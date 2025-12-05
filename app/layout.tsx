@@ -1,15 +1,19 @@
-import "../styles/globals.css";
-import React from "react";
+﻿import './globals.css';
+import type { Metadata } from 'next';
 
-export const metadata = {
-  title: "Sirens Forge",
-  description: "NSFW/SFW AI Generator — Images, Video, Subscriptions & Muses",
+export const metadata: Metadata = {
+  title: 'Sirens Forge',
+  description: 'AI-powered image and video generation platform.',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en">
-      <body className="min-h-screen bg-black text-white">
+    <html lang='en'>
+      <body className='bg-black text-white'>
         {children}
       </body>
     </html>
