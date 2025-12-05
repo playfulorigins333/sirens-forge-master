@@ -1,6 +1,7 @@
-{
+﻿{
   "name": "sirens-forge-master",
   "version": "1.0.0",
+  "type": "module",
   "description": "Unified frontend + backend for Sirens Forge (Next.js 16 & Tailwind)",
   "main": "next.config.js",
   "scripts": {
