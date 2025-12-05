@@ -1,10 +1,7 @@
-export default function HomeRedirect() {
+﻿export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center text-center">
-      <div>
-        <h1 className="text-4xl font-bold">Redirecting…</h1>
-        <p className="mt-4 text-lg">Sending you to the Age Check page.</p>
-      </div>
-    </div>
+    <main className="flex items-center justify-center min-h-screen bg-black text-white">
+      <h1 className="text-4xl font-bold">Sirens Forge</h1>
+    </main>
   );
 }
