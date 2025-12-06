@@ -11,8 +11,10 @@ export default function AgeGate() {
 
   const enter = () => {
     setIsEntering(true);
-    localStorage.setItem('ageVerified', 'true');
-    
+
+    // ✅ Set a REAL cookie readable by middleware
+    document.cookie = "ageVerified=true; path=/; max-age=31536000";
+
     // Smooth transition delay
     setTimeout(() => {
       router.replace('/landing');
@@ -24,13 +26,13 @@ export default function AgeGate() {
   };
 
   useEffect(() => {
-    // Auto-redirect if already verified
-    if (localStorage.getItem('ageVerified') === 'true') {
+    // ✅ Auto-redirect if cookie already exists
+    if (document.cookie.includes("ageVerified=true")) {
       router.replace('/landing');
     }
   }, [router]);
 
-  // Keyboard support (Enter key to confirm)
+  // Keyboard support (Enter key)
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && !isEntering) {
