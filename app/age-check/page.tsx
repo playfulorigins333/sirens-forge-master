@@ -11,9 +11,7 @@ export default function AgeGate() {
 
   const enter = () => {
     setIsEntering(true);
-
-    // ✅ Set a REAL cookie readable by middleware
-    document.cookie = "ageVerified=true; path=/; max-age=31536000";
+    localStorage.setItem('ageVerified', 'true');
 
     // Smooth transition delay
     setTimeout(() => {
@@ -26,13 +24,13 @@ export default function AgeGate() {
   };
 
   useEffect(() => {
-    // ✅ Auto-redirect if cookie already exists
-    if (document.cookie.includes("ageVerified=true")) {
+    // Auto-redirect if already verified
+    if (localStorage.getItem('ageVerified') === 'true') {
       router.replace('/landing');
     }
   }, [router]);
 
-  // Keyboard support (Enter key)
+  // Keyboard support (Enter key to confirm)
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && !isEntering) {
@@ -99,7 +97,7 @@ export default function AgeGate() {
             <span className="font-bold text-white">Sirens Forge</span> contains adult AI-generated content.
           </p>
           <p className="text-base sm:text-lg text-gray-400 max-w-lg mx-auto">
-            You must be <span className="text-red-400 font-bold">18 years or older</span> to enter. 
+            You must be <span className="text-red-400 font-bold">18 years or older</span> to enter.
             By proceeding, you confirm you meet the age requirement and agree to our terms.
           </p>
         </motion.div>
@@ -144,7 +142,7 @@ export default function AgeGate() {
           </motion.button>
         </motion.div>
 
-        {/* Legal Notice */}
+        {/* LEGAL + VERSION MARKER */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -152,10 +150,9 @@ export default function AgeGate() {
           className="mt-12 text-xs sm:text-sm text-gray-500 max-w-xl mx-auto"
         >
           <Shield className="w-4 h-4 inline-block mr-2 text-gray-600" />
-          This site uses cookies to remember your age verification. By entering, you agree to our{' '}
-          <span className="text-purple-400 hover:text-purple-300 cursor-pointer">Terms of Service</span>
-          {' '}and{' '}
-          <span className="text-purple-400 hover:text-purple-300 cursor-pointer">Privacy Policy</span>.
+          This site uses cookies to remember your age verification.
+          <br />
+          <span className="text-yellow-400 font-bold">AGEGATE VERSION: v777</span>
         </motion.div>
       </motion.div>
 
