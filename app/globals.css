@@ -4,7 +4,10 @@
 
 /* Global body styles */
 body {
-  @apply bg-black text-white antialiased;
+  background-color: #000000;             /* bg-black */
+  color: #ffffff;                        /* text-white */
+  -webkit-font-smoothing: antialiased;   /* antialiased */
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* Scrollbar styling */
@@ -49,29 +52,117 @@ body {
 
 /* Frosted glass panel style (used in old layouts) */
 .panel-glass {
-  @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl;
+  background-color: rgba(255, 255, 255, 0.05);           /* bg-white/5 */
+  backdrop-filter: blur(24px);                           /* backdrop-blur-xl */
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.10);           /* border-white/10 */
+  border-radius: 1.5rem;                                 /* rounded-3xl */
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);     /* shadow-2xl */
 }
 
 /* Button base styles */
 .btn-primary {
-  @apply inline-flex items-center justify-center px-6 py-3 rounded-full font-semibold tracking-wide transition-all duration-200;
+  display: inline-flex;                                   /* inline-flex */
+  align-items: center;                                    /* items-center */
+  justify-content: center;                                /* justify-center */
+  padding: 0.75rem 1.5rem;                                /* py-3 px-6 */
+  border-radius: 9999px;                                  /* rounded-full */
+  font-weight: 600;                                       /* font-semibold */
+  letter-spacing: 0.05em;                                 /* tracking-wide */
+  transition-property: background-color, border-color,
+    color, fill, stroke, opacity, box-shadow, transform;  /* transition-all */
+  transition-duration: 200ms;                             /* duration-200 */
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Gradient primary button */
 .btn-primary-gradient {
-  @apply btn-primary bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white hover:from-purple-600 hover:via-pink-600 hover:to-red-600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  transition-property: background-color, border-color,
+    color, fill, stroke, opacity, box-shadow, transform;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+
+  background-image: linear-gradient(
+    to right,
+    #a855f7,  /* purple-500 */
+    #ec4899,  /* pink-500 */
+    #ef4444   /* red-500 */
+  );
+  color: #ffffff;
 }
 
+.btn-primary-gradient:hover {
+  background-image: linear-gradient(
+    to right,
+    #7c3aed,  /* purple-600 */
+    #db2777,  /* pink-600 */
+    #dc2626   /* red-600 */
+  );
+}
+
+/* Outline light button */
 .btn-outline-light {
-  @apply btn-primary bg-transparent border border-white/40 text-white hover:bg-white/10;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.5rem;
+  border-radius: 9999px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  transition-property: background-color, border-color,
+    color, fill, stroke, opacity, box-shadow, transform;
+  transition-duration: 200ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+
+  background-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.40);           /* border-white/40 */
+  color: #ffffff;
+}
+
+.btn-outline-light:hover {
+  background-color: rgba(255, 255, 255, 0.10);           /* hover:bg-white/10 */
 }
 
 /* Typography helpers */
 .heading-xl {
-  @apply text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight;
+  font-size: 2.25rem;   /* text-4xl */
+  line-height: 2.5rem;
+  font-weight: 700;     /* font-bold */
+  letter-spacing: -0.02em; /* mimic tracking-tight */
+}
+
+@media (min-width: 640px) { /* sm: */
+  .heading-xl {
+    font-size: 3rem;    /* text-5xl */
+    line-height: 1;
+  }
+}
+
+@media (min-width: 768px) { /* md: */
+  .heading-xl {
+    font-size: 3.75rem; /* text-6xl */
+    line-height: 1;
+  }
 }
 
 .subheading {
-  @apply text-base sm:text-lg text-gray-300;
+  font-size: 1rem;      /* text-base */
+  line-height: 1.5rem;
+  color: #d1d5db;       /* text-gray-300 */
+}
+
+@media (min-width: 640px) { /* sm: */
+  .subheading {
+    font-size: 1.125rem;  /* text-lg */
+    line-height: 1.75rem;
+  }
 }
 
 /* Background gradient utilities */
