@@ -1,26 +1,21 @@
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const ageVerified = req.cookies.get('ageVerified')?.value;
-  const { pathname } = req.nextUrl;
+  const url = req.nextUrl;
 
-  // Allow the age-check page through always
-  if (pathname.startsWith('/age-check')) {
-    return NextResponse.next();
-  }
+  // Age verification cookie
+  const isVerified = req.cookies.get("ageVerified")?.value === "true";
 
-  // If no cookie, redirect to /age-check
-  if (!ageVerified) {
-    const url = req.nextUrl.clone();
-    url.pathname = '/age-check';
+  // If not verified, force age-check
+  if (!isVerified && !url.pathname.startsWith("/age-check")) {
+    url.pathname = "/age-check";
     return NextResponse.redirect(url);
   }
 
+  // If verified, allow root "/" to load normally
   return NextResponse.next();
 }
 
-// Apply middleware to every page EXCEPT static assets
 export const config = {
-  matcher: ['/((?!_next|favicon.ico|api).*)'],
+  matcher: ["/((?!_next|api|favicon.ico).*)"],
 };

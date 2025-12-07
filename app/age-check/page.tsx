@@ -12,14 +12,15 @@ export default function AgeGate() {
   const enter = () => {
     setIsEntering(true);
 
-    // 🚀 FIX: Set cookie so middleware sees ageVerified = true
+    // MUST match middleware
     document.cookie = "ageVerified=true; path=/; max-age=31536000";
 
-    // Optional UI persistence
+    // Optional memory for UI
     localStorage.setItem("ageVerified", "true");
 
+    // After verifying → go to homepage ("/")
     setTimeout(() => {
-      router.replace("/landing");
+      router.replace("/");
     }, 300);
   };
 
@@ -28,9 +29,9 @@ export default function AgeGate() {
   };
 
   useEffect(() => {
-    // If cookie already exists, skip page
+    // Auto-skip if cookie exists
     if (document.cookie.includes("ageVerified=true")) {
-      router.replace("/landing");
+      router.replace("/");
     }
   }, [router]);
 
@@ -46,7 +47,6 @@ export default function AgeGate() {
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       />
 
-      {/* Main Content */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -85,7 +85,6 @@ export default function AgeGate() {
           </p>
           <p className="text-base sm:text-lg text-gray-400 max-w-lg mx-auto">
             You must be <span className="text-red-400 font-bold">18 years or older</span> to enter.
-            By proceeding, you confirm you meet the age requirement and agree to our terms.
           </p>
         </motion.div>
 
@@ -101,13 +100,13 @@ export default function AgeGate() {
             disabled={isEntering}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            className="w-full sm:w-auto px-8 sm:px-12 py-4 sm:py-5 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold text-base sm:text-lg rounded-full hover:from-purple-700 hover:to-pink-700 transition-all glow-purple disabled:opacity-50 disabled:cursor-not-allowed shadow-2xl"
+            className="w-full sm:w-auto px-8 sm:px-12 py-4 sm:py-5 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold text-base sm:text-lg rounded-full hover:from-purple-700 hover:to-pink-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-2xl"
           >
             {isEntering ? (
               <span className="flex items-center justify-center gap-2">
                 <motion.div
                   animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                   className="w-5 h-5 border-2 border-white border-t-transparent rounded-full"
                 />
                 ENTERING...
