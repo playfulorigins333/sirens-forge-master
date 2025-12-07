@@ -1,17 +1,25 @@
 ﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
   trailingSlash: false,
-  redirects: async () => {
+
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "2mb",
+    },
+  },
+
+  async redirects() {
     return [];
   },
+
   async rewrites() {
     return [
       {
         source: "/api/webhook",
-        destination: "/api/webhook", // prevent redirect loop
+        destination: "/api/webhook", // Prevent 307 redirect
       },
     ];
   },
 };
 
-module.exports = nextConfig;
+export default nextConfig;
