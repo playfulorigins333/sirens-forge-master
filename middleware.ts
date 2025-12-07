@@ -2,16 +2,15 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 export function middleware(req: NextRequest) {
-  const ageVerified = req.cookies.get('ageVerified');
+  const ageVerified = req.cookies.get('ageVerified')?.value;
+  const { pathname } = req.nextUrl;
 
-  const pathname = req.nextUrl.pathname;
-
-  // Allow age-check to always load
+  // Allow the age-check page through always
   if (pathname.startsWith('/age-check')) {
     return NextResponse.next();
   }
 
-  // Block everything else until verified
+  // If no cookie, redirect to /age-check
   if (!ageVerified) {
     const url = req.nextUrl.clone();
     url.pathname = '/age-check';
@@ -21,6 +20,7 @@ export function middleware(req: NextRequest) {
   return NextResponse.next();
 }
 
+// Apply middleware to every page EXCEPT static assets
 export const config = {
   matcher: ['/((?!_next|favicon.ico|api).*)'],
 };

@@ -11,52 +11,49 @@ export default function AgeGate() {
 
   const enter = () => {
     setIsEntering(true);
-    localStorage.setItem('ageVerified', 'true');
+
+    // 🚀 FIX: Set cookie so middleware sees ageVerified = true
+    document.cookie = "ageVerified=true; path=/; max-age=31536000";
+
+    // Optional UI persistence
+    localStorage.setItem("ageVerified", "true");
 
     setTimeout(() => {
-      router.replace('/landing');
-    }, 600);
+      router.replace("/landing");
+    }, 300);
   };
 
   const exit = () => {
-    window.location.href = 'https://www.google.com';
+    window.location.href = "https://www.google.com";
   };
 
   useEffect(() => {
-    if (localStorage.getItem('ageVerified') === 'true') {
-      router.replace('/landing');
+    // If cookie already exists, skip page
+    if (document.cookie.includes("ageVerified=true")) {
+      router.replace("/landing");
     }
   }, [router]);
 
-  useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' && !isEntering) {
-        enter();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isEntering]);
-
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 sm:p-8 text-center relative overflow-hidden">
+
       {/* Animated background gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-red-900/10 via-black to-purple-900/10" />
+
       <motion.div
         className="absolute inset-0 bg-gradient-to-tr from-purple-900/5 via-transparent to-pink-900/5"
         animate={{ opacity: [0.3, 0.5, 0.3] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       />
 
-      {/* Main content */}
+      {/* Main Content */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
         className="relative z-10 max-w-2xl w-full"
       >
-        {/* Warning icon */}
+
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
@@ -68,7 +65,6 @@ export default function AgeGate() {
           </div>
         </motion.div>
 
-        {/* Heading */}
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -78,7 +74,6 @@ export default function AgeGate() {
           18+ ONLY
         </motion.h1>
 
-        {/* Description */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -94,14 +89,13 @@ export default function AgeGate() {
           </p>
         </motion.div>
 
-        {/* Buttons */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
           className="flex flex-col sm:flex-row gap-4 justify-center items-center"
         >
-          {/* Enter button */}
+          {/* ENTER BUTTON */}
           <motion.button
             onClick={enter}
             disabled={isEntering}
@@ -113,17 +107,17 @@ export default function AgeGate() {
               <span className="flex items-center justify-center gap-2">
                 <motion.div
                   animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
                   className="w-5 h-5 border-2 border-white border-t-transparent rounded-full"
                 />
                 ENTERING...
               </span>
             ) : (
-              'I AM 18+ — ENTER THE EMPIRE'
+              "I AM 18+ — ENTER THE EMPIRE"
             )}
           </motion.button>
 
-          {/* Exit button */}
+          {/* EXIT BUTTON */}
           <motion.button
             onClick={exit}
             whileHover={{ scale: 1.05 }}
@@ -134,7 +128,6 @@ export default function AgeGate() {
           </motion.button>
         </motion.div>
 
-        {/* Legal footer - NO VERSION NUMBER */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -146,7 +139,6 @@ export default function AgeGate() {
         </motion.div>
       </motion.div>
 
-      {/* Decorative blobs */}
       <div className="absolute top-10 left-10 w-32 h-32 bg-purple-600/10 rounded-full blur-3xl" />
       <div className="absolute bottom-10 right-10 w-40 h-40 bg-pink-600/10 rounded-full blur-3xl" />
     </div>
