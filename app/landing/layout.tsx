@@ -1,9 +1,7 @@
-'use client';
-
-export default function LandingTestPage() {
+export default function LandingLayout({ children }) {
   return (
-    <main className="min-h-screen bg-black text-white flex items-center justify-center">
-      <h1 className="text-4xl font-bold">Landing works ✅</h1>
-    </main>
+    <div className="min-h-screen">
+      {children}
+    </div>
   );
 }
