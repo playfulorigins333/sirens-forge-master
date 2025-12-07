@@ -1,14 +1,17 @@
 ﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
-  images: {
-    remotePatterns: [
+  trailingSlash: false,
+  redirects: async () => {
+    return [];
+  },
+  async rewrites() {
+    return [
       {
-        protocol: "https",
-        hostname: "**",
+        source: "/api/webhook",
+        destination: "/api/webhook", // prevent redirect loop
       },
-    ],
+    ];
   },
 };
 
-export default nextConfig;
+module.exports = nextConfig;
