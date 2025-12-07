@@ -3,16 +3,18 @@ import { NextRequest, NextResponse } from "next/server";
 export function middleware(req: NextRequest) {
   const url = req.nextUrl;
 
-  // Age verification cookie
+  // 🔥 Bypass for Stripe Webhooks
+  if (url.pathname.startsWith("/api/webhook")) {
+    return NextResponse.next();
+  }
+
   const isVerified = req.cookies.get("ageVerified")?.value === "true";
 
-  // If not verified, force age-check
   if (!isVerified && !url.pathname.startsWith("/age-check")) {
     url.pathname = "/age-check";
     return NextResponse.redirect(url);
   }
 
-  // If verified, allow root "/" to load normally
   return NextResponse.next();
 }
 
