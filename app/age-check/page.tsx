@@ -13,7 +13,6 @@ export default function AgeGate() {
     setIsEntering(true);
     localStorage.setItem('ageVerified', 'true');
 
-    // Smooth transition delay
     setTimeout(() => {
       router.replace('/landing');
     }, 600);
@@ -24,19 +23,18 @@ export default function AgeGate() {
   };
 
   useEffect(() => {
-    // Auto-redirect if already verified
     if (localStorage.getItem('ageVerified') === 'true') {
       router.replace('/landing');
     }
   }, [router]);
 
-  // Keyboard support (Enter key to confirm)
   useEffect(() => {
     const handleKeyPress = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && !isEntering) {
         enter();
       }
     };
+
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isEntering]);
@@ -47,24 +45,18 @@ export default function AgeGate() {
       <div className="absolute inset-0 bg-gradient-to-br from-red-900/10 via-black to-purple-900/10" />
       <motion.div
         className="absolute inset-0 bg-gradient-to-tr from-purple-900/5 via-transparent to-pink-900/5"
-        animate={{
-          opacity: [0.3, 0.5, 0.3],
-        }}
-        transition={{
-          duration: 4,
-          repeat: Infinity,
-          ease: "easeInOut"
-        }}
+        animate={{ opacity: [0.3, 0.5, 0.3] }}
+        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       />
 
-      {/* Content */}
+      {/* Main content */}
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.5 }}
         className="relative z-10 max-w-2xl w-full"
       >
-        {/* Warning Icon */}
+        {/* Warning icon */}
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
@@ -76,7 +68,7 @@ export default function AgeGate() {
           </div>
         </motion.div>
 
-        {/* Main Heading */}
+        {/* Heading */}
         <motion.h1
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -109,7 +101,7 @@ export default function AgeGate() {
           transition={{ delay: 0.5 }}
           className="flex flex-col sm:flex-row gap-4 justify-center items-center"
         >
-          {/* Enter Button */}
+          {/* Enter button */}
           <motion.button
             onClick={enter}
             disabled={isEntering}
@@ -131,7 +123,7 @@ export default function AgeGate() {
             )}
           </motion.button>
 
-          {/* Exit Button */}
+          {/* Exit button */}
           <motion.button
             onClick={exit}
             whileHover={{ scale: 1.05 }}
@@ -142,7 +134,7 @@ export default function AgeGate() {
           </motion.button>
         </motion.div>
 
-        {/* LEGAL + VERSION MARKER */}
+        {/* Legal footer - NO VERSION NUMBER */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -151,12 +143,10 @@ export default function AgeGate() {
         >
           <Shield className="w-4 h-4 inline-block mr-2 text-gray-600" />
           This site uses cookies to remember your age verification.
-          <br />
-          <span className="text-yellow-400 font-bold">AGEGATE VERSION: v777</span>
         </motion.div>
       </motion.div>
 
-      {/* Decorative elements */}
+      {/* Decorative blobs */}
       <div className="absolute top-10 left-10 w-32 h-32 bg-purple-600/10 rounded-full blur-3xl" />
       <div className="absolute bottom-10 right-10 w-40 h-40 bg-pink-600/10 rounded-full blur-3xl" />
     </div>
