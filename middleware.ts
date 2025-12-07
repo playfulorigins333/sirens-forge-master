@@ -1,17 +1,35 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const url = req.nextUrl;
+  const { pathname } = req.nextUrl;
 
-  // 🔥 Bypass for Stripe Webhooks
-  if (url.pathname.startsWith("/api/webhook")) {
+  // 1️⃣ Allow ALL API routes through — no age gate
+  if (pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
 
-  const isVerified = req.cookies.get("ageVerified")?.value === "true";
+  // 2️⃣ Allow assets, static files, etc.
+  if (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon") ||
+    pathname.startsWith("/images") ||
+    pathname.includes(".") // file requests
+  ) {
+    return NextResponse.next();
+  }
 
-  if (!isVerified && !url.pathname.startsWith("/age-check")) {
-    url.pathname = "/age-check";
+  // 3️⃣ Allow the age page itself
+  if (pathname === "/age") {
+    return NextResponse.next();
+  }
+
+  // 4️⃣ Apply age gate to everything else
+  const hasCookie = req.cookies.get("ageVerified")?.value === "true";
+
+  if (!hasCookie) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/age";
     return NextResponse.redirect(url);
   }
 
@@ -19,5 +37,7 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next|api|favicon.ico).*)"],
+  matcher: [
+    "/((?!api/|_next/|favicon.ico|.*\\.).*)" // exclude API + assets
+  ]
 };
