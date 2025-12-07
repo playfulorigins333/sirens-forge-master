@@ -2,12 +2,98 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Global reset */
-html, body {
-  margin: 0;
-  padding: 0;
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  background-color: #000;
-  color: #fff;
+/* Global body styles */
+body {
+  @apply bg-black text-white antialiased;
 }
 
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #050509;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4b5563;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #6b7280;
+}
+
+/* Glow effects */
+.glow-red {
+  box-shadow:
+    0 0 30px rgba(248, 113, 113, 0.5),
+    0 0 60px rgba(248, 113, 113, 0.4),
+    0 0 90px rgba(248, 113, 113, 0.3);
+}
+
+.glow-purple {
+  box-shadow:
+    0 0 30px rgba(168, 85, 247, 0.5),
+    0 0 60px rgba(168, 85, 247, 0.4),
+    0 0 90px rgba(168, 85, 247, 0.3);
+}
+
+.glow-gold {
+  box-shadow:
+    0 0 30px rgba(252, 211, 77, 0.6),
+    0 0 60px rgba(252, 211, 77, 0.45),
+    0 0 90px rgba(252, 211, 77, 0.3);
+}
+
+/* Frosted glass panel style (used in old layouts) */
+.panel-glass {
+  @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl shadow-2xl;
+}
+
+/* Button base styles */
+.btn-primary {
+  @apply inline-flex items-center justify-center px-6 py-3 rounded-full font-semibold tracking-wide transition-all duration-200;
+}
+
+.btn-primary-gradient {
+  @apply btn-primary bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 text-white hover:from-purple-600 hover:via-pink-600 hover:to-red-600;
+}
+
+.btn-outline-light {
+  @apply btn-primary bg-transparent border border-white/40 text-white hover:bg-white/10;
+}
+
+/* Typography helpers */
+.heading-xl {
+  @apply text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight;
+}
+
+.subheading {
+  @apply text-base sm:text-lg text-gray-300;
+}
+
+/* Background gradient utilities */
+.bg-radial-dark {
+  background:
+    radial-gradient(circle at top left, rgba(248, 113, 113, 0.18), transparent 55%),
+    radial-gradient(circle at bottom right, rgba(129, 140, 248, 0.16), transparent 55%),
+    #020617;
+}
+
+/* Simple fade/slide animation helpers */
+.fade-in-up {
+  animation: fadeInUp 0.6s ease-out both;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
