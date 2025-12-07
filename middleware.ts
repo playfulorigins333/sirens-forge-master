@@ -4,17 +4,17 @@ import type { NextRequest } from "next/server";
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 1️⃣ Allow ALL API routes through — no age gate
+  // 1️⃣ Allow ALL API routes through — including webhook
   if (pathname.startsWith("/api/")) {
     return NextResponse.next();
   }
 
-  // 2️⃣ Allow assets, static files, etc.
+  // 2️⃣ Allow static assets, images, Next.js system files
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon") ||
     pathname.startsWith("/images") ||
-    pathname.includes(".") // file requests
+    pathname.includes(".")
   ) {
     return NextResponse.next();
   }
@@ -24,7 +24,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 4️⃣ Apply age gate to everything else
+  // 4️⃣ Normal age gate logic
   const hasCookie = req.cookies.get("ageVerified")?.value === "true";
 
   if (!hasCookie) {
@@ -38,6 +38,7 @@ export function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api/|_next/|favicon.ico|.*\\.).*)" // exclude API + assets
+    // Apply middleware only to non-API, non-static pages
+    "/((?!api/webhook|api/|_next/|favicon.ico|.*\\.).*)"
   ]
 };
