@@ -1,31 +1,43 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
-export const dynamic = "force-dynamic";
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
 export async function POST(req: Request) {
   const sig = req.headers.get("stripe-signature");
-  const body = await req.text();
+  const rawBody = await req.text();
 
   let event;
 
   try {
     event = stripe.webhooks.constructEvent(
-      body,
+      rawBody,
       sig!,
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err: any) {
-    console.error("❌ Invalid signature:", err.message);
-    return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
+    console.error("❌ Stripe signature verification failed:", err.message);
+    return new Response(`Webhook Error: ${err.message}`, { status: 400 });
   }
 
-  console.log("🔥 EVENT:", event.type);
+  console.log("🔥 Webhook Event:", event.type);
 
-  return NextResponse.json({ received: true });
+  switch (event.type) {
+    case "checkout.session.completed":
+      console.log("Checkout completed:", event.data.object.id);
+      break;
+  }
+
+  return new Response("OK", { status: 200 });
 }
 
 export async function GET() {
