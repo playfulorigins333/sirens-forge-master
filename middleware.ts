@@ -19,8 +19,8 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 3️⃣ Allow the age page itself
-  if (pathname === "/age") {
+  // 3️⃣ Allow the age-check page itself
+  if (pathname === "/age-check") {
     return NextResponse.next();
   }
 
@@ -29,7 +29,7 @@ export function middleware(req: NextRequest) {
 
   if (!hasCookie) {
     const url = req.nextUrl.clone();
-    url.pathname = "/age";
+    url.pathname = "/age-check";   // 🔥 FIXED: always redirect to /age-check
     return NextResponse.redirect(url);
   }
 
