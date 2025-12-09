@@ -20,7 +20,6 @@ import {
   Search,
   Play,
   Maximize2,
-  Trash,
 } from "lucide-react";
 
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -80,11 +79,34 @@ interface GeneratedItem {
 }
 
 // -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function inferKindFromOutput(output: any): MediaKind {
+  if (output.kind === "video" || output.kind === "image") {
+    return output.kind;
+  }
+  const url = (output.url || "").toLowerCase();
+  if (
+    url.endsWith(".mp4") ||
+    url.endsWith(".webm") ||
+    url.includes("video")
+  ) {
+    return "video";
+  }
+  return "image";
+}
+
+// -----------------------------------------------------------------------------
 // Header
 // -----------------------------------------------------------------------------
 
 function GeneratorHeader() {
-  // For now, we keep this simple – layout already gated by subscription.
+  // For now, static placeholders; gate is handled via route/middleware.
   const userName = "Creator";
   const userAvatar = "";
   const badge: "OG_FOUNDER" | "EARLY_BIRD" | "STARTER_HIT" | null = null;
@@ -245,9 +267,7 @@ function PromptSection(props: {
 
   const addChip = (chip: string) => {
     const lower = chip.toLowerCase();
-    props.onPromptChange(
-      props.prompt ? `${props.prompt}, ${lower}` : lower
-    );
+    props.onPromptChange(props.prompt ? `${props.prompt}, ${lower}` : lower);
   };
 
   return (
@@ -258,8 +278,8 @@ function PromptSection(props: {
           Prompt Builder
         </CardTitle>
         <CardDescription className="text-xs text-gray-400">
-          Describe exactly what you want SirensForge to create. This feeds
-          SDXL / Flux / video models.
+          Describe exactly what you want SirensForge to create. This feeds SDXL
+          / Flux / video models.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -541,7 +561,7 @@ function DNALockSection(props: {
           Character DNA Lock
         </CardTitle>
         <CardDescription className="text-xs text-gray-400">
-          Upload 5–8 photos to lock a face + body combo across image & video
+          Upload 5–8 photos to lock a face + body combo across image &amp; video
           generations.
         </CardDescription>
       </CardHeader>
@@ -550,7 +570,11 @@ function DNALockSection(props: {
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
           onClick={() =>
-            (document.getElementById("dna-upload-input") as HTMLInputElement)?.click()
+            (
+              document.getElementById(
+                "dna-upload-input"
+              ) as HTMLInputElement | null
+            )?.click()
           }
           className="border-2 border-dashed border-gray-700 rounded-xl p-6 text-center cursor-pointer hover:border-purple-500 transition-colors"
         >
@@ -559,7 +583,7 @@ function DNALockSection(props: {
             Drop or click to upload reference photos
           </p>
           <p className="text-[11px] text-gray-500 mb-1">
-            Clear, frontal faces work best. Avoid filters & heavy makeup.
+            Clear, frontal faces work best. Avoid filters &amp; heavy makeup.
           </p>
           <p className="text-[11px] text-gray-500">
             {props.files.length}/{maxImages} uploaded
@@ -899,7 +923,9 @@ function AdvancedSettings(props: {
                   <input
                     type="checkbox"
                     checked={props.lockSeed}
-                    onChange={(e) => props.onLockSeedChange(e.target.checked)}
+                    onChange={(e) =>
+                      props.onLockSeedChange(e.target.checked)
+                    }
                     className="w-4 h-4 rounded border-gray-700 bg-gray-950 accent-purple-500"
                   />
                   <span className="text-xs text-gray-400">
@@ -998,18 +1024,13 @@ function GenerateButton(props: {
 // Output Grid + Modal
 // -----------------------------------------------------------------------------
 
-function OutputPanel(props: {
-  items: GeneratedItem[];
-  loading: boolean;
-}) {
+function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
   const [selected, setSelected] = useState<GeneratedItem | null>(null);
 
   if (props.loading) {
     return (
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-gray-100">
-          Generating…
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-100">Generating…</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {[1, 2, 3, 4].map((i) => (
             <div
@@ -1084,7 +1105,6 @@ function OutputPanel(props: {
                   variant="ghost"
                   type="button"
                   onClick={() => {
-                    // Simple client download; real logic can be added later
                     window.open(item.url, "_blank");
                   }}
                   className="bg-white/10 hover:bg-white/20"
@@ -1302,7 +1322,8 @@ export default function GeneratePage() {
   const [negativePrompt, setNegativePrompt] = useState("");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
   const [contentMode, setContentMode] = useState<ContentMode>("sfw");
-  const [stylePreset, setStylePreset] = useState<StylePreset>("photorealistic");
+  const [stylePreset, setStylePreset] =
+    useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
   const [consistencyPreset] = useState<ConsistencyPreset>("medium");
 
@@ -1336,46 +1357,142 @@ export default function GeneratePage() {
     setErrorMessage(null);
 
     try {
-      // TODO: Replace this stub with real /api/generate integration.
-      // For now we just simulate a generation result so the UI can be wired up.
-      const now = new Date().toISOString();
-      const fake: GeneratedItem = {
-        id: `${now}-${Math.random().toString(36).slice(2)}`,
-        kind:
-          mode === "image_to_video" || mode === "text_to_video"
-            ? "video"
-            : "image",
-        url:
-          mode === "image_to_video" || mode === "text_to_video"
-            ? "https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4"
-            : "https://placehold.co/1024x1024/111827/8b5cf6?text=SirensForge+Preview",
+      // Build payload to match /api/generate GenerationRequestPayload
+      const payload = {
+        mode,
         prompt,
-        settings: {
-          mode,
-          baseModel,
-          contentMode,
-          stylePreset,
-          qualityPreset,
-          consistencyPreset,
-          resolution,
-          guidance,
-          steps,
-          seed: lockSeed ? seed : "random",
-          batchSize,
-          dnaCount: dnaFiles.length,
-          fluxLockType,
-          fluxLockStrength,
+        negativePrompt,
+        baseModel,
+        contentMode,
+        stylePreset,
+        qualityPreset,
+        consistencyPreset,
+        resolution,
+        guidance,
+        steps,
+        seed: lockSeed ? seed : null,
+        lockSeed,
+        batchSize,
+        dnaPack: {
+          count: dnaFiles.length,
+          hasFiles: dnaFiles.length > 0,
         },
-        createdAt: now,
+        fluxLock: {
+          type: fluxLockType,
+          strength: fluxLockStrength,
+        },
+        imageInput: null as any, // reserved for future image-to-image / img2vid
       };
 
-      const newItems: GeneratedItem[] = [fake, ...items].slice(0, 12);
-      setItems(newItems);
-      setHistory([fake, ...history]);
-    } catch (err) {
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Generate failed with status ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      // If backend ever returns outputs directly:
+      const immediateOutputs: any[] =
+        (Array.isArray(data.outputs) && data.outputs) ||
+        (Array.isArray(data.output) && data.output) ||
+        [];
+
+      if (immediateOutputs.length) {
+        const now = new Date().toISOString();
+        const generated: GeneratedItem[] = immediateOutputs.map(
+          (output: any) => ({
+            id: `${now}-${Math.random().toString(36).slice(2)}`,
+            kind: inferKindFromOutput(output),
+            url: output.url,
+            prompt,
+            settings: payload,
+            createdAt: output.createdAt || now,
+          })
+        );
+
+        setItems((prev) => [...generated, ...prev].slice(0, 12));
+        setHistory((prev) => [...generated, ...prev]);
+        return;
+      }
+
+      const jobId: string | undefined =
+        data.job_id || data.id || data.jobId || undefined;
+
+      if (!jobId) {
+        throw new Error("No job_id or outputs returned from /api/generate");
+      }
+
+      // Poll /api/status until completed
+      const timeoutMs = 90_000;
+      const intervalMs = 1500;
+      const start = Date.now();
+
+      let finalStatus: any = null;
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (Date.now() - start > timeoutMs) {
+          throw new Error("Generation timed out. Try again.");
+        }
+
+        const statusRes = await fetch(
+          `/api/status?job_id=${encodeURIComponent(jobId)}`
+        );
+        if (!statusRes.ok) {
+          throw new Error(`Status check failed: ${statusRes.status}`);
+        }
+
+        const statusData = await statusRes.json();
+        const status = String(statusData.status || "").toUpperCase();
+
+        if (
+          status === "COMPLETED" &&
+          (Array.isArray(statusData.outputs) ||
+            Array.isArray(statusData.output))
+        ) {
+          finalStatus = statusData;
+          break;
+        }
+
+        if (status === "FAILED") {
+          throw new Error(
+            statusData.error || "Generation failed on the backend."
+          );
+        }
+
+        await sleep(intervalMs);
+      }
+
+      const outputs: any[] =
+        (Array.isArray(finalStatus.outputs) && finalStatus.outputs) ||
+        (Array.isArray(finalStatus.output) && finalStatus.output) ||
+        [];
+
+      const now = new Date().toISOString();
+
+      const generated: GeneratedItem[] = outputs.map((output: any) => ({
+        id: `${jobId}-${Math.random().toString(36).slice(2)}`,
+        kind: inferKindFromOutput(output),
+        url: output.url,
+        prompt,
+        settings: payload,
+        createdAt: output.createdAt || now,
+      }));
+
+      setItems((prev) => [...generated, ...prev].slice(0, 12));
+      setHistory((prev) => [...generated, ...prev]);
+    } catch (err: any) {
       console.error("Generation error:", err);
       setErrorMessage(
-        "Something went wrong starting the generation. Check the console or backend logs."
+        err?.message ||
+          "Something went wrong starting the generation. Check backend logs."
       );
     } finally {
       setIsGenerating(false);
@@ -1384,7 +1501,7 @@ export default function GeneratePage() {
 
   const handleHistorySelect = (item: GeneratedItem) => {
     setPrompt(item.prompt);
-    // We could also restore settings later (mode, base model, etc.)
+    // later: restore full settings from item.settings if you want
   };
 
   const handleHistoryRerun = (item: GeneratedItem) => {
