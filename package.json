@@ -16,7 +16,7 @@
   },
   "license": "ISC",
   "dependencies": {
-    "@supabase/supabase-js": "^2.86.2",
+    "@supabase/supabase-js": "^2.87.0",
     "framer-motion": "^12.23.25",
     "lucide-react": "^0.556.0",
     "next": "^16.0.7",
@@ -25,7 +25,7 @@
     "stripe": "^20.0.0"
   },
   "devDependencies": {
-    "@types/node": "^24.10.1",
+    "@types/node": "^24.10.2",
     "@types/react": "^19.2.7",
     "autoprefixer": "^10.4.22",
     "postcss": "^8.5.6",
