@@ -1,237 +1,125 @@
 // app/api/generate/route.ts
 import { NextResponse } from "next/server";
-import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { cookies } from "next/headers";
+import { createClient } from "@supabase/supabase-js";
 
-export const runtime = "nodejs";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
 export const dynamic = "force-dynamic";
 
-// Keep types local to this route so TS stays happy even if frontend changes later
-type GenerationMode = "text_to_image" | "image_to_image" | "image_to_video" | "text_to_video";
-type BaseModel = "feminine" | "masculine" | "mtf" | "ftm";
-type ContentMode = "sfw" | "nsfw" | "ultra";
-type StylePreset =
-  | "photorealistic"
-  | "cinematic"
-  | "editorial"
-  | "soft_glam"
-  | "artistic"
-  | "anime";
-type QualityPreset = "fast" | "balanced" | "quality" | "ultra";
-type ConsistencyPreset = "low" | "medium" | "high" | "perfect";
-type FluxLockType = "face_only" | "body_only" | "face_and_body";
-type FluxLockStrength = "subtle" | "balanced" | "strong";
-
-interface DnaPackMeta {
-  count: number;
-  hasFiles: boolean;
-}
-
-interface FluxLockMeta {
-  type: FluxLockType;
-  strength: FluxLockStrength;
-}
-
-interface ImageInputMeta {
-  kind: "upload" | "url";
-  url?: string | null;
-}
-
-interface GenerationRequestPayload {
-  mode: GenerationMode;
-  prompt: string;
-  negativePrompt?: string;
-
-  baseModel: BaseModel;
-  contentMode: ContentMode;
-  stylePreset: StylePreset;
-
-  qualityPreset: QualityPreset;
-  consistencyPreset: ConsistencyPreset;
-
-  resolution: string;
-  guidance: number;
-  steps: number;
-
-  seed?: number | null;
-  lockSeed?: boolean;
-  batchSize?: number;
-
-  dnaPack?: DnaPackMeta;
-  fluxLock?: FluxLockMeta;
-  imageInput?: ImageInputMeta | null;
-}
-
-// -----------------------------------------------------------------------------
-// GET – simple health check + gate
-// -----------------------------------------------------------------------------
-export async function GET() {
-  const auth = await ensureActiveSubscription();
-
-  if (!auth.ok) {
-    return NextResponse.json(
-      {
-        error: auth.error,
-        message: auth.message,
-      },
-      { status: auth.status ?? 401 }
-    );
-  }
-
-  return NextResponse.json({
-    ok: true,
-    message: "SirensForge /api/generate is live, subscription-gated, and ready for job creation.",
-  });
-}
-
-// -----------------------------------------------------------------------------
-// POST – create generation job (Phase 1 = mocked engine, real metadata)
-// -----------------------------------------------------------------------------
 export async function POST(req: Request) {
-  // 1️⃣ Subscription gate
-  const auth = await ensureActiveSubscription();
-
-  if (!auth.ok) {
-    return NextResponse.json(
-      {
-        error: auth.error,
-        message: auth.message,
-      },
-      { status: auth.status ?? 401 }
-    );
-  }
-
-  // 2️⃣ Parse and validate body
-  let body: GenerationRequestPayload;
   try {
-    body = (await req.json()) as GenerationRequestPayload;
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return NextResponse.json(
+        { error: "server_not_configured" },
+        { status: 500 }
+      );
+    }
+
+    // -----------------------------
+    // 🔐 1. Read auth cookies
+    // -----------------------------
+    const cookieStore = await cookies();
+    const accessToken = cookieStore.get("sb-access-token")?.value || null;
+
+    if (!accessToken) {
+      return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
+    }
+
+    // -----------------------------
+    // 🔐 2. Auth lookup must use ANON client
+    // -----------------------------
+    const supabaseAuth = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabaseAuth.auth.getUser(accessToken);
+
+    if (userErr || !user) {
+      return NextResponse.json(
+        { error: "not_authenticated" },
+        { status: 401 }
+      );
+    }
+
+    // -----------------------------
+    // 🔐 3. DB access must use SERVICE ROLE
+    // -----------------------------
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    // Fetch profile (internal mapping)
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, email, badge, is_og_member, seat_number")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!profile) {
+      return NextResponse.json(
+        { error: "profile_not_found" },
+        { status: 400 }
+      );
+    }
+
+    // -----------------------------
+    // 🔐 4. Subscription check
+    // MUST MATCH auth.users.id (NOT profile.id)
+    // -----------------------------
+    const { data: subscription } = await supabase
+      .from("user_subscriptions")
+      .select("id, status, tier_name, expires_at")
+      .eq("user_id", user.id) // FIXED
+      .in("status", ["active", "trialing"])
+      .maybeSingle();
+
+    const active =
+      subscription &&
+      (subscription.status === "active" ||
+        subscription.status === "trialing");
+
+    if (!active) {
+      return NextResponse.json(
+        {
+          error:
+            "No active SirensForge subscription. Unlock OG, Early Bird, or Prime to generate.",
+        },
+        { status: 402 }
+      );
+    }
+
+    // -----------------------------
+    // 💬 5. Parse incoming request
+    // -----------------------------
+    const body = await req.json();
+    const prompt = body.prompt;
+
+    if (!prompt) {
+      return NextResponse.json(
+        { error: "missing_prompt" },
+        { status: 400 }
+      );
+    }
+
+    // -----------------------------
+    // 🚀 6. TODO: Send job to RunPod / ComfyUI / Worker
+    // -----------------------------
+    return NextResponse.json(
+      {
+        success: true,
+        ready: true,
+        message: "Subscription active — ready to generate.",
+        subscription: subscription.tier_name,
+      },
+      { status: 200 }
+    );
   } catch (err) {
-    console.error("[/api/generate] JSON parse error:", err);
+    console.error("GENERATION ERROR:", err);
     return NextResponse.json(
-      {
-        ok: false,
-        error: "INVALID_JSON",
-        message: "Request body must be valid JSON.",
-      },
-      { status: 400 }
+      { error: "internal_error" },
+      { status: 500 }
     );
   }
-
-  if (!body || typeof body.prompt !== "string" || !body.prompt.trim()) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "MISSING_PROMPT",
-        message: "Prompt is required to start a generation.",
-      },
-      { status: 400 }
-    );
-  }
-
-  const mode: GenerationMode = body.mode || "text_to_image";
-  const supportedModes: GenerationMode[] = [
-    "text_to_image",
-    "image_to_image",
-    "image_to_video",
-    "text_to_video",
-  ];
-
-  if (!supportedModes.includes(mode)) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "INVALID_MODE",
-        message: `Unsupported generation mode: ${mode}`,
-      },
-      { status: 400 }
-    );
-  }
-
-  // Normalize a few fields with sane defaults
-  const batchSize = Math.max(1, Math.min(body.batchSize ?? 1, 4));
-  const seed = body.lockSeed ? body.seed ?? null : null;
-
-  // 3️⃣ Build the engine payload (this is what we'll send to RunPod/Comfy later)
-  const enginePayload = {
-    mode,
-    prompt: body.prompt,
-    negative_prompt: body.negativePrompt ?? "",
-    base_model: body.baseModel ?? "feminine",
-    content_mode: body.contentMode ?? "sfw",
-    style_preset: body.stylePreset ?? "photorealistic",
-
-    quality_preset: body.qualityPreset ?? "balanced",
-    consistency_preset: body.consistencyPreset ?? "medium",
-
-    resolution: body.resolution ?? "1024x1024",
-    guidance: body.guidance ?? 7.5,
-    steps: body.steps ?? 30,
-
-    // Seed controls
-    seed,
-    lock_seed: !!body.lockSeed,
-    batch_size: batchSize,
-
-    // DNA / FLUX / image input
-    dna_pack: {
-      count: body.dnaPack?.count ?? 0,
-      has_files: body.dnaPack?.hasFiles ?? false,
-    },
-    flux_lock: body.fluxLock
-      ? {
-          type: body.fluxLock.type,
-          strength: body.fluxLock.strength,
-        }
-      : null,
-    image_input: body.imageInput
-      ? {
-          kind: body.imageInput.kind,
-          url: body.imageInput.url ?? null,
-        }
-      : null,
-  };
-
-  // 4️⃣ Phase 1 – MOCK ENGINE
-  //
-  // Later:
-  //   const runpodRes = await fetch(RUNPOD_URL, { method: "POST", body: JSON.stringify(enginePayload), ... });
-  //   const runpodJson = await runpodRes.json();
-  //   const jobId = runpodJson.id;
-  //
-  // For now we generate a job_id on the server and let /api/status mock the rest.
-  const jobId = makeJobId();
-
-  // OPTIONAL (later): insert into `generations` table in Supabase.
-  // We do NOT do it now to avoid breaking on missing server client.
-  //
-  // await supabaseAdmin.from("generations").insert({
-  //   user_id: auth.userId,
-  //   job_id: jobId,
-  //   status: "QUEUED",
-  //   mode,
-  //   prompt: body.prompt,
-  //   content_mode: body.contentMode,
-  //   meta: enginePayload,
-  // });
-
-  // 5️⃣ Return standard job response
-  return NextResponse.json(
-    {
-      ok: true,
-      job_id: jobId,
-      status: "QUEUED",
-      queued_at: new Date().toISOString(),
-      engine: "MOCK_PHASE1",
-      meta: enginePayload,
-    },
-    { status: 202 }
-  );
-}
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-function makeJobId() {
-  const ts = Date.now().toString(36);
-  const rand = Math.random().toString(36).slice(2, 8);
-  return `sf_job_${ts}_${rand}`;
 }

@@ -20,7 +20,9 @@ import {
   Search,
   Play,
   Maximize2,
+  AlertTriangle,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -99,6 +101,137 @@ function inferKindFromOutput(output: any): MediaKind {
     return "video";
   }
   return "image";
+}
+
+// -----------------------------------------------------------------------------
+// Subscription Modal (Neon SirensForge Style)
+// -----------------------------------------------------------------------------
+
+interface SubscriptionModalProps {
+  open: boolean;
+  message?: string | null;
+  onClose: () => void;
+  onGoPricing: () => void;
+}
+
+function SubscriptionModal({
+  open,
+  message,
+  onClose,
+  onGoPricing,
+}: SubscriptionModalProps) {
+  if (!open) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        <motion.div
+          className="relative w-full max-w-lg mx-4"
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0.9, opacity: 0 }}
+        >
+          {/* Neon border wrapper */}
+          <div className="absolute -inset-[2px] rounded-3xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 opacity-80 blur-sm animate-pulse" />
+          <div className="relative rounded-3xl bg-gray-950/95 border border-purple-700/60 shadow-[0_0_40px_rgba(168,85,247,0.6)] overflow-hidden">
+            <div className="px-6 pt-5 pb-4 border-b border-purple-900/50 flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-purple-500 via-pink-500 to-cyan-500 flex items-center justify-center text-black shadow-lg">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-transparent">
+                  Subscription Required to Forge
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Generator access is locked to SirensForge members. OG &amp;
+                  Early Bird tiers get full image &amp; video generation.
+                </p>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 space-y-3 text-sm text-gray-200">
+              {message && (
+                <p className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg px-3 py-2">
+                  {message}
+                </p>
+              )}
+
+              <p className="text-xs text-gray-300">
+                To keep the platform fast, exclusive, and creator-first, the
+                Forge is currently limited to paid members:
+              </p>
+
+              <ul className="text-xs text-gray-300 space-y-1.5">
+                <li className="flex items-start gap-2">
+                  <span className="mt-[3px] h-1.5 w-1.5 rounded-full bg-purple-400" />
+                  <span>
+                    <span className="font-semibold text-purple-200">
+                      OG Founders
+                    </span>{" "}
+                    — lifetime access, best perks, highest priority in the
+                    queue.
+                  </span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="mt-[3px] h-1.5 w-1.5 rounded-full bg-pink-400" />
+                  <span>
+                    <span className="font-semibold text-pink-200">
+                      Early Bird
+                    </span>{" "}
+                    — full generator access at launch pricing.
+                  </span>
+                </li>
+              </ul>
+
+              <p className="text-[11px] text-gray-400 pt-1">
+                You&apos;re seeing this message because your account doesn&apos;t
+                have an active tier with generator access yet.
+              </p>
+            </div>
+
+            <div className="px-6 pb-5 pt-2 flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center border-t border-purple-900/40 bg-gradient-to-r from-purple-950/60 via-black to-cyan-950/40">
+              <div className="text-[11px] text-gray-400">
+                <p>
+                  Smash the competition at launch by locking in{" "}
+                  <span className="text-purple-300 font-semibold">
+                    OG
+                  </span>{" "}
+                  or{" "}
+                  <span className="text-pink-300 font-semibold">
+                    Early Bird
+                  </span>{" "}
+                  access before seats are gone.
+                </p>
+              </div>
+
+              <div className="flex gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onClose}
+                  className="border-gray-700 bg-gray-900 text-gray-200 text-xs h-9 px-3"
+                >
+                  Stay on this page
+                </Button>
+                <Button
+                  type="button"
+                  onClick={onGoPricing}
+                  className="text-xs h-9 px-4 bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 hover:from-purple-400 hover:via-pink-400 hover:to-cyan-400 text-black font-semibold shadow-[0_0_20px_rgba(168,85,247,0.8)]"
+                >
+                  View Plans &amp; Unlock Access
+                </Button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
 }
 
 // -----------------------------------------------------------------------------
@@ -1316,6 +1449,8 @@ function HistorySidebar(props: {
 // -----------------------------------------------------------------------------
 
 export default function GeneratePage() {
+  const router = useRouter();
+
   // Core state
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
   const [prompt, setPrompt] = useState("");
@@ -1347,6 +1482,12 @@ export default function GeneratePage() {
   const [history, setHistory] = useState<GeneratedItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Subscription modal state
+  const [showSubModal, setShowSubModal] = useState(false);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(
+    null
+  );
 
   const canGenerate = prompt.trim().length > 0 && !isGenerating;
 
@@ -1391,6 +1532,28 @@ export default function GeneratePage() {
         },
         body: JSON.stringify(payload),
       });
+
+      // 🔐 Subscription / gating handling (Step 5)
+      if (res.status === 402 || res.status === 403) {
+        let reason = "You need an active SirensForge subscription with generator access.";
+        try {
+          const data = await res.json();
+          if (typeof data?.error === "string") {
+            reason = data.error;
+          } else if (typeof data?.message === "string") {
+            reason = data.message;
+          } else if (typeof data?.code === "string") {
+            reason = data.code;
+          }
+        } catch {
+          // ignore parse errors; keep default reason
+        }
+
+        setSubscriptionError(reason);
+        setShowSubModal(true);
+        setIsGenerating(false);
+        return;
+      }
 
       if (!res.ok) {
         throw new Error(`Generate failed with status ${res.status}`);
@@ -1602,6 +1765,14 @@ export default function GeneratePage() {
           />
         </div>
       </main>
+
+      {/* Subscription gating modal */}
+      <SubscriptionModal
+        open={showSubModal}
+        message={subscriptionError}
+        onClose={() => setShowSubModal(false)}
+        onGoPricing={() => router.push("/pricing")}
+      />
     </div>
   );
 }
