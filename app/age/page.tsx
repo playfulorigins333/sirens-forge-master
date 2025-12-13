@@ -12,13 +12,14 @@ export default function AgeGate() {
   const enter = () => {
     setIsEntering(true);
 
-    // MUST match middleware
-    document.cookie = "ageVerified=true; path=/; max-age=31536000";
+    // 🔐 MUST match middleware exactly
+    document.cookie =
+      "sf_age_verified=true; path=/; max-age=31536000; SameSite=Lax";
 
-    // Optional memory for UI
-    localStorage.setItem("ageVerified", "true");
+    // Optional: UI memory only (middleware does NOT read this)
+    localStorage.setItem("sf_age_verified", "true");
 
-    // After verifying → go to homepage ("/")
+    // Small delay to ensure cookie is written
     setTimeout(() => {
       router.replace("/");
     }, 300);
@@ -29,8 +30,8 @@ export default function AgeGate() {
   };
 
   useEffect(() => {
-    // Auto-skip if cookie exists
-    if (document.cookie.includes("ageVerified=true")) {
+    // Auto-skip if cookie already exists
+    if (document.cookie.includes("sf_age_verified=true")) {
       router.replace("/");
     }
   }, [router]);
