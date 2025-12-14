@@ -32,55 +32,21 @@
   },
 
   "4": {
-    "class_type": "LoadImage",
+    "class_type": "EmptyLatentImage",
     "inputs": {
-      "image": "{dna_image}"
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
     }
   },
 
   "5": {
-    "class_type": "IPAdapterInsightFaceLoader",
-    "inputs": {
-      "provider": "CPU",
-      "model_name": "buffalo_l"
-    }
-  },
-
-  "6": {
-    "class_type": "IPAdapterModelLoader",
-    "inputs": {
-      "ipadapter_file": "ip-adapter-faceid-portrait_sdxl_unnorm.bin"
-    }
-  },
-
-  "7": {
-    "class_type": "CLIPVisionLoader",
-    "inputs": {
-      "clip_name": "CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors"
-    }
-  },
-
-  "8": {
-    "class_type": "IPAdapterFaceID",
-    "inputs": {
-      "weight": 0,
-      "weight_faceidv2": 0,
-      "weight_type": "linear",
-      "start_at_step": 0,
-      "end_at_step": 1,
-      "embeds": ["6", 0],
-      "image": ["4", 0],
-      "clip_vision": ["7", 0],
-      "insightface": ["5", 0]
-    }
-  },
-
-  "9": {
     "class_type": "KSampler",
     "inputs": {
       "model": ["1", 0],
       "positive": ["2", 0],
       "negative": ["3", 0],
+      "latent_image": ["4", 0],
       "seed": "{seed}",
       "steps": "{steps}",
       "cfg": "{cfg}",
@@ -90,19 +56,19 @@
     }
   },
 
-  "10": {
+  "6": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["9", 0],
+      "samples": ["5", 0],
       "vae": ["0", 2]
     }
   },
 
-  "11": {
+  "7": {
     "class_type": "SaveImage",
     "inputs": {
       "filename_prefix": "sirensforge",
-      "images": ["10", 0]
+      "images": ["6", 0]
     }
   }
 }
