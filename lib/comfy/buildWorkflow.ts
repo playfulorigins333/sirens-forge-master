@@ -8,6 +8,10 @@ interface BuildWorkflowArgs {
   steps: number;
   cfg: number;
   baseModel: BaseModelKey;
+
+  // DNA Lock (optional)
+  dnaImageName?: string | null;
+  dnaStrength?: number;
 }
 
 export function buildWorkflow({
@@ -17,50 +21,38 @@ export function buildWorkflow({
   steps,
   cfg,
   baseModel,
+  dnaImageName = null,
+  dnaStrength = 0.85,
 }: BuildWorkflowArgs) {
-  
-  // 🔥 1. Deep clone the workflow JSON so we don’t mutate the original template
   const wf: any = JSON.parse(JSON.stringify(baseWorkflow));
-
-  // 🔥 2. Find LoraLoader node dynamically
-  // (We don’t hardcode node IDs — safer for future workflow changes)
   const nodeIds = Object.keys(wf);
-  const loraNodeId = nodeIds.find(
-    (id) => wf[id]?.class_type === "LoraLoader"
-  );
+
+  // --- Find nodes dynamically
+  const findNode = (type: string) =>
+    nodeIds.find((id) => wf[id]?.class_type === type);
+
+  const loraNodeId = findNode("LoraLoader");
+  const ipAdapterId = findNode("IPAdapterFaceID");
+  const loadImageId = findNode("LoadImage");
 
   if (!loraNodeId) {
-    throw new Error("❌ No LoraLoader node found in workflow-base.json");
+    throw new Error("No LoraLoader node found");
   }
 
-  // 🔥 3. Load LoRAs from routing table
+  // --- LoRA routing
   const routing = LORA_ROUTING[baseModel] || { loras: [] };
+  wf[loraNodeId].inputs.loras = routing.loras;
 
-  const lorasPayload = routing.loras.map((l) => ({
-    lora_name: l.name,
-    strength: l.strength,
-  }));
-
-  // Inject LoRAs array into that node
-  wf[loraNodeId].inputs.loras = lorasPayload;
-
-  // 🔥 4. Inject prompt + negative prompt into the CLIPTextEncode nodes
+  // --- Inject prompt + negative
   for (const id of nodeIds) {
     const node = wf[id];
-    if (!node?.class_type) continue;
-
-    if (node.class_type === "CLIPTextEncode") {
-      if (node.inputs?.text === "{prompt}") {
-        node.inputs.text = prompt;
-      }
-
-      if (node.inputs?.text === "{negative_prompt}") {
-        node.inputs.text = negative;
-      }
+    if (node?.class_type === "CLIPTextEncode") {
+      if (node.inputs.text === "{prompt}") node.inputs.text = prompt;
+      if (node.inputs.text === "{negative_prompt}") node.inputs.text = negative;
     }
   }
 
-  // 🔥 5. Inject sampler params
+  // --- Sampler params
   for (const id of nodeIds) {
     const node = wf[id];
     if (node?.class_type === "KSampler") {
@@ -70,5 +62,23 @@ export function buildWorkflow({
     }
   }
 
+  // --- DNA Lock logic
+  if (ipAdapterId && loadImageId) {
+    if (dnaImageName && dnaImageName.trim()) {
+      wf[loadImageId].inputs.image = dnaImageName;
+      wf[ipAdapterId].inputs.weight = clamp01(dnaStrength);
+    } else {
+      // No ref → behave like pure txt2img
+      wf[loadImageId].inputs.image = "___NO_DNA___.png";
+      wf[ipAdapterId].inputs.weight = 0;
+    }
+  }
+
   return wf;
+}
+
+function clamp01(n: number) {
+  if (n < 0) return 0;
+  if (n > 1) return 1;
+  return n;
 }

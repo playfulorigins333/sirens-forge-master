@@ -32,6 +32,50 @@
   },
 
   "4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{dna_image}"
+    }
+  },
+
+  "5": {
+    "class_type": "IPAdapterInsightFaceLoader",
+    "inputs": {
+      "provider": "CPU",
+      "model_name": "buffalo_l"
+    }
+  },
+
+  "6": {
+    "class_type": "IPAdapterModelLoader",
+    "inputs": {
+      "ipadapter_file": "ip-adapter-faceid-portrait_sdxl_unnorm.bin"
+    }
+  },
+
+  "7": {
+    "class_type": "CLIPVisionLoader",
+    "inputs": {
+      "clip_name": "CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors"
+    }
+  },
+
+  "8": {
+    "class_type": "IPAdapterFaceID",
+    "inputs": {
+      "weight": 0,
+      "weight_faceidv2": 0,
+      "weight_type": "linear",
+      "start_at_step": 0,
+      "end_at_step": 1,
+      "embeds": ["6", 0],
+      "image": ["4", 0],
+      "clip_vision": ["7", 0],
+      "insightface": ["5", 0]
+    }
+  },
+
+  "9": {
     "class_type": "KSampler",
     "inputs": {
       "model": ["1", 0],
@@ -46,19 +90,19 @@
     }
   },
 
-  "5": {
+  "10": {
     "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["4", 0],
+      "samples": ["9", 0],
       "vae": ["0", 2]
     }
   },
 
-  "6": {
+  "11": {
     "class_type": "SaveImage",
     "inputs": {
       "filename_prefix": "sirensforge",
-      "images": ["5", 0]
+      "images": ["10", 0]
     }
   }
 }
