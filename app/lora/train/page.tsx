@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import React, { useState, useCallback, useEffect } from 'react'
 import { Button } from "@/components/ui/button"
@@ -41,7 +41,7 @@ const FloatingParticles = () => {
             opacity: 0
           }}
           animate={{
-            y: [null, Math.random() * -100 - 50],
+            y: Math.random() * -100 - 50,
             opacity: [0, 1, 0]
           }}
           transition={{
