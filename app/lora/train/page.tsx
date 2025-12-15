@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Upload, X, Check, Sparkles, Crown, AlertCircle, Clock, CheckCircle, Star, Zap, Heart } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { createClient } from '@supabase/supabase-js'
 
 interface UploadedImage {
   id: string
@@ -17,6 +18,11 @@ interface UploadedImage {
 }
 
 type TrainingStatus = 'idle' | 'queued' | 'training' | 'completed' | 'failed'
+
+const supabaseClient = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 // Floating particles component
 const FloatingParticles = () => {
@@ -98,6 +104,7 @@ export default function LoRATrainerPage() {
   const [description, setDescription] = useState("")
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
   const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>('idle')
+  const [loraId, setLoraId] = useState<string | null>(null)
   const [trainingProgress, setTrainingProgress] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
   const [showInfo, setShowInfo] = useState(false)
@@ -173,38 +180,98 @@ export default function LoRATrainerPage() {
     })
   }
 
-  const handleStartTraining = () => {
+  const getAccessToken = async (): Promise<string | null> => {
+    try {
+      const { data } = await supabaseClient.auth.getSession()
+      return data.session?.access_token ?? null
+    } catch {
+      return null
+    }
+  }
+
+  const handleStartTraining = async () => {
     if (uploadedImages.length < 10 || !identityName.trim()) return
 
+    setErrorMessage(null)
+    setTrainingProgress(0)
     setTrainingStatus('queued')
-    
-    setTimeout(() => {
-      setTrainingStatus('training')
-      simulateTrainingProgress()
-    }, 2000)
-  }
 
-  const simulateTrainingProgress = () => {
-    let progress = 0
-    const interval = setInterval(() => {
-      progress += Math.random() * 15
-      if (progress >= 100) {
-        progress = 100
-        clearInterval(interval)
-        setTimeout(() => {
-          setTrainingStatus('completed')
-          setShowConfetti(true)
-          setTimeout(() => setShowConfetti(false), 3000)
-        }, 500)
+    try {
+      const token = await getAccessToken()
+      if (!token) {
+        setTrainingStatus('failed')
+        setErrorMessage("You must be logged in to start training.")
+        return
       }
-      setTrainingProgress(Math.min(progress, 100))
-    }, 800)
+
+      // Step 1: Create (or reuse) a draft identity record in Supabase
+      const createRes = await fetch("/api/lora/train", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          identityName: identityName.trim(),
+          description: description?.trim() || null,
+          imageCount: uploadedImages.length,
+        }),
+      })
+
+      const createJson = await createRes.json().catch(() => ({} as any))
+
+      if (!createRes.ok) {
+        setTrainingStatus('failed')
+        setErrorMessage(createJson?.error || "Failed to create LoRA identity.")
+        return
+      }
+
+      const createdId = createJson?.lora_id as string | undefined
+      if (!createdId) {
+        setTrainingStatus('failed')
+        setErrorMessage("Server response missing lora_id.")
+        return
+      }
+
+      setLoraId(createdId)
+
+      // Step 2: Start training manually
+      const startRes = await fetch("/api/lora/start-training", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({ lora_id: createdId }),
+      })
+
+      const startJson = await startRes.json().catch(() => ({} as any))
+
+      if (!startRes.ok) {
+        setTrainingStatus('failed')
+        setErrorMessage(startJson?.error || "Failed to start training.")
+        return
+      }
+
+      const nextStatus = (startJson?.status as TrainingStatus) || 'queued'
+      setTrainingStatus(nextStatus)
+
+      if (nextStatus === 'completed') {
+        setShowConfetti(true)
+        setTimeout(() => setShowConfetti(false), 3000)
+      }
+    } catch (err) {
+      console.error("Start training error:", err)
+      setTrainingStatus('failed')
+      setErrorMessage("Unexpected error starting training.")
+    }
   }
 
-  const handleRetry = () => {
+const handleRetry = () => {
     setTrainingStatus('idle')
     setTrainingProgress(0)
     setErrorMessage(null)
+    setLoraId(null)
   }
 
   const getProgressColor = () => {
@@ -737,6 +804,18 @@ export default function LoRATrainerPage() {
           </Card>
         </motion.div>
 
+        {errorMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-4 rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-200 flex items-start gap-3"
+            role="alert"
+          >
+            <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+            <div className="text-sm leading-relaxed">{errorMessage}</div>
+          </motion.div>
+        )}
+
         {/* Action Button */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
@@ -877,6 +956,9 @@ export default function LoRATrainerPage() {
                         Queued for Magic ✨
                       </motion.h3>
                       <p className="text-gray-300 text-lg">Your identity is next in line for transformation</p>
+                      {loraId && (
+                        <p className="text-xs text-gray-400 mt-2">LoRA Job: <span className="font-mono">{loraId}</span></p>
+                      )}
                     </>
                   )}
                   {trainingStatus === 'training' && (
@@ -891,6 +973,9 @@ export default function LoRATrainerPage() {
                         Forging Your AI Twin
                       </motion.h3>
                       <p className="text-gray-300 text-lg">Weaving pixels into digital consciousness...</p>
+                      {loraId && (
+                        <p className="text-xs text-gray-400 mt-2">LoRA Job: <span className="font-mono">{loraId}</span></p>
+                      )}
                       <div className="pt-6 space-y-4">
                         <div className="relative h-3 bg-gray-800 rounded-full overflow-hidden">
                           <motion.div
@@ -978,6 +1063,7 @@ export default function LoRATrainerPage() {
                             setIdentityName('')
                             setDescription('')
                             setUploadedImages([])
+                            setLoraId(null)
                           }}
                           className="w-full py-6 border-gray-700 hover:bg-gray-800"
                         >
@@ -1011,6 +1097,7 @@ export default function LoRATrainerPage() {
                       onClick={() => {
                         setTrainingStatus('idle')
                         setTrainingProgress(0)
+                        setLoraId(null)
                       }}
                       className="w-full py-6 border-gray-700 hover:bg-gray-800"
                     >
