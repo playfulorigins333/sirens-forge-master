@@ -66,8 +66,16 @@ type StylePreset =
 type QualityPreset = "fast" | "balanced" | "quality" | "ultra";
 type ConsistencyPreset = "low" | "medium" | "high" | "perfect";
 
-type FluxLockType = "face_only" | "body_only" | "face_and_body";
-type FluxLockStrength = "subtle" | "balanced" | "strong";
+
+type LoraMode = "single" | "advanced";
+
+interface LoraSelection {
+  mode: LoraMode;
+  selected: string[]; // LoRA ids/names
+  createNew: boolean;
+  newName: string;
+}
+
 
 type MediaKind = "image" | "video";
 
@@ -656,249 +664,207 @@ function ModelStyleSection(props: {
 }
 
 // -----------------------------------------------------------------------------
-// DNA Lock (high-level, front-end only for now)
+// -----------------------------------------------------------------------------
+// LoRA Identity Section (Option A default; Option B available)
 // -----------------------------------------------------------------------------
 
-function DNALockSection(props: {
-  files: File[];
-  onUpload: (files: File[]) => void;
-  onRemove: (index: number) => void;
+function LoraIdentitySection(props: {
+  value: LoraSelection;
+  onChange: (next: LoraSelection) => void;
 }) {
-  const maxImages = 8;
-  const minImages = 5;
-  const isReady = props.files.length >= minImages;
+  // NOTE: replace this with a backend-driven list when ready.
+  const availableLoras = [
+    { id: "none", label: "None (no identity LoRA)" },
+    { id: "identity_lora_1", label: "Identity LoRA #1" },
+    { id: "identity_lora_2", label: "Identity LoRA #2" },
+  ];
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const incoming = Array.from(e.target.files || []);
-    const allowed = incoming.slice(
-      0,
-      Math.max(0, maxImages - props.files.length)
-    );
-    if (allowed.length) props.onUpload(allowed);
-  };
+  const v = props.value;
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const incoming = Array.from(e.dataTransfer.files || []);
-    const allowed = incoming.slice(
-      0,
-      Math.max(0, maxImages - props.files.length)
-    );
-    if (allowed.length) props.onUpload(allowed);
+  const set = (patch: Partial<LoraSelection>) =>
+    props.onChange({ ...v, ...patch });
+
+  const toggleSelected = (id: string) => {
+    const next = v.selected.includes(id)
+      ? v.selected.filter((x) => x !== id)
+      : [...v.selected, id];
+    set({ selected: next.filter((x) => x !== "none") });
   };
 
   return (
     <Card className="border-gray-800 bg-gray-900/80">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">
-          Character DNA Lock
+          Identity LoRA (Training Mode)
         </CardTitle>
         <CardDescription className="text-xs text-gray-400">
-          Upload 5–8 photos to lock a face + body combo across image &amp; video
-          generations.
+          DNA Lock + FLUX Lock are removed. Identity consistency is now driven
+          by LoRA selection/training. Default is the safest, lowest-friction
+          path (Option A). Option B is available for power creators.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={handleDrop}
-          onClick={() =>
-            (
-              document.getElementById(
-                "dna-upload-input"
-              ) as HTMLInputElement | null
-            )?.click()
-          }
-          className="border-2 border-dashed border-gray-700 rounded-xl p-6 text-center cursor-pointer hover:border-purple-500 transition-colors"
-        >
-          <Upload className="w-10 h-10 mx-auto mb-3 text-gray-400" />
-          <p className="text-sm text-gray-200 mb-1">
-            Drop or click to upload reference photos
-          </p>
-          <p className="text-[11px] text-gray-500 mb-1">
-            Clear, frontal faces work best. Avoid filters &amp; heavy makeup.
-          </p>
-          <p className="text-[11px] text-gray-500">
-            {props.files.length}/{maxImages} uploaded
-          </p>
-          <input
-            id="dna-upload-input"
-            type="file"
-            multiple
-            accept="image/*"
-            onChange={handleFileSelect}
-            className="hidden"
-          />
+
+      <CardContent className="space-y-4 text-xs">
+        {/* Mode */}
+        <div className="space-y-2">
+          <label
+            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
+              v.mode === "single"
+                ? "border-purple-500 bg-purple-500/10"
+                : "border-gray-800 hover:border-gray-700"
+            }`}
+          >
+            <input
+              type="radio"
+              name="loraMode"
+              checked={v.mode === "single"}
+              onChange={() => set({ mode: "single" })}
+            />
+            <div>
+              <div className="font-semibold text-gray-100">
+                Option A — Select 1 LoRA (recommended)
+              </div>
+              <div className="text-[10px] text-gray-400">
+                Safest default for creators. Lowest friction, simplest routing.
+              </div>
+            </div>
+          </label>
+
+          <label
+            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
+              v.mode === "advanced"
+                ? "border-gray-600 bg-gray-950"
+                : "border-gray-800 hover:border-gray-700"
+            }`}
+          >
+            <input
+              type="radio"
+              name="loraMode"
+              checked={v.mode === "advanced"}
+              onChange={() => set({ mode: "advanced" })}
+            />
+            <div>
+              <div className="font-semibold text-gray-100">
+                Option B — Multi-LoRA / Create New (advanced)
+              </div>
+              <div className="text-[10px] text-gray-400">
+                For power users who want multiple LoRAs or to start a new one.
+              </div>
+            </div>
+          </label>
         </div>
 
-        {props.files.length > 0 && (
-          <div className="grid grid-cols-4 gap-2">
-            {props.files.map((file, index) => (
-              <div
-                key={index}
-                className="relative aspect-square rounded-lg overflow-hidden bg-gray-950 group"
+        {/* Option A UI */}
+        {v.mode === "single" && (
+          <div className="space-y-3">
+            <div>
+              <p className="font-semibold mb-1 text-gray-200">
+                Choose an identity LoRA
+              </p>
+              <Select
+                value={v.selected[0] || "none"}
+                onValueChange={(val) =>
+                  set({
+                    selected: val === "none" ? [] : [val],
+                    createNew: false,
+                    newName: "",
+                  })
+                }
               >
-                <img
-                  src={URL.createObjectURL(file)}
-                  alt={`DNA ${index + 1}`}
-                  className="w-full h-full object-cover"
+                <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs">
+                  <SelectValue placeholder="Select a LoRA" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-950 border-gray-800">
+                  {availableLoras.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={v.createNew}
+                onChange={(e) =>
+                  set({
+                    createNew: e.target.checked,
+                    newName: e.target.checked ? v.newName : "",
+                    selected: e.target.checked ? [] : v.selected,
+                  })
+                }
+              />
+              <span className="text-gray-300">Create a new identity LoRA</span>
+            </label>
+
+            {v.createNew && (
+              <div>
+                <p className="font-semibold mb-1 text-gray-200">New LoRA name</p>
+                <Input
+                  value={v.newName}
+                  onChange={(e) => set({ newName: e.target.value })}
+                  placeholder="e.g. client_jane_v1"
+                  className="bg-gray-950 border-gray-800 h-8 text-xs"
                 />
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    props.onRemove(index);
-                  }}
-                  className="absolute top-1 right-1 p-1 bg-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                >
-                  <X className="w-3 h-3 text-white" />
-                </button>
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Backend will start training when you submit the training flow.
+                </p>
               </div>
-            ))}
+            )}
           </div>
         )}
 
-        <div
-          className={`flex items-center justify-between text-xs px-3 py-2 rounded-lg border ${
-            isReady
-              ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
-              : "border-amber-500 bg-amber-500/10 text-amber-300"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {isReady ? (
-              <Check className="w-4 h-4" />
-            ) : (
-              <Upload className="w-4 h-4" />
+        {/* Option B UI */}
+        {v.mode === "advanced" && (
+          <div className="space-y-3">
+            <p className="font-semibold text-gray-200">
+              Select multiple LoRAs to blend
+            </p>
+
+            <div className="space-y-2">
+              {availableLoras
+                .filter((l) => l.id !== "none")
+                .map((l) => (
+                  <label
+                    key={l.id}
+                    className="flex items-center gap-2 p-2 rounded-lg border border-gray-800 bg-gray-950"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={v.selected.includes(l.id)}
+                      onChange={() => toggleSelected(l.id)}
+                    />
+                    <span className="text-gray-200">{l.label}</span>
+                  </label>
+                ))}
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={v.createNew}
+                onChange={(e) =>
+                  set({
+                    createNew: e.target.checked,
+                    newName: e.target.checked ? v.newName : "",
+                  })
+                }
+              />
+              <span className="text-gray-300">Also create a new LoRA</span>
+            </label>
+
+            {v.createNew && (
+              <Input
+                value={v.newName}
+                onChange={(e) => set({ newName: e.target.value })}
+                placeholder="e.g. new_identity_v1"
+                className="bg-gray-950 border-gray-800 h-8 text-xs"
+              />
             )}
-            <span>
-              {isReady
-                ? "DNA Pack Ready for face/body consistency."
-                : "Upload at least 5 photos to enable DNA Lock."}
-            </span>
           </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// -----------------------------------------------------------------------------
-// FLUX Lock Section (simplified front-end UI for now)
-// -----------------------------------------------------------------------------
-
-function FluxLockSection(props: {
-  lockType: FluxLockType;
-  lockStrength: FluxLockStrength;
-  onLockTypeChange: (t: FluxLockType) => void;
-  onLockStrengthChange: (s: FluxLockStrength) => void;
-}) {
-  const lockTypes: { id: FluxLockType; label: string; description: string }[] =
-    [
-      {
-        id: "face_only",
-        label: "Face Only",
-        description: "Lock facial features with FLUX.",
-      },
-      {
-        id: "body_only",
-        label: "Body Only",
-        description: "Lock physique / proportions.",
-      },
-      {
-        id: "face_and_body",
-        label: "Face + Body",
-        description: "Max consistency for both.",
-      },
-    ];
-
-  const strengths: { id: FluxLockStrength; label: string }[] = [
-    { id: "subtle", label: "Subtle" },
-    { id: "balanced", label: "Balanced" },
-    { id: "strong", label: "Strong" },
-  ];
-
-  return (
-    <Card className="border-gray-800 bg-gray-900/80">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm md:text-base flex items-center gap-2">
-          FLUX Face &amp; Body Lock
-          <span className="text-lg">🔒</span>
-        </CardTitle>
-        <CardDescription className="text-xs text-gray-400">
-          High-end FLUX lock controls. Combined with DNA pack, this is your
-          competitive edge.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4 text-xs">
-        <div>
-          <p className="font-semibold mb-2 text-gray-200">Lock Type</p>
-          <div className="grid grid-cols-3 gap-2">
-            {lockTypes.map((lt) => {
-              const isActive = props.lockType === lt.id;
-              return (
-                <button
-                  key={lt.id}
-                  type="button"
-                  onClick={() => props.onLockTypeChange(lt.id)}
-                  className={`p-2.5 rounded-lg border-2 transition-all ${
-                    isActive
-                      ? "border-purple-500 bg-purple-500/10 text-white"
-                      : "border-gray-800 bg-gray-950 text-gray-300 hover:border-gray-700"
-                  }`}
-                >
-                  <div className="font-semibold text-[11px]">{lt.label}</div>
-                  <div className="text-[10px] text-gray-400 mt-1">
-                    {lt.description}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <p className="font-semibold text-gray-200">Lock Strength</p>
-            <span className="text-[11px] text-purple-300 font-semibold">
-              {props.lockStrength[0].toUpperCase() +
-                props.lockStrength.slice(1)}
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={2}
-            step={1}
-            value={
-              props.lockStrength === "subtle"
-                ? 0
-                : props.lockStrength === "balanced"
-                ? 1
-                : 2
-            }
-            onChange={(e) => {
-              const idx = parseInt(e.target.value, 10);
-              const map: FluxLockStrength[] = [
-                "subtle",
-                "balanced",
-                "strong",
-              ];
-              props.onLockStrengthChange(map[idx] ?? "balanced");
-            }}
-            className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
-          />
-          <div className="flex justify-between mt-1 text-[10px] text-gray-500">
-            <span>Subtle</span>
-            <span>Balanced</span>
-            <span>Strong</span>
-          </div>
-        </div>
-
-        <p className="text-[10px] text-gray-500">
-          On the backend, this maps into FLUX IP-Adapter strength + LoRA blend
-          so you can keep faces and bodies locked between images and video.
-        </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -1461,13 +1427,13 @@ export default function GeneratePage() {
     useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
   const [consistencyPreset] = useState<ConsistencyPreset>("medium");
-
-  // DNA & FLUX
-  const [dnaFiles, setDnaFiles] = useState<File[]>([]);
-  const [fluxLockType, setFluxLockType] =
-    useState<FluxLockType>("face_and_body");
-  const [fluxLockStrength, setFluxLockStrength] =
-    useState<FluxLockStrength>("balanced");
+  // LoRA identity (UI + payload)
+  const [loraSelection, setLoraSelection] = useState<LoraSelection>({
+    mode: "single",
+    selected: [],
+    createNew: false,
+    newName: "",
+  });
 
   // Advanced
   const [resolution, setResolution] = useState("1024x1024");
@@ -1514,14 +1480,7 @@ export default function GeneratePage() {
         seed: lockSeed ? seed : null,
         lockSeed,
         batchSize,
-        dnaPack: {
-          count: dnaFiles.length,
-          hasFiles: dnaFiles.length > 0,
-        },
-        fluxLock: {
-          type: fluxLockType,
-          strength: fluxLockStrength,
-        },
+        loraSelection,
         imageInput: null as any, // reserved for future image-to-image / img2vid
       };
 
@@ -1690,21 +1649,6 @@ export default function GeneratePage() {
                 negativePrompt={negativePrompt}
                 onPromptChange={setPrompt}
                 onNegativePromptChange={setNegativePrompt}
-              />
-              <DNALockSection
-                files={dnaFiles}
-                onUpload={(files) =>
-                  setDnaFiles((prev) => [...prev, ...files])
-                }
-                onRemove={(idx) =>
-                  setDnaFiles((prev) => prev.filter((_, i) => i !== idx))
-                }
-              />
-              <FluxLockSection
-                lockType={fluxLockType}
-                lockStrength={fluxLockStrength}
-                onLockTypeChange={setFluxLockType}
-                onLockStrengthChange={setFluxLockStrength}
               />
             </div>
 
