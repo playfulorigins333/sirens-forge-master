@@ -2,26 +2,42 @@
 """
 SirensForge — Launch-Safe LoRA Trainer Worker (RunPod On-Demand)
 
-Design goals:
-- Single-job, on-demand, cheap (T4/A10).
-- NO fake "completed".
-- If training isn't configured, job FAILS with a clear error and updates Supabase.
-- Updates Supabase status: queued -> training -> completed/failed.
+Launch-safe rules:
+- NEVER mark completed without a real .safetensors artifact on disk.
+- If TRAINING_COMMAND is missing, AUTO-BUILD a safe SDXL LoRA command from env defaults.
+- Update Supabase status: queued/failed -> training -> completed/failed.
+- Optional: upload artifact to Supabase Storage.
 
 Required env:
 - SUPABASE_URL
 - SUPABASE_SERVICE_ROLE_KEY
 - LORA_ID
 
-Optional env:
-- TRAINING_COMMAND  (if not set, worker will FAIL with "Training not configured")
-- TRAIN_OUTPUT_FILE (default: /workspace/output/lora.safetensors)
+Optional env (auto-build mode):
+- TRAINING_SCRIPT (default: /workspace/sd-scripts/sdxl_train_network.py)
+- PRETRAINED_MODEL (path to SDXL .safetensors)  [required if TRAINING_COMMAND missing]
+- VAE_PATH (path to VAE .safetensors)          [required if TRAINING_COMMAND missing]
+- TRAIN_DATA_DIR (default: /workspace/train_data)
+- RESOLUTION (default: 1024,1024)
+- OUTPUT_DIR (default: /workspace/output)
+- OUTPUT_NAME (default: lora)  -> writes <OUTPUT_DIR>/<OUTPUT_NAME>.safetensors
+- NETWORK_DIM (default: 64)
+- NETWORK_ALPHA (default: 64)
+- LEARNING_RATE (default: 1e-4)
+- MAX_TRAIN_STEPS (default: 100)
+- TRAIN_BATCH_SIZE (default: 1)
+- GRADIENT_CHECKPOINTING (default: 1)
+- USE_XFORMERS (default: 1)    -> only enabled if xformers import succeeds
+- MIXED_PRECISION (default: fp16)
+- SAVE_MODEL_AS (default: safetensors)
+
+Optional env (manual mode):
+- TRAINING_COMMAND  (if set, worker uses it verbatim)
+- TRAIN_OUTPUT_FILE (default derived from OUTPUT_DIR/OUTPUT_NAME)
+
+Optional env (upload):
 - OUTPUT_BUCKET     (Supabase Storage bucket name to upload artifact)
 - OUTPUT_OBJECT_KEY (object key path inside bucket; default uses LORA_ID)
-
-Notes:
-- This worker uses Supabase REST (PostgREST) for DB updates and Storage HTTP for uploads.
-- It does NOT assume any dataset storage layout yet (we’ll wire that next).
 """
 
 import os
@@ -31,7 +47,7 @@ import time
 import shlex
 import pathlib
 import subprocess
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import requests
 
@@ -45,6 +61,17 @@ def require_env(name: str) -> str:
     if not val:
         raise RuntimeError(f"Missing env: {name}")
     return val
+
+
+def env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+def env_int(name: str, default: int) -> int:
+    v = os.getenv(name)
+    if v is None or str(v).strip() == "":
+        return default
+    return int(str(v).strip())
 
 
 def supabase_headers(service_role_key: str) -> Dict[str, str]:
@@ -80,7 +107,6 @@ def sb_db_update_lora(
 ) -> Dict[str, Any]:
     url = f"{sb_url.rstrip('/')}/rest/v1/user_loras?id=eq.{lora_id}"
     patch: Dict[str, Any] = {"status": status}
-    # Only set error_message when provided (so we don't wipe it accidentally).
     if error_message is not None:
         patch["error_message"] = error_message
 
@@ -111,18 +137,98 @@ def sb_storage_upload(
     }
 
     with open(file_path, "rb") as f:
-        r = requests.put(upload_url, headers=headers, data=f, timeout=120)
+        r = requests.put(upload_url, headers=headers, data=f, timeout=300)
 
     if r.status_code >= 400:
         raise RuntimeError(f"Storage upload failed ({r.status_code}): {r.text}")
 
 
+def have_xformers() -> bool:
+    try:
+        import xformers  # noqa: F401
+        import xformers.ops  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def build_training_command_and_output() -> (str, str):
+    """
+    If TRAINING_COMMAND is set: use it verbatim.
+    Else: auto-build a safe SDXL LoRA training command from env vars.
+
+    Returns:
+      (training_command, output_file)
+    """
+    training_command = env("TRAINING_COMMAND", "")
+    output_dir = env("OUTPUT_DIR", "/workspace/output")
+    output_name = env("OUTPUT_NAME", "lora")
+    output_file = env("TRAIN_OUTPUT_FILE", os.path.join(output_dir, f"{output_name}.safetensors"))
+
+    # Manual mode
+    if training_command:
+        return training_command, output_file
+
+    # Auto-build mode
+    training_script = env("TRAINING_SCRIPT", "/workspace/sd-scripts/sdxl_train_network.py")
+    pretrained = env("PRETRAINED_MODEL", "")
+    vae = env("VAE_PATH", "")
+    train_data_dir = env("TRAIN_DATA_DIR", "/workspace/train_data")
+    resolution = env("RESOLUTION", "1024,1024")
+
+    if not pretrained:
+        raise RuntimeError("Auto-build mode missing env PRETRAINED_MODEL (path to SDXL checkpoint .safetensors).")
+    if not vae:
+        raise RuntimeError("Auto-build mode missing env VAE_PATH (path to VAE .safetensors).")
+
+    network_dim = env_int("NETWORK_DIM", 64)
+    network_alpha = env_int("NETWORK_ALPHA", 64)
+    learning_rate = env("LEARNING_RATE", "1e-4")
+    max_train_steps = env_int("MAX_TRAIN_STEPS", 100)
+    train_batch_size = env_int("TRAIN_BATCH_SIZE", 1)
+    grad_ckpt = env_int("GRADIENT_CHECKPOINTING", 1)
+    use_xf = env_int("USE_XFORMERS", 1)
+    mixed_precision = env("MIXED_PRECISION", "fp16")
+    save_model_as = env("SAVE_MODEL_AS", "safetensors")
+    network_module = env("NETWORK_MODULE", "networks.lora")
+
+    pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    args: List[str] = [
+        "python",
+        training_script,
+        f"--pretrained_model_name_or_path={pretrained}",
+        f"--vae={vae}",
+        f"--resolution={resolution}",
+        f"--train_data_dir={train_data_dir}",
+        f"--output_dir={output_dir}",
+        f"--output_name={output_name}",
+        f"--network_module={network_module}",
+        f"--network_dim={network_dim}",
+        f"--network_alpha={network_alpha}",
+        f"--learning_rate={learning_rate}",
+        f"--max_train_steps={max_train_steps}",
+        f"--train_batch_size={train_batch_size}",
+        f"--mixed_precision={mixed_precision}",
+        f"--save_model_as={save_model_as}",
+    ]
+
+    if grad_ckpt == 1:
+        args.append("--gradient_checkpointing")
+
+    # Only enable if requested AND installed
+    if use_xf == 1 and have_xformers():
+        args.append("--xformers")
+
+    training_command = shlex.join(args)
+    return training_command, output_file
+
+
 def run_training(training_command: str, output_file: str) -> None:
     """
-    Runs TRAINING_COMMAND as a shell-like command.
     Contract:
-      - Command must produce TRAIN_OUTPUT_FILE on disk.
-      - If output file not present after, we FAIL.
+      - Command must produce output_file on disk.
+      - If output file missing/too small after, FAIL.
     """
     pathlib.Path(os.path.dirname(output_file)).mkdir(parents=True, exist_ok=True)
 
@@ -130,7 +236,6 @@ def run_training(training_command: str, output_file: str) -> None:
     log(f"Running TRAINING_COMMAND: {training_command}")
     start = time.time()
 
-    # Stream stdout/stderr live
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     assert proc.stdout is not None
     for line in proc.stdout:
@@ -143,10 +248,7 @@ def run_training(training_command: str, output_file: str) -> None:
         raise RuntimeError(f"Training command failed with exit code {code} after {elapsed:.1f}s")
 
     if not os.path.exists(output_file) or os.path.getsize(output_file) < 1024:
-        # Guardrail: don't ever mark completed without a real artifact.
-        raise RuntimeError(
-            f"Training finished but output artifact missing/too small: {output_file}"
-        )
+        raise RuntimeError(f"Training finished but output artifact missing/too small: {output_file}")
 
     log(f"Training complete in {elapsed:.1f}s. Artifact: {output_file} ({os.path.getsize(output_file)} bytes)")
 
@@ -156,44 +258,31 @@ def main() -> int:
         sb_url = require_env("SUPABASE_URL")
         service_key = require_env("SUPABASE_SERVICE_ROLE_KEY")
         lora_id = require_env("LORA_ID")
-
         headers = supabase_headers(service_key)
 
-        # 1) Confirm job exists
         job = sb_db_select_lora(sb_url, headers, lora_id)
         log(f"Loaded job: id={job.get('id')} user_id={job.get('user_id')} status={job.get('status')} name={job.get('name')}")
 
-        # 2) Move to training immediately (launch-safe state transition)
         sb_db_update_lora(sb_url, headers, lora_id, status="training", error_message=None)
         log("Updated status -> training")
 
-        # 3) Require actual training command (NO fake completion)
-        training_command = os.getenv("TRAINING_COMMAND", "").strip()
-        output_file = os.getenv("TRAIN_OUTPUT_FILE", "/workspace/output/lora.safetensors").strip()
+        training_command, output_file = build_training_command_and_output()
+        log(f"Resolved output file: {output_file}")
 
-        if not training_command:
-            raise RuntimeError(
-                "Training not configured: missing env TRAINING_COMMAND. "
-                "This worker will not fake completion."
-            )
-
-        # 4) Run training
         run_training(training_command, output_file)
 
-        # 5) Upload artifact (optional but recommended)
-        output_bucket = os.getenv("OUTPUT_BUCKET", "").strip()
-        output_object_key = os.getenv("OUTPUT_OBJECT_KEY", "").strip()
+        # Optional upload
+        output_bucket = env("OUTPUT_BUCKET", "")
+        output_object_key = env("OUTPUT_OBJECT_KEY", "")
 
         if output_bucket:
             if not output_object_key:
-                # Default object key
-                output_object_key = f"loras/{lora_id}/lora.safetensors"
+                output_object_key = f"loras/{lora_id}/{os.path.basename(output_file)}"
 
             log(f"Uploading artifact -> supabase storage: {output_bucket}/{output_object_key}")
             sb_storage_upload(sb_url, service_key, output_bucket, output_object_key, output_file)
             log("Upload complete")
 
-        # 6) Mark completed
         sb_db_update_lora(sb_url, headers, lora_id, status="completed", error_message=None)
         log("Updated status -> completed")
         return 0
@@ -202,12 +291,11 @@ def main() -> int:
         err = str(e)
         log(f"ERROR: {err}")
 
-        # Best-effort: update Supabase status -> failed
+        # Best-effort failed status update
         try:
-            sb_url = os.getenv("SUPABASE_URL", "").strip()
-            service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-            lora_id = os.getenv("LORA_ID", "").strip()
-
+            sb_url = env("SUPABASE_URL", "")
+            service_key = env("SUPABASE_SERVICE_ROLE_KEY", "")
+            lora_id = env("LORA_ID", "")
             if sb_url and service_key and lora_id:
                 headers = supabase_headers(service_key)
                 sb_db_update_lora(sb_url, headers, lora_id, status="failed", error_message=err[:500])
