@@ -1,3 +1,6 @@
+cd /workspace/sirens-forge-master
+
+cat > runpod/train_lora.py <<'PY'
 import os
 import sys
 import json
@@ -8,7 +11,6 @@ import subprocess
 from typing import Any, Dict, Optional, List, Tuple
 
 import requests
-
 
 # -------------------------
 # Helpers
@@ -39,17 +41,16 @@ def env_int(name: str, default: int) -> int:
     return int(str(v).strip())
 
 
-def supabase_headers(service_role_key: str) -> Dict[str, str]:
-    return {
+def supabase_headers(service_role_key: str, prefer_return: bool = False) -> Dict[str, str]:
+    h = {
         "apikey": service_role_key,
         "Authorization": f"Bearer {service_role_key}",
         "Content-Type": "application/json",
     }
+    if prefer_return:
+        h["Prefer"] = "return=representation"
+    return h
 
-
-# -------------------------
-# Supabase DB + Storage
-# -------------------------
 
 def sb_db_select_lora(sb_url: str, headers: Dict[str, str], lora_id: str) -> Dict[str, Any]:
     url = f"{sb_url.rstrip('/')}/rest/v1/user_loras"
@@ -74,23 +75,19 @@ def sb_db_update_lora(
     status: str,
     error_message: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    FIXED: reuses provided headers and only adds Prefer.
-    """
     url = f"{sb_url.rstrip('/')}/rest/v1/user_loras?id=eq.{lora_id}"
     patch: Dict[str, Any] = {"status": status}
-
-    # Only set error_message when provided (do not wipe accidentally).
     if error_message is not None:
         patch["error_message"] = error_message
 
-    update_headers = dict(headers)
-    update_headers["Prefer"] = "return=representation"
-
-    r = requests.patch(url, headers=update_headers, data=json.dumps(patch), timeout=30)
+    r = requests.patch(
+        url,
+        headers=supabase_headers(headers["apikey"], prefer_return=True),
+        data=json.dumps(patch),
+        timeout=30,
+    )
     if r.status_code >= 400:
         raise RuntimeError(f"Supabase update failed ({r.status_code}): {r.text}")
-
     rows = r.json()
     return rows[0] if rows else {}
 
@@ -117,10 +114,6 @@ def sb_storage_upload(
         raise RuntimeError(f"Storage upload failed ({r.status_code}): {r.text}")
 
 
-# -------------------------
-# xFormers
-# -------------------------
-
 def have_xformers() -> bool:
     try:
         import xformers  # noqa: F401
@@ -131,7 +124,7 @@ def have_xformers() -> bool:
 
 
 # -------------------------
-# Dataset wiring + image gate
+# Dataset wiring + gates
 # -------------------------
 
 VALID_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -179,8 +172,16 @@ def scaled_steps(image_count: int) -> int:
 
 
 # -------------------------
-# Build training command (AUTO ONLY)
+# Command build (SDXL diffusers only)
 # -------------------------
+
+def _looks_like_safetensors_file(p: str) -> bool:
+    return bool(p) and p.lower().endswith(".safetensors") and os.path.isfile(p)
+
+
+def _looks_like_local_dir(p: str) -> bool:
+    return bool(p) and os.path.isdir(p)
+
 
 def build_training_command_and_output(
     lora_id: str,
@@ -188,14 +189,30 @@ def build_training_command_and_output(
     image_count: int,
 ) -> Tuple[str, str]:
     training_script = env("TRAINING_SCRIPT", "/workspace/sd-scripts/sdxl_train_network.py")
-    pretrained = env("PRETRAINED_MODEL", "")
-    vae = env("VAE_PATH", "")
-    resolution = env("RESOLUTION", "1024,1024")
 
+    pretrained = env("PRETRAINED_MODEL", "")
     if not pretrained:
-        raise RuntimeError("Missing env PRETRAINED_MODEL (path to SDXL checkpoint .safetensors).")
-    if not vae:
-        raise RuntimeError("Missing env VAE_PATH (path to VAE .safetensors).")
+        raise RuntimeError("Missing env PRETRAINED_MODEL. Use a Diffusers repo id (e.g. stabilityai/stable-diffusion-xl-base-1.0) or a local Diffusers folder.")
+    if _looks_like_safetensors_file(pretrained):
+        raise RuntimeError(
+            "PRETRAINED_MODEL points to a .safetensors file. This SDXL training script expects a Diffusers repo id or Diffusers directory, not a single checkpoint file."
+        )
+
+    vae = env("VAE_PATH", "")
+    # IMPORTANT: For this sd-scripts SDXL path, --vae must be a diffusers repo/folder (with config.json),
+    # not a .safetensors. If user provides .safetensors, we SKIP it instead of looping/failing.
+    use_vae = False
+    if vae:
+        if _looks_like_safetensors_file(vae):
+            log("WARNING: VAE_PATH is a .safetensors file. sd-scripts expects a Diffusers VAE repo/folder. Skipping --vae.")
+            use_vae = False
+        elif _looks_like_local_dir(vae):
+            use_vae = True
+        else:
+            # treat as HF repo id like "madebyollin/sdxl-vae-fp16-fix"
+            use_vae = True
+
+    resolution = env("RESOLUTION", "1024,1024")
 
     output_dir = env("OUTPUT_DIR", "/workspace/output")
     output_name = env("OUTPUT_NAME", f"lora_{lora_id}")
@@ -218,7 +235,6 @@ def build_training_command_and_output(
         "python",
         training_script,
         f"--pretrained_model_name_or_path={pretrained}",
-        f"--vae={vae}",
         f"--resolution={resolution}",
         f"--train_data_dir={str(train_data_dir)}",
         f"--output_dir={output_dir}",
@@ -232,6 +248,9 @@ def build_training_command_and_output(
         f"--mixed_precision={mixed_precision}",
         f"--save_model_as={save_model_as}",
     ]
+
+    if use_vae:
+        args.insert(3, f"--vae={vae}")  # keep near pretrained for readability
 
     if gradient_checkpointing:
         args.append("--gradient_checkpointing")
@@ -251,7 +270,6 @@ def build_training_command_and_output(
 def validate_artifact_or_fail(output_file: str) -> None:
     if not os.path.exists(output_file):
         raise RuntimeError(f"Training finished but artifact missing: {output_file}")
-
     size = os.path.getsize(output_file)
     if size <= 1_000_000:
         raise RuntimeError(f"Artifact too small ({size} bytes). Expected > 1MB. File: {output_file}")
@@ -282,15 +300,15 @@ def run_training(training_command: str) -> None:
 
 
 # -------------------------
-# Status transitions
+# Status contract
 # -------------------------
 
 def enforce_transition_or_fail(current: str, target: str) -> None:
     allowed = {
         ("queued", "training"),
-        ("queued", "failed"),
         ("training", "completed"),
         ("training", "failed"),
+        ("queued", "failed"),
     }
     if (current, target) not in allowed:
         raise RuntimeError(f"Illegal status transition: {current} -> {target}")
@@ -305,8 +323,6 @@ def main() -> int:
     service_key = ""
     lora_id = ""
 
-    did_mark_training = False  # FIXED: contract enforcement
-
     try:
         sb_url = require_env("SUPABASE_URL")
         service_key = require_env("SUPABASE_SERVICE_ROLE_KEY")
@@ -316,37 +332,28 @@ def main() -> int:
 
         job = sb_db_select_lora(sb_url, headers, lora_id)
         current_status = (job.get("status") or "").strip().lower()
-
-        log(
-            f"Loaded job: id={job.get('id')} user_id={job.get('user_id')} "
-            f"status={current_status} name={job.get('name')}"
-        )
+        log(f"Loaded job: id={job.get('id')} user_id={job.get('user_id')} status={current_status} name={job.get('name')}")
 
         if current_status != "queued":
             raise RuntimeError(f"Job must start in status 'queued'. Found '{current_status}'.")
 
-        # Dataset dir must exist
         train_dir = dataset_dir_for_job(lora_id)
         if not train_dir.exists():
-            # queued -> failed (no fake training)
-            enforce_transition_or_fail("queued", "failed")
-            sb_db_update_lora(sb_url, headers, lora_id, status="failed", error_message=f"Dataset directory missing: {train_dir}"[:500])
-            log(f"Updated status -> failed (missing dataset): {train_dir}")
-            return 1
+            raise RuntimeError(f"Dataset directory missing: {train_dir}")
 
-        # Image count gate
         images = list_valid_images(train_dir)
         n, gate_err = enforce_image_count_or_fail(images)
         if gate_err:
-            enforce_transition_or_fail("queued", "failed")
+            enforce_transition_or_fail("queued", "training")
+            sb_db_update_lora(sb_url, headers, lora_id, status="training", error_message=None)
+            log("Updated status -> training")
+            enforce_transition_or_fail("training", "failed")
             sb_db_update_lora(sb_url, headers, lora_id, status="failed", error_message=gate_err[:500])
             log(f"Updated status -> failed (image gate): {gate_err}")
             return 1
 
-        # Mark training BEFORE starting training command
         enforce_transition_or_fail("queued", "training")
         sb_db_update_lora(sb_url, headers, lora_id, status="training", error_message=None)
-        did_mark_training = True
         log(f"Updated status -> training (images={n}, steps≈{scaled_steps(n)})")
 
         training_command, output_file = build_training_command_and_output(
@@ -358,10 +365,8 @@ def main() -> int:
         log(f"Resolved output file: {output_file}")
 
         run_training(training_command)
-
         validate_artifact_or_fail(output_file)
 
-        # Optional upload
         output_bucket = env("OUTPUT_BUCKET", "")
         if output_bucket:
             object_key = f"loras/{lora_id}/{os.path.basename(output_file)}"
@@ -378,21 +383,23 @@ def main() -> int:
         err = str(e)
         log(f"ERROR: {err}")
 
-        # FIXED: only force training->failed if we truly marked training
         try:
             if sb_url and service_key and lora_id:
                 headers = supabase_headers(service_key)
                 job = sb_db_select_lora(sb_url, headers, lora_id)
                 current_status = (job.get("status") or "").strip().lower()
 
-                if did_mark_training or current_status == "training":
+                if current_status == "queued":
+                    enforce_transition_or_fail("queued", "failed")
+                    sb_db_update_lora(sb_url, headers, lora_id, status="failed", error_message=err[:500])
+                    log("Updated status -> failed (queued->failed)")
+                elif current_status == "training":
                     enforce_transition_or_fail("training", "failed")
                     sb_db_update_lora(sb_url, headers, lora_id, status="failed", error_message=err[:500])
                     log("Updated status -> failed (training->failed)")
                 else:
-                    enforce_transition_or_fail("queued", "failed")
                     sb_db_update_lora(sb_url, headers, lora_id, status="failed", error_message=err[:500])
-                    log("Updated status -> failed (queued->failed)")
+                    log("Updated status -> failed (fallback)")
         except Exception as inner:
             log(f"Could not update status to failed: {inner}")
 
@@ -401,3 +408,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+PY
