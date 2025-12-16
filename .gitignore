@@ -12,3 +12,6 @@ Thumbs.db
 logs
 *.log
 *.clover
+# Python cache
+__pycache__/
+*.pyc

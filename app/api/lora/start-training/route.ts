@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { startLoraTrainingPod } from "@/lib/runpod";
 
 /**
  * Starts LoRA training for a queued draft.
- * Rules:
- * - User must be authenticated
- * - LoRA must exist
- * - LoRA must belong to the user
- * - Status must be 'queued'
- * - Only ONE active training per user at a time
+ * LAUNCH-SAFE FLOW:
+ * - Auth required
+ * - LoRA must belong to user
+ * - Status must be queued
+ * - Enforces ONE active training per user
+ * - Spins up ONE RunPod training pod
  */
 export async function POST(req: NextRequest) {
   try {
+    /* ────────────────────────────────
+       1️⃣ AUTH
+    ──────────────────────────────── */
     const authHeader = req.headers.get("authorization");
 
     if (!authHeader) {
@@ -29,6 +33,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
 
+    /* ────────────────────────────────
+       2️⃣ INPUT
+    ──────────────────────────────── */
     const body = await req.json();
     const { lora_id } = body;
 
@@ -39,9 +46,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    /**
-     * 1️⃣ Verify LoRA belongs to user and is queued
-     */
+    /* ────────────────────────────────
+       3️⃣ VERIFY LORA
+    ──────────────────────────────── */
     const { data: lora, error: loraError } = await supabaseAdmin
       .from("user_loras")
       .select("id, status")
@@ -63,9 +70,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    /**
-     * 2️⃣ Ensure no other active training for this user
-     */
+    /* ────────────────────────────────
+       4️⃣ SINGLE ACTIVE TRAINING ENFORCEMENT
+    ──────────────────────────────── */
     const { data: activeTraining } = await supabaseAdmin
       .from("user_loras")
       .select("id")
@@ -80,9 +87,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    /**
-     * 3️⃣ Move LoRA into training state
-     */
+    /* ────────────────────────────────
+       5️⃣ FLIP STATUS → TRAINING
+    ──────────────────────────────── */
     const { error: updateError } = await supabaseAdmin
       .from("user_loras")
       .update({
@@ -92,26 +99,31 @@ export async function POST(req: NextRequest) {
       .eq("id", lora_id);
 
     if (updateError) {
-      console.error("Failed to start training:", updateError);
+      console.error("Failed to update LoRA status:", updateError);
       return NextResponse.json(
         { error: "Failed to start training" },
         { status: 500 }
       );
     }
 
-    /**
-     * 4️⃣ (NEXT PHASE)
-     * This is where the job dispatch will happen:
-     * - RunPod
-     * - Queue
-     * - Background worker
-     *
-     * For launch: status transition is correct and stable.
-     */
+    /* ────────────────────────────────
+       6️⃣ START RUNPOD TRAINING POD
+    ──────────────────────────────── */
+    const pod = await startLoraTrainingPod({
+      loraId: lora_id,
+      userId: user.id,
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    });
 
+    /* ────────────────────────────────
+       7️⃣ RESPONSE
+    ──────────────────────────────── */
     return NextResponse.json({
+      ok: true,
       lora_id,
       status: "training",
+      pod_id: pod.id,
     });
   } catch (err) {
     console.error("Start training error:", err);

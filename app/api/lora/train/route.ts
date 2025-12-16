@@ -8,13 +8,13 @@ export async function POST(req: Request) {
     const {
       user_id,
       name,
-      description,
-      image_count
+      description = null,
+      image_count = 20,
     } = body
 
-    if (!user_id || !name || !image_count) {
+    if (!user_id || !name) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Missing required fields: user_id, name" },
         { status: 400 }
       )
     }
@@ -24,9 +24,9 @@ export async function POST(req: Request) {
       .insert({
         user_id,
         name,
-        description: description ?? null,
+        description,
         image_count,
-        status: "queued"
+        status: "queued",
       })
       .select()
       .single()
@@ -34,21 +34,20 @@ export async function POST(req: Request) {
     if (error) {
       console.error("LoRA create error:", error)
       return NextResponse.json(
-        { error: "Failed to create LoRA job" },
+        { error: error.message },
         { status: 500 }
       )
     }
 
     return NextResponse.json({
       lora_id: data.id,
-      status: data.status
+      status: data.status,
     })
-
   } catch (err) {
-    console.error("LoRA train POST error:", err)
+    console.error("LoRA train POST fatal error:", err)
     return NextResponse.json(
-      { error: "Invalid request" },
-      { status: 400 }
+      { error: "Server error" },
+      { status: 500 }
     )
   }
 }
