@@ -1,13 +1,6 @@
 // lib/runpod.ts
-import fs from "fs";
-import path from "path";
 
-const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY!;
 const RUNPOD_API_URL = "https://api.runpod.io/graphql";
-
-if (!RUNPOD_API_KEY) {
-  throw new Error("Missing env: RUNPOD_API_KEY");
-}
 
 type StartLoraPodArgs = {
   loraId: string;
@@ -22,21 +15,27 @@ export async function startLoraTrainingPod({
   supabaseUrl,
   serviceRoleKey,
 }: StartLoraPodArgs) {
-  const templatePath = path.join(
-    process.cwd(),
-    "runpod",
-    "start_pod.json"
-  );
+  const RUNPOD_API_KEY = process.env.RUNPOD_API_KEY;
 
-  const templateRaw = fs.readFileSync(templatePath, "utf-8");
+  // Runtime check ONLY (do not crash build)
+  if (!RUNPOD_API_KEY) {
+    throw new Error("RUNPOD_API_KEY is not configured");
+  }
 
-  const podConfig = JSON.parse(templateRaw);
-
-  // Inject runtime env vars
-  podConfig.env.LORA_ID = loraId;
-  podConfig.env.USER_ID = userId;
-  podConfig.env.SUPABASE_URL = supabaseUrl;
-  podConfig.env.SUPABASE_SERVICE_ROLE_KEY = serviceRoleKey;
+  const podConfig = {
+    name: `lora-${loraId}`,
+    imageName: "python:3.10",
+    gpuTypeId: "NVIDIA_T4",
+    cloudType: "SECURE",
+    containerDiskInGb: 20,
+    volumeInGb: 20,
+    env: {
+      LORA_ID: loraId,
+      USER_ID: userId,
+      SUPABASE_URL: supabaseUrl,
+      SUPABASE_SERVICE_ROLE_KEY: serviceRoleKey,
+    },
+  };
 
   const query = `
     mutation CreatePod($input: PodInput!) {
@@ -56,9 +55,7 @@ export async function startLoraTrainingPod({
     },
     body: JSON.stringify({
       query,
-      variables: {
-        input: podConfig,
-      },
+      variables: { input: podConfig },
     }),
   });
 
@@ -70,9 +67,7 @@ export async function startLoraTrainingPod({
   const json = await res.json();
 
   if (json.errors) {
-    throw new Error(
-      `RunPod GraphQL error: ${JSON.stringify(json.errors)}`
-    );
+    throw new Error(JSON.stringify(json.errors));
   }
 
   return json.data.podCreate;
