@@ -10,19 +10,27 @@ export async function POST(req: Request) {
     ───────────────────────────── */
     const authHeader = req.headers.get("authorization")
     if (!authHeader) {
-      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Missing Authorization header" },
+        { status: 401 }
+      )
     }
 
     const token = authHeader.replace("Bearer ", "")
-    const { data: { user }, error: authError } =
-      await supabaseAdmin.auth.getUser(token)
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(token)
 
     if (authError || !user) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 })
+      return NextResponse.json(
+        { error: "Invalid session" },
+        { status: 401 }
+      )
     }
 
     /* ─────────────────────────────
-       BODY
+       BODY (multipart/form-data)
     ───────────────────────────── */
     const formData = await req.formData()
 
@@ -38,7 +46,7 @@ export async function POST(req: Request) {
     }
 
     /* ─────────────────────────────
-       CREATE DB ROW (DRAFT)
+       CREATE DB ROW (QUEUED)
     ───────────────────────────── */
     const { data: lora, error: insertError } = await supabaseAdmin
       .from("user_loras")
@@ -47,14 +55,17 @@ export async function POST(req: Request) {
         name: identityName,
         description,
         image_count: images.length,
-        status: "draft",
+        status: "queued", // 🔑 MUST be queued for worker
       })
       .select()
       .single()
 
     if (insertError || !lora) {
       console.error("LoRA insert error:", insertError)
-      return NextResponse.json({ error: "Failed to create LoRA record" }, { status: 500 })
+      return NextResponse.json(
+        { error: "Failed to create LoRA record" },
+        { status: 500 }
+      )
     }
 
     const loraId = lora.id
@@ -83,7 +94,10 @@ export async function POST(req: Request) {
     if (files.length < 10) {
       await supabaseAdmin
         .from("user_loras")
-        .update({ status: "failed", error_message: "Dataset write failed" })
+        .update({
+          status: "failed",
+          error_message: "Dataset write failed",
+        })
         .eq("id", loraId)
 
       return NextResponse.json(
@@ -93,19 +107,17 @@ export async function POST(req: Request) {
     }
 
     /* ─────────────────────────────
-       QUEUE JOB
+       DONE — WORKER WILL PICK IT UP
     ───────────────────────────── */
-    await supabaseAdmin
-      .from("user_loras")
-      .update({ status: "queued" })
-      .eq("id", loraId)
-
     return NextResponse.json({
       lora_id: loraId,
       status: "queued",
     })
   } catch (err) {
     console.error("LoRA train fatal error:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+    return NextResponse.json(
+      { error: "Server error" },
+      { status: 500 }
+    )
   }
 }
