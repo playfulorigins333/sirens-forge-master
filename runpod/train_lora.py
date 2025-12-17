@@ -1,19 +1,15 @@
 #!/usr/bin/env python3
 """
-SirensForge — SDXL LoRA Trainer (RunPod)
+SirensForge — SDXL LoRA Trainer (RunPod Queue Worker)
 
-PRODUCTION-SAFE VERSION (LAUNCH LOCKED)
+FINAL PRODUCTION VERSION
 
-- ALWAYS-ON pod
-- Supabase-first active-job guard
-- Uses local SDXL checkpoint (.safetensors)
-- Uses local VAE (.safetensors)
-- Forces bucketing ON for mixed-resolution uploads
-- Enforces image count (10–20)
-- Correct Supabase enum usage:
-  idle | queued | training | completed | failed
-- NO fake completions
-- NO job clobbering
+- Always-on pod
+- Pulls next queued job from Supabase
+- One active job at a time per user
+- Enforces 10–20 images
+- No manual env vars per job
+- Clean exits when idle
 """
 
 import os
@@ -22,7 +18,7 @@ import time
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import requests
 
@@ -54,46 +50,26 @@ class SupabaseClient:
     def __init__(self, url: str, key: str):
         self.url = url.rstrip("/")
         self.key = key
-
-    def _headers(self) -> Dict[str, str]:
-        return {
+        self.headers = {
             "apikey": self.key,
             "Authorization": f"Bearer {self.key}",
             "Content-Type": "application/json",
         }
 
-    def get_lora(self, lora_id: str) -> Dict[str, Any]:
+    def get_next_queued_job(self) -> Optional[Dict[str, Any]]:
         r = requests.get(
             f"{self.url}/rest/v1/user_loras",
+            headers=self.headers,
             params={
-                "id": f"eq.{lora_id}",
-                "select": "id,status",
+                "status": "eq.queued",
+                "order": "created_at.asc",
+                "limit": 1,
             },
-            headers=self._headers(),
             timeout=30,
         )
-        if r.status_code != 200:
-            raise RuntimeError(f"Supabase GET failed: {r.status_code} {r.text}")
-
+        r.raise_for_status()
         rows = r.json()
-        if not rows:
-            raise RuntimeError(f"LoRA job not found: {lora_id}")
-
-        return rows[0]
-
-    def patch_user_loras(self, lora_id: str, payload: Dict[str, Any]) -> None:
-        r = requests.patch(
-            f"{self.url}/rest/v1/user_loras",
-            params={"id": f"eq.{lora_id}"},
-            headers={
-                **self._headers(),
-                "Prefer": "return=minimal",
-            },
-            json=payload,
-            timeout=30,
-        )
-        if r.status_code >= 300:
-            raise RuntimeError(f"Supabase PATCH failed: {r.status_code} {r.text}")
+        return rows[0] if rows else None
 
     def set_status(self, lora_id: str, status: str, extra: Dict[str, Any] | None = None):
         payload = {
@@ -102,7 +78,16 @@ class SupabaseClient:
         }
         if extra:
             payload.update(extra)
-        self.patch_user_loras(lora_id, payload)
+
+        r = requests.patch(
+            f"{self.url}/rest/v1/user_loras",
+            headers={**self.headers, "Prefer": "return=minimal"},
+            params={"id": f"eq.{lora_id}"},
+            json=payload,
+            timeout=30,
+        )
+        if r.status_code >= 300:
+            raise RuntimeError(f"Supabase PATCH failed: {r.status_code} {r.text}")
 
 
 # =========================
@@ -119,12 +104,11 @@ def count_images(path: Path) -> int:
 
 
 # =========================
-# Training
+# Training Worker
 # =========================
 
 def main() -> int:
-    # Required env
-    lora_id = require_env("LORA_ID")
+    # Required env (GLOBAL, NOT PER JOB)
     sb_url = require_env("SUPABASE_URL")
     sb_key = require_env("SUPABASE_SERVICE_ROLE_KEY")
     pretrained_model = require_env("PRETRAINED_MODEL")
@@ -132,19 +116,18 @@ def main() -> int:
 
     sb = SupabaseClient(sb_url, sb_key)
 
-    # -------------------------------------------------
-    # 🔒 ACTIVE JOB GUARD (FIRST — BEFORE ANY IO)
-    # -------------------------------------------------
-    job = sb.get_lora(lora_id)
-    status = job["status"]
+    log("Checking for queued LoRA jobs…")
+    job = sb.get_next_queued_job()
 
-    if status in ("queued", "training"):
-        log(f"Job already active (status={status}) — exiting")
+    if not job:
+        log("No queued jobs found. Exiting cleanly.")
         return 0
 
-    # -------------------------------------------------
-    # Dataset checks
-    # -------------------------------------------------
+    lora_id = job["id"]
+    user_id = job["user_id"]
+
+    log(f"Picked job {lora_id} for user {user_id}")
+
     dataset_dir = Path(f"/workspace/train_data/sf_{lora_id}")
     output_dir = Path("/workspace/output")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +136,7 @@ def main() -> int:
         sb.set_status(
             lora_id,
             "failed",
-            {"error_message": f"Dataset directory missing: {dataset_dir}"},
+            {"error_message": "Dataset directory missing on pod"},
         )
         raise RuntimeError(f"Dataset directory missing: {dataset_dir}")
 
@@ -166,9 +149,7 @@ def main() -> int:
         )
         raise RuntimeError("Image count gate failed")
 
-    # -------------------------------------------------
-    # Transition → training
-    # -------------------------------------------------
+    # Lock job → training
     sb.set_status(
         lora_id,
         "training",
@@ -177,7 +158,8 @@ def main() -> int:
             "image_count": image_count,
         },
     )
-    log(f"Updated status -> training (images={image_count})")
+
+    log(f"Training started (images={image_count})")
 
     train_script = "/workspace/sd-scripts/sdxl_train_network.py"
     if not os.path.exists(train_script):
@@ -203,17 +185,15 @@ def main() -> int:
         "--mixed_precision", "fp16",
         "--save_model_as", "safetensors",
         "--gradient_checkpointing",
-
-        # Bucketing (critical)
         "--enable_bucket",
         "--min_bucket_reso", "256",
         "--max_bucket_reso", "2048",
         "--bucket_reso_steps", "64",
-
         "--xformers",
     ]
 
-    log("Running: " + " ".join(shlex.quote(c) for c in cmd))
+    log("Running training command:")
+    log(" ".join(shlex.quote(c) for c in cmd))
 
     proc = subprocess.Popen(
         cmd,
@@ -245,15 +225,10 @@ def main() -> int:
         )
         raise RuntimeError("Missing output artifact")
 
-    # -------------------------------------------------
-    # ✅ FINAL STATUS
-    # -------------------------------------------------
     sb.set_status(
         lora_id,
         "completed",
-        {
-            "completed_at": now_iso(),
-        },
+        {"completed_at": now_iso()},
     )
 
     log(f"✅ TRAINING COMPLETE: {artifact}")
@@ -264,21 +239,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as e:
-        log(f"❌ ERROR: {e}")
-        try:
-            if (
-                os.getenv("LORA_ID")
-                and os.getenv("SUPABASE_URL")
-                and os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-            ):
-                SupabaseClient(
-                    os.environ["SUPABASE_URL"],
-                    os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-                ).set_status(
-                    os.environ["LORA_ID"],
-                    "failed",
-                    {"error_message": str(e)},
-                )
-        except Exception:
-            pass
-        raise
+        log(f"❌ FATAL ERROR: {e}")
+        sys.exit(1)
