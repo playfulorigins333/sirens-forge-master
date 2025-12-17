@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,6 +24,16 @@ const supabaseClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
+
+type LoraRow = {
+  id: string
+  status: TrainingStatus
+  progress?: number | null
+  error_message?: string | null
+  updated_at?: string | null
+}
+
+const POLL_INTERVAL_MS = 5000
 // Floating particles component
 const FloatingParticles = () => {
   const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 })
@@ -112,6 +122,89 @@ export default function LoRATrainerPage() {
   const [showConfetti, setShowConfetti] = useState(false)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
   const [mounted, setMounted] = useState(false)
+
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const clearPolling = () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current)
+      pollingIntervalRef.current = null
+    }
+  }
+
+  const mapDbStatusToUi = (dbStatus: string): TrainingStatus => {
+    if (dbStatus === 'queued') return 'queued'
+    if (dbStatus === 'training') return 'training'
+    if (dbStatus === 'completed') return 'completed'
+    if (dbStatus === 'failed') return 'failed'
+    return 'idle'
+  }
+
+  const pollLoraStatusOnce = useCallback(async (id: string) => {
+    try {
+      const { data, error } = await supabaseClient
+        .from('user_loras')
+        .select('id,status,progress,error_message,updated_at')
+        .eq('id', id)
+        .single()
+
+      if (error) {
+        // Don't hard-fail the UI on a transient polling error. Just show it.
+        setErrorMessage(error.message || "Failed to poll training status.")
+        return
+      }
+
+      const row = data as unknown as LoraRow | null
+      if (!row) return
+
+      const next = mapDbStatusToUi(String(row.status || 'idle'))
+      setTrainingStatus(next)
+
+      // Optional progress from DB; if not present, keep whatever we have.
+      if (typeof row.progress === 'number') {
+        const clamped = Math.max(0, Math.min(100, row.progress))
+        setTrainingProgress(clamped)
+      }
+
+      if (next === 'failed') {
+        setErrorMessage(row.error_message || "Training failed.")
+        clearPolling()
+      }
+
+      if (next === 'completed') {
+        setErrorMessage(null)
+        setTrainingProgress(100)
+        setShowConfetti(true)
+        setTimeout(() => setShowConfetti(false), 3000)
+        clearPolling()
+      }
+    } catch (e: any) {
+      setErrorMessage(e?.message || "Failed to poll training status.")
+    }
+  }, [])
+
+  // Start/stop polling when we have a LoRA id and we're in a non-terminal state.
+  useEffect(() => {
+    if (!mounted) return
+
+    // Always clear existing polling first (prevents duplicates).
+    clearPolling()
+
+    if (!loraId) return
+    if (trainingStatus === 'completed' || trainingStatus === 'failed' || trainingStatus === 'idle') return
+
+    // Poll immediately once, then on an interval.
+    pollLoraStatusOnce(loraId)
+
+    pollingIntervalRef.current = setInterval(() => {
+      pollLoraStatusOnce(loraId)
+    }, POLL_INTERVAL_MS)
+
+    return () => {
+      clearPolling()
+    }
+  }, [mounted, loraId, trainingStatus, pollLoraStatusOnce])
+
 
   useEffect(() => {
     setMounted(true)
@@ -268,6 +361,7 @@ export default function LoRATrainerPage() {
   }
 
 const handleRetry = () => {
+    clearPolling()
     setTrainingStatus('idle')
     setTrainingProgress(0)
     setErrorMessage(null)
@@ -1058,6 +1152,7 @@ const handleRetry = () => {
                         <Button
                           variant="outline"
                           onClick={() => {
+                            clearPolling()
                             setTrainingStatus('idle')
                             setTrainingProgress(0)
                             setIdentityName('')
@@ -1095,6 +1190,7 @@ const handleRetry = () => {
                     <Button
                       variant="outline"
                       onClick={() => {
+                        clearPolling()
                         setTrainingStatus('idle')
                         setTrainingProgress(0)
                         setLoraId(null)
