@@ -297,18 +297,29 @@ export default function LoRATrainerPage() {
         return
       }
 
-      // Step 1: Create (or reuse) a draft identity record in Supabase
+      /**
+       * ✅ LOCKED FIX:
+       * Send multipart/form-data to /api/lora/train (NO JSON).
+       * Include identityName/description + the actual image binaries.
+       * DO NOT set Content-Type manually (browser sets boundary).
+       */
+      const formData = new FormData()
+      formData.append("identityName", identityName.trim())
+      formData.append("description", (description?.trim() || ""))
+
+      // Append image files under a consistent field name the API can read.
+      // If your API expects a different key (e.g. "files"), change it there (NOT here) per your locked architecture.
+      uploadedImages.forEach((img, idx) => {
+        formData.append("images", img.file, img.file.name || `image_${idx}.png`)
+      })
+
       const createRes = await fetch("/api/lora/train", {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
+          // ❌ DO NOT set "Content-Type" here
         },
-        body: JSON.stringify({
-          identityName: identityName.trim(),
-          description: description?.trim() || null,
-          imageCount: uploadedImages.length,
-        }),
+        body: formData,
       })
 
       const createJson = await createRes.json().catch(() => ({} as any))
@@ -328,8 +339,7 @@ export default function LoRATrainerPage() {
 
       setLoraId(createdId)
 
-     
-     
+      // Keep status queued; polling effect will take over.
     } catch (err) {
       console.error("Start training error:", err)
       setTrainingStatus('failed')
