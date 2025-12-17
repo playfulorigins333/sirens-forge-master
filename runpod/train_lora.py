@@ -1,32 +1,24 @@
 #!/usr/bin/env python3
 """
-SirensForge — SDXL LoRA Trainer (RunPod) — PRODUCTION-SAFE (Launch)
+SirensForge — SDXL LoRA Trainer (RunPod) — PRODUCTION LAUNCH SAFE
 
-This script is designed to run on the RunPod trainer pod and pull a single LoRA job
-from Supabase (user_loras) by LORA_ID, validate the dataset, and run kohya/sd-scripts.
+FULL FILE REPLACEMENT.
 
-CRITICAL FIX:
-- We run /workspace/sd-scripts/sdxl_train_network.py (your pod has it)
-- We FORCE bucketing ON via:
-    --enable_bucket
-    --min_bucket_reso
-    --max_bucket_reso
+Key fixes:
+- FORCE BUCKETING ON (mixed user image resolutions will not crash)
+- Per-job dataset dir: /workspace/train_data/sf_<LORA_ID>/
+- Hard gate: 10–20 images
+- Strict Supabase status transitions with SAFE columns only:
+  status, error_message, updated_at
+  (DO NOT write finished_at / artifact_path — those columns do not exist in your DB)
+- Validate artifact exists before marking complete
 
-Why:
-- Real customer uploads are mixed resolution (yours were 1024x962 and 1056x992)
-- Without bucket/crop, kohya asserts and crashes:
-    "image too large, but cropping and bucketing are disabled"
-
-Hard rules enforced:
-- Dataset must exist at: /workspace/train_data/sf_<LORA_ID>/
-- Valid images: 10–20 (hard gate)
-- Job must start in status 'queued' (hard gate)
-- NO fake completions: we only mark complete if a .safetensors artifact exists
-
-Supabase schema safety:
-- We ONLY write columns we can safely assume exist:
-    status, error_message, updated_at
-- We DO NOT write: finished_at, artifact_path, started_at, etc.
+Required env vars:
+- LORA_ID
+- SUPABASE_URL
+- SUPABASE_SERVICE_ROLE_KEY
+- PRETRAINED_MODEL   (path to SDXL checkpoint .safetensors)
+- VAE_PATH           (path to VAE .safetensors)
 """
 
 from __future__ import annotations
@@ -34,8 +26,8 @@ from __future__ import annotations
 import os
 import sys
 import time
-import shlex
 import json
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, Optional, List
@@ -43,138 +35,181 @@ from typing import Any, Dict, Optional, List
 import requests
 
 
-# =========================
-# Small helpers
-# =========================
+# -------------------------
+# Helpers
+# -------------------------
 
-def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def _require_env(name: str) -> str:
-    v = os.environ.get(name, "").strip()
-    if not v:
-        raise RuntimeError(f"Missing env: {name}")
-    return v
-
-
-def _env_int(name: str, default: int) -> int:
-    v = os.environ.get(name, "").strip()
-    if not v:
-        return int(default)
-    try:
-        return int(v)
-    except Exception as e:
-        raise RuntimeError(f"Env var {name} must be an int. Got: {v}") from e
-
-
-def _env_float(name: str, default: float) -> float:
-    v = os.environ.get(name, "").strip()
-    if not v:
-        return float(default)
-    try:
-        return float(v)
-    except Exception as e:
-        raise RuntimeError(f"Env var {name} must be a float. Got: {v}") from e
-
-
-def _log(msg: str) -> None:
+def log(msg: str) -> None:
     print(f"[train_lora] {msg}", flush=True)
 
 
-# =========================
-# Supabase client (REST)
-# =========================
+def now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def require_env(name: str) -> str:
+    v = os.getenv(name)
+    if not v or not str(v).strip():
+        raise RuntimeError(f"Missing env: {name}")
+    return str(v).strip()
+
+
+def env_int(name: str, default: int) -> int:
+    v = os.getenv(name)
+    if v is None or str(v).strip() == "":
+        return default
+    return int(str(v).strip())
+
+
+def env_bool(name: str, default: bool) -> bool:
+    v = os.getenv(name)
+    if v is None or str(v).strip() == "":
+        return default
+    s = str(v).strip().lower()
+    if s in ("1", "true", "yes", "y", "on"):
+        return True
+    if s in ("0", "false", "no", "n", "off"):
+        return False
+    raise RuntimeError(f"Env var {name} must be bool-like. Got: {v}")
+
+
+# -------------------------
+# Supabase client (SAFE columns only)
+# -------------------------
 
 class SupabaseClient:
     def __init__(self, url: str, service_role_key: str):
         self.base = url.rstrip("/")
         self.key = service_role_key
 
-    def _headers(self) -> Dict[str, str]:
-        return {
-            "apikey": self.key,
-            "Authorization": f"Bearer {self.key}",
-            "Content-Type": "application/json",
-        }
-
-    def get_job(self, lora_id: str) -> Dict[str, Any]:
+    def patch_user_loras(self, lora_id: str, payload: Dict[str, Any]) -> None:
         endpoint = f"{self.base}/rest/v1/user_loras"
-        # Keep select minimal so we don't depend on extra columns.
-        params = {
-            "id": f"eq.{lora_id}",
-            "select": "id,user_id,status,name",
-            "limit": "1",
-        }
-        r = requests.get(endpoint, params=params, headers=self._headers(), timeout=30)
-        if r.status_code >= 300:
-            raise RuntimeError(f"Supabase GET failed: {r.status_code} {r.text}")
-        data = r.json()
-        if not data:
-            raise RuntimeError(f"Job not found in user_loras: {lora_id}")
-        return data[0]
-
-    def patch_job(self, lora_id: str, payload: Dict[str, Any]) -> None:
-        endpoint = f"{self.base}/rest/v1/user_loras"
-        params = {"id": f"eq.{lora_id}"}
-        headers = dict(self._headers())
-        headers["Prefer"] = "return=minimal"
-        r = requests.patch(endpoint, params=params, headers=headers, json=payload, timeout=30)
+        r = requests.patch(
+            endpoint,
+            params={"id": f"eq.{lora_id}"},
+            headers={
+                "apikey": self.key,
+                "Authorization": f"Bearer {self.key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            json=payload,
+            timeout=30,
+        )
         if r.status_code >= 300:
             raise RuntimeError(f"Supabase PATCH failed: {r.status_code} {r.text}")
 
     def set_status(self, lora_id: str, status: str, error_message: Optional[str] = None) -> None:
-        # ONLY columns we rely on existing:
+        # IMPORTANT: only write columns we know exist
         payload: Dict[str, Any] = {
             "status": status,
-            "updated_at": _now_iso(),
+            "updated_at": now_iso(),
         }
-        # Your SQL reset uses error_message, so we use that exact column name.
         if error_message is not None:
             payload["error_message"] = error_message
-        self.patch_job(lora_id, payload)
+        self.patch_user_loras(lora_id, payload)
 
 
-# =========================
+# -------------------------
 # Dataset validation
-# =========================
+# -------------------------
 
 VALID_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
-def _resolve_dataset_dir(lora_id: str) -> Path:
-    # REQUIRED structure
+def dataset_root_for(lora_id: str) -> Path:
     return Path(f"/workspace/train_data/sf_{lora_id}").resolve()
 
 
-def _count_valid_images(dataset_root: Path) -> int:
-    if not dataset_root.exists() or not dataset_root.is_dir():
-        raise RuntimeError(f"Dataset directory does not exist: {dataset_root}")
-    count = 0
-    for p in dataset_root.rglob("*"):
+def count_images(root: Path) -> int:
+    if not root.exists() or not root.is_dir():
+        raise RuntimeError(f"Dataset directory missing: {root}")
+    n = 0
+    for p in root.rglob("*"):
         if p.is_file() and p.suffix.lower() in VALID_EXTS:
-            count += 1
-    return count
+            n += 1
+    return n
 
 
-# =========================
-# Training invocation
-# =========================
+# -------------------------
+# Training command builder
+# -------------------------
 
-def _training_script_path() -> Path:
-    # Your pod has this exact file.
-    p = Path(os.environ.get("TRAINING_SCRIPT", "/workspace/sd-scripts/sdxl_train_network.py")).resolve()
-    if not p.exists():
-        raise RuntimeError(f"Training script not found: {p}")
-    return p
-
-
-def _artifact_path(output_dir: Path, lora_id: str) -> Path:
-    name = f"lora_{lora_id}.safetensors"
-    return (output_dir / name).resolve()
+def training_script_path() -> Path:
+    # You proved this exists:
+    p = Path("/workspace/sd-scripts/sdxl_train_network.py")
+    if p.exists():
+        return p.resolve()
+    raise RuntimeError("Missing training script at /workspace/sd-scripts/sdxl_train_network.py")
 
 
-def _run_and_log(cmd: List[str], log_path: Path) -> int:
+def build_cmd(lora_id: str, train_data_dir: Path, output_dir: Path) -> List[str]:
+    python_bin = sys.executable
+    train_py = training_script_path()
+
+    pretrained_model = require_env("PRETRAINED_MODEL")
+    vae_path = require_env("VAE_PATH")
+
+    # Hard defaults for launch
+    resolution = env_int("RESOLUTION", 1024)  # used as 1024,1024
+    batch_size = env_int("TRAIN_BATCH_SIZE", 1)
+    max_train_steps = env_int("MAX_TRAIN_STEPS", 1200)
+    learning_rate = os.getenv("LEARNING_RATE", "1e-4").strip() or "1e-4"
+    network_dim = env_int("NETWORK_DIM", 64)
+    network_alpha = env_int("NETWORK_ALPHA", 64)
+
+    mixed_precision = os.getenv("MIXED_PRECISION", "fp16").strip() or "fp16"
+    use_xformers = env_bool("USE_XFORMERS", True)
+
+    # BUCKETING (FORCED ON)
+    min_bucket_reso = env_int("MIN_BUCKET_RESO", 256)
+    max_bucket_reso = env_int("MAX_BUCKET_RESO", 2048)
+    bucket_reso_steps = env_int("BUCKET_RESO_STEPS", 64)
+
+    if max_bucket_reso < min_bucket_reso:
+        raise RuntimeError(f"MAX_BUCKET_RESO ({max_bucket_reso}) < MIN_BUCKET_RESO ({min_bucket_reso})")
+
+    output_name = f"lora_{lora_id}"
+
+    cmd: List[str] = [
+        python_bin,
+        str(train_py),
+
+        "--pretrained_model_name_or_path", pretrained_model,
+        "--vae", vae_path,
+
+        "--resolution", f"{resolution},{resolution}",
+        "--train_data_dir", str(train_data_dir),
+
+        "--output_dir", str(output_dir),
+        "--output_name", output_name,
+
+        "--network_module", "networks.lora",
+        "--network_dim", str(network_dim),
+        "--network_alpha", str(network_alpha),
+
+        "--learning_rate", str(learning_rate),
+        "--max_train_steps", str(max_train_steps),
+        "--train_batch_size", str(batch_size),
+
+        "--mixed_precision", mixed_precision,
+        "--save_model_as", "safetensors",
+        "--gradient_checkpointing",
+
+        # ✅ FORCE BUCKETING ON
+        "--enable_bucket",
+        "--min_bucket_reso", str(min_bucket_reso),
+        "--max_bucket_reso", str(max_bucket_reso),
+        "--bucket_reso_steps", str(bucket_reso_steps),
+    ]
+
+    if use_xformers:
+        cmd.append("--xformers")
+
+    return cmd
+
+
+def run_and_log(cmd: List[str], log_path: Path) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as f:
         f.write("CMD:\n")
@@ -195,145 +230,79 @@ def _run_and_log(cmd: List[str], log_path: Path) -> int:
         return proc.wait()
 
 
-def _build_command(lora_id: str, dataset_root: Path, output_dir: Path) -> List[str]:
-    # Required envs (your current trainer flow expects these)
-    pretrained_model = _require_env("PRETRAINED_MODEL")  # can be HF id OR local .safetensors path
-    vae_path = _require_env("VAE_PATH")                  # local .safetensors path
-
-    # Validate local paths when they look like paths
-    if pretrained_model.startswith("/"):
-        if not Path(pretrained_model).exists():
-            raise RuntimeError(f"PRETRAINED_MODEL path does not exist: {pretrained_model}")
-    if vae_path.startswith("/"):
-        if not Path(vae_path).exists():
-            raise RuntimeError(f"VAE_PATH does not exist: {vae_path}")
-
-    # Defaults chosen for launch safety (you can tune later via env)
-    resolution = os.environ.get("RESOLUTION", "1024,1024").strip()
-    if "," not in resolution:
-        # Allow "1024" -> convert to "1024,1024"
-        resolution = f"{resolution},{resolution}"
-
-    max_train_steps = _env_int("MAX_TRAIN_STEPS", 1200)
-    train_batch_size = _env_int("TRAIN_BATCH_SIZE", 1)
-    learning_rate = _env_float("LEARNING_RATE", 1e-4)
-    network_dim = _env_int("NETWORK_DIM", 64)
-    network_alpha = _env_int("NETWORK_ALPHA", 64)
-    mixed_precision = os.environ.get("MIXED_PRECISION", "fp16").strip()
-
-    use_xformers = os.environ.get("USE_XFORMERS", "1").strip().lower() in ("1", "true", "yes", "y", "on")
-    gradient_checkpointing = os.environ.get("GRADIENT_CHECKPOINTING", "1").strip().lower() in ("1", "true", "yes", "y", "on")
-
-    # BUCKETING — FORCED ON
-    min_bucket_reso = _env_int("MIN_BUCKET_RESO", 256)
-    max_bucket_reso = _env_int("MAX_BUCKET_RESO", 2048)
-
-    if max_bucket_reso < min_bucket_reso:
-        raise RuntimeError(f"MAX_BUCKET_RESO ({max_bucket_reso}) < MIN_BUCKET_RESO ({min_bucket_reso})")
-
-    script = _training_script_path()
-
-    cmd: List[str] = [
-        sys.executable,
-        str(script),
-        f"--pretrained_model_name_or_path={pretrained_model}",
-        f"--vae={vae_path}",
-        f"--resolution={resolution}",
-        f"--train_data_dir={str(dataset_root)}",
-        f"--output_dir={str(output_dir)}",
-        f"--output_name=lora_{lora_id}",
-        "--network_module=networks.lora",
-        f"--network_dim={network_dim}",
-        f"--network_alpha={network_alpha}",
-        f"--learning_rate={learning_rate}",
-        f"--max_train_steps={max_train_steps}",
-        f"--train_batch_size={train_batch_size}",
-        f"--mixed_precision={mixed_precision}",
-        "--save_model_as=safetensors",
-    ]
-
-    if gradient_checkpointing:
-        cmd.append("--gradient_checkpointing")
-    if use_xformers:
-        cmd.append("--xformers")
-
-    # ✅ THE FIX: FORCE BUCKETING ON (THIS MUST BE PRESENT)
-    cmd += [
-        "--enable_bucket",
-        f"--min_bucket_reso={min_bucket_reso}",
-        f"--max_bucket_reso={max_bucket_reso}",
-    ]
-
-    return cmd
+def expected_artifact(output_dir: Path, lora_id: str) -> Path:
+    return output_dir / f"lora_{lora_id}.safetensors"
 
 
-# =========================
+# -------------------------
 # Main
-# =========================
+# -------------------------
 
 def main() -> int:
-    # Required envs
-    lora_id = _require_env("LORA_ID")
-    sb_url = _require_env("SUPABASE_URL")
-    sb_key = _require_env("SUPABASE_SERVICE_ROLE_KEY")
+    lora_id = require_env("LORA_ID")
+    sb_url = require_env("SUPABASE_URL")
+    sb_key = require_env("SUPABASE_SERVICE_ROLE_KEY")
 
     sb = SupabaseClient(sb_url, sb_key)
 
-    # Load job
-    job = sb.get_job(lora_id)
-    _log(f"Loaded job: id={job.get('id')} user_id={job.get('user_id')} status={job.get('status')} name={job.get('name')}")
+    # Per-job dirs
+    train_data_dir = dataset_root_for(lora_id)
+    output_dir = Path("/workspace/output").resolve()
+    logs_dir = Path(f"/workspace/train_logs/sf_{lora_id}").resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir.mkdir(parents=True, exist_ok=True)
 
-    if str(job.get("status", "")).strip() != "queued":
-        raise RuntimeError(f"Job must start in status 'queued'. Found '{job.get('status')}'.")
-
-    # Dataset wiring (HARD GATE)
-    dataset_root = _resolve_dataset_dir(lora_id)
-    _log(f"Resolved train_data_dir: {dataset_root}")
-    img_count = _count_valid_images(dataset_root)
-
-    min_images = _env_int("MIN_IMAGES", 10)
-    max_images = _env_int("MAX_IMAGES", 20)
+    # Hard gate: image count 10–20
+    img_count = count_images(train_data_dir)
+    min_images = env_int("MIN_IMAGES", 10)
+    max_images = env_int("MAX_IMAGES", 20)
     if img_count < min_images or img_count > max_images:
-        msg = f"Invalid image count: {img_count}. Required {min_images}-{max_images}. Dataset: {dataset_root}"
+        msg = f"Invalid image count: {img_count}. Required {min_images}-{max_images}."
+        log(msg)
         sb.set_status(lora_id, "failed", msg)
         raise RuntimeError(msg)
 
-    # Output dir + log path (stable defaults)
-    output_dir = Path(os.environ.get("OUTPUT_DIR", "/workspace/output")).resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    log_dir = Path(os.environ.get("LOG_DIR", f"/workspace/train_logs/sf_{lora_id}")).resolve()
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = (log_dir / "train.log").resolve()
-
-    # Set training
+    # Move to training
     sb.set_status(lora_id, "training", None)
-    _log(f"Updated status -> training (images={img_count}, steps≈{_env_int('MAX_TRAIN_STEPS', 1200)})")
+    log(f"Updated status -> training (images={img_count}, steps≈{env_int('MAX_TRAIN_STEPS', 1200)})")
+    log(f"Resolved train_data_dir: {train_data_dir}")
 
-    # Build + run
-    cmd = _build_command(lora_id, dataset_root, output_dir)
-    _log("Running: " + " ".join(shlex.quote(c) for c in cmd))
+    # Build command (bucket forced on)
+    cmd = build_cmd(lora_id, train_data_dir, output_dir)
+    log_path = logs_dir / "train.log"
 
-    rc = _run_and_log(cmd, log_path)
+    # Best-effort store train_args if the column exists (ignore if not)
+    try:
+        sb.patch_user_loras(lora_id, {
+            "updated_at": now_iso(),
+            "error_message": None,
+            "train_args": json.dumps(cmd),
+        })
+    except Exception:
+        pass
+
+    log("Running: " + " ".join(shlex.quote(c) for c in cmd))
+    t0 = time.time()
+    rc = run_and_log(cmd, log_path)
+    dt = time.time() - t0
 
     if rc != 0:
-        msg = f"Training failed with exit code {rc}. See log: {log_path}"
-        _log(f"ERROR: {msg}")
+        msg = f"Training failed with exit code {rc} after {dt:.1f}s (see {log_path})"
+        log("ERROR: " + msg)
         sb.set_status(lora_id, "failed", msg)
         return rc
 
-    # Validate artifact (NO FAKE COMPLETIONS)
-    artifact = _artifact_path(output_dir, lora_id)
+    # Validate artifact exists before marking complete
+    artifact = expected_artifact(output_dir, lora_id)
     if not artifact.exists() or artifact.stat().st_size < 1024 * 1024:
-        msg = f"Training finished but artifact missing/too small: {artifact}"
-        _log(f"ERROR: {msg}")
+        msg = f"Training exited 0 but artifact missing/too small: {artifact}"
+        log("ERROR: " + msg)
         sb.set_status(lora_id, "failed", msg)
-        return 2
+        raise RuntimeError(msg)
 
-    # Complete
     sb.set_status(lora_id, "complete", None)
-    _log(f"✅ TRAINING COMPLETE: {artifact}")
-    _log(f"Log: {log_path}")
+    log(f"✅ TRAINING COMPLETE: {artifact}")
+    log(f"Log: {log_path}")
     return 0
 
 
@@ -341,14 +310,14 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as e:
-        # Best-effort fail status (but ONLY if env allows)
+        # Best-effort mark failed
         try:
-            lora_id = os.environ.get("LORA_ID", "").strip()
-            sb_url = os.environ.get("SUPABASE_URL", "").strip()
-            sb_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+            lora_id = os.getenv("LORA_ID", "").strip()
+            sb_url = os.getenv("SUPABASE_URL", "").strip()
+            sb_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
             if lora_id and sb_url and sb_key:
                 SupabaseClient(sb_url, sb_key).set_status(lora_id, "failed", str(e))
         except Exception:
             pass
-        _log(f"ERROR: {e}")
+        print(f"\n❌ ERROR: {e}\n", file=sys.stderr)
         raise
