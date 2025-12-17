@@ -24,7 +24,6 @@ const supabaseClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 )
 
-
 type LoraRow = {
   id: string
   status: TrainingStatus
@@ -34,6 +33,7 @@ type LoraRow = {
 }
 
 const POLL_INTERVAL_MS = 5000
+
 // Floating particles component
 const FloatingParticles = () => {
   const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 })
@@ -149,7 +149,6 @@ export default function LoRATrainerPage() {
         .single()
 
       if (error) {
-        // Don't hard-fail the UI on a transient polling error. Just show it.
         setErrorMessage(error.message || "Failed to poll training status.")
         return
       }
@@ -160,7 +159,6 @@ export default function LoRATrainerPage() {
       const next = mapDbStatusToUi(String(row.status || 'idle'))
       setTrainingStatus(next)
 
-      // Optional progress from DB; if not present, keep whatever we have.
       if (typeof row.progress === 'number') {
         const clamped = Math.max(0, Math.min(100, row.progress))
         setTrainingProgress(clamped)
@@ -187,13 +185,11 @@ export default function LoRATrainerPage() {
   useEffect(() => {
     if (!mounted) return
 
-    // Always clear existing polling first (prevents duplicates).
     clearPolling()
 
     if (!loraId) return
     if (trainingStatus === 'completed' || trainingStatus === 'failed' || trainingStatus === 'idle') return
 
-    // Poll immediately once, then on an interval.
     pollLoraStatusOnce(loraId)
 
     pollingIntervalRef.current = setInterval(() => {
@@ -205,14 +201,13 @@ export default function LoRATrainerPage() {
     }
   }, [mounted, loraId, trainingStatus, pollLoraStatusOnce])
 
-
   useEffect(() => {
     setMounted(true)
   }, [])
 
   useEffect(() => {
     if (!mounted) return
-    
+
     const handleMouseMove = (e: MouseEvent) => {
       setMousePosition({ x: e.clientX, y: e.clientY })
     }
@@ -246,7 +241,7 @@ export default function LoRATrainerPage() {
 
   const handleFiles = (files: File[]) => {
     const imageFiles = files.filter(file => file.type.startsWith('image/'))
-    
+
     if (uploadedImages.length + imageFiles.length > 20) {
       setErrorMessage('Maximum 20 images allowed')
       return
@@ -282,7 +277,11 @@ export default function LoRATrainerPage() {
     }
   }
 
-  const handleStartTraining = async () => {
+  const handleStartTraining = async (e?: React.MouseEvent<HTMLButtonElement>) => {
+    // 🔒 Hard-stop any implicit submit/navigation behavior.
+    e?.preventDefault()
+    e?.stopPropagation()
+
     if (uploadedImages.length < 10 || !identityName.trim()) return
 
     setErrorMessage(null)
@@ -307,12 +306,17 @@ export default function LoRATrainerPage() {
       formData.append("identityName", identityName.trim())
       formData.append("description", (description?.trim() || ""))
 
-      // Append image files under a consistent field name the API can read.
-      // If your API expects a different key (e.g. "files"), change it there (NOT here) per your locked architecture.
       uploadedImages.forEach((img, idx) => {
         formData.append("images", img.file, img.file.name || `image_${idx}.png`)
       })
 
+      // ✅ Debug signal: you should see this every time you click the button.
+      console.log("[LoRA Train] POST /api/lora/train", {
+        identityName: identityName.trim(),
+        imageCount: uploadedImages.length,
+      })
+
+      // ✅ Force the correct endpoint (never /lora/train)
       const createRes = await fetch("/api/lora/train", {
         method: "POST",
         headers: {
@@ -320,6 +324,7 @@ export default function LoRATrainerPage() {
           // ❌ DO NOT set "Content-Type" here
         },
         body: formData,
+        cache: "no-store",
       })
 
       const createJson = await createRes.json().catch(() => ({} as any))
@@ -338,7 +343,6 @@ export default function LoRATrainerPage() {
       }
 
       setLoraId(createdId)
-
       // Keep status queued; polling effect will take over.
     } catch (err) {
       console.error("Start training error:", err)
@@ -347,7 +351,7 @@ export default function LoRATrainerPage() {
     }
   }
 
-const handleRetry = () => {
+  const handleRetry = () => {
     clearPolling()
     setTrainingStatus('idle')
     setTrainingProgress(0)
@@ -393,9 +397,9 @@ const handleRetry = () => {
       <header className="border-b border-gray-800/50 bg-black/50 backdrop-blur-xl top-0 z-40 relative">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <motion.h1 
+            <motion.h1
               className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent"
-              animate={{ 
+              animate={{
                 backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
               }}
               transition={{ duration: 5, repeat: Infinity }}
@@ -421,7 +425,7 @@ const handleRetry = () => {
         className="max-w-4xl mx-auto px-6 pt-20 pb-12 text-center relative z-10"
       >
         <motion.div
-          animate={{ 
+          animate={{
             scale: [1, 1.02, 1],
             rotate: [0, 1, -1, 0]
           }}
@@ -441,7 +445,7 @@ const handleRetry = () => {
           </div>
         </motion.div>
 
-        <motion.h1 
+        <motion.h1
           className="text-6xl md:text-7xl font-bold mb-6 relative"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -452,7 +456,7 @@ const handleRetry = () => {
           </span>
           <motion.div
             className="absolute -top-4 -right-4"
-            animate={{ 
+            animate={{
               rotate: [0, 10, -10, 0],
               scale: [1, 1.2, 1]
             }}
@@ -462,7 +466,7 @@ const handleRetry = () => {
           </motion.div>
         </motion.h1>
 
-        <motion.p 
+        <motion.p
           className="text-xl md:text-2xl text-gray-300 mb-6 max-w-2xl mx-auto"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -618,7 +622,7 @@ const handleRetry = () => {
             <CardHeader className="relative z-10">
               <div className="flex items-center gap-3">
                 <motion.div
-                  animate={{ 
+                  animate={{
                     y: [0, -5, 0],
                     rotate: [0, 5, -5, 0]
                   }}
@@ -636,7 +640,7 @@ const handleRetry = () => {
               {/* Progress Indicator */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <motion.span 
+                  <motion.span
                     className={`text-lg font-bold ${getProgressTextColor()}`}
                     animate={{ scale: uploadedImages.length >= 10 ? [1, 1.1, 1] : 1 }}
                     transition={{ duration: 0.5 }}
@@ -694,7 +698,7 @@ const handleRetry = () => {
                   disabled={uploadedImages.length >= 20}
                 />
                 <motion.div
-                  animate={{ 
+                  animate={{
                     y: isDragging ? -10 : [0, -10, 0],
                     scale: isDragging ? 1.1 : 1
                   }}
@@ -743,7 +747,7 @@ const handleRetry = () => {
                           alt="Training image"
                           className="w-full h-full object-cover"
                         />
-                        <motion.div 
+                        <motion.div
                           className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center"
                           initial={false}
                         >
@@ -771,7 +775,7 @@ const handleRetry = () => {
               )}
 
               {/* Guidelines */}
-              <motion.div 
+              <motion.div
                 className="space-y-3 p-6 rounded-xl bg-gradient-to-br from-cyan-500/10 to-purple-500/10 border border-cyan-500/30 backdrop-blur-sm"
                 whileHover={{ scale: 1.02 }}
               >
@@ -846,9 +850,9 @@ const handleRetry = () => {
             />
             <CardContent className="p-8 relative z-10">
               <div className="flex items-start gap-6">
-                <motion.div 
+                <motion.div
                   className="p-4 rounded-2xl bg-gradient-to-br from-purple-500/30 to-pink-500/30 backdrop-blur-sm"
-                  animate={{ 
+                  animate={{
                     rotate: [0, 5, -5, 0],
                     scale: [1, 1.05, 1]
                   }}
@@ -908,7 +912,7 @@ const handleRetry = () => {
             whileTap={{ scale: isReadyToTrain ? 0.98 : 1 }}
           >
             <Button
-              onClick={handleStartTraining}
+              onClick={(e) => handleStartTraining(e)}
               disabled={!isReadyToTrain || trainingStatus !== 'idle'}
               className="w-full py-10 text-xl font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-2xl shadow-purple-500/50 relative overflow-hidden group"
             >
@@ -968,13 +972,13 @@ const handleRetry = () => {
                 }}
                 transition={{ duration: 5, repeat: Infinity }}
               />
-              
+
               <div className="p-12 text-center space-y-8 relative z-10">
                 {/* Status Icon */}
                 <div className="flex justify-center">
                   {trainingStatus === 'queued' && (
                     <motion.div
-                      animate={{ 
+                      animate={{
                         scale: [1, 1.2, 1],
                         rotate: [0, 180, 360]
                       }}
@@ -1029,7 +1033,7 @@ const handleRetry = () => {
                 <div className="space-y-4">
                   {trainingStatus === 'queued' && (
                     <>
-                      <motion.h3 
+                      <motion.h3
                         className="text-3xl font-bold text-amber-400"
                         animate={{ opacity: [0.7, 1, 0.7] }}
                         transition={{ duration: 2, repeat: Infinity }}
@@ -1044,9 +1048,9 @@ const handleRetry = () => {
                   )}
                   {trainingStatus === 'training' && (
                     <>
-                      <motion.h3 
+                      <motion.h3
                         className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent"
-                        animate={{ 
+                        animate={{
                           backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
                         }}
                         transition={{ duration: 3, repeat: Infinity }}
@@ -1071,7 +1075,7 @@ const handleRetry = () => {
                             />
                           </motion.div>
                         </div>
-                        <motion.p 
+                        <motion.p
                           className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent"
                           animate={{ scale: [1, 1.05, 1] }}
                           transition={{ duration: 1, repeat: Infinity }}
@@ -1083,7 +1087,7 @@ const handleRetry = () => {
                   )}
                   {trainingStatus === 'completed' && (
                     <>
-                      <motion.h3 
+                      <motion.h3
                         className="text-4xl font-bold bg-gradient-to-r from-emerald-400 to-green-400 bg-clip-text text-transparent"
                         initial={{ scale: 0 }}
                         animate={{ scale: 1 }}
@@ -1091,7 +1095,7 @@ const handleRetry = () => {
                       >
                         Your AI Twin is Alive! 🎉
                       </motion.h3>
-                      <motion.p 
+                      <motion.p
                         className="text-gray-300 text-lg"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
