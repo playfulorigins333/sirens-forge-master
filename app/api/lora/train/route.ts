@@ -28,22 +28,18 @@ export async function POST(req: Request) {
     const {
       identityName,
       description = null,
-      imageCount,
     } = body
 
-    if (!identityName || typeof imageCount !== "number") {
+    if (!identityName) {
       return NextResponse.json(
-        { error: "Missing required fields: identityName, imageCount" },
+        { error: "Missing required field: identityName" },
         { status: 400 }
       )
     }
 
-    if (imageCount < 10 || imageCount > 20) {
-      return NextResponse.json(
-        { error: "Image count must be between 10 and 20" },
-        { status: 400 }
-      )
-    }
+    // IMPORTANT:
+    // This endpoint ONLY creates a draft LoRA record.
+    // Images are handled separately by /api/lora/start-training
 
     const { data, error } = await supabaseAdmin
       .from("user_loras")
@@ -51,8 +47,7 @@ export async function POST(req: Request) {
         user_id: user.id,
         name: identityName,
         description,
-        image_count: imageCount,
-        status: "queued",
+        status: "draft", // 🔒 NOT queued
       })
       .select()
       .single()
