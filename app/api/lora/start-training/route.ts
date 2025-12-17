@@ -1,116 +1,106 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabaseAdmin"
+import { spawn } from "child_process"
 import fs from "fs"
 import path from "path"
-import { spawn } from "child_process"
+import os from "os"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-/**
- * POST /api/lora/start-training
- *
- * Multipart form-data:
- * - lora_id (string)
- * - images[] (File, 10–20)
- */
+const TRAIN_ROOT = "/workspace/train_data"
+
 export async function POST(req: Request) {
   try {
-    const formData = await req.formData()
+    const form = await req.formData()
 
-    const loraId = formData.get("lora_id")?.toString()
-    if (!loraId) {
-      return NextResponse.json(
-        { error: "Missing lora_id" },
-        { status: 400 }
-      )
+    const lora_id = form.get("lora_id") as string
+    if (!lora_id) {
+      return NextResponse.json({ error: "Missing lora_id" }, { status: 400 })
     }
 
-    // ----------------------------------------
-    // 1. Load LoRA record + guard active job
-    // ----------------------------------------
-    const { data: lora, error: fetchErr } = await supabaseAdmin
+    /* ──────────────────────────────────────────────
+       1️⃣ Guard: block if job already active
+    ────────────────────────────────────────────── */
+    const { data: existing, error: existingErr } = await supabaseAdmin
       .from("user_loras")
-      .select("id, status")
-      .eq("id", loraId)
+      .select("id,status")
+      .eq("id", lora_id)
       .single()
 
-    if (fetchErr || !lora) {
-      return NextResponse.json(
-        { error: "LoRA not found" },
-        { status: 404 }
-      )
+    if (existingErr || !existing) {
+      return NextResponse.json({ error: "LoRA job not found" }, { status: 404 })
     }
 
-    if (lora.status === "queued" || lora.status === "training") {
-      console.log("[start-training] Job already active — exiting")
-      return NextResponse.json(
-        { status: lora.status },
-        { status: 200 }
-      )
+    if (existing.status === "queued" || existing.status === "training") {
+      console.log("[start-training] Job already active — exiting", lora_id)
+      return NextResponse.json({
+        status: existing.status,
+        message: "Job already active",
+      })
     }
 
-    // ----------------------------------------
-    // 2. Extract images
-    // ----------------------------------------
-    const files = formData.getAll("images") as File[]
+    /* ──────────────────────────────────────────────
+       2️⃣ Prepare dataset directory
+    ────────────────────────────────────────────── */
+    const datasetDir = path.join(TRAIN_ROOT, `sf_${lora_id}`, "10_class1")
+    fs.mkdirSync(datasetDir, { recursive: true })
 
-    if (files.length < 10 || files.length > 20) {
+    let imageCount = 0
+
+    for (const [key, value] of form.entries()) {
+      if (!(value instanceof File)) continue
+      if (!value.type.startsWith("image/")) continue
+
+      const buffer = Buffer.from(await value.arrayBuffer())
+      const ext = value.name.split(".").pop() || "png"
+      const filename = `${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2)}.${ext}`
+
+      fs.writeFileSync(path.join(datasetDir, filename), buffer)
+      imageCount++
+    }
+
+    if (imageCount < 10 || imageCount > 20) {
       return NextResponse.json(
-        { error: "You must upload between 10 and 20 images" },
+        { error: `Invalid image count: ${imageCount} (10–20 required)` },
         { status: 400 }
       )
     }
 
-    // ----------------------------------------
-    // 3. Create dataset directory
-    // ----------------------------------------
-    const datasetDir = `/workspace/train_data/sf_${loraId}`
-    fs.mkdirSync(datasetDir, { recursive: true })
-
-    // ----------------------------------------
-    // 4. Write images to disk
-    // ----------------------------------------
-    let index = 0
-    for (const file of files) {
-      if (!(file instanceof File)) continue
-
-      const buffer = Buffer.from(await file.arrayBuffer())
-      const ext =
-        path.extname(file.name) ||
-        (file.type.includes("png") ? ".png" : ".jpg")
-
-      const filename = `img_${String(index).padStart(3, "0")}${ext}`
-      const outPath = path.join(datasetDir, filename)
-
-      fs.writeFileSync(outPath, buffer)
-      index++
-    }
-
-    // ----------------------------------------
-    // 5. Mark job as queued
-    // ----------------------------------------
+    /* ──────────────────────────────────────────────
+       3️⃣ Update DB → queued
+    ────────────────────────────────────────────── */
     await supabaseAdmin
       .from("user_loras")
       .update({
         status: "queued",
+        image_count: imageCount,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", loraId)
+      .eq("id", lora_id)
 
-    // ----------------------------------------
-    // 6. Launch trainer (ALWAYS-ON POD)
-    // ----------------------------------------
+    /* ──────────────────────────────────────────────
+       4️⃣ SPAWN TRAINER (THIS WAS MISSING BEFORE)
+    ────────────────────────────────────────────── */
+    console.log("🚀 START-TRAINING ROUTE REACHED — SPAWNING TRAINER", {
+      lora_id,
+      datasetDir,
+      imageCount,
+    })
+
     const child = spawn(
       "python",
       ["runpod/train_lora.py"],
       {
+        cwd: process.cwd(),
         env: {
           ...process.env,
-          LORA_ID: loraId,
+          LORA_ID: lora_id,
         },
-        stdio: "inherit",
         detached: true,
+        stdio: "ignore",
       }
     )
 
@@ -118,8 +108,10 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       status: "queued",
+      images_written: imageCount,
     })
-  } catch (err) {
+
+  } catch (err: any) {
     console.error("[start-training] Fatal error:", err)
     return NextResponse.json(
       { error: "Failed to start training" },
