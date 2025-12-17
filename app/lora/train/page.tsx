@@ -298,7 +298,7 @@ export default function LoRATrainerPage() {
       }
 
       // Step 1: Create (or reuse) a draft identity record in Supabase
-      const createRes = await fetch("/api/lora/train", {
+      const createRes = await fetch("/api/lora/start-training", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
