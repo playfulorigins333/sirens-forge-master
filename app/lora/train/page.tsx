@@ -298,7 +298,7 @@ export default function LoRATrainerPage() {
       }
 
       // Step 1: Create (or reuse) a draft identity record in Supabase
-      const createRes = await fetch("/api/lora/start-training", {
+      const createRes = await fetch("/api/lora/train", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -328,31 +328,8 @@ export default function LoRATrainerPage() {
 
       setLoraId(createdId)
 
-      // Step 2: Start training manually
-      const startRes = await fetch("/api/lora/start-training", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: JSON.stringify({ lora_id: createdId }),
-      })
-
-      const startJson = await startRes.json().catch(() => ({} as any))
-
-      if (!startRes.ok) {
-        setTrainingStatus('failed')
-        setErrorMessage(startJson?.error || "Failed to start training.")
-        return
-      }
-
-      const nextStatus = (startJson?.status as TrainingStatus) || 'queued'
-      setTrainingStatus(nextStatus)
-
-      if (nextStatus === 'completed') {
-        setShowConfetti(true)
-        setTimeout(() => setShowConfetti(false), 3000)
-      }
+     
+     
     } catch (err) {
       console.error("Start training error:", err)
       setTrainingStatus('failed')
