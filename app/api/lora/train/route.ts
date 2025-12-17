@@ -1,74 +1,111 @@
 import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabaseAdmin"
+import fs from "fs/promises"
+import path from "path"
 
 export async function POST(req: Request) {
   try {
+    /* ─────────────────────────────
+       AUTH
+    ───────────────────────────── */
     const authHeader = req.headers.get("authorization")
     if (!authHeader) {
-      return NextResponse.json(
-        { error: "Missing Authorization header" },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 })
     }
 
     const token = authHeader.replace("Bearer ", "")
-    const {
-      data: { user },
-      error: authError,
-    } = await supabaseAdmin.auth.getUser(token)
+    const { data: { user }, error: authError } =
+      await supabaseAdmin.auth.getUser(token)
 
     if (authError || !user) {
-      return NextResponse.json(
-        { error: "Invalid or expired session" },
-        { status: 401 }
-      )
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 })
     }
 
-    const body = await req.json()
-    const {
-      identityName,
-      description = null,
-    } = body
+    /* ─────────────────────────────
+       BODY
+    ───────────────────────────── */
+    const formData = await req.formData()
 
-    if (!identityName) {
+    const identityName = formData.get("identityName")?.toString()
+    const description = formData.get("description")?.toString() ?? null
+    const images = formData.getAll("images") as File[]
+
+    if (!identityName || images.length < 10 || images.length > 20) {
       return NextResponse.json(
-        { error: "Missing required field: identityName" },
+        { error: "You must upload 10–20 images and provide an identity name" },
         { status: 400 }
       )
     }
 
-    // IMPORTANT:
-    // This endpoint ONLY creates a draft LoRA record.
-    // Images are handled separately by /api/lora/start-training
-
-    const { data, error } = await supabaseAdmin
+    /* ─────────────────────────────
+       CREATE DB ROW (DRAFT)
+    ───────────────────────────── */
+    const { data: lora, error: insertError } = await supabaseAdmin
       .from("user_loras")
       .insert({
         user_id: user.id,
         name: identityName,
         description,
-        status: "draft", // 🔒 NOT queued
+        image_count: images.length,
+        status: "draft",
       })
       .select()
       .single()
 
-    if (error) {
-      console.error("LoRA create error:", error)
+    if (insertError || !lora) {
+      console.error("LoRA insert error:", insertError)
+      return NextResponse.json({ error: "Failed to create LoRA record" }, { status: 500 })
+    }
+
+    const loraId = lora.id
+    const datasetDir = `/workspace/train_data/sf_${loraId}`
+
+    /* ─────────────────────────────
+       CREATE DATASET DIRECTORY
+    ───────────────────────────── */
+    await fs.mkdir(datasetDir, { recursive: true })
+
+    /* ─────────────────────────────
+       WRITE IMAGES
+    ───────────────────────────── */
+    let index = 1
+    for (const image of images) {
+      const buffer = Buffer.from(await image.arrayBuffer())
+      const filename = `img_${String(index).padStart(2, "0")}.jpg`
+      await fs.writeFile(path.join(datasetDir, filename), buffer)
+      index++
+    }
+
+    /* ─────────────────────────────
+       VERIFY DATASET
+    ───────────────────────────── */
+    const files = await fs.readdir(datasetDir)
+    if (files.length < 10) {
+      await supabaseAdmin
+        .from("user_loras")
+        .update({ status: "failed", error_message: "Dataset write failed" })
+        .eq("id", loraId)
+
       return NextResponse.json(
-        { error: error.message },
+        { error: "Dataset creation failed" },
         { status: 500 }
       )
     }
 
+    /* ─────────────────────────────
+       QUEUE JOB
+    ───────────────────────────── */
+    await supabaseAdmin
+      .from("user_loras")
+      .update({ status: "queued" })
+      .eq("id", loraId)
+
     return NextResponse.json({
-      lora_id: data.id,
-      status: data.status,
+      lora_id: loraId,
+      status: "queued",
     })
   } catch (err) {
-    console.error("LoRA train POST fatal error:", err)
-    return NextResponse.json(
-      { error: "Server error" },
-      { status: 500 }
-    )
+    console.error("LoRA train fatal error:", err)
+    return NextResponse.json({ error: "Server error" }, { status: 500 })
   }
 }
