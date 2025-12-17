@@ -46,7 +46,8 @@ export async function POST(req: Request) {
     }
 
     /* ─────────────────────────────
-       CREATE DB ROW (QUEUED)
+       CREATE DB ROW (DRAFT)
+       ⚠️ NOT QUEUED YET
     ───────────────────────────── */
     const { data: lora, error: insertError } = await supabaseAdmin
       .from("user_loras")
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
         name: identityName,
         description,
         image_count: images.length,
-        status: "queued", // 🔑 MUST be queued for worker
+        status: "draft",
       })
       .select()
       .single()
@@ -105,6 +106,14 @@ export async function POST(req: Request) {
         { status: 500 }
       )
     }
+
+    /* ─────────────────────────────
+       MARK QUEUED (SAFE)
+    ───────────────────────────── */
+    await supabaseAdmin
+      .from("user_loras")
+      .update({ status: "queued" })
+      .eq("id", loraId)
 
     /* ─────────────────────────────
        DONE — WORKER WILL PICK IT UP
