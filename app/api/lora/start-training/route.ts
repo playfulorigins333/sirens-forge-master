@@ -1,135 +1,63 @@
-import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { startLoraTrainingPod } from "@/lib/runpod";
+import { NextResponse } from "next/server"
+import { supabaseAdmin } from "@/lib/supabaseAdmin"
 
-/**
- * Starts LoRA training for a queued draft.
- * LAUNCH-SAFE FLOW:
- * - Auth required
- * - LoRA must belong to user
- * - Status must be queued
- * - Enforces ONE active training per user
- * - Spins up ONE RunPod training pod
- */
-export async function POST(req: NextRequest) {
+const POD_TRAIN_ENDPOINT = process.env.POD_TRAIN_ENDPOINT!
+// example: http://127.0.0.1:8000/train
+
+export async function POST(req: Request) {
   try {
-    /* ────────────────────────────────
-       1️⃣ AUTH
-    ──────────────────────────────── */
-    const authHeader = req.headers.get("authorization");
-
-    if (!authHeader) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const token = authHeader.replace("Bearer ", "");
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabaseAdmin.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
-    }
-
-    /* ────────────────────────────────
-       2️⃣ INPUT
-    ──────────────────────────────── */
-    const body = await req.json();
-    const { lora_id } = body;
+    const { lora_id } = await req.json()
 
     if (!lora_id) {
       return NextResponse.json(
         { error: "Missing lora_id" },
         { status: 400 }
-      );
+      )
     }
 
-    /* ────────────────────────────────
-       3️⃣ VERIFY LORA
-    ──────────────────────────────── */
-    const { data: lora, error: loraError } = await supabaseAdmin
-      .from("user_loras")
-      .select("id, status")
-      .eq("id", lora_id)
-      .eq("user_id", user.id)
-      .single();
-
-    if (loraError || !lora) {
-      return NextResponse.json(
-        { error: "LoRA not found" },
-        { status: 404 }
-      );
-    }
-
-    if (lora.status !== "queued") {
-      return NextResponse.json(
-        { error: "LoRA is not ready to start training" },
-        { status: 409 }
-      );
-    }
-
-    /* ────────────────────────────────
-       4️⃣ SINGLE ACTIVE TRAINING ENFORCEMENT
-    ──────────────────────────────── */
-    const { data: activeTraining } = await supabaseAdmin
-      .from("user_loras")
-      .select("id")
-      .eq("user_id", user.id)
-      .in("status", ["training"])
-      .maybeSingle();
-
-    if (activeTraining) {
-      return NextResponse.json(
-        { error: "Another LoRA is already training" },
-        { status: 409 }
-      );
-    }
-
-    /* ────────────────────────────────
-       5️⃣ FLIP STATUS → TRAINING
-    ──────────────────────────────── */
+    // 1️⃣ Mark as training immediately
     const { error: updateError } = await supabaseAdmin
       .from("user_loras")
-      .update({
-        status: "training",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", lora_id);
+      .update({ status: "training" })
+      .eq("id", lora_id)
 
     if (updateError) {
-      console.error("Failed to update LoRA status:", updateError);
+      console.error("Status update failed:", updateError)
       return NextResponse.json(
-        { error: "Failed to start training" },
+        { error: "Failed to update status" },
         { status: 500 }
-      );
+      )
     }
 
-    /* ────────────────────────────────
-       6️⃣ START RUNPOD TRAINING POD
-    ──────────────────────────────── */
-    const pod = await startLoraTrainingPod({
-      loraId: lora_id,
-      userId: user.id,
-      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    });
+    // 2️⃣ Notify the pod
+    const podRes = await fetch(POD_TRAIN_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lora_id }),
+    })
 
-    /* ────────────────────────────────
-       7️⃣ RESPONSE
-    ──────────────────────────────── */
-    return NextResponse.json({
-      ok: true,
-      lora_id,
-      status: "training",
-      pod_id: pod.id,
-    });
+    if (!podRes.ok) {
+      const text = await podRes.text()
+      console.error("Pod rejected job:", text)
+
+      await supabaseAdmin
+        .from("user_loras")
+        .update({ status: "failed" })
+        .eq("id", lora_id)
+
+      return NextResponse.json(
+        { error: "Pod rejected training job" },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ status: "training" })
+
   } catch (err) {
-    console.error("Start training error:", err);
+    console.error("start-training fatal error:", err)
     return NextResponse.json(
-      { error: "Unexpected server error" },
+      { error: "Server error" },
       { status: 500 }
-    );
+    )
   }
 }
