@@ -3,18 +3,44 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin"
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
+    const authHeader = req.headers.get("authorization")
+    if (!authHeader) {
+      return NextResponse.json(
+        { error: "Missing Authorization header" },
+        { status: 401 }
+      )
+    }
 
+    const token = authHeader.replace("Bearer ", "")
     const {
-      user_id,
-      name,
+      data: { user },
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(token)
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Invalid or expired session" },
+        { status: 401 }
+      )
+    }
+
+    const body = await req.json()
+    const {
+      identityName,
       description = null,
-      image_count = 20,
+      imageCount,
     } = body
 
-    if (!user_id || !name) {
+    if (!identityName || typeof imageCount !== "number") {
       return NextResponse.json(
-        { error: "Missing required fields: user_id, name" },
+        { error: "Missing required fields: identityName, imageCount" },
+        { status: 400 }
+      )
+    }
+
+    if (imageCount < 10 || imageCount > 20) {
+      return NextResponse.json(
+        { error: "Image count must be between 10 and 20" },
         { status: 400 }
       )
     }
@@ -22,10 +48,10 @@ export async function POST(req: Request) {
     const { data, error } = await supabaseAdmin
       .from("user_loras")
       .insert({
-        user_id,
-        name,
+        user_id: user.id,
+        name: identityName,
         description,
-        image_count,
+        image_count: imageCount,
         status: "queued",
       })
       .select()
