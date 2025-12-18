@@ -3,15 +3,15 @@
 SirensForge - Always-on LoRA Training Worker
 OPTION B — STORAGE HANDOFF (REST ONLY)
 
-Flow:
-1) Poll Supabase (REST) FIFO for user_loras.status='queued'
-2) Atomically claim job -> status='training'
-3) Download images from Supabase Storage via signed URLs
-4) Build local dataset (sd-scripts compatible):
-     /workspace/train_data/sf_<lora_id>/concept/*.jpg
-   (train_data_dir MUST be the parent: /workspace/train_data/sf_<lora_id>)
-5) Run sd-scripts
-6) Update job -> completed / failed
+LOCKED BEHAVIOR:
+- Image count: 10–20
+- repeat = round(1200 / image_count)
+- sd-scripts structure:
+    train_data_dir/
+      concept_<repeat>/
+        img_*.jpg
+- --train_data_dir MUST be the parent directory
+- NEVER hard-code max_train_steps
 """
 
 import os
@@ -46,12 +46,6 @@ SUPABASE_KEY = require_env("SUPABASE_SERVICE_ROLE_KEY")
 
 PRETRAINED_MODEL = require_env("PRETRAINED_MODEL")
 VAE_PATH = require_env("VAE_PATH")
-
-# Optional sanity checks (won't break if you already know paths are good)
-if not os.path.exists(PRETRAINED_MODEL):
-    raise RuntimeError(f"PRETRAINED_MODEL not found: {PRETRAINED_MODEL}")
-if not os.path.exists(VAE_PATH):
-    raise RuntimeError(f"VAE_PATH not found: {VAE_PATH}")
 
 STORAGE_BUCKET = os.getenv("LORA_DATASET_BUCKET", "lora-datasets")
 STORAGE_PREFIX = os.getenv("LORA_DATASET_PREFIX_ROOT", "lora_datasets")
@@ -99,7 +93,7 @@ def sb_patch(path: str, payload: Dict[str, Any], params: Dict[str, Any]):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Storage helpers (SIGNED URL FIX + /storage/v1 DOWNLOAD)
+# Storage helpers
 # ──────────────────────────────────────────────────────────────────────────────
 def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
     r = requests.post(
@@ -113,13 +107,6 @@ def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
 
 
 def signed_download_url(path: str) -> str:
-    """
-    Supabase returns signedURL as a RELATIVE path like:
-      /object/sign/<bucket>/<path>?token=...
-
-    You must download from:
-      {SUPABASE_URL}/storage/v1{signedURL}
-    """
     r = requests.post(
         f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}",
         headers=HEADERS,
@@ -132,37 +119,19 @@ def signed_download_url(path: str) -> str:
     if not signed:
         raise RuntimeError("Supabase did not return signedURL")
 
-    # Make absolute + ensure /storage/v1 prefix
     if signed.startswith("/"):
         signed = f"{SUPABASE_URL}/storage/v1{signed}"
-    elif signed.startswith("http"):
-        # If Supabase ever returns absolute (rare), still ensure it has /storage/v1
-        if "/storage/v1/" not in signed:
-            signed = signed.replace(SUPABASE_URL, f"{SUPABASE_URL}/storage/v1", 1)
 
     return signed
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Dataset handling (sd-scripts expects parent dir containing folders with images)
+# Dataset handling (CRITICAL FIX)
 # ──────────────────────────────────────────────────────────────────────────────
 def prepare_dataset(job_id: str) -> str:
-    """
-    sd-scripts expects:
-      train_data_dir/
-        concept/
-          img_1.jpg ...
-
-    So:
-      base_dir   = /workspace/train_data/sf_<job_id>
-      concept_dir= /workspace/train_data/sf_<job_id>/concept
-      --train_data_dir MUST be base_dir
-    """
     base_dir = f"{LOCAL_TRAIN_ROOT}/sf_{job_id}"
-    concept_dir = f"{base_dir}/concept"
-
     shutil.rmtree(base_dir, ignore_errors=True)
-    os.makedirs(concept_dir, exist_ok=True)
+    os.makedirs(base_dir, exist_ok=True)
 
     prefix = f"{STORAGE_PREFIX}/{job_id}"
     objects = list_storage_objects(prefix)
@@ -171,6 +140,10 @@ def prepare_dataset(job_id: str) -> str:
     if not files:
         raise RuntimeError(f"No images found in storage for job {job_id}")
 
+    # Download all images first
+    temp_dir = f"{base_dir}/_raw"
+    os.makedirs(temp_dir, exist_ok=True)
+
     for name in sorted(files):
         remote_path = f"{prefix}/{name}"
         url = signed_download_url(remote_path)
@@ -178,18 +151,33 @@ def prepare_dataset(job_id: str) -> str:
         r = requests.get(url, timeout=120)
         r.raise_for_status()
 
-        with open(f"{concept_dir}/{name}", "wb") as f:
+        with open(f"{temp_dir}/{name}", "wb") as f:
             f.write(r.content)
 
     images = [
-        f for f in os.listdir(concept_dir)
+        f for f in os.listdir(temp_dir)
         if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
     ]
 
-    if not (10 <= len(images) <= 20):
-        raise RuntimeError(f"Invalid image count: {len(images)}")
+    image_count = len(images)
+    if not (10 <= image_count <= 20):
+        raise RuntimeError(f"Invalid image count: {image_count}")
 
-    return base_dir  # IMPORTANT: parent dir, not concept_dir
+    # 🔐 LOCKED FORMULA
+    repeat = round(1200 / image_count)
+    effective = image_count * repeat
+
+    log(f"📊 Images={image_count} → repeat={repeat} → samples≈{effective}")
+
+    concept_dir = f"{base_dir}/concept_{repeat}"
+    os.makedirs(concept_dir, exist_ok=True)
+
+    for name in images:
+        shutil.move(f"{temp_dir}/{name}", f"{concept_dir}/{name}")
+
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+    return base_dir  # MUST be parent directory
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -210,7 +198,6 @@ def run_training(job_id: str, dataset_dir: str):
         "--resolution", "1024,1024",
         "--train_batch_size", "1",
         "--learning_rate", "1e-4",
-        "--max_train_steps", "1200",
         "--network_dim", "64",
         "--network_alpha", "32",
         "--mixed_precision", "fp16",
@@ -262,7 +249,6 @@ def worker_main():
             job_id = jobs[0]["id"]
             log(f"📥 Found job {job_id}")
 
-            # Claim job (best-effort atomic by including status=eq.queued filter)
             sb_patch(
                 "user_loras",
                 {"status": "training", "progress": 1, "error_message": None},
