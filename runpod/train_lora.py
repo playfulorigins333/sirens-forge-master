@@ -2,15 +2,6 @@
 """
 SirensForge - Always-on LoRA Training Worker
 OPTION B — STORAGE HANDOFF (REST ONLY)
-
-Flow:
-1) Poll Supabase (REST) FIFO for user_loras.status='queued'
-2) Atomically claim job -> status='training'
-3) Download images from Supabase Storage via signed URLs
-4) Build local dataset:
-     /workspace/train_data/sf_<lora_id>/
-5) Run sd-scripts
-6) Update job -> completed / failed
 """
 
 import os
@@ -18,9 +9,10 @@ import sys
 import time
 import shutil
 import subprocess
-from typing import Optional, Dict, Any, List
+from typing import Dict, Any, List
 
 import requests
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -56,7 +48,9 @@ STORAGE_PREFIX = os.getenv("LORA_DATASET_PREFIX_ROOT", "lora_datasets")
 LOCAL_TRAIN_ROOT = os.getenv("LORA_LOCAL_TRAIN_ROOT", "/workspace/train_data")
 OUTPUT_ROOT = os.getenv("LORA_OUTPUT_ROOT", "/workspace/output_loras")
 
-TRAIN_SCRIPT = os.getenv("TRAIN_SCRIPT", "/workspace/sd-scripts/sdxl_train_network.py")
+TRAIN_SCRIPT = os.getenv(
+    "TRAIN_SCRIPT", "/workspace/sd-scripts/sdxl_train_network.py"
+)
 PYTHON_BIN = os.getenv("PYTHON_BIN", sys.executable)
 
 POLL_SECONDS = int(os.getenv("LORA_POLL_SECONDS", "5"))
@@ -92,7 +86,8 @@ def sb_patch(path: str, payload: Dict[str, Any], params: Dict[str, Any]):
         timeout=10,
     )
     r.raise_for_status()
-    return r.json()
+    # Supabase PATCH returns 204 No Content — DO NOT call .json()
+    return True
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -143,7 +138,11 @@ def prepare_dataset(job_id: str) -> str:
         with open(os.path.join(local_dir, name), "wb") as f:
             f.write(r.content)
 
-    images = [f for f in os.listdir(local_dir) if f.lower().endswith((".jpg", ".png", ".jpeg", ".webp"))]
+    images = [
+        f
+        for f in os.listdir(local_dir)
+        if f.lower().endswith((".jpg", ".png", ".jpeg", ".webp"))
+    ]
     if not (10 <= len(images) <= 20):
         raise RuntimeError(f"Invalid image count: {len(images)}")
 
@@ -178,7 +177,9 @@ def run_training(job_id: str, dataset_dir: str):
     log("🔥 Launching training")
     log("CMD: " + " ".join(cmd))
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
     for line in proc.stdout:
         print(line, end="")
     if proc.wait() != 0:
