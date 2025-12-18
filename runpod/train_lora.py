@@ -3,12 +3,12 @@
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
 OPTION B — STORAGE HANDOFF (REST ONLY)
 
-✔ sd-scripts compatible dataset structure
+✔ sd-scripts compatible dataset structure (SDXL)
 ✔ Dynamic repeat/steps (~1200 effective samples)
 ✔ Explicit LoRA network module
-✔ Class token enforced (prevents silent dataset rejection)
+✔ NO SD1.5-only args (e.g. --class_tokens) for SDXL train script
 ✔ Hard-fail on bad dataset or fake success
-✔ Supabase schema-safe PATCH
+✔ Supabase schema-safe PATCH (auto-strips unknown columns)
 """
 
 import os
@@ -17,7 +17,7 @@ import time
 import json
 import shutil
 import subprocess
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Tuple
 
 import requests
 
@@ -89,14 +89,24 @@ def sanity_checks() -> None:
 # ─────────────────────────────────────────────────────────────
 # Supabase helpers
 # ─────────────────────────────────────────────────────────────
-def sb_get(path: str, params: Dict[str, Any]):
-    r = requests.get(f"{SUPABASE_URL}/rest/v1/{path}", headers=HEADERS, params=params, timeout=20)
+def sb_get(table: str, params: Dict[str, Any]):
+    r = requests.get(
+        f"{SUPABASE_URL}/rest/v1/{table}",
+        headers=HEADERS,
+        params=params,
+        timeout=20,
+    )
     r.raise_for_status()
     return r.json() if r.text else None
 
 
 def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
+    """
+    PATCH and auto-strip unknown columns if Supabase returns:
+    "Could not find the 'col' column of 'table' in the schema cache"
+    """
     working = dict(payload)
+
     for _ in range(6):
         r = requests.patch(
             f"{SUPABASE_URL}/rest/v1/{table}",
@@ -105,6 +115,7 @@ def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
             params=params,
             timeout=20,
         )
+
         if 200 <= r.status_code < 300:
             return r.json() if r.text else None
 
@@ -156,9 +167,14 @@ def signed_download_url(path: str) -> str:
 # Repeat logic
 # ─────────────────────────────────────────────────────────────
 def compute_repeat(image_count: int) -> Tuple[int, int]:
+    """
+    sd-scripts dataset repeats: directory name like "{repeat}_concept"
+    We choose repeat so effective samples ~ TARGET_SAMPLES.
+    """
     repeat = round(TARGET_SAMPLES / image_count)
     repeat = max(1, repeat)
-    return repeat, image_count * repeat
+    effective = image_count * repeat
+    return repeat, effective
 
 
 # ─────────────────────────────────────────────────────────────
@@ -171,31 +187,38 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
 
     prefix = f"{STORAGE_PREFIX}/{job_id}"
     objects = list_storage_objects(prefix)
-    files = [o["name"] for o in objects if o.get("name")]
 
+    # Supabase storage list returns objects with "name" (filename) under prefix
+    files = [o.get("name") for o in objects if o.get("name")]
     if not files:
         raise RuntimeError("No images in storage")
 
     tmp = os.path.join(base, "_tmp")
     os.makedirs(tmp, exist_ok=True)
 
-    for f in files:
-        url = signed_download_url(f"{prefix}/{f}")
+    # Download all files under prefix
+    for fname in files:
+        url = signed_download_url(f"{prefix}/{fname}")
         r = requests.get(url, timeout=180)
         r.raise_for_status()
-        with open(os.path.join(tmp, f), "wb") as out:
+        with open(os.path.join(tmp, fname), "wb") as out:
             out.write(r.content)
 
-    images = [f for f in os.listdir(tmp) if f.lower().endswith((".jpg", ".png", ".jpeg", ".webp"))]
+    # Filter for valid image extensions
+    images = [f for f in os.listdir(tmp) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))]
     if not (MIN_IMAGES <= len(images) <= MAX_IMAGES):
-        raise RuntimeError(f"Invalid image count: {len(images)}")
+        raise RuntimeError(f"Invalid image count: {len(images)} (must be {MIN_IMAGES}-{MAX_IMAGES})")
 
     repeat, effective = compute_repeat(len(images))
-    concept = os.path.join(base, f"{repeat}_concept")
-    os.makedirs(concept, exist_ok=True)
+
+    # sd-scripts expects: /train_data_dir/{repeat}_{concept}/imagefiles
+    concept_name = "concept"
+    concept_dir = os.path.join(base, f"{repeat}_{concept_name}")
+    os.makedirs(concept_dir, exist_ok=True)
 
     for f in images:
-        shutil.move(os.path.join(tmp, f), os.path.join(concept, f))
+        shutil.move(os.path.join(tmp, f), os.path.join(concept_dir, f))
+
     shutil.rmtree(tmp, ignore_errors=True)
 
     log(f"📊 Images={len(images)} → repeat={repeat} → samples≈{effective}")
@@ -203,7 +226,8 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
     return {
         "base_dir": base,
         "repeat": repeat,
-        "steps": effective,
+        "steps": effective,          # we align max_train_steps to effective samples
+        "concept_name": concept_name # kept for clarity / future caption logic
     }
 
 
@@ -217,6 +241,9 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     name = f"sf_{job_id}"
     artifact = os.path.join(out, f"{name}.safetensors")
 
+    # IMPORTANT:
+    # SDXL sd-scripts DOES NOT accept --class_tokens.
+    # Identity concepts must come from captions (.txt) next to images.
     cmd = [
         PYTHON_BIN,
         TRAIN_SCRIPT,
@@ -226,7 +253,6 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
         "--output_dir", out,
         "--output_name", name,
         "--network_module", NETWORK_MODULE,
-        "--class_tokens", "concept",
         "--resolution", "1024,1024",
         "--train_batch_size", "1",
         "--learning_rate", "1e-4",
@@ -242,6 +268,7 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     log("CMD: " + " ".join(cmd))
 
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert p.stdout is not None
     for line in p.stdout:
         print(line, end="")
 
@@ -258,26 +285,41 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
 # ─────────────────────────────────────────────────────────────
 # Worker loop
 # ─────────────────────────────────────────────────────────────
-def worker_main():
+def worker_main() -> None:
     sanity_checks()
     log("🚀 LoRA worker started (PRODUCTION)")
     log(f"NETWORK_MODULE={NETWORK_MODULE}")
 
+    last_idle_log = 0.0
+
     while True:
         try:
-            jobs = sb_get("user_loras", {"status": "eq.queued", "order": "created_at.asc", "limit": 1})
+            jobs = sb_get(
+                "user_loras",
+                {"status": "eq.queued", "order": "created_at.asc", "limit": 1},
+            )
+
             if not jobs:
+                now = time.time()
+                if now - last_idle_log >= IDLE_LOG_SECONDS:
+                    log("⏳ No queued jobs — waiting")
+                    last_idle_log = now
                 time.sleep(POLL_SECONDS)
                 continue
 
             job_id = jobs[0]["id"]
             log(f"📥 Found job {job_id}")
 
+            # Mark as training
             sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{job_id}"})
 
+            # Build dataset
             ds = prepare_dataset(job_id)
+
+            # Train
             artifact = run_training(job_id, ds)
 
+            # Mark completed
             sb_patch_safe(
                 "user_loras",
                 {"status": "completed", "progress": 100, "artifact_path": artifact},
@@ -287,6 +329,18 @@ def worker_main():
             log(f"✅ Completed job {job_id}")
 
         except Exception as e:
+            # BEST EFFORT: mark failed if we can (schema-safe)
+            try:
+                # job_id might not exist if failure happens before fetch
+                if "job_id" in locals() and job_id:
+                    sb_patch_safe(
+                        "user_loras",
+                        {"status": "failed", "progress": 0, "error_message": str(e)},
+                        {"id": f"eq.{job_id}"},
+                    )
+            except Exception as patch_err:
+                log(f"⚠️ Failed to PATCH failure status: {patch_err}")
+
             log(f"❌ Job failed: {e}")
             time.sleep(POLL_SECONDS)
 
