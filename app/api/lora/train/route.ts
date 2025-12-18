@@ -10,27 +10,21 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   try {
-    /* ──────────────────────────────────────────────
-       1️⃣ AUTHENTICATE USER (NOT SERVICE ROLE)
-    ────────────────────────────────────────────── */
+    // 🔐 Auth
     const authHeader = req.headers.get("authorization")
     if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }
 
     const userToken = authHeader.replace("Bearer ", "")
-    const {
-      data: { user },
-      error: userErr,
-    } = await supabase.auth.getUser(userToken)
+    const { data: { user }, error: userErr } =
+      await supabase.auth.getUser(userToken)
 
     if (userErr || !user) {
       return NextResponse.json({ error: "Invalid user" }, { status: 401 })
     }
 
-    /* ──────────────────────────────────────────────
-       2️⃣ PARSE JSON BODY (NO FORM DATA)
-    ────────────────────────────────────────────── */
+    // 📦 JSON body (NOT multipart)
     const body = await req.json()
 
     const {
@@ -40,7 +34,7 @@ export async function POST(req: Request) {
       image_count,
       storage_bucket,
       storage_prefix,
-    } = body ?? {}
+    } = body
 
     if (
       !lora_id ||
@@ -52,66 +46,41 @@ export async function POST(req: Request) {
       image_count > 20
     ) {
       return NextResponse.json(
-        { error: "Invalid training payload" },
+        { error: "Invalid input" },
         { status: 400 }
       )
     }
 
-    /* ──────────────────────────────────────────────
-       3️⃣ VERIFY DB ROW OWNERSHIP
-    ────────────────────────────────────────────── */
-    const { data: loraRow, error: fetchErr } = await supabase
-      .from("user_loras")
-      .select("id, user_id, status")
-      .eq("id", lora_id)
-      .single()
-
-    if (fetchErr || !loraRow) {
-      return NextResponse.json(
-        { error: "LoRA job not found" },
-        { status: 404 }
-      )
-    }
-
-    if (loraRow.user_id !== user.id) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
-    }
-
-    /* ──────────────────────────────────────────────
-       4️⃣ CONFIRM STORAGE DATA EXISTS
-    ────────────────────────────────────────────── */
+    // ✅ Confirm storage path exists (lightweight check)
     const { data: files, error: listErr } = await supabase.storage
       .from(storage_bucket)
-      .list(storage_prefix)
+      .list(storage_prefix, { limit: 1 })
 
-    if (listErr || !files || files.length < image_count) {
+    if (listErr || !files || files.length === 0) {
       return NextResponse.json(
         { error: "Training images not found in storage" },
         { status: 400 }
       )
     }
 
-    /* ──────────────────────────────────────────────
-       5️⃣ MARK JOB AS QUEUED
-    ────────────────────────────────────────────── */
+    // 🚦 Mark job queued (worker will pick it up)
     const { error: updateErr } = await supabase
       .from("user_loras")
       .update({
         status: "queued",
+        image_count,
         updated_at: new Date().toISOString(),
       })
       .eq("id", lora_id)
+      .eq("user_id", user.id)
 
     if (updateErr) {
       throw updateErr
     }
 
-    /* ──────────────────────────────────────────────
-       6️⃣ DONE — WORKER PICKS THIS UP
-    ────────────────────────────────────────────── */
     return NextResponse.json({
-      lora_id,
       status: "queued",
+      lora_id,
     })
   } catch (err) {
     console.error("LoRA train error:", err)
