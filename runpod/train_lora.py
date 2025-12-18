@@ -3,15 +3,18 @@
 SirensForge - Always-on LoRA Training Worker
 OPTION B — STORAGE HANDOFF (REST ONLY)
 
-LOCKED BEHAVIOR:
-- Image count: 10–20
-- repeat = round(1200 / image_count)
-- sd-scripts structure:
-    train_data_dir/
-      concept_<repeat>/
-        img_*.jpg
-- --train_data_dir MUST be the parent directory
-- NEVER hard-code max_train_steps
+Flow:
+1) Poll Supabase (REST) FIFO for user_loras.status='queued'
+2) Atomically claim job -> status='training'
+3) Download images from Supabase Storage via signed URLs
+4) Build local dataset (sd-scripts compatible):
+     /workspace/train_data/sf_<lora_id>/
+       <repeat>_concept/
+         img_*.jpg
+   (train_data_dir MUST be the parent: /workspace/train_data/sf_<lora_id>)
+5) Run sd-scripts
+6) Validate artifact exists (no fake completions)
+7) Update job -> completed / failed
 """
 
 import os
@@ -119,6 +122,7 @@ def signed_download_url(path: str) -> str:
     if not signed:
         raise RuntimeError("Supabase did not return signedURL")
 
+    # Supabase returns relative signedURL sometimes; must be downloaded via /storage/v1
     if signed.startswith("/"):
         signed = f"{SUPABASE_URL}/storage/v1{signed}"
 
@@ -126,9 +130,22 @@ def signed_download_url(path: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Dataset handling (CRITICAL FIX)
+# Dataset handling (sd-scripts repeat folder naming FIX)
 # ──────────────────────────────────────────────────────────────────────────────
-def prepare_dataset(job_id: str) -> str:
+def prepare_dataset(job_id: str) -> Dict[str, Any]:
+    """
+    sd-scripts expects repeats as: <repeat>_<conceptname>
+    Example:
+      /workspace/train_data/sf_<job_id>/120_concept/img_1.jpg ...
+
+    Returns:
+      {
+        "train_root": base_dir,          # pass to --train_data_dir
+        "image_count": N,
+        "repeat": R,
+        "concept_dir": ".../R_concept"
+      }
+    """
     base_dir = f"{LOCAL_TRAIN_ROOT}/sf_{job_id}"
     shutil.rmtree(base_dir, ignore_errors=True)
     os.makedirs(base_dir, exist_ok=True)
@@ -140,22 +157,19 @@ def prepare_dataset(job_id: str) -> str:
     if not files:
         raise RuntimeError(f"No images found in storage for job {job_id}")
 
-    # Download all images first
-    temp_dir = f"{base_dir}/_raw"
-    os.makedirs(temp_dir, exist_ok=True)
+    tmp_dir = f"{base_dir}/_raw"
+    os.makedirs(tmp_dir, exist_ok=True)
 
     for name in sorted(files):
         remote_path = f"{prefix}/{name}"
         url = signed_download_url(remote_path)
-
         r = requests.get(url, timeout=120)
         r.raise_for_status()
-
-        with open(f"{temp_dir}/{name}", "wb") as f:
+        with open(f"{tmp_dir}/{name}", "wb") as f:
             f.write(r.content)
 
     images = [
-        f for f in os.listdir(temp_dir)
+        f for f in os.listdir(tmp_dir)
         if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
     ]
 
@@ -163,38 +177,53 @@ def prepare_dataset(job_id: str) -> str:
     if not (10 <= image_count <= 20):
         raise RuntimeError(f"Invalid image count: {image_count}")
 
-    # 🔐 LOCKED FORMULA
+    # 🔒 LOCKED: dynamic repeat to ~1200 effective samples
     repeat = round(1200 / image_count)
     effective = image_count * repeat
-
     log(f"📊 Images={image_count} → repeat={repeat} → samples≈{effective}")
 
-    concept_dir = f"{base_dir}/concept_{repeat}"
+    concept_dir = f"{base_dir}/{repeat}_concept"
     os.makedirs(concept_dir, exist_ok=True)
 
     for name in images:
-        shutil.move(f"{temp_dir}/{name}", f"{concept_dir}/{name}")
+        shutil.move(f"{tmp_dir}/{name}", f"{concept_dir}/{name}")
 
-    shutil.rmtree(temp_dir, ignore_errors=True)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    return base_dir  # MUST be parent directory
+    # Final sanity: concept dir must contain images
+    final_images = [
+        f for f in os.listdir(concept_dir)
+        if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+    ]
+    if len(final_images) != image_count:
+        raise RuntimeError(f"Dataset move mismatch: expected {image_count}, got {len(final_images)}")
+
+    return {
+        "train_root": base_dir,
+        "image_count": image_count,
+        "repeat": repeat,
+        "concept_dir": concept_dir,
+    }
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Training
+# Training + Artifact Gate (NO fake completions)
 # ──────────────────────────────────────────────────────────────────────────────
-def run_training(job_id: str, dataset_dir: str):
+def run_training(job_id: str, train_root: str) -> str:
     out_dir = f"{OUTPUT_ROOT}/sf_{job_id}"
     os.makedirs(out_dir, exist_ok=True)
+
+    output_name = f"sf_{job_id}"
+    expected_file = f"{out_dir}/{output_name}.safetensors"
 
     cmd = [
         PYTHON_BIN,
         TRAIN_SCRIPT,
         "--pretrained_model_name_or_path", PRETRAINED_MODEL,
         "--vae", VAE_PATH,
-        "--train_data_dir", dataset_dir,
+        "--train_data_dir", train_root,
         "--output_dir", out_dir,
-        "--output_name", f"sf_{job_id}",
+        "--output_name", output_name,
         "--resolution", "1024,1024",
         "--train_batch_size", "1",
         "--learning_rate", "1e-4",
@@ -204,21 +233,43 @@ def run_training(job_id: str, dataset_dir: str):
         "--save_model_as", "safetensors",
     ]
 
+    # Print safely so flags can't "look glued"
     log("🔥 Starting training")
-    log("CMD: " + " ".join(cmd))
+    log("CMD (list): " + repr(cmd))
+    log("CMD (shell): " + " ".join(cmd))
 
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
+
+    saw_no_data = False
 
     for line in proc.stdout:
         print(line, end="")
+        if "No data found" in line:
+            saw_no_data = True
 
-    if proc.wait() != 0:
-        raise RuntimeError("Training process failed")
+    rc = proc.wait()
+    if rc != 0:
+        raise RuntimeError(f"Training process failed (exit={rc})")
+
+    # Hard gate: sd-scripts sometimes prints an error and can still exit weirdly.
+    if saw_no_data:
+        raise RuntimeError("Training aborted: No data found (dataset not detected by sd-scripts)")
+
+    # Artifact gate: MUST exist and be non-trivial size
+    if not os.path.exists(expected_file):
+        raise RuntimeError(f"Training produced no artifact: missing {expected_file}")
+
+    size_mb = os.path.getsize(expected_file) / (1024 * 1024)
+    if size_mb < 1.0:
+        raise RuntimeError(f"Training artifact too small ({size_mb:.2f} MB): {expected_file}")
+
+    return expected_file
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -255,14 +306,26 @@ def worker_main():
                 {"id": f"eq.{job_id}", "status": "eq.queued"},
             )
 
-            dataset_dir = prepare_dataset(job_id)
-            sb_patch("user_loras", {"progress": 15}, {"id": f"eq.{job_id}"})
+            ds = prepare_dataset(job_id)
+            sb_patch(
+                "user_loras",
+                {
+                    "progress": 15,
+                    "image_count": ds["image_count"],
+                    "repeat": ds["repeat"],
+                },
+                {"id": f"eq.{job_id}"},
+            )
 
-            run_training(job_id, dataset_dir)
+            artifact = run_training(job_id, ds["train_root"])
 
             sb_patch(
                 "user_loras",
-                {"status": "completed", "progress": 100},
+                {
+                    "status": "completed",
+                    "progress": 100,
+                    "artifact_path": artifact,
+                },
                 {"id": f"eq.{job_id}"},
             )
 
