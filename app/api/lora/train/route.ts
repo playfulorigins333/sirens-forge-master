@@ -10,6 +10,9 @@ const supabase = createClient(
 
 export async function POST(req: Request) {
   try {
+    /* ──────────────────────────────────────────────
+       1️⃣ AUTHENTICATE USER (NOT SERVICE ROLE)
+    ────────────────────────────────────────────── */
     const authHeader = req.headers.get("authorization")
     if (!authHeader?.startsWith("Bearer ")) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
@@ -25,56 +28,89 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Invalid user" }, { status: 401 })
     }
 
-    const formData = await req.formData()
-    const identityName = String(formData.get("identityName") || "").trim()
-    const description = String(formData.get("description") || "")
-    const images = formData.getAll("images") as File[]
+    /* ──────────────────────────────────────────────
+       2️⃣ PARSE JSON BODY (NO FORM DATA)
+    ────────────────────────────────────────────── */
+    const body = await req.json()
 
-    if (!identityName || images.length < 10 || images.length > 20) {
+    const {
+      lora_id,
+      identityName,
+      description,
+      image_count,
+      storage_bucket,
+      storage_prefix,
+    } = body ?? {}
+
+    if (
+      !lora_id ||
+      !identityName ||
+      !storage_bucket ||
+      !storage_prefix ||
+      typeof image_count !== "number" ||
+      image_count < 10 ||
+      image_count > 20
+    ) {
       return NextResponse.json(
-        { error: "Invalid input" },
+        { error: "Invalid training payload" },
         { status: 400 }
       )
     }
 
-    // 1️⃣ Create DB row FIRST
-    const { data: loraRow, error: insertErr } = await supabase
+    /* ──────────────────────────────────────────────
+       3️⃣ VERIFY DB ROW OWNERSHIP
+    ────────────────────────────────────────────── */
+    const { data: loraRow, error: fetchErr } = await supabase
       .from("user_loras")
-      .insert({
-        user_id: user.id,
-        name: identityName,
-        description,
-        status: "queued",
-      })
-      .select()
+      .select("id, user_id, status")
+      .eq("id", lora_id)
       .single()
 
-    if (insertErr || !loraRow) {
-      throw insertErr
+    if (fetchErr || !loraRow) {
+      return NextResponse.json(
+        { error: "LoRA job not found" },
+        { status: 404 }
+      )
     }
 
-    const loraId = loraRow.id
-    const basePath = `lora_datasets/${loraId}`
-
-    // 2️⃣ Upload images to storage
-    for (let i = 0; i < images.length; i++) {
-      const file = images[i]
-      const arrayBuffer = await file.arrayBuffer()
-
-      const { error: uploadErr } = await supabase.storage
-        .from("lora-datasets")
-        .upload(`${basePath}/img_${i + 1}.jpg`, arrayBuffer, {
-          contentType: file.type,
-          upsert: false,
-        })
-
-      if (uploadErr) {
-        throw uploadErr
-      }
+    if (loraRow.user_id !== user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 })
     }
 
+    /* ──────────────────────────────────────────────
+       4️⃣ CONFIRM STORAGE DATA EXISTS
+    ────────────────────────────────────────────── */
+    const { data: files, error: listErr } = await supabase.storage
+      .from(storage_bucket)
+      .list(storage_prefix)
+
+    if (listErr || !files || files.length < image_count) {
+      return NextResponse.json(
+        { error: "Training images not found in storage" },
+        { status: 400 }
+      )
+    }
+
+    /* ──────────────────────────────────────────────
+       5️⃣ MARK JOB AS QUEUED
+    ────────────────────────────────────────────── */
+    const { error: updateErr } = await supabase
+      .from("user_loras")
+      .update({
+        status: "queued",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", lora_id)
+
+    if (updateErr) {
+      throw updateErr
+    }
+
+    /* ──────────────────────────────────────────────
+       6️⃣ DONE — WORKER PICKS THIS UP
+    ────────────────────────────────────────────── */
     return NextResponse.json({
-      lora_id: loraId,
+      lora_id,
       status: "queued",
     })
   } catch (err) {
