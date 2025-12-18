@@ -2,15 +2,6 @@
 """
 SirensForge - Always-on LoRA Training Worker
 OPTION B — STORAGE HANDOFF (REST ONLY)
-
-Flow:
-1) Poll Supabase (REST) FIFO for user_loras.status='queued'
-2) Atomically claim job -> status='training'
-3) Download images from Supabase Storage via signed URLs
-4) Build local dataset:
-     /workspace/train_data/sf_<lora_id>/
-5) Run sd-scripts
-6) Update job -> completed / failed
 """
 
 import os
@@ -40,31 +31,23 @@ def require_env(name: str) -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 # Config
 # ──────────────────────────────────────────────────────────────────────────────
-SUPABASE_URL = require_env("SUPABASE_URL")
+SUPABASE_URL = require_env("SUPABASE_URL").rstrip("/")
 SUPABASE_KEY = require_env("SUPABASE_SERVICE_ROLE_KEY")
 
 PRETRAINED_MODEL = require_env("PRETRAINED_MODEL")
 VAE_PATH = require_env("VAE_PATH")
 
-if not os.path.exists(PRETRAINED_MODEL):
-    raise RuntimeError(f"PRETRAINED_MODEL not found: {PRETRAINED_MODEL}")
-if not os.path.exists(VAE_PATH):
-    raise RuntimeError(f"VAE_PATH not found: {VAE_PATH}")
-
 STORAGE_BUCKET = os.getenv("LORA_DATASET_BUCKET", "lora-datasets")
 STORAGE_PREFIX = os.getenv("LORA_DATASET_PREFIX_ROOT", "lora_datasets")
 
-LOCAL_TRAIN_ROOT = os.getenv("LORA_LOCAL_TRAIN_ROOT", "/workspace/train_data")
-OUTPUT_ROOT = os.getenv("LORA_OUTPUT_ROOT", "/workspace/output_loras")
+LOCAL_TRAIN_ROOT = "/workspace/train_data"
+OUTPUT_ROOT = "/workspace/output_loras"
 
-TRAIN_SCRIPT = os.getenv(
-    "TRAIN_SCRIPT",
-    "/workspace/sd-scripts/sdxl_train_network.py"
-)
-PYTHON_BIN = os.getenv("PYTHON_BIN", sys.executable)
+TRAIN_SCRIPT = "/workspace/sd-scripts/sdxl_train_network.py"
+PYTHON_BIN = sys.executable
 
-POLL_SECONDS = int(os.getenv("LORA_POLL_SECONDS", "5"))
-IDLE_LOG_SECONDS = int(os.getenv("LORA_IDLE_LOG_SECONDS", "30"))
+POLL_SECONDS = 5
+IDLE_LOG_SECONDS = 30
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -88,10 +71,6 @@ def sb_get(path: str, params: Dict[str, Any] = None):
 
 
 def sb_patch(path: str, payload: Dict[str, Any], params: Dict[str, Any]):
-    """
-    Supabase PATCH returns 204 No Content.
-    DO NOT call r.json().
-    """
     r = requests.patch(
         f"{SUPABASE_URL}/rest/v1/{path}",
         headers=HEADERS,
@@ -104,7 +83,7 @@ def sb_patch(path: str, payload: Dict[str, Any], params: Dict[str, Any]):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Storage helpers
+# Storage helpers (FIXED)
 # ──────────────────────────────────────────────────────────────────────────────
 def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
     r = requests.post(
@@ -117,7 +96,11 @@ def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
     return r.json()
 
 
-def signed_url(path: str) -> str:
+def signed_download_url(path: str) -> str:
+    """
+    CRITICAL FIX:
+    - Signed URLs must be fetched AND downloaded from /storage/v1
+    """
     r = requests.post(
         f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}",
         headers=HEADERS,
@@ -125,24 +108,22 @@ def signed_url(path: str) -> str:
         timeout=10,
     )
     r.raise_for_status()
-    data = r.json()
 
-    url = data.get("signedURL")
-    if not url:
-        raise RuntimeError("Missing signedURL from Supabase")
+    signed = r.json().get("signedURL")
+    if not signed:
+        raise RuntimeError("Supabase did not return signedURL")
 
-    # Supabase returns relative paths sometimes — fix it
-    if url.startswith("/"):
-        url = f"{SUPABASE_URL}{url}"
+    if signed.startswith("/"):
+        signed = f"{SUPABASE_URL}/storage/v1{signed}"
 
-    return url
+    return signed
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dataset handling
 # ──────────────────────────────────────────────────────────────────────────────
 def prepare_dataset(job_id: str) -> str:
-    local_dir = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{job_id}")
+    local_dir = f"{LOCAL_TRAIN_ROOT}/sf_{job_id}"
     shutil.rmtree(local_dir, ignore_errors=True)
     os.makedirs(local_dir, exist_ok=True)
 
@@ -151,16 +132,16 @@ def prepare_dataset(job_id: str) -> str:
 
     files = [o["name"] for o in objects if o.get("name")]
     if not files:
-        raise RuntimeError(f"No files in storage for job {job_id}")
+        raise RuntimeError(f"No images found in storage for job {job_id}")
 
     for name in sorted(files):
         remote_path = f"{prefix}/{name}"
-        url = signed_url(remote_path)
+        url = signed_download_url(remote_path)
 
         r = requests.get(url, timeout=120)
         r.raise_for_status()
 
-        with open(os.path.join(local_dir, name), "wb") as f:
+        with open(f"{local_dir}/{name}", "wb") as f:
             f.write(r.content)
 
     images = [
@@ -178,7 +159,7 @@ def prepare_dataset(job_id: str) -> str:
 # Training
 # ──────────────────────────────────────────────────────────────────────────────
 def run_training(job_id: str, dataset_dir: str):
-    out_dir = os.path.join(OUTPUT_ROOT, f"sf_{job_id}")
+    out_dir = f"{OUTPUT_ROOT}/sf_{job_id}"
     os.makedirs(out_dir, exist_ok=True)
 
     cmd = [
@@ -199,15 +180,8 @@ def run_training(job_id: str, dataset_dir: str):
         "--save_model_as", "safetensors",
     ]
 
-    log("🔥 Launching training")
-    log("CMD: " + " ".join(cmd))
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    log("🔥 Starting training")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     for line in proc.stdout:
         print(line, end="")
@@ -220,9 +194,7 @@ def run_training(job_id: str, dataset_dir: str):
 # Worker loop
 # ──────────────────────────────────────────────────────────────────────────────
 def worker_main():
-    log("🚀 LoRA worker started (REST + Storage handoff)")
-    log(f"Using PRETRAINED_MODEL={PRETRAINED_MODEL}")
-    log(f"Using VAE_PATH={VAE_PATH}")
+    log("🚀 LoRA worker started")
 
     last_idle = 0
 
@@ -231,11 +203,7 @@ def worker_main():
         try:
             jobs = sb_get(
                 "user_loras",
-                {
-                    "status": "eq.queued",
-                    "order": "created_at.asc",
-                    "limit": 1,
-                },
+                {"status": "eq.queued", "order": "created_at.asc", "limit": 1},
             )
 
             if not jobs:
@@ -245,8 +213,7 @@ def worker_main():
                 time.sleep(POLL_SECONDS)
                 continue
 
-            job = jobs[0]
-            job_id = job["id"]
+            job_id = jobs[0]["id"]
             log(f"📥 Found job {job_id}")
 
             sb_patch(
@@ -255,9 +222,7 @@ def worker_main():
                 {"id": f"eq.{job_id}", "status": "eq.queued"},
             )
 
-            log("📦 Downloading dataset")
             dataset_dir = prepare_dataset(job_id)
-
             sb_patch("user_loras", {"progress": 15}, {"id": f"eq.{job_id}"})
 
             run_training(job_id, dataset_dir)
@@ -272,17 +237,15 @@ def worker_main():
 
         except Exception as e:
             msg = str(e)
-            if job_id:
-                try:
-                    sb_patch(
-                        "user_loras",
-                        {"status": "failed", "error_message": msg, "progress": 0},
-                        {"id": f"eq.{job_id}"},
-                    )
-                except Exception as ee:
-                    log(f"❌ Failed to mark failure: {ee}")
-
             log(f"❌ Job failed: {msg}")
+
+            if job_id:
+                sb_patch(
+                    "user_loras",
+                    {"status": "failed", "error_message": msg, "progress": 0},
+                    {"id": f"eq.{job_id}"},
+                )
+
             time.sleep(POLL_SECONDS)
 
 
