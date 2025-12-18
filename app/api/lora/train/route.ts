@@ -1,123 +1,87 @@
 import { NextResponse } from "next/server"
-import { supabaseAdmin } from "@/lib/supabaseAdmin"
+import { createClient } from "@supabase/supabase-js"
 
 export const runtime = "nodejs"
 
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
+
 export async function POST(req: Request) {
   try {
-    /* ─────────────────────────────
-       AUTH
-    ───────────────────────────── */
     const authHeader = req.headers.get("authorization")
-    if (!authHeader) {
-      return NextResponse.json({ error: "Missing Authorization header" }, { status: 401 })
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }
 
-    const token = authHeader.replace("Bearer ", "")
+    const userToken = authHeader.replace("Bearer ", "")
     const {
       data: { user },
-      error: authError,
-    } = await supabaseAdmin.auth.getUser(token)
+      error: userErr,
+    } = await supabase.auth.getUser(userToken)
 
-    if (authError || !user) {
-      return NextResponse.json({ error: "Invalid session" }, { status: 401 })
+    if (userErr || !user) {
+      return NextResponse.json({ error: "Invalid user" }, { status: 401 })
     }
 
-    /* ─────────────────────────────
-       BODY (multipart/form-data)
-    ───────────────────────────── */
     const formData = await req.formData()
-
-    const identityName = formData.get("identityName")?.toString()
-    const description = formData.get("description")?.toString() ?? null
+    const identityName = String(formData.get("identityName") || "").trim()
+    const description = String(formData.get("description") || "")
     const images = formData.getAll("images") as File[]
 
     if (!identityName || images.length < 10 || images.length > 20) {
       return NextResponse.json(
-        { error: "You must upload 10–20 images and provide an identity name" },
+        { error: "Invalid input" },
         { status: 400 }
       )
     }
 
-    /* ─────────────────────────────
-       CREATE DB ROW (QUEUED)
-    ───────────────────────────── */
-    const { data: lora, error: insertError } = await supabaseAdmin
+    // 1️⃣ Create DB row FIRST
+    const { data: loraRow, error: insertErr } = await supabase
       .from("user_loras")
       .insert({
         user_id: user.id,
         name: identityName,
         description,
-        image_count: images.length,
         status: "queued",
-        progress: 0,
       })
       .select()
       .single()
 
-    if (insertError || !lora) {
-      console.error("LoRA insert error:", insertError)
-      return NextResponse.json({ error: "Failed to create LoRA record" }, { status: 500 })
+    if (insertErr || !loraRow) {
+      throw insertErr
     }
 
-    const loraId = lora.id
+    const loraId = loraRow.id
+    const basePath = `lora_datasets/${loraId}`
 
-    /* ─────────────────────────────
-       UPLOAD IMAGES TO STORAGE (FIXED)
-    ───────────────────────────── */
-    const uploadedPaths: string[] = []
+    // 2️⃣ Upload images to storage
+    for (let i = 0; i < images.length; i++) {
+      const file = images[i]
+      const arrayBuffer = await file.arrayBuffer()
 
-    let index = 1
-    for (const image of images) {
-      const arrayBuffer = await image.arrayBuffer()
-      const fileBytes = new Uint8Array(arrayBuffer)
-
-      const filePath = `lora_datasets/${loraId}/img_${String(index).padStart(2, "0")}.jpg`
-
-      const { error: uploadError } = await supabaseAdmin.storage
+      const { error: uploadErr } = await supabase.storage
         .from("lora-datasets")
-        .upload(filePath, fileBytes, {
-          contentType: image.type || "image/jpeg",
+        .upload(`${basePath}/img_${i + 1}.jpg`, arrayBuffer, {
+          contentType: file.type,
           upsert: false,
         })
 
-      if (uploadError) {
-        console.error("Storage upload failed:", uploadError)
-
-        await supabaseAdmin
-          .from("user_loras")
-          .update({
-            status: "failed",
-            error_message: `Storage upload failed: ${uploadError.message}`,
-          })
-          .eq("id", loraId)
-
-        return NextResponse.json({ error: "Image upload failed" }, { status: 500 })
+      if (uploadErr) {
+        throw uploadErr
       }
-
-      uploadedPaths.push(filePath)
-      index++
     }
 
-    /* ─────────────────────────────
-       SAVE STORAGE PATHS
-    ───────────────────────────── */
-    await supabaseAdmin
-      .from("user_loras")
-      .update({
-        dataset_paths: uploadedPaths,
-      })
-      .eq("id", loraId)
-
-    /* ─────────────────────────────
-       DONE
-    ───────────────────────────── */
     return NextResponse.json({
       lora_id: loraId,
       status: "queued",
     })
   } catch (err) {
-    console.error("LoRA train fatal error:", err)
-    return NextResponse.json({ error: "Server error" }, { status: 500 })
+    console.error("LoRA train error:", err)
+    return NextResponse.json(
+      { error: "Server error" },
+      { status: 500 }
+    )
   }
 }
