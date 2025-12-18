@@ -253,7 +253,6 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
         "--network_module", NETWORK_MODULE,
         "--resolution", "1024,1024",
 
-        # ✅ SDXL BUCKET MODE (ONLY CHANGE)
         "--enable_bucket",
         "--min_bucket_reso", "512",
         "--max_bucket_reso", "1024",
@@ -265,6 +264,10 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
         "--network_dim", "64",
         "--network_alpha", "32",
         "--mixed_precision", "fp16",
+
+        # ✅ SINGLE MEMORY FIX
+        "--gradient_checkpointing",
+
         "--save_model_as", "safetensors",
         "--save_every_n_steps", "200",
     ]
