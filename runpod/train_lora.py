@@ -64,9 +64,8 @@ MIN_IMAGES = 10
 MAX_IMAGES = 20
 TARGET_SAMPLES = 1200
 
-# Caption enforcement (SDXL-safe)
 CONCEPT_TOKEN = os.getenv("LORA_CONCEPT_TOKEN", "concept")
-CAPTION_EXTENSION = os.getenv("LORA_CAPTION_EXTENSION", ".txt")  # passed to sd-scripts
+CAPTION_EXTENSION = os.getenv("LORA_CAPTION_EXTENSION", ".txt")
 
 ARTIFACT_MIN_BYTES = 2 * 1024 * 1024  # 2MB
 
@@ -93,7 +92,7 @@ def sanity_checks() -> None:
             raise RuntimeError(f"{name} not found: {p}")
 
     if not CAPTION_EXTENSION.startswith("."):
-        raise RuntimeError("LORA_CAPTION_EXTENSION must start with '.' (e.g. .txt)")
+        raise RuntimeError("LORA_CAPTION_EXTENSION must start with '.'")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -111,12 +110,7 @@ def sb_get(table: str, params: Dict[str, Any]):
 
 
 def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
-    """
-    PATCH and auto-strip unknown columns if Supabase returns:
-    "Could not find the 'col' column of 'table' in the schema cache"
-    """
     working = dict(payload)
-
     for _ in range(6):
         r = requests.patch(
             f"{SUPABASE_URL}/rest/v1/{table}",
@@ -151,9 +145,6 @@ def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
 # Storage helpers
 # ─────────────────────────────────────────────────────────────
 def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
-    """
-    Returns objects under prefix. Supabase may include folders; we filter later.
-    """
     r = requests.post(
         f"{SUPABASE_URL}/storage/v1/object/list/{STORAGE_BUCKET}",
         headers=HEADERS,
@@ -165,9 +156,6 @@ def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
 
 
 def signed_download_url(path: str) -> str:
-    """
-    path is the full object key inside the bucket (e.g. lora_datasets/<job>/<file>)
-    """
     r = requests.post(
         f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}",
         headers=HEADERS,
@@ -183,95 +171,64 @@ def signed_download_url(path: str) -> str:
 # Repeat logic
 # ─────────────────────────────────────────────────────────────
 def compute_repeat(image_count: int) -> Tuple[int, int]:
-    """
-    sd-scripts repeats: directory name like "{repeat}_concept"
-    Choose repeat so effective samples ~= TARGET_SAMPLES.
-    """
-    repeat = round(TARGET_SAMPLES / image_count)
-    repeat = max(1, repeat)
-    effective = image_count * repeat
-    return repeat, effective
+    repeat = max(1, round(TARGET_SAMPLES / image_count))
+    return repeat, image_count * repeat
 
 
 # ─────────────────────────────────────────────────────────────
 # Dataset builder
 # ─────────────────────────────────────────────────────────────
 def _write_caption_for_image(image_path: str) -> None:
-    """
-    SDXL concept enforcement: create a caption file next to the image.
-    image.jpg -> image.txt (or configured extension) containing "concept"
-    """
-    root, _ext = os.path.splitext(image_path)
-    cap_path = root + CAPTION_EXTENSION
-    with open(cap_path, "w", encoding="utf-8") as f:
+    root, _ = os.path.splitext(image_path)
+    with open(root + CAPTION_EXTENSION, "w", encoding="utf-8") as f:
         f.write(CONCEPT_TOKEN)
 
 
 def prepare_dataset(job_id: str) -> Dict[str, Any]:
-    """
-    Creates:
-      /workspace/train_data/sf_<job_id>/
-        {repeat}_concept/
-          img1.jpg
-          img1.txt  (contains "concept")
-          ...
-    """
     base = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{job_id}")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
 
     prefix = f"{STORAGE_PREFIX}/{job_id}"
     objects = list_storage_objects(prefix)
-
-    # "name" is usually the filename relative to prefix (not always guaranteed)
     names = [o.get("name") for o in objects if o.get("name")]
+
     if not names:
         raise RuntimeError("No files found in storage for this job")
 
     tmp = os.path.join(base, "_tmp")
     os.makedirs(tmp, exist_ok=True)
 
-    # Download everything under prefix; we filter to images after download
     for name in names:
-        # Some listings may return nested paths; preserve basename only for local tmp
-        local_name = os.path.basename(name)
-        object_key = f"{prefix}/{name}".replace("//", "/")
-
-        url = signed_download_url(object_key)
+        local = os.path.basename(name)
+        url = signed_download_url(f"{prefix}/{name}".replace("//", "/"))
         r = requests.get(url, timeout=180)
         r.raise_for_status()
-        with open(os.path.join(tmp, local_name), "wb") as out:
-            out.write(r.content)
+        with open(os.path.join(tmp, local), "wb") as f:
+            f.write(r.content)
 
     images = [f for f in os.listdir(tmp) if f.lower().endswith(IMAGE_EXTS)]
-    img_count = len(images)
+    count = len(images)
 
-    if not (MIN_IMAGES <= img_count <= MAX_IMAGES):
-        raise RuntimeError(f"Invalid image count: {img_count} (must be {MIN_IMAGES}-{MAX_IMAGES})")
+    if not (MIN_IMAGES <= count <= MAX_IMAGES):
+        raise RuntimeError(f"Invalid image count: {count}")
 
-    repeat, effective = compute_repeat(img_count)
-
-    # sd-scripts repeats folder
+    repeat, effective = compute_repeat(count)
     concept_dir = os.path.join(base, f"{repeat}_{CONCEPT_TOKEN}")
     os.makedirs(concept_dir, exist_ok=True)
 
-    # Move images + create captions
-    for fname in images:
-        src = os.path.join(tmp, fname)
-        dst = os.path.join(concept_dir, fname)
+    for img in images:
+        src = os.path.join(tmp, img)
+        dst = os.path.join(concept_dir, img)
         shutil.move(src, dst)
         _write_caption_for_image(dst)
 
     shutil.rmtree(tmp, ignore_errors=True)
 
-    log(f"📊 Images={img_count} → repeat={repeat} → samples≈{effective}")
+    log(f"📊 Images={count} → repeat={repeat} → samples≈{effective}")
     log(f"🧾 Captions: {CAPTION_EXTENSION} = '{CONCEPT_TOKEN}'")
 
-    return {
-        "base_dir": base,
-        "repeat": repeat,
-        "steps": effective,
-    }
+    return {"base_dir": base, "steps": effective}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -284,18 +241,24 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     name = f"sf_{job_id}"
     artifact = os.path.join(out, f"{name}.safetensors")
 
-    # SDXL sd-scripts: concept must come from captions, not --class_tokens
     cmd = [
         PYTHON_BIN,
         TRAIN_SCRIPT,
         "--pretrained_model_name_or_path", PRETRAINED_MODEL,
         "--vae", VAE_PATH,
         "--train_data_dir", ds["base_dir"],
-        "--caption_extension", CAPTION_EXTENSION,  # <- CRITICAL
+        "--caption_extension", CAPTION_EXTENSION,
         "--output_dir", out,
         "--output_name", name,
         "--network_module", NETWORK_MODULE,
         "--resolution", "1024,1024",
+
+        # ✅ SDXL BUCKET MODE (ONLY CHANGE)
+        "--enable_bucket",
+        "--min_bucket_reso", "512",
+        "--max_bucket_reso", "1024",
+        "--bucket_reso_steps", "64",
+
         "--train_batch_size", "1",
         "--learning_rate", "1e-4",
         "--max_train_steps", str(ds["steps"]),
@@ -310,18 +273,17 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     log("CMD: " + " ".join(cmd))
 
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    if p.stdout is None:
-        raise RuntimeError("Failed to start training process (no stdout)")
+    if not p.stdout:
+        raise RuntimeError("Training process failed to start")
 
     for line in p.stdout:
         print(line, end="")
 
-    rc = p.wait()
-    if rc != 0:
-        raise RuntimeError(f"Training failed (exit code {rc})")
+    if p.wait() != 0:
+        raise RuntimeError("Training failed")
 
-    if (not os.path.exists(artifact)) or (os.path.getsize(artifact) < ARTIFACT_MIN_BYTES):
-        raise RuntimeError("Training produced invalid artifact (missing or too small)")
+    if not os.path.exists(artifact) or os.path.getsize(artifact) < ARTIFACT_MIN_BYTES:
+        raise RuntimeError("Invalid artifact produced")
 
     log(f"✅ Artifact created: {artifact}")
     return artifact
@@ -336,37 +298,28 @@ def worker_main() -> None:
     log(f"NETWORK_MODULE={NETWORK_MODULE}")
     log(f"CONCEPT_TOKEN={CONCEPT_TOKEN}  CAPTION_EXTENSION={CAPTION_EXTENSION}")
 
-    last_idle_log = 0.0
+    last_idle = 0.0
 
     while True:
         job_id: Optional[str] = None
         try:
-            jobs = sb_get(
-                "user_loras",
-                {"status": "eq.queued", "order": "created_at.asc", "limit": 1},
-            )
+            jobs = sb_get("user_loras", {"status": "eq.queued", "order": "created_at.asc", "limit": 1})
 
             if not jobs:
-                now = time.time()
-                if now - last_idle_log >= IDLE_LOG_SECONDS:
+                if time.time() - last_idle >= IDLE_LOG_SECONDS:
                     log("⏳ No queued jobs — waiting")
-                    last_idle_log = now
+                    last_idle = time.time()
                 time.sleep(POLL_SECONDS)
                 continue
 
             job_id = jobs[0]["id"]
             log(f"📥 Found job {job_id}")
 
-            # Mark as training
             sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{job_id}"})
 
-            # Build dataset
             ds = prepare_dataset(job_id)
-
-            # Train
             artifact = run_training(job_id, ds)
 
-            # Mark completed
             sb_patch_safe(
                 "user_loras",
                 {"status": "completed", "progress": 100, "artifact_path": artifact},
@@ -376,7 +329,6 @@ def worker_main() -> None:
             log(f"✅ Completed job {job_id}")
 
         except Exception as e:
-            # Best-effort: mark failed
             try:
                 if job_id:
                     sb_patch_safe(
@@ -384,8 +336,8 @@ def worker_main() -> None:
                         {"status": "failed", "progress": 0, "error_message": str(e)},
                         {"id": f"eq.{job_id}"},
                     )
-            except Exception as patch_err:
-                log(f"⚠️ Failed to PATCH failure status: {patch_err}")
+            except Exception as pe:
+                log(f"⚠️ Failed to patch failure status: {pe}")
 
             log(f"❌ Job failed: {e}")
             time.sleep(POLL_SECONDS)
