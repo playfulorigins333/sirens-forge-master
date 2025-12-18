@@ -3,12 +3,13 @@
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
 OPTION B — STORAGE HANDOFF (REST ONLY)
 
-✔ sd-scripts compatible dataset structure (SDXL)
-✔ Dynamic repeat/steps (~1200 effective samples)
-✔ Explicit LoRA network module
-✔ NO SD1.5-only args (e.g. --class_tokens) for SDXL train script
-✔ Hard-fail on bad dataset or fake success
-✔ Supabase schema-safe PATCH (auto-strips unknown columns)
+✅ sd-scripts compatible dataset structure (SDXL)
+✅ Per-job dataset folder: /workspace/train_data/sf_<JOB_ID>/
+✅ Hard image gate: 10–20 images
+✅ Repeat/steps targeting ~1200 effective samples
+✅ SDXL-safe concept enforcement via captions (.txt) NOT --class_tokens
+✅ Hard-fail on missing dataset / missing artifact / tiny artifact
+✅ Supabase schema-safe PATCH (auto-strips unknown columns)
 """
 
 import os
@@ -17,7 +18,7 @@ import time
 import json
 import shutil
 import subprocess
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 
 import requests
 
@@ -63,6 +64,10 @@ MIN_IMAGES = 10
 MAX_IMAGES = 20
 TARGET_SAMPLES = 1200
 
+# Caption enforcement (SDXL-safe)
+CONCEPT_TOKEN = os.getenv("LORA_CONCEPT_TOKEN", "concept")
+CAPTION_EXTENSION = os.getenv("LORA_CAPTION_EXTENSION", ".txt")  # passed to sd-scripts
+
 ARTIFACT_MIN_BYTES = 2 * 1024 * 1024  # 2MB
 
 HEADERS = {
@@ -71,6 +76,8 @@ HEADERS = {
     "Content-Type": "application/json",
     "Prefer": "return=representation",
 }
+
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -84,6 +91,9 @@ def sanity_checks() -> None:
     ]:
         if not os.path.exists(p):
             raise RuntimeError(f"{name} not found: {p}")
+
+    if not CAPTION_EXTENSION.startswith("."):
+        raise RuntimeError("LORA_CAPTION_EXTENSION must start with '.' (e.g. .txt)")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -141,6 +151,9 @@ def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
 # Storage helpers
 # ─────────────────────────────────────────────────────────────
 def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
+    """
+    Returns objects under prefix. Supabase may include folders; we filter later.
+    """
     r = requests.post(
         f"{SUPABASE_URL}/storage/v1/object/list/{STORAGE_BUCKET}",
         headers=HEADERS,
@@ -152,6 +165,9 @@ def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
 
 
 def signed_download_url(path: str) -> str:
+    """
+    path is the full object key inside the bucket (e.g. lora_datasets/<job>/<file>)
+    """
     r = requests.post(
         f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}",
         headers=HEADERS,
@@ -168,8 +184,8 @@ def signed_download_url(path: str) -> str:
 # ─────────────────────────────────────────────────────────────
 def compute_repeat(image_count: int) -> Tuple[int, int]:
     """
-    sd-scripts dataset repeats: directory name like "{repeat}_concept"
-    We choose repeat so effective samples ~ TARGET_SAMPLES.
+    sd-scripts repeats: directory name like "{repeat}_concept"
+    Choose repeat so effective samples ~= TARGET_SAMPLES.
     """
     repeat = round(TARGET_SAMPLES / image_count)
     repeat = max(1, repeat)
@@ -180,7 +196,26 @@ def compute_repeat(image_count: int) -> Tuple[int, int]:
 # ─────────────────────────────────────────────────────────────
 # Dataset builder
 # ─────────────────────────────────────────────────────────────
+def _write_caption_for_image(image_path: str) -> None:
+    """
+    SDXL concept enforcement: create a caption file next to the image.
+    image.jpg -> image.txt (or configured extension) containing "concept"
+    """
+    root, _ext = os.path.splitext(image_path)
+    cap_path = root + CAPTION_EXTENSION
+    with open(cap_path, "w", encoding="utf-8") as f:
+        f.write(CONCEPT_TOKEN)
+
+
 def prepare_dataset(job_id: str) -> Dict[str, Any]:
+    """
+    Creates:
+      /workspace/train_data/sf_<job_id>/
+        {repeat}_concept/
+          img1.jpg
+          img1.txt  (contains "concept")
+          ...
+    """
     base = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{job_id}")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
@@ -188,46 +223,54 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
     prefix = f"{STORAGE_PREFIX}/{job_id}"
     objects = list_storage_objects(prefix)
 
-    # Supabase storage list returns objects with "name" (filename) under prefix
-    files = [o.get("name") for o in objects if o.get("name")]
-    if not files:
-        raise RuntimeError("No images in storage")
+    # "name" is usually the filename relative to prefix (not always guaranteed)
+    names = [o.get("name") for o in objects if o.get("name")]
+    if not names:
+        raise RuntimeError("No files found in storage for this job")
 
     tmp = os.path.join(base, "_tmp")
     os.makedirs(tmp, exist_ok=True)
 
-    # Download all files under prefix
-    for fname in files:
-        url = signed_download_url(f"{prefix}/{fname}")
+    # Download everything under prefix; we filter to images after download
+    for name in names:
+        # Some listings may return nested paths; preserve basename only for local tmp
+        local_name = os.path.basename(name)
+        object_key = f"{prefix}/{name}".replace("//", "/")
+
+        url = signed_download_url(object_key)
         r = requests.get(url, timeout=180)
         r.raise_for_status()
-        with open(os.path.join(tmp, fname), "wb") as out:
+        with open(os.path.join(tmp, local_name), "wb") as out:
             out.write(r.content)
 
-    # Filter for valid image extensions
-    images = [f for f in os.listdir(tmp) if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))]
-    if not (MIN_IMAGES <= len(images) <= MAX_IMAGES):
-        raise RuntimeError(f"Invalid image count: {len(images)} (must be {MIN_IMAGES}-{MAX_IMAGES})")
+    images = [f for f in os.listdir(tmp) if f.lower().endswith(IMAGE_EXTS)]
+    img_count = len(images)
 
-    repeat, effective = compute_repeat(len(images))
+    if not (MIN_IMAGES <= img_count <= MAX_IMAGES):
+        raise RuntimeError(f"Invalid image count: {img_count} (must be {MIN_IMAGES}-{MAX_IMAGES})")
 
-    # sd-scripts expects: /train_data_dir/{repeat}_{concept}/imagefiles
-    concept_name = "concept"
-    concept_dir = os.path.join(base, f"{repeat}_{concept_name}")
+    repeat, effective = compute_repeat(img_count)
+
+    # sd-scripts repeats folder
+    concept_dir = os.path.join(base, f"{repeat}_{CONCEPT_TOKEN}")
     os.makedirs(concept_dir, exist_ok=True)
 
-    for f in images:
-        shutil.move(os.path.join(tmp, f), os.path.join(concept_dir, f))
+    # Move images + create captions
+    for fname in images:
+        src = os.path.join(tmp, fname)
+        dst = os.path.join(concept_dir, fname)
+        shutil.move(src, dst)
+        _write_caption_for_image(dst)
 
     shutil.rmtree(tmp, ignore_errors=True)
 
-    log(f"📊 Images={len(images)} → repeat={repeat} → samples≈{effective}")
+    log(f"📊 Images={img_count} → repeat={repeat} → samples≈{effective}")
+    log(f"🧾 Captions: {CAPTION_EXTENSION} = '{CONCEPT_TOKEN}'")
 
     return {
         "base_dir": base,
         "repeat": repeat,
-        "steps": effective,          # we align max_train_steps to effective samples
-        "concept_name": concept_name # kept for clarity / future caption logic
+        "steps": effective,
     }
 
 
@@ -241,15 +284,14 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     name = f"sf_{job_id}"
     artifact = os.path.join(out, f"{name}.safetensors")
 
-    # IMPORTANT:
-    # SDXL sd-scripts DOES NOT accept --class_tokens.
-    # Identity concepts must come from captions (.txt) next to images.
+    # SDXL sd-scripts: concept must come from captions, not --class_tokens
     cmd = [
         PYTHON_BIN,
         TRAIN_SCRIPT,
         "--pretrained_model_name_or_path", PRETRAINED_MODEL,
         "--vae", VAE_PATH,
         "--train_data_dir", ds["base_dir"],
+        "--caption_extension", CAPTION_EXTENSION,  # <- CRITICAL
         "--output_dir", out,
         "--output_name", name,
         "--network_module", NETWORK_MODULE,
@@ -268,15 +310,18 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     log("CMD: " + " ".join(cmd))
 
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    assert p.stdout is not None
+    if p.stdout is None:
+        raise RuntimeError("Failed to start training process (no stdout)")
+
     for line in p.stdout:
         print(line, end="")
 
-    if p.wait() != 0:
-        raise RuntimeError("Training failed")
+    rc = p.wait()
+    if rc != 0:
+        raise RuntimeError(f"Training failed (exit code {rc})")
 
-    if not os.path.exists(artifact) or os.path.getsize(artifact) < ARTIFACT_MIN_BYTES:
-        raise RuntimeError("Training produced invalid artifact")
+    if (not os.path.exists(artifact)) or (os.path.getsize(artifact) < ARTIFACT_MIN_BYTES):
+        raise RuntimeError("Training produced invalid artifact (missing or too small)")
 
     log(f"✅ Artifact created: {artifact}")
     return artifact
@@ -289,10 +334,12 @@ def worker_main() -> None:
     sanity_checks()
     log("🚀 LoRA worker started (PRODUCTION)")
     log(f"NETWORK_MODULE={NETWORK_MODULE}")
+    log(f"CONCEPT_TOKEN={CONCEPT_TOKEN}  CAPTION_EXTENSION={CAPTION_EXTENSION}")
 
     last_idle_log = 0.0
 
     while True:
+        job_id: Optional[str] = None
         try:
             jobs = sb_get(
                 "user_loras",
@@ -329,10 +376,9 @@ def worker_main() -> None:
             log(f"✅ Completed job {job_id}")
 
         except Exception as e:
-            # BEST EFFORT: mark failed if we can (schema-safe)
+            # Best-effort: mark failed
             try:
-                # job_id might not exist if failure happens before fetch
-                if "job_id" in locals() and job_id:
+                if job_id:
                     sb_patch_safe(
                         "user_loras",
                         {"status": "failed", "progress": 0, "error_message": str(e)},
