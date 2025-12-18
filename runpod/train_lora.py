@@ -24,23 +24,23 @@ import requests
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Logging helpers
+# Logging
 # ──────────────────────────────────────────────────────────────────────────────
 def log(msg: str) -> None:
     print(f"[train_lora_worker] {msg}", flush=True)
 
 
 def require_env(name: str) -> str:
-    value = os.getenv(name)
-    if not value:
+    v = os.getenv(name)
+    if not v:
         raise RuntimeError(f"Missing env: {name}")
-    return value
+    return v
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Environment / Config
+# Config
 # ──────────────────────────────────────────────────────────────────────────────
-SUPABASE_URL = require_env("SUPABASE_URL").rstrip("/")
+SUPABASE_URL = require_env("SUPABASE_URL")
 SUPABASE_KEY = require_env("SUPABASE_SERVICE_ROLE_KEY")
 
 PRETRAINED_MODEL = require_env("PRETRAINED_MODEL")
@@ -48,7 +48,6 @@ VAE_PATH = require_env("VAE_PATH")
 
 if not os.path.exists(PRETRAINED_MODEL):
     raise RuntimeError(f"PRETRAINED_MODEL not found: {PRETRAINED_MODEL}")
-
 if not os.path.exists(VAE_PATH):
     raise RuntimeError(f"VAE_PATH not found: {VAE_PATH}")
 
@@ -60,7 +59,7 @@ OUTPUT_ROOT = os.getenv("LORA_OUTPUT_ROOT", "/workspace/output_loras")
 
 TRAIN_SCRIPT = os.getenv(
     "TRAIN_SCRIPT",
-    "/workspace/sd-scripts/sdxl_train_network.py",
+    "/workspace/sd-scripts/sdxl_train_network.py"
 )
 PYTHON_BIN = os.getenv("PYTHON_BIN", sys.executable)
 
@@ -89,6 +88,10 @@ def sb_get(path: str, params: Dict[str, Any] = None):
 
 
 def sb_patch(path: str, payload: Dict[str, Any], params: Dict[str, Any]):
+    """
+    Supabase PATCH returns 204 No Content.
+    DO NOT call r.json().
+    """
     r = requests.patch(
         f"{SUPABASE_URL}/rest/v1/{path}",
         headers=HEADERS,
@@ -97,11 +100,11 @@ def sb_patch(path: str, payload: Dict[str, Any], params: Dict[str, Any]):
         timeout=10,
     )
     r.raise_for_status()
-    return r.json()
+    return True
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Supabase Storage helpers
+# Storage helpers
 # ──────────────────────────────────────────────────────────────────────────────
 def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
     r = requests.post(
@@ -114,32 +117,29 @@ def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
     return r.json()
 
 
-def signed_url(object_path: str) -> str:
-    """
-    Supabase returns a RELATIVE signedURL.
-    We must convert it to a full https URL before downloading.
-    """
+def signed_url(path: str) -> str:
     r = requests.post(
-        f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{object_path}",
+        f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}",
         headers=HEADERS,
         json={"expiresIn": 3600},
         timeout=10,
     )
     r.raise_for_status()
+    data = r.json()
 
-    signed_path = r.json().get("signedURL")
-    if not signed_path:
-        raise RuntimeError("Supabase did not return signedURL")
+    url = data.get("signedURL")
+    if not url:
+        raise RuntimeError("Missing signedURL from Supabase")
 
-    # Supabase returns `/object/sign/...`
-    if signed_path.startswith("/"):
-        return f"{SUPABASE_URL}/storage/v1{signed_path}"
+    # Supabase returns relative paths sometimes — fix it
+    if url.startswith("/"):
+        url = f"{SUPABASE_URL}{url}"
 
-    return signed_path
+    return url
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Dataset preparation
+# Dataset handling
 # ──────────────────────────────────────────────────────────────────────────────
 def prepare_dataset(job_id: str) -> str:
     local_dir = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{job_id}")
@@ -149,19 +149,19 @@ def prepare_dataset(job_id: str) -> str:
     prefix = f"{STORAGE_PREFIX}/{job_id}"
     objects = list_storage_objects(prefix)
 
-    files = [obj["name"] for obj in objects if obj.get("name")]
+    files = [o["name"] for o in objects if o.get("name")]
     if not files:
-        raise RuntimeError(f"No images found in storage for job {job_id}")
+        raise RuntimeError(f"No files in storage for job {job_id}")
 
     for name in sorted(files):
-        object_path = f"{prefix}/{name}"
-        url = signed_url(object_path)
+        remote_path = f"{prefix}/{name}"
+        url = signed_url(remote_path)
 
-        resp = requests.get(url, timeout=120)
-        resp.raise_for_status()
+        r = requests.get(url, timeout=120)
+        r.raise_for_status()
 
         with open(os.path.join(local_dir, name), "wb") as f:
-            f.write(resp.content)
+            f.write(r.content)
 
     images = [
         f for f in os.listdir(local_dir)
@@ -175,11 +175,11 @@ def prepare_dataset(job_id: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Training execution
+# Training
 # ──────────────────────────────────────────────────────────────────────────────
 def run_training(job_id: str, dataset_dir: str):
-    output_dir = os.path.join(OUTPUT_ROOT, f"sf_{job_id}")
-    os.makedirs(output_dir, exist_ok=True)
+    out_dir = os.path.join(OUTPUT_ROOT, f"sf_{job_id}")
+    os.makedirs(out_dir, exist_ok=True)
 
     cmd = [
         PYTHON_BIN,
@@ -187,7 +187,7 @@ def run_training(job_id: str, dataset_dir: str):
         "--pretrained_model_name_or_path", PRETRAINED_MODEL,
         "--vae", VAE_PATH,
         "--train_data_dir", dataset_dir,
-        "--output_dir", output_dir,
+        "--output_dir", out_dir,
         "--output_name", f"sf_{job_id}",
         "--resolution", "1024,1024",
         "--train_batch_size", "1",
@@ -224,9 +224,10 @@ def worker_main():
     log(f"Using PRETRAINED_MODEL={PRETRAINED_MODEL}")
     log(f"Using VAE_PATH={VAE_PATH}")
 
-    last_idle_log = 0
+    last_idle = 0
 
     while True:
+        job_id = None
         try:
             jobs = sb_get(
                 "user_loras",
@@ -238,18 +239,16 @@ def worker_main():
             )
 
             if not jobs:
-                if time.time() - last_idle_log > IDLE_LOG_SECONDS:
+                if time.time() - last_idle > IDLE_LOG_SECONDS:
                     log("⏳ No queued jobs — waiting")
-                    last_idle_log = time.time()
+                    last_idle = time.time()
                 time.sleep(POLL_SECONDS)
                 continue
 
             job = jobs[0]
             job_id = job["id"]
-
             log(f"📥 Found job {job_id}")
 
-            # Claim job
             sb_patch(
                 "user_loras",
                 {"status": "training", "progress": 1, "error_message": None},
@@ -259,11 +258,7 @@ def worker_main():
             log("📦 Downloading dataset")
             dataset_dir = prepare_dataset(job_id)
 
-            sb_patch(
-                "user_loras",
-                {"progress": 15},
-                {"id": f"eq.{job_id}"},
-            )
+            sb_patch("user_loras", {"progress": 15}, {"id": f"eq.{job_id}"})
 
             run_training(job_id, dataset_dir)
 
@@ -276,24 +271,18 @@ def worker_main():
             log(f"✅ Completed job {job_id}")
 
         except Exception as e:
-            error_msg = str(e)
-            try:
-                if "job_id" in locals():
+            msg = str(e)
+            if job_id:
+                try:
                     sb_patch(
                         "user_loras",
-                        {
-                            "status": "failed",
-                            "progress": 0,
-                            "error_message": error_msg,
-                        },
+                        {"status": "failed", "error_message": msg, "progress": 0},
                         {"id": f"eq.{job_id}"},
                     )
-                    log(f"❌ Failed job {job_id}: {error_msg}")
-                else:
-                    log(f"❌ Worker error: {error_msg}")
-            except Exception as mark_err:
-                log(f"❌ Failed to mark failure: {mark_err}")
+                except Exception as ee:
+                    log(f"❌ Failed to mark failure: {ee}")
 
+            log(f"❌ Job failed: {msg}")
             time.sleep(POLL_SECONDS)
 
 
