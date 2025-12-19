@@ -155,7 +155,7 @@ function SubscriptionModal({
                 <h2 className="text-lg font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-transparent">
                   Subscription Required to Forge
                 </h2>
-                <p className="text-xs text-gray-400 mt-0.5">
+                <p className="text-xs text-gray-300 mt-0.5">
                   Generator access is locked to SirensForge members. OG &amp;
                   Early Bird tiers get full image &amp; video generation.
                 </p>
@@ -203,7 +203,7 @@ function SubscriptionModal({
             </div>
 
             <div className="px-6 pb-5 pt-2 flex flex-col sm:flex-row gap-3 sm:justify-between sm:items-center border-t border-purple-900/40 bg-gradient-to-r from-purple-950/60 via-black to-cyan-950/40">
-              <div className="text-[11px] text-gray-400">
+              <div className="text-[11px] text-gray-300">
                 <p>
                   Smash the competition at launch by locking in{" "}
                   <span className="text-purple-300 font-semibold">
@@ -287,8 +287,8 @@ function GeneratorHeader() {
           <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
             SirensForge Generator
           </h1>
-          <p className="text-xs md:text-sm text-gray-400 mt-1">
-            Text &amp; Image → Images &amp; Video • SDXL + FLUX Lock + DNA Lock
+          <p className="text-xs md:text-sm text-gray-300 mt-1">
+            Text &amp; Image → Images &amp; Video • SDXL + LoRA Identity
           </p>
         </div>
 
@@ -306,7 +306,7 @@ function GeneratorHeader() {
             className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
               subscriptionStatus === "active"
                 ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                : "bg-gray-800 text-gray-400 border border-gray-700"
+                : "bg-gray-800 text-gray-300 border border-gray-700"
             }`}
           >
             {subscriptionStatus === "active"
@@ -367,12 +367,12 @@ function ModeTabs(props: {
             <div className="flex flex-col items-center gap-1.5">
               <Icon
                 className={`w-5 h-5 ${
-                  isActive ? "text-purple-400" : "text-gray-400"
+                  isActive ? "text-purple-400" : "text-gray-300"
                 }`}
               />
               <span
                 className={`text-xs font-semibold ${
-                  isActive ? "text-white" : "text-gray-400"
+                  isActive ? "text-white" : "text-gray-300"
                 }`}
               >
                 {mode.label}
@@ -418,9 +418,9 @@ function PromptSection(props: {
           <Sparkles className="w-5 h-5 text-purple-400" />
           Prompt Builder
         </CardTitle>
-        <CardDescription className="text-xs text-gray-400">
+        <CardDescription className="text-xs text-gray-300">
           Describe exactly what you want SirensForge to create. This feeds SDXL
-          / Flux / video models.
+          and video generation.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -429,9 +429,9 @@ function PromptSection(props: {
             value={props.prompt}
             onChange={(e) => props.onPromptChange(e.target.value)}
             placeholder="Describe the scene, style, mood, and details..."
-            className="min-h-32 bg-gray-950 border-gray-800 resize-none text-sm"
+            className="min-h-32 bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 resize-none text-sm"
           />
-          <p className="text-[10px] text-gray-500 mt-1">
+          <p className="text-[10px] text-gray-400 mt-1">
             {props.prompt.length} characters
           </p>
         </div>
@@ -442,7 +442,7 @@ function PromptSection(props: {
               key={chip}
               type="button"
               onClick={() => addChip(chip)}
-              className="px-3 py-1.5 text-[11px] rounded-full bg-gray-800 hover:bg-purple-500/20 hover:text-purple-300 transition-colors"
+              className="px-3 py-1.5 text-[11px] rounded-full bg-gray-800 text-gray-200 hover:bg-purple-500/20 hover:text-purple-200 transition-colors"
             >
               + {chip}
             </button>
@@ -454,7 +454,7 @@ function PromptSection(props: {
           size="sm"
           type="button"
           onClick={() => setShowNegative((v) => !v)}
-          className="w-full justify-between text-xs"
+          className="w-full justify-between text-xs text-gray-100 hover:text-white"
         >
           <span>Refine / avoid styles (negative prompt)</span>
           {showNegative ? (
@@ -476,7 +476,7 @@ function PromptSection(props: {
                 value={props.negativePrompt}
                 onChange={(e) => props.onNegativePromptChange(e.target.value)}
                 placeholder="What to avoid (e.g. bad anatomy, extra limbs, blurry, etc.)"
-                className="min-h-24 bg-gray-950 border-gray-800 resize-none text-sm mt-2"
+                className="min-h-24 bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 resize-none text-sm mt-2"
               />
             </motion.div>
           )}
@@ -518,7 +518,7 @@ function ModelStyleSection(props: {
     <Card className="border-gray-800 bg-gray-900/80">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
-        <CardDescription className="text-xs text-gray-400">
+        <CardDescription className="text-xs text-gray-300">
           SDXL core model (bigLust_v16) with body-specific LoRA shaping +
           content modes.
         </CardDescription>
@@ -540,7 +540,7 @@ function ModelStyleSection(props: {
                   className={`p-3 rounded-lg border-2 text-xs font-semibold transition-all ${
                     isActive
                       ? "border-purple-500 bg-purple-500/10 text-white"
-                      : "border-gray-800 bg-gray-950 text-gray-400 hover:border-gray-700"
+                      : "border-gray-800 bg-gray-950 text-gray-300 hover:border-gray-700"
                   }`}
                 >
                   {bm.label}
@@ -572,7 +572,7 @@ function ModelStyleSection(props: {
                 />
                 <div>
                   <div className="font-semibold">SFW</div>
-                  <div className="text-[10px] text-gray-400">
+                  <div className="text-[10px] text-gray-300">
                     Safe-for-work content, social-friendly.
                   </div>
                 </div>
@@ -596,7 +596,7 @@ function ModelStyleSection(props: {
                 />
                 <div>
                   <div className="font-semibold">NSFW</div>
-                  <div className="text-[10px] text-gray-400">
+                  <div className="text-[10px] text-gray-300">
                     Adult content within policy.
                   </div>
                 </div>
@@ -624,7 +624,7 @@ function ModelStyleSection(props: {
                       18+
                     </span>
                   </div>
-                  <div className="text-[10px] text-gray-400">
+                  <div className="text-[10px] text-gray-300">
                     Full NSFW pipeline (no illegal content).
                   </div>
                 </div>
@@ -697,10 +697,10 @@ function LoraIdentitySection(props: {
         <CardTitle className="text-sm md:text-base">
           Identity LoRA (Training Mode)
         </CardTitle>
-        <CardDescription className="text-xs text-gray-400">
-          DNA Lock + FLUX Lock are removed. Identity consistency is now driven
-          by LoRA selection/training. Default is the safest, lowest-friction
-          path (Option A). Option B is available for power creators.
+        <CardDescription className="text-xs text-gray-300">
+          Legacy identity locks are removed. Identity consistency is now driven
+          by LoRA selection/training. Option A is the safest, lowest-friction
+          path. Option B is available for power creators.
         </CardDescription>
       </CardHeader>
 
@@ -724,7 +724,7 @@ function LoraIdentitySection(props: {
               <div className="font-semibold text-gray-100">
                 Option A — Select 1 LoRA (recommended)
               </div>
-              <div className="text-[10px] text-gray-400">
+              <div className="text-[10px] text-gray-300">
                 Safest default for creators. Lowest friction, simplest routing.
               </div>
             </div>
@@ -747,7 +747,7 @@ function LoraIdentitySection(props: {
               <div className="font-semibold text-gray-100">
                 Option B — Multi-LoRA / Create New (advanced)
               </div>
-              <div className="text-[10px] text-gray-400">
+              <div className="text-[10px] text-gray-300">
                 For power users who want multiple LoRAs or to start a new one.
               </div>
             </div>
@@ -771,10 +771,10 @@ function LoraIdentitySection(props: {
                   })
                 }
               >
-                <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs">
+                <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
                   <SelectValue placeholder="Select a LoRA" />
                 </SelectTrigger>
-                <SelectContent className="bg-gray-950 border-gray-800">
+                <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
                   {availableLoras.map((l) => (
                     <SelectItem key={l.id} value={l.id}>
                       {l.label}
@@ -806,9 +806,9 @@ function LoraIdentitySection(props: {
                   value={v.newName}
                   onChange={(e) => set({ newName: e.target.value })}
                   placeholder="e.g. client_jane_v1"
-                  className="bg-gray-950 border-gray-800 h-8 text-xs"
+                  className="bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
                 />
-                <p className="text-[10px] text-gray-500 mt-1">
+                <p className="text-[10px] text-gray-400 mt-1">
                   Backend will start training when you submit the training flow.
                 </p>
               </div>
@@ -860,7 +860,7 @@ function LoraIdentitySection(props: {
                 value={v.newName}
                 onChange={(e) => set({ newName: e.target.value })}
                 placeholder="e.g. new_identity_v1"
-                className="bg-gray-950 border-gray-800 h-8 text-xs"
+                className="bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
               />
             )}
           </div>
@@ -909,7 +909,7 @@ function AdvancedSettings(props: {
           variant="ghost"
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="w-full justify-between px-0 hover:bg-transparent"
+          className="w-full justify-between px-0 hover:bg-transparent text-gray-100 hover:text-white"
         >
           <CardTitle className="text-sm md:text-base">
             Advanced Settings
@@ -936,10 +936,10 @@ function AdvancedSettings(props: {
                   value={props.resolution}
                   onValueChange={props.onResolutionChange}
                 >
-                  <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs">
+                  <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-gray-950 border-gray-800">
+                  <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
                     {resolutions.map((res) => (
                       <SelectItem key={res} value={res}>
                         {res}
@@ -947,8 +947,8 @@ function AdvancedSettings(props: {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-[10px] text-gray-500 mt-1">
-                  SDXL max 1024x1792, Flux/Sora higher in video.
+                <p className="text-[10px] text-gray-400 mt-1">
+                  SDXL max 1024x1792. Video modes use higher limits.
                 </p>
               </div>
 
@@ -1006,14 +1006,14 @@ function AdvancedSettings(props: {
                     onChange={(e) =>
                       props.onSeedChange(parseInt(e.target.value, 10) || 0)
                     }
-                    className="bg-gray-950 border-gray-800 h-8 text-xs"
+                    className="bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
                   />
                   <Button
                     type="button"
                     variant="outline"
                     size="icon"
                     onClick={randomizeSeed}
-                    className="border-gray-800 h-8 w-8"
+                    className="border-gray-700 bg-gray-950 text-gray-100 hover:bg-gray-900 h-8 w-8"
                   >
                     <Sparkles className="w-4 h-4" />
                   </Button>
@@ -1027,7 +1027,7 @@ function AdvancedSettings(props: {
                     }
                     className="w-4 h-4 rounded border-gray-700 bg-gray-950 accent-purple-500"
                   />
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-gray-300">
                     Lock seed for reproducible outputs.
                   </span>
                 </label>
@@ -1096,7 +1096,7 @@ function GenerateButton(props: {
             disabled={props.disabled || props.isGenerating}
             className={`w-full h-12 text-sm md:text-base font-semibold transition-all ${
               props.disabled || props.isGenerating
-                ? "bg-gray-700 text-gray-400 cursor-not-allowed"
+                ? "bg-gray-700 text-gray-300 cursor-not-allowed"
                 : "bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 shadow-lg shadow-purple-500/30"
             }`}
           >
@@ -1113,7 +1113,7 @@ function GenerateButton(props: {
             )}
           </Button>
         </motion.div>
-        <p className="text-[11px] text-gray-400 text-center mt-2">{subtext}</p>
+        <p className="text-[11px] text-gray-300 text-center mt-2">{subtext}</p>
       </CardContent>
     </Card>
   );
@@ -1150,7 +1150,7 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
           <h2 className="text-base md:text-lg font-semibold text-gray-300">
             Your creations will appear here
           </h2>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-gray-400">
             Describe something on the left and press Generate.
           </p>
         </div>
@@ -1250,7 +1250,7 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
               )}
               <div className="p-4 space-y-2 text-xs">
                 <p className="text-gray-300">{selected.prompt}</p>
-                <p className="text-[10px] text-gray-500">
+                <p className="text-[10px] text-gray-400">
                   {new Date(selected.createdAt).toLocaleString()}
                 </p>
               </div>
@@ -1316,12 +1316,12 @@ function HistorySidebar(props: {
 
       <div className="space-y-2 text-xs">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
           <Input
             placeholder="Filter by prompt…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="pl-9 bg-gray-950 border-gray-800 h-8 text-xs"
+            className="pl-9 bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
           />
         </div>
 
@@ -1332,13 +1332,13 @@ function HistorySidebar(props: {
               setFilter(v as "all" | "images" | "videos")
             }
           >
-            <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs">
+            <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-gray-950 border-gray-800">
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="images">Images</SelectItem>
-              <SelectItem value="videos">Videos</SelectItem>
+            <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="all">All</SelectItem>
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="images">Images</SelectItem>
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="videos">Videos</SelectItem>
             </SelectContent>
           </Select>
 
@@ -1346,12 +1346,12 @@ function HistorySidebar(props: {
             value={sort}
             onValueChange={(v) => setSort(v as "newest" | "oldest")}
           >
-            <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs">
+            <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-gray-950 border-gray-800">
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="oldest">Oldest</SelectItem>
+            <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="newest">Newest</SelectItem>
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="oldest">Oldest</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1381,7 +1381,7 @@ function HistorySidebar(props: {
               <p className="text-[11px] font-medium text-gray-100 line-clamp-2">
                 {item.prompt}
               </p>
-              <p className="text-[10px] text-gray-500 mt-1">
+              <p className="text-[10px] text-gray-400 mt-1">
                 {new Date(item.createdAt).toLocaleTimeString()}
               </p>
             </div>
@@ -1393,7 +1393,7 @@ function HistorySidebar(props: {
                 e.stopPropagation();
                 props.onRerun(item);
               }}
-              className="shrink-0 h-7 w-7"
+              className="shrink-0 h-7 w-7 text-gray-100 hover:text-white"
             >
               <Play className="w-3.5 h-3.5" />
             </Button>
@@ -1402,7 +1402,7 @@ function HistorySidebar(props: {
       </div>
 
       {!filtered.length && (
-        <div className="text-center py-8 text-[11px] text-gray-500">
+        <div className="text-center py-8 text-[11px] text-gray-400">
           No history this session yet.
         </div>
       )}
@@ -1642,7 +1642,7 @@ export default function GeneratePage() {
           <ModeTabs activeMode={mode} onChange={setMode} />
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            {/* Left column: prompt + DNA/FLUX */}
+            {/* Left column: prompt */}
             <div className="space-y-4 xl:col-span-1">
               <PromptSection
                 prompt={prompt}
