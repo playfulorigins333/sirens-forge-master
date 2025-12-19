@@ -11,6 +11,7 @@ OPTION B — STORAGE HANDOFF (REST ONLY)
 ✅ Hard-fail on missing dataset / missing artifact / tiny artifact
 ✅ Supabase schema-safe PATCH (auto-strips unknown columns)
 ✅ Upload final merged LoRA to Supabase Storage (Build A)
+✅ Terminal-status email notify (Edge Function) — ONLY on completed/failed
 """
 
 import os
@@ -74,6 +75,14 @@ CONCEPT_TOKEN = os.getenv("LORA_CONCEPT_TOKEN", "concept")
 CAPTION_EXTENSION = os.getenv("LORA_CAPTION_EXTENSION", ".txt")
 
 ARTIFACT_MIN_BYTES = 2 * 1024 * 1024  # 2MB
+
+# Edge Function notify (terminal states only)
+# You can set LORA_NOTIFY_ENDPOINT explicitly, otherwise we build from SUPABASE_URL.
+# Example: https://<project>.supabase.co/functions/v1/lora-status-notify
+LORA_NOTIFY_ENDPOINT = os.getenv(
+    "LORA_NOTIFY_ENDPOINT",
+    f"{SUPABASE_URL}/functions/v1/lora-status-notify",
+).rstrip("/")
 
 HEADERS = {
     "apikey": SUPABASE_KEY,
@@ -148,6 +157,38 @@ def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
 
 
 # ─────────────────────────────────────────────────────────────
+# Edge Function notify (terminal status only)
+# ─────────────────────────────────────────────────────────────
+def notify_status(job_id: str, new_status: str) -> None:
+    """
+    Notify via Supabase Edge Function.
+    IMPORTANT: Call ONLY on terminal states (completed/failed) to avoid spam.
+    """
+    if not LORA_NOTIFY_ENDPOINT:
+        log("⚠️ LORA_NOTIFY_ENDPOINT not set — skipping notify")
+        return
+
+    payload = {
+        "lora_id": job_id,
+        "new_status": new_status,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "apikey": SUPABASE_KEY,
+        "Content-Type": "application/json",
+    }
+
+    try:
+        r = requests.post(LORA_NOTIFY_ENDPOINT, headers=headers, json=payload, timeout=15)
+        r.raise_for_status()
+        log(f"📨 Notified Edge Function: status={new_status} job={job_id}")
+    except Exception as e:
+        # Never fail the worker because email notify failed
+        log(f"⚠️ Notify failed (non-fatal): {e}")
+
+
+# ─────────────────────────────────────────────────────────────
 # Storage helpers (dataset)
 # ─────────────────────────────────────────────────────────────
 def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
@@ -199,7 +240,9 @@ def upload_artifact_to_storage(local_path: str, job_id: str) -> str:
         "x-upsert": "true",
     }
 
-    log(f"☁️ Uploading final LoRA to Storage: bucket={ARTIFACT_BUCKET} path={storage_path} ({size} bytes)")
+    log(
+        f"☁️ Uploading final LoRA to Storage: bucket={ARTIFACT_BUCKET} path={storage_path} ({size} bytes)"
+    )
     with open(local_path, "rb") as f:
         r = requests.put(url, headers=headers, data=f, timeout=600)
     r.raise_for_status()
@@ -285,38 +328,55 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     cmd = [
         PYTHON_BIN,
         TRAIN_SCRIPT,
-        "--pretrained_model_name_or_path", PRETRAINED_MODEL,
-        "--vae", VAE_PATH,
-        "--train_data_dir", ds["base_dir"],
-        "--caption_extension", CAPTION_EXTENSION,
-        "--output_dir", out,
-        "--output_name", name,
-        "--network_module", NETWORK_MODULE,
-        "--resolution", "1024,1024",
-
+        "--pretrained_model_name_or_path",
+        PRETRAINED_MODEL,
+        "--vae",
+        VAE_PATH,
+        "--train_data_dir",
+        ds["base_dir"],
+        "--caption_extension",
+        CAPTION_EXTENSION,
+        "--output_dir",
+        out,
+        "--output_name",
+        name,
+        "--network_module",
+        NETWORK_MODULE,
+        "--resolution",
+        "1024,1024",
         "--enable_bucket",
-        "--min_bucket_reso", "512",
-        "--max_bucket_reso", "1024",
-        "--bucket_reso_steps", "64",
-
-        "--train_batch_size", "1",
-        "--learning_rate", "1e-4",
-        "--max_train_steps", str(ds["steps"]),
-        "--network_dim", "64",
-        "--network_alpha", "32",
-        "--mixed_precision", "fp16",
-
+        "--min_bucket_reso",
+        "512",
+        "--max_bucket_reso",
+        "1024",
+        "--bucket_reso_steps",
+        "64",
+        "--train_batch_size",
+        "1",
+        "--learning_rate",
+        "1e-4",
+        "--max_train_steps",
+        str(ds["steps"]),
+        "--network_dim",
+        "64",
+        "--network_alpha",
+        "32",
+        "--mixed_precision",
+        "fp16",
         # ✅ Memory stability (already proven)
         "--gradient_checkpointing",
-
-        "--save_model_as", "safetensors",
-        "--save_every_n_steps", "200",
+        "--save_model_as",
+        "safetensors",
+        "--save_every_n_steps",
+        "200",
     ]
 
     log("🔥 Starting training")
     log("CMD: " + " ".join(cmd))
 
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    p = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
     if not p.stdout:
         raise RuntimeError("Training process failed to start")
 
@@ -342,13 +402,17 @@ def worker_main() -> None:
     log(f"NETWORK_MODULE={NETWORK_MODULE}")
     log(f"CONCEPT_TOKEN={CONCEPT_TOKEN}  CAPTION_EXTENSION={CAPTION_EXTENSION}")
     log(f"ARTIFACT_BUCKET={ARTIFACT_BUCKET}  ARTIFACT_PREFIX={ARTIFACT_PREFIX}")
+    log(f"LORA_NOTIFY_ENDPOINT={LORA_NOTIFY_ENDPOINT}")
 
     last_idle = 0.0
 
     while True:
         job_id: Optional[str] = None
         try:
-            jobs = sb_get("user_loras", {"status": "eq.queued", "order": "created_at.asc", "limit": 1})
+            jobs = sb_get(
+                "user_loras",
+                {"status": "eq.queued", "order": "created_at.asc", "limit": 1},
+            )
 
             if not jobs:
                 if time.time() - last_idle >= IDLE_LOG_SECONDS:
@@ -360,7 +424,9 @@ def worker_main() -> None:
             job_id = jobs[0]["id"]
             log(f"📥 Found job {job_id}")
 
-            sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{job_id}"})
+            sb_patch_safe(
+                "user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{job_id}"}
+            )
 
             ds = prepare_dataset(job_id)
             local_artifact = run_training(job_id, ds)
@@ -381,6 +447,9 @@ def worker_main() -> None:
                 {"id": f"eq.{job_id}"},
             )
 
+            # ✅ Notify (terminal state only)
+            notify_status(job_id, "completed")
+
             log(f"✅ Completed job {job_id}")
 
         except Exception as e:
@@ -391,6 +460,10 @@ def worker_main() -> None:
                         {"status": "failed", "progress": 0, "error_message": str(e)},
                         {"id": f"eq.{job_id}"},
                     )
+
+                    # ✅ Notify (terminal state only)
+                    notify_status(job_id, "failed")
+
             except Exception as pe:
                 log(f"⚠️ Failed to patch failure status: {pe}")
 
