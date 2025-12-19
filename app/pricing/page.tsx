@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, animate } from "framer-motion";
-import { Button } from "@/components/ui/button";
+
 import {
   Card,
   CardHeader,
@@ -13,6 +13,7 @@ import {
 import { Crown, Star, Sparkles, AlertTriangle, Check } from "lucide-react";
 
 type ViewMode = "cards" | "compare";
+type CheckoutTier = "og_throne" | "early_bird";
 
 interface TierSeats {
   remaining: number;
@@ -26,7 +27,7 @@ interface SeatState {
 
 const FALLBACK_SEATS: SeatState = {
   og: { remaining: 10, total: 35 },
-  earlyBird: { remaining: 120, total: 150 },
+  earlyBird: { remaining: 120, total: 150 }, // updated totals (Early Bird max = 150)
 };
 
 interface SeatCountTier {
@@ -50,7 +51,6 @@ function AnimatedNumber({ value }: { value: number }) {
   const [display, setDisplay] = useState<number>(value);
 
   useEffect(() => {
-    // Animate from current display to new value
     const controls = animate(display, value, {
       duration: 0.6,
       ease: "easeOut",
@@ -71,6 +71,11 @@ export default function PricingPage() {
   const [seats, setSeats] = useState<SeatState>(FALLBACK_SEATS);
   const [loadingSeats, setLoadingSeats] = useState<boolean>(false);
 
+  const [checkoutLoading, setCheckoutLoading] = useState<CheckoutTier | null>(
+    null
+  );
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
   const ogSoldOut = seats.og.remaining <= 0;
   const earlyBirdSoldOut = seats.earlyBird.remaining <= 0;
 
@@ -81,7 +86,9 @@ export default function PricingPage() {
     const fetchSeats = async () => {
       try {
         setLoadingSeats(true);
-        const res = await fetch("/api/subscription/seat-count");
+        const res = await fetch("/api/subscription/seat-count", {
+          cache: "no-store",
+        });
         if (!res.ok) throw new Error("Seat endpoint not ready");
 
         const data = (await res.json()) as SeatCountApiResponse;
@@ -117,12 +124,43 @@ export default function PricingPage() {
     };
   }, []);
 
-  const handleCheckout = (tier: "og" | "earlybird") => {
-    const url =
-      tier === "og"
-        ? "/api/checkout?tier=og"
-        : "/api/checkout?tier=earlybird";
-    window.location.href = url;
+  const handleCheckout = async (tierName: CheckoutTier) => {
+    try {
+      setCheckoutError(null);
+      setCheckoutLoading(tierName);
+
+      const res = await fetch("/api/checkout/subscription", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
+        body: JSON.stringify({
+          tierName,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({} as any));
+
+      if (!res.ok) {
+        const msg =
+          json?.error ||
+          (res.status === 409
+            ? "That tier is sold out."
+            : "Checkout failed. Please try again.");
+        setCheckoutError(msg);
+        return;
+      }
+
+      if (!json?.url) {
+        setCheckoutError("Checkout session missing URL.");
+        return;
+      }
+
+      window.location.href = json.url as string;
+    } catch (e: any) {
+      setCheckoutError(e?.message || "Checkout failed. Please try again.");
+    } finally {
+      setCheckoutLoading(null);
+    }
   };
 
   const seatText = (tier: TierSeats) =>
@@ -143,10 +181,10 @@ export default function PricingPage() {
       highlight: "earlybird",
     },
     {
-      label: "Seat Range",
-      og: "Seats 1–35",
-      earlyBird: "Seats 36–150",
-      prime: "Seats 151–250",
+      label: "Availability",
+      og: "35 total seats",
+      earlyBird: "150 total seats",
+      prime: "250 total seats",
       highlight: "og",
     },
     {
@@ -254,7 +292,7 @@ export default function PricingPage() {
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.7, ease: "easeOut" }}
-          className="mt-6 mb-8 md:mb-12"
+          className="mt-6 mb-6 md:mb-10"
         >
           <div className="relative overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 px-4 py-3 md:px-5 md:py-3.5 shadow-[0_0_35px_rgba(15,23,42,0.9)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             {/* Glow accent */}
@@ -321,6 +359,17 @@ export default function PricingPage() {
           </div>
         </motion.section>
 
+        {/* Checkout error */}
+        {checkoutError && (
+          <div className="mb-6 rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-100 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-300" />
+            <div>
+              <p className="font-semibold text-amber-100">Checkout error</p>
+              <p className="text-amber-100/90">{checkoutError}</p>
+            </div>
+          </div>
+        )}
+
         {/* Main content */}
         {viewMode === "cards" ? (
           <>
@@ -340,13 +389,10 @@ export default function PricingPage() {
                 className="transform-gpu"
               >
                 <Card className="relative h-full border border-purple-600/70 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950/90 rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(168,85,247,0.45)]">
-                  <AnimatedBadge
-                    label="Lifetime Elite"
-                    className="left-4 top-4"
-                  />
+                  <AnimatedBadge label="Lifetime Elite" className="left-4 top-4" />
                   <AnimatedGlow className="bg-purple-500/40" />
 
-                  {/* Selling fast micro banner when < 10 and > 0 */}
+                  {/* Selling fast micro banner when <= 10 and > 0 */}
                   {seats.og.remaining > 0 && seats.og.remaining <= 10 && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
@@ -443,14 +489,15 @@ export default function PricingPage() {
                       </div>
 
                       <NeonButton
-                        disabled={ogSoldOut}
+                        disabled={ogSoldOut || checkoutLoading !== null}
+                        loading={checkoutLoading === "og_throne"}
                         label={ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
                         sublabel={
                           ogSoldOut
                             ? "Join Early Bird below instead."
                             : "Lifetime elite access • No recurring payment"
                         }
-                        onClick={() => !ogSoldOut && handleCheckout("og")}
+                        onClick={() => !ogSoldOut && handleCheckout("og_throne")}
                       />
                     </div>
                   </CardContent>
@@ -471,10 +518,7 @@ export default function PricingPage() {
                 className="transform-gpu"
               >
                 <Card className="relative h-full border border-pink-500/80 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950/90 rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(236,72,153,0.45)]">
-                  <AnimatedBadge
-                    label="Best Value"
-                    className="left-4 top-4"
-                  />
+                  <AnimatedBadge label="Best Value" className="left-4 top-4" />
                   <AnimatedGlow className="bg-pink-500/40" />
 
                   <CardHeader className="pt-12">
@@ -553,11 +597,10 @@ export default function PricingPage() {
                       </div>
 
                       <NeonButton
-                        disabled={earlyBirdSoldOut}
+                        disabled={earlyBirdSoldOut || checkoutLoading !== null}
+                        loading={checkoutLoading === "early_bird"}
                         label={
-                          earlyBirdSoldOut
-                            ? "Early Bird Sold Out"
-                            : "Join Early Bird"
+                          earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"
                         }
                         sublabel={
                           earlyBirdSoldOut
@@ -565,7 +608,7 @@ export default function PricingPage() {
                             : "Lock in founding $29.99/month pricing."
                         }
                         onClick={() =>
-                          !earlyBirdSoldOut && handleCheckout("earlybird")
+                          !earlyBirdSoldOut && handleCheckout("early_bird")
                         }
                       />
                     </div>
@@ -614,7 +657,7 @@ export default function PricingPage() {
                           <span className="font-semibold">Prime</span>
                           <span className="text-lg font-bold">$59.99/mo</span>
                         </div>
-                        <p className="text-xs text-gray-400">Seats 151–250</p>
+                        <p className="text-xs text-gray-400">250 total seats</p>
                         <p className="text-[11px] mt-1 text-gray-500">
                           10% commission (6 months) • 7.5% lifetime after
                           launch. Reserved for creators who join once Early Bird
@@ -690,7 +733,7 @@ export default function PricingPage() {
                     $1,333 one-time
                   </span>
                   <span className="text-[10px] text-purple-200/80">
-                    Seats 1–35 • Lifetime
+                    35 total seats • Lifetime
                   </span>
                 </div>
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-pink-900/90 via-pink-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
@@ -701,7 +744,7 @@ export default function PricingPage() {
                     $29.99/month
                   </span>
                   <span className="text-[10px] text-pink-200/80">
-                    Seats 36–150
+                    150 total seats
                   </span>
                 </div>
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-cyan-900/80 via-slate-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
@@ -712,7 +755,7 @@ export default function PricingPage() {
                     $59.99/month
                   </span>
                   <span className="text-[10px] text-cyan-200/80">
-                    Seats 151–250
+                    250 total seats
                   </span>
                 </div>
 
@@ -765,22 +808,24 @@ export default function PricingPage() {
                     Eternal Throne is designed for you.
                   </li>
                   <li>
-                    If you want <span className="font-semibold">flexibility</span>{" "}
-                    with strong commissions and full access, Early Bird is the
-                    best monthly option.
+                    If you want{" "}
+                    <span className="font-semibold">flexibility</span> with
+                    strong commissions and full access, Early Bird is the best
+                    monthly option.
                   </li>
                   <li>
-                    If you plan to join <span className="font-semibold">
-                      after
-                    </span>{" "}
-                    launch, you&apos;ll likely end up in Prime or Standard at
-                    higher pricing and lower upside.
+                    If you plan to join{" "}
+                    <span className="font-semibold">after</span> launch,
+                    you&apos;ll likely end up in Prime or Standard at higher
+                    pricing and lower upside.
                   </li>
                 </ul>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 md:gap-4 w-full md:w-auto">
                 <NeonButton
+                  disabled={ogSoldOut || checkoutLoading !== null}
+                  loading={checkoutLoading === "og_throne"}
                   label={
                     ogSoldOut
                       ? "OG Sold Out • View Early Bird"
@@ -791,24 +836,18 @@ export default function PricingPage() {
                       ? "OG seats are gone. Early Bird is now the top tier."
                       : "Lifetime elite access • Highest commissions"
                   }
-                  onClick={() => !ogSoldOut && handleCheckout("og")}
-                  disabled={ogSoldOut}
+                  onClick={() => !ogSoldOut && handleCheckout("og_throne")}
                 />
                 <NeonButton
-                  label={
-                    earlyBirdSoldOut
-                      ? "Early Bird Sold Out"
-                      : "Join Early Bird"
-                  }
+                  disabled={earlyBirdSoldOut || checkoutLoading !== null}
+                  loading={checkoutLoading === "early_bird"}
+                  label={earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
                   sublabel={
                     earlyBirdSoldOut
                       ? "Prime & Standard will open next."
                       : "Founding monthly rate • Limited seats"
                   }
-                  onClick={() =>
-                    !earlyBirdSoldOut && handleCheckout("earlybird")
-                  }
-                  disabled={earlyBirdSoldOut}
+                  onClick={() => !earlyBirdSoldOut && handleCheckout("early_bird")}
                 />
               </div>
             </div>
@@ -878,11 +917,13 @@ function NeonButton({
   sublabel,
   onClick,
   disabled,
+  loading,
 }: {
   label: string;
   sublabel?: string;
   onClick?: () => void;
   disabled?: boolean;
+  loading?: boolean;
 }) {
   return (
     <button
@@ -894,7 +935,7 @@ function NeonButton({
       onClick={onClick}
       disabled={disabled}
     >
-      {!disabled && (
+      {!disabled && !loading && (
         <motion.div
           aria-hidden
           className="pointer-events-none absolute -inset-1 opacity-70"
@@ -911,7 +952,9 @@ function NeonButton({
           />
         </motion.div>
       )}
-      <span className="relative z-10">{label}</span>
+      <span className="relative z-10">
+        {loading ? "Redirecting to Stripe…" : label}
+      </span>
       {sublabel && (
         <span className="relative z-10 text-[10px] text-slate-600 mt-0.5">
           {sublabel}
