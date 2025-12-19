@@ -550,13 +550,39 @@ function ModelStyleSection(props: {
           </div>
         </div>
 
+        
         {/* Content mode */}
         <div>
           <p className="text-xs font-semibold mb-2 text-gray-200">
             Content Mode
           </p>
           <div className="space-y-2 text-xs">
+            {/* SFW */}
+            <label
+              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
+                props.contentMode === "sfw"
+                  ? "border-emerald-500 bg-emerald-500/10 text-gray-100"
+                  : "border-gray-800 hover:border-gray-700 text-gray-200"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="contentMode"
+                  checked={props.contentMode === "sfw"}
+                  onChange={() => props.onContentModeChange("sfw")}
+                />
+                <div>
+                  <div className="font-semibold">SFW</div>
+                  <div className="text-[10px] text-gray-300">
+                    Safe-for-work content, social-friendly.
+                  </div>
+                </div>
+              </div>
+              <Shield className="w-4 h-4 text-emerald-400" />
+            </label>
 
+            {/* NSFW */}
             <label
               className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
                 props.contentMode === "ultra"
@@ -588,6 +614,7 @@ function ModelStyleSection(props: {
         </div>
 
         {/* Style preset */}
+
         <div>
           <p className="text-xs font-semibold mb-2 text-gray-200">
             Style Preset
