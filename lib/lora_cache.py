@@ -1,72 +1,92 @@
+# /workspace/sirensforge/lib/lora_cache.py
+# ------------------------------------------------------------
+# LoRA Artifact Cache (Launch-Safe)
+# - Downloads LoRA from Supabase Storage once
+# - Caches locally in /workspace/cache/loras
+# - Safe for concurrent generation requests
+# ------------------------------------------------------------
+
 import os
-import requests
-from typing import Optional
+import shutil
+import tempfile
+from supabase import create_client
 
-# ─────────────────────────────────────────────────────────────
-# Config
-# ─────────────────────────────────────────────────────────────
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+# ------------------------------------------------------------
+# ENV
+# ------------------------------------------------------------
 
-ARTIFACT_BUCKET = os.getenv("LORA_ARTIFACT_BUCKET", "lora-artifacts")
-CACHE_ROOT = os.getenv("LORA_CACHE_ROOT", "/workspace/lora_cache")
+SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-}
+LORA_CACHE_DIR = "/workspace/cache/loras"
 
-# ─────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────
-def _signed_download_url(storage_path: str) -> str:
-    """
-    Create a short-lived signed URL for the artifact in Supabase Storage.
-    """
-    url = f"{SUPABASE_URL}/storage/v1/object/sign/{ARTIFACT_BUCKET}/{storage_path}"
-    r = requests.post(url, headers=HEADERS, json={"expiresIn": 3600}, timeout=20)
-    r.raise_for_status()
-    signed = r.json()["signedURL"]
-    return f"{SUPABASE_URL}/storage/v1{signed}" if signed.startswith("/") else signed
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    raise RuntimeError("Supabase environment variables not set")
 
+supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-def _ensure_cache_dir() -> None:
-    os.makedirs(CACHE_ROOT, exist_ok=True)
+# ------------------------------------------------------------
+# PUBLIC API
+# ------------------------------------------------------------
 
-
-# ─────────────────────────────────────────────────────────────
-# Public API
-# ─────────────────────────────────────────────────────────────
-def ensure_lora_cached(
-    job_id: str,
-    artifact_storage_path: str,
+def get_lora_path(
+    *,
+    bucket: str,
+    storage_path: str,
+    lora_id: str,
 ) -> str:
     """
-    Ensure the LoRA for job_id exists locally.
-    Downloads from Supabase Storage once per pod if missing.
+    Ensure LoRA exists locally and return absolute file path.
 
-    Returns local filesystem path to the .safetensors file.
+    Args:
+        bucket: Supabase storage bucket name
+        storage_path: Path inside bucket (e.g. loras/foo.safetensors)
+        lora_id: Stable LoRA identifier (used for local filename)
+
+    Returns:
+        Absolute path to cached .safetensors file
     """
-    _ensure_cache_dir()
 
-    local_path = os.path.join(CACHE_ROOT, f"{job_id}.safetensors")
+    os.makedirs(LORA_CACHE_DIR, exist_ok=True)
 
-    # Cache hit
-    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
-        return local_path
+    filename = f"{lora_id}.safetensors"
+    final_path = os.path.join(LORA_CACHE_DIR, filename)
 
-    # Cache miss → download
-    signed_url = _signed_download_url(artifact_storage_path)
+    # Fast path: already cached
+    if os.path.exists(final_path):
+        return final_path
 
-    with requests.get(signed_url, stream=True, timeout=300) as r:
-        r.raise_for_status()
-        with open(local_path, "wb") as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
+    # --------------------------------------------------------
+    # Download with atomic write
+    # --------------------------------------------------------
 
-    # Basic validation
-    if os.path.getsize(local_path) < 1024 * 1024:
-        raise RuntimeError(f"Downloaded LoRA is suspiciously small: {local_path}")
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        prefix=f".{lora_id}.",
+        suffix=".tmp",
+        dir=LORA_CACHE_DIR,
+    )
+    os.close(tmp_fd)
 
-    return local_path
+    try:
+        # Download from Supabase Storage
+        response = supabase.storage.from_(bucket).download(storage_path)
+
+        if not response:
+            raise RuntimeError(f"Failed to download LoRA: {storage_path}")
+
+        with open(tmp_path, "wb") as f:
+            f.write(response)
+
+        # Atomic replace
+        os.replace(tmp_path, final_path)
+
+        return final_path
+
+    except Exception:
+        # Cleanup temp file if something fails
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        raise
