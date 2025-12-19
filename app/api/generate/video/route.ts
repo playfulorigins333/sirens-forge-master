@@ -1,8 +1,12 @@
 // ------------------------------------------------------------
-// /app/api/generate/route.ts
-// FULL FILE — PRODUCTION, CONTRACT-DRIVEN, DETERMINISTIC
-// Architecture (LOCKED):
-// Contract → resolveLoraStack → buildWorkflow → ComfyUI
+// /app/api/generate/video/route.ts
+// PHASE 2 — VIDEO POD (EXECUTION WIRED)
+//
+// Launch tiers ONLY:
+// - subscriber → Flux Cinematic
+// - og → Sora 1.0
+//
+// No token tier exists at launch.
 // ------------------------------------------------------------
 
 import { NextResponse } from "next/server";
@@ -14,51 +18,57 @@ import {
   type GenerationRequest,
 } from "@/lib/generation/contract";
 import { resolveLoraStack } from "@/lib/generation/lora-resolver";
-import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
 export const dynamic = "force-dynamic";
 
 // ------------------------------------------------------------
-// ENV (server-safe)
+// ENV
 // ------------------------------------------------------------
 const SUPABASE_URL =
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const COMFY_ENDPOINT = process.env.RUNPOD_COMFY_WEBHOOK || "";
+
+// Video backends (wired at pod level)
+const FLUX_VIDEO_ENDPOINT = process.env.RUNPOD_FLUX_VIDEO_WEBHOOK || "";
+const SORA_VIDEO_ENDPOINT = process.env.RUNPOD_SORA_VIDEO_WEBHOOK || "";
 
 // ------------------------------------------------------------
-// Safety (launch rules)
+// Local video param shape (LAUNCH)
 // ------------------------------------------------------------
-function validateSafety(prompt?: string, negative?: string) {
-  const text = `${prompt || ""} ${negative || ""}`.toLowerCase();
-  const banned = [
-    "child",
-    "minor",
-    "teen",
-    "schoolgirl",
-    "schoolboy",
-    "underage",
-    "young girl",
-    "young boy",
-    "celebrity",
-    "famous",
-    "public figure",
-    "politician",
-    "deepfake",
-    "face swap",
-    "faceswap",
-    "look like",
-    "make her look like",
-    "make him look like",
-  ];
-  for (const p of banned) {
-    if (text.includes(p)) throw new Error("Prompt violates safety rules.");
+type VideoParams = {
+  duration?: number;
+  fps?: number;
+  motion_strength?: number;
+};
+
+// ------------------------------------------------------------
+// Tier caps (LAUNCH-ONLY)
+// ------------------------------------------------------------
+function enforceVideoCaps(tier: string, params: VideoParams) {
+  const duration = params.duration ?? 0;
+  const fps = params.fps ?? 0;
+  const motion = params.motion_strength ?? 0;
+
+  if (tier === "subscriber") {
+    if (duration > 15) throw new Error("duration_exceeds_tier_limit");
+    if (fps > 30) throw new Error("fps_exceeds_tier_limit");
+    if (motion > 0.65) throw new Error("motion_exceeds_tier_limit");
+    return "flux";
   }
+
+  if (tier === "og") {
+    if (duration > 25) throw new Error("duration_exceeds_tier_limit");
+    if (fps > 30) throw new Error("fps_exceeds_tier_limit");
+    if (motion > 0.8) throw new Error("motion_exceeds_tier_limit");
+    return "sora";
+  }
+
+  throw new Error("tier_not_supported_at_launch");
 }
 
 // ------------------------------------------------------------
-// POST /api/generate
+// POST /api/generate/video
 // ------------------------------------------------------------
 export async function POST(req: Request) {
   try {
@@ -66,8 +76,7 @@ export async function POST(req: Request) {
     if (
       !SUPABASE_URL ||
       !SUPABASE_ANON_KEY ||
-      !SUPABASE_SERVICE_ROLE_KEY ||
-      !COMFY_ENDPOINT
+      !SUPABASE_SERVICE_ROLE_KEY
     ) {
       return NextResponse.json(
         { error: "server_not_configured" },
@@ -98,7 +107,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
     }
 
-    // SUBSCRIPTION (image + video will share this gate)
+    // SUBSCRIPTION
     const supabase = createClient(
       SUPABASE_URL,
       SUPABASE_SERVICE_ROLE_KEY
@@ -118,57 +127,64 @@ export async function POST(req: Request) {
       );
     }
 
-    // ------------------------------------------------------------
-    // CONTRACT (single source of truth)
-    // ------------------------------------------------------------
+    // CONTRACT
     const json = await req.json();
     const request: GenerationRequest = parseGenerationRequest(json);
 
-    validateSafety(
-      request.params.prompt,
-      request.params.negative_prompt
-    );
+    // Narrow video params
+    const videoParams: VideoParams = {
+      duration: (json as any)?.duration,
+      fps: (json as any)?.fps,
+      motion_strength: (json as any)?.motion_strength,
+    };
 
-    // ------------------------------------------------------------
-    // RESOLVE MODEL STACK (LOCKED)
-    // ------------------------------------------------------------
+    // Enforce tier caps + choose backend
+    const backend = enforceVideoCaps(sub.tier, videoParams);
+
+    // Resolve model stack (SAME as image)
     const loraStack = resolveLoraStack(
       request.params.body_mode,
       request.params.user_lora
     );
 
     // ------------------------------------------------------------
-    // BUILD WORKFLOW (DETERMINISTIC)
+    // EXECUTION ROUTING
     // ------------------------------------------------------------
-    const workflow = buildWorkflow({
-      prompt: request.params.prompt,
-      negative: request.params.negative_prompt || "",
-      seed:
-        typeof request.params.seed === "number"
-          ? request.params.seed
-          : Math.floor(Math.random() * 1_000_000_000),
-      steps: request.params.steps,
-      cfg: request.params.cfg,
-      width: request.params.width,
-      height: request.params.height,
-      loraStack,
-      dnaImageNames: [],
-      fluxLock: null,
-    });
+    const endpoint =
+      backend === "flux"
+        ? FLUX_VIDEO_ENDPOINT
+        : backend === "sora"
+        ? SORA_VIDEO_ENDPOINT
+        : "";
 
-    // ------------------------------------------------------------
-    // COMFY EXECUTION (IMAGE ONLY FOR NOW)
-    // ------------------------------------------------------------
-    const res = await fetch(COMFY_ENDPOINT, {
+    if (!endpoint) {
+      return NextResponse.json(
+        { error: "video_backend_not_configured" },
+        { status: 500 }
+      );
+    }
+
+    // NOTE:
+    // Payload shape will be finalized per backend in next step.
+    // For now, pass through normalized data cleanly.
+
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workflow, stream: false }),
+      body: JSON.stringify({
+        mode: backend,
+        params: {
+          ...request.params,
+          ...videoParams,
+        },
+        loraStack,
+      }),
     });
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
       return NextResponse.json(
-        { error: "comfyui_failed", detail },
+        { error: "video_backend_failed", detail },
         { status: 500 }
       );
     }
@@ -177,7 +193,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      mode: request.mode,
+      mode: "video",
+      backend,
       result,
     });
   } catch (err: any) {

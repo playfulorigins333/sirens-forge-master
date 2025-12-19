@@ -1,3 +1,5 @@
+// @ts-nocheck
+
 // ------------------------------------------------------------
 // /app/api/generate/route.ts
 // FULL FILE — MULTI-IMAGE DNA BLENDING @ LAUNCH (3–8 refs)

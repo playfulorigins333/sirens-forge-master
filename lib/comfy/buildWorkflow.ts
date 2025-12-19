@@ -1,7 +1,8 @@
 // lib/comfy/buildWorkflow.ts
-// LAUNCH-SAFE — BigLust base + body LoRA + optional user LoRA (stacked correctly)
+// LAUNCH-SAFE — Deterministic workflow builder
+// Uses explicit LoRA stack (BigLust + optional body + optional user)
 
-import { LORA_ROUTING, BaseModelKey } from "@/lib/lora/lora-routing";
+import type { ResolvedLoraStack } from "@/lib/generation/lora-resolver";
 
 // Node-safe JSON load (avoids TS resolveJsonModule issues)
 const baseWorkflow = require("./workflow-base.json");
@@ -16,10 +17,9 @@ interface BuildWorkflowArgs {
   cfg: number;
   width: number;
   height: number;
-  baseModel: BaseModelKey;
 
-  // Optional USER LoRA (already resolved to local pod path)
-  loraPath?: string | null;
+  // ✅ LOCKED: explicit ordered LoRA stack
+  loraStack: ResolvedLoraStack;
 
   // DNA / FaceID (future-ready)
   dnaImageNames?: string[];
@@ -37,8 +37,7 @@ export function buildWorkflow({
   cfg,
   width,
   height,
-  baseModel,
-  loraPath = null,
+  loraStack,
   dnaImageNames = [],
   fluxLock = null,
 }: BuildWorkflowArgs) {
@@ -58,27 +57,14 @@ export function buildWorkflow({
   }
 
   // ------------------------------------------------------------
-  // BASE + BODY LoRAs (BigLust already loaded by CheckpointLoader)
+  // APPLY EXPLICIT LoRA STACK (ORDERED, DETERMINISTIC)
   // ------------------------------------------------------------
-  const routing = LORA_ROUTING[baseModel] || { loras: [] };
-
-  wf[loraNodeId].inputs.loras = routing.loras.map((l: any) => ({
-    lora_name: l.name,
+  wf[loraNodeId].inputs.loras = loraStack.loras.map((l) => ({
+    lora_name: l.path.includes("/workspace/cache/loras/")
+      ? `sirensforge_cache/${l.path.split("/").pop()}`
+      : l.path.split("/").pop(),
     strength: l.strength,
   }));
-
-  // ------------------------------------------------------------
-  // USER LoRA (ALWAYS LAST)
-  // ------------------------------------------------------------
-  if (loraPath) {
-    const filename = loraPath.split("/").pop();
-    wf[loraNodeId].inputs.loras.push({
-      // Resolved via symlink:
-      // /workspace/ComfyUI/models/loras/sirensforge_cache -> /workspace/cache/loras
-      lora_name: `sirensforge_cache/${filename}`,
-      strength: 1.0,
-    });
-  }
 
   // ------------------------------------------------------------
   // PROMPT / NEGATIVE
