@@ -26,7 +26,7 @@ interface SeatState {
 
 const FALLBACK_SEATS: SeatState = {
   og: { remaining: 10, total: 35 },
-  earlyBird: { remaining: 120, total: 120 },
+  earlyBird: { remaining: 120, total: 150 },
 };
 
 interface SeatCountTier {
@@ -145,8 +145,8 @@ export default function PricingPage() {
     {
       label: "Seat Range",
       og: "Seats 1–35",
-      earlyBird: "Seats 36–120",
-      prime: "Seats 121–200",
+      earlyBird: "Seats 36–150",
+      prime: "Seats 151–250",
       highlight: "og",
     },
     {
@@ -614,7 +614,7 @@ export default function PricingPage() {
                           <span className="font-semibold">Prime</span>
                           <span className="text-lg font-bold">$59.99/mo</span>
                         </div>
-                        <p className="text-xs text-gray-400">Seats 121–200</p>
+                        <p className="text-xs text-gray-400">Seats 151–250</p>
                         <p className="text-[11px] mt-1 text-gray-500">
                           10% commission (6 months) • 7.5% lifetime after
                           launch. Reserved for creators who join once Early Bird
@@ -701,7 +701,7 @@ export default function PricingPage() {
                     $29.99/month
                   </span>
                   <span className="text-[10px] text-pink-200/80">
-                    Seats 36–120
+                    Seats 36–150
                   </span>
                 </div>
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-cyan-900/80 via-slate-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
@@ -712,7 +712,7 @@ export default function PricingPage() {
                     $59.99/month
                   </span>
                   <span className="text-[10px] text-cyan-200/80">
-                    Seats 121–200
+                    Seats 151–250
                   </span>
                 </div>
 

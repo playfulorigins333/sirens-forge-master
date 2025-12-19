@@ -37,7 +37,7 @@ export async function GET() {
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    // 1) Pull tiers from subscription_tiers (authoritative)
+    // 1) Pull tiers from subscription_tiers (authoritative config)
     const { data: tiersRaw, error: tiersErr } = await supabase
       .from("subscription_tiers")
       .select("id,name,max_slots,slots_remaining,is_active");
@@ -57,8 +57,11 @@ export async function GET() {
         return acc;
       }, {});
 
-    // 2) Count active subscriptions for each tier (derived)
-    // We do separate counting so we can exclude OG testers (counts_toward_seats=false).
+    // 2) Count active subscriptions per tier (derived, not stored)
+    // NOTE: slots_remaining in the database is NOT authoritative.
+    // Remaining seats are ALWAYS derived from:
+    //   max_slots - active paid subscriptions
+    // This prevents drift when tester grants or admin comps exist.
     const counts: Record<LaunchTierName, number> = {
       og_throne: 0,
       early_bird: 0,
@@ -101,7 +104,7 @@ export async function GET() {
       counts.prime_access = count ?? 0;
     }
 
-    // OG count (exclude testers where metadata->>counts_toward_seats = 'false')
+    // OG count (exclude testers / grants that do NOT consume seats)
     {
       const { count: totalOg, error: totalErr } = await supabase
         .from("user_subscriptions")
@@ -117,8 +120,7 @@ export async function GET() {
         );
       }
 
-      // Count excluded (tester grants, etc.)
-      // PostgREST supports json path filters like: metadata->>key
+      // Exclude tester grants (metadata.counts_toward_seats = false)
       const { count: excludedOg, error: excludedErr } = await supabase
         .from("user_subscriptions")
         .select("id", { count: "exact", head: true })
@@ -138,17 +140,17 @@ export async function GET() {
       counts.og_throne = paidOg < 0 ? 0 : paidOg;
     }
 
-    // 3) Build response in the format PricingPage expects
-    // PricingPage currently reads: tiers.og_throne, tiers.early_bird, tiers.prime_access
+    // 3) Build response in the exact format the PricingPage expects
     const responseTiers: Record<string, any> = {};
 
     for (const name of LAUNCH_TIERS) {
       const tier = tiers[name];
       const max = tier?.max_slots ?? null;
 
-      // If max_slots is null, keep remaining null (unlimited / not capped)
       const remaining =
-        typeof max === "number" ? clampNonNegative(max - (counts[name] ?? 0)) : null;
+        typeof max === "number"
+          ? clampNonNegative(max - (counts[name] ?? 0))
+          : null;
 
       responseTiers[name] = {
         max_slots: max,
