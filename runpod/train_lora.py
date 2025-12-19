@@ -10,6 +10,7 @@ OPTION B — STORAGE HANDOFF (REST ONLY)
 ✅ SDXL-safe concept enforcement via captions (.txt) NOT --class_tokens
 ✅ Hard-fail on missing dataset / missing artifact / tiny artifact
 ✅ Supabase schema-safe PATCH (auto-strips unknown columns)
+✅ Upload final merged LoRA to Supabase Storage (Build A)
 """
 
 import os
@@ -46,8 +47,13 @@ SUPABASE_KEY = require_env("SUPABASE_SERVICE_ROLE_KEY")
 PRETRAINED_MODEL = require_env("PRETRAINED_MODEL")
 VAE_PATH = require_env("VAE_PATH")
 
+# Dataset storage (incoming images)
 STORAGE_BUCKET = os.getenv("LORA_DATASET_BUCKET", "lora-datasets")
 STORAGE_PREFIX = os.getenv("LORA_DATASET_PREFIX_ROOT", "lora_datasets")
+
+# Artifact storage (final LoRAs)
+ARTIFACT_BUCKET = os.getenv("LORA_ARTIFACT_BUCKET", "lora-artifacts")
+ARTIFACT_PREFIX = os.getenv("LORA_ARTIFACT_PREFIX_ROOT", "loras")
 
 LOCAL_TRAIN_ROOT = os.getenv("LORA_LOCAL_TRAIN_ROOT", "/workspace/train_data")
 OUTPUT_ROOT = os.getenv("LORA_OUTPUT_ROOT", "/workspace/output_loras")
@@ -142,7 +148,7 @@ def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
 
 
 # ─────────────────────────────────────────────────────────────
-# Storage helpers
+# Storage helpers (dataset)
 # ─────────────────────────────────────────────────────────────
 def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
     r = requests.post(
@@ -165,6 +171,41 @@ def signed_download_url(path: str) -> str:
     r.raise_for_status()
     signed = r.json()["signedURL"]
     return f"{SUPABASE_URL}/storage/v1{signed}" if signed.startswith("/") else signed
+
+
+# ─────────────────────────────────────────────────────────────
+# Storage helpers (artifact upload)  ✅ Build A
+# ─────────────────────────────────────────────────────────────
+def upload_artifact_to_storage(local_path: str, job_id: str) -> str:
+    """
+    Upload ONLY the final merged LoRA to Supabase Storage.
+    Returns the storage path (not a signed URL).
+    """
+    if not os.path.exists(local_path):
+        raise RuntimeError(f"Artifact not found for upload: {local_path}")
+    size = os.path.getsize(local_path)
+    if size < ARTIFACT_MIN_BYTES:
+        raise RuntimeError(f"Artifact too small for upload: {size} bytes")
+
+    storage_path = f"{ARTIFACT_PREFIX}/{job_id}/final.safetensors".replace("//", "/")
+    url = f"{SUPABASE_URL}/storage/v1/object/{ARTIFACT_BUCKET}/{storage_path}"
+
+    # Supabase Storage upload headers (service role)
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/octet-stream",
+        # allow overwrite if re-run
+        "x-upsert": "true",
+    }
+
+    log(f"☁️ Uploading final LoRA to Storage: bucket={ARTIFACT_BUCKET} path={storage_path} ({size} bytes)")
+    with open(local_path, "rb") as f:
+        r = requests.put(url, headers=headers, data=f, timeout=600)
+    r.raise_for_status()
+
+    log("☁️ Upload complete")
+    return storage_path
 
 
 # ─────────────────────────────────────────────────────────────
@@ -265,7 +306,7 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
         "--network_alpha", "32",
         "--mixed_precision", "fp16",
 
-        # ✅ SINGLE MEMORY FIX
+        # ✅ Memory stability (already proven)
         "--gradient_checkpointing",
 
         "--save_model_as", "safetensors",
@@ -300,6 +341,7 @@ def worker_main() -> None:
     log("🚀 LoRA worker started (PRODUCTION)")
     log(f"NETWORK_MODULE={NETWORK_MODULE}")
     log(f"CONCEPT_TOKEN={CONCEPT_TOKEN}  CAPTION_EXTENSION={CAPTION_EXTENSION}")
+    log(f"ARTIFACT_BUCKET={ARTIFACT_BUCKET}  ARTIFACT_PREFIX={ARTIFACT_PREFIX}")
 
     last_idle = 0.0
 
@@ -321,11 +363,21 @@ def worker_main() -> None:
             sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{job_id}"})
 
             ds = prepare_dataset(job_id)
-            artifact = run_training(job_id, ds)
+            local_artifact = run_training(job_id, ds)
 
+            # ✅ Build A: upload final artifact to Supabase Storage
+            storage_path = upload_artifact_to_storage(local_artifact, job_id)
+
+            # ✅ Mark completed + persist storage reference (schema-safe)
             sb_patch_safe(
                 "user_loras",
-                {"status": "completed", "progress": 100, "artifact_path": artifact},
+                {
+                    "status": "completed",
+                    "progress": 100,
+                    "artifact_storage_path": storage_path,
+                    "artifact_bucket": ARTIFACT_BUCKET,
+                    "artifact_local_path": local_artifact,
+                },
                 {"id": f"eq.{job_id}"},
             )
 
