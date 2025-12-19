@@ -8,6 +8,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 import { BaseModelKey } from "@/lib/lora/lora-routing";
+import { resolveLoraToLocalPath } from "@/lib/lora_cache";
 
 export const dynamic = "force-dynamic";
 
@@ -97,9 +98,12 @@ export async function POST(req: Request) {
     const seed =
       typeof body.seed === "number" ? body.seed : Math.floor(Math.random() * 1e9);
 
+    // ------------------------------------------------------------
+    // LoRA resolution (OPTIONAL, SINGLE)
+    // ------------------------------------------------------------
     const loraId = normalizeLoraSelection(body);
+    let resolvedLoraPath: string | null = null;
 
-    let loraMeta: any = null;
     if (loraId) {
       const { data } = await supabase
         .from("user_loras")
@@ -112,12 +116,15 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "lora_not_ready" }, { status: 409 });
       }
 
-      loraMeta = {
-        lora_id: data.id,
-        artifact_storage_path: data.artifact_storage_path || data.artifact_path,
-      };
+      resolvedLoraPath = await resolveLoraToLocalPath({
+        loraId: data.id,
+        storagePath: data.artifact_storage_path || data.artifact_path,
+      });
     }
 
+    // ------------------------------------------------------------
+    // Workflow
+    // ------------------------------------------------------------
     const workflow = buildWorkflow({
       prompt: body.prompt,
       negative: body.negativePrompt || "",
@@ -127,6 +134,7 @@ export async function POST(req: Request) {
       width,
       height,
       baseModel: body.baseModel as BaseModelKey,
+      loraPath: resolvedLoraPath, // ← THE ONLY NEW INPUT
       dnaImageNames: [],
       fluxLock: null,
     });
@@ -134,7 +142,7 @@ export async function POST(req: Request) {
     const res = await fetch(COMFY_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workflow, stream: false, lora: loraMeta }),
+      body: JSON.stringify({ workflow, stream: false }),
     });
 
     if (!res.ok) {
@@ -142,7 +150,7 @@ export async function POST(req: Request) {
     }
 
     const result = await res.json();
-    return NextResponse.json({ success: true, seed, lora: loraMeta, result });
+    return NextResponse.json({ success: true, seed, lora: resolvedLoraPath, result });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || "internal_error" }, { status: 400 });
   }

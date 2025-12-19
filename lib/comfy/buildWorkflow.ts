@@ -12,22 +12,22 @@ interface BuildWorkflowArgs {
   width: number;
   height: number;
   baseModel: BaseModelKey;
-  dnaImageNames?: string[]; // Comfy filenames in /input
+
+  // Optional launch features
+  loraPath?: string | null;      // 👈 FIX: allow resolved user LoRA
+  dnaImageNames?: string[];      // Comfy filenames in /input
   fluxLock?: FluxLock;
 }
 
 /**
  * IMPORTANT:
  * This assumes your ComfyUI has:
- * - LoadImage (standard)
- * - ImageBatch (standard)
- * - A FaceID/IPAdapter node installed that accepts:
- *    model + image batch + weight/strength and outputs conditioned model
- *
- * In most setups, this comes from IPAdapter / FaceID custom nodes.
- * If your node name differs, change FACEID_NODE_CLASS below to match.
+ * - LoadImage
+ * - ImageBatch
+ * - LoraLoader
+ * - IPAdapter / FaceID node
  */
-const FACEID_NODE_CLASS = "IPAdapterFaceID"; // <-- if your node class differs, change this
+const FACEID_NODE_CLASS = "IPAdapterFaceID";
 
 export function buildWorkflow({
   prompt,
@@ -38,6 +38,7 @@ export function buildWorkflow({
   width,
   height,
   baseModel,
+  loraPath = null,
   dnaImageNames = [],
   fluxLock = null,
 }: BuildWorkflowArgs) {
@@ -47,18 +48,38 @@ export function buildWorkflow({
   const maxId = nodeIds.reduce((m, id) => Math.max(m, parseInt(id, 10)), 0);
   let nextId = Number.isFinite(maxId) ? maxId + 1 : 100;
 
-  // ---- find nodes we already have
-  const loraNodeId = nodeIds.find((id) => wf[id]?.class_type === "LoraLoader");
-  if (!loraNodeId) throw new Error("❌ No LoraLoader node found in workflow-base.json");
+  // ------------------------------------------------------------
+  // FIND REQUIRED NODES
+  // ------------------------------------------------------------
+  const loraNodeId = nodeIds.find(
+    (id) => wf[id]?.class_type === "LoraLoader"
+  );
+  if (!loraNodeId) {
+    throw new Error("❌ No LoraLoader node found in workflow-base.json");
+  }
 
-  // ---- inject LoRAs from routing table
+  // ------------------------------------------------------------
+  // BASE MODEL ROUTING (system LoRAs)
+  // ------------------------------------------------------------
   const routing = LORA_ROUTING[baseModel] || { loras: [] };
   wf[loraNodeId].inputs.loras = routing.loras.map((l) => ({
     lora_name: l.name,
     strength: l.strength,
   }));
 
-  // ---- inject prompt / negative
+  // ------------------------------------------------------------
+  // USER LoRA (single, optional, launch-safe)
+  // ------------------------------------------------------------
+  if (loraPath) {
+    wf[loraNodeId].inputs.loras.push({
+      lora_name: loraPath,
+      strength: 1.0,
+    });
+  }
+
+  // ------------------------------------------------------------
+  // PROMPT / NEGATIVE
+  // ------------------------------------------------------------
   for (const id of Object.keys(wf)) {
     const node = wf[id];
     if (node?.class_type === "CLIPTextEncode") {
@@ -67,7 +88,9 @@ export function buildWorkflow({
     }
   }
 
-  // ---- inject sampler + latent size
+  // ------------------------------------------------------------
+  // SAMPLER + LATENT
+  // ------------------------------------------------------------
   for (const id of Object.keys(wf)) {
     const node = wf[id];
     if (node?.class_type === "KSampler") {
@@ -83,16 +106,9 @@ export function buildWorkflow({
   }
 
   // ------------------------------------------------------------
-  // DNA BLENDING (3–8 refs) — inject nodes
-  // ------------------------------------------------------------
-  // We condition the model BEFORE sampling:
-  // CheckpointLoader → LoraLoader → (optional FaceID/IPAdapter) → KSampler
-  //
-  // In base workflow, KSampler model input is ["1",0] (LoraLoader output).
-  // If DNA refs exist, we insert a conditioner node and redirect KSampler model input.
+  // DNA / FACE ID BLENDING (3–8 refs)
   // ------------------------------------------------------------
   if (dnaImageNames.length >= 3) {
-    // 1) Create LoadImage nodes for each DNA ref
     const loadIds: string[] = [];
 
     for (const name of dnaImageNames.slice(0, 8)) {
@@ -100,16 +116,13 @@ export function buildWorkflow({
       wf[id] = {
         class_type: "LoadImage",
         inputs: {
-          image: name,      // Comfy input filename
-          upload: "image",  // harmless if ignored
+          image: name,
+          upload: "image",
         },
       };
       loadIds.push(id);
     }
 
-    // 2) Create ImageBatch node (standard Comfy) to combine images
-    // Many Comfy builds use: class_type = "ImageBatch"
-    // and inputs: image1, image2, ...
     const batchId = String(nextId++);
     const batchInputs: any = {};
     loadIds.forEach((id, idx) => {
@@ -121,23 +134,23 @@ export function buildWorkflow({
       inputs: batchInputs,
     };
 
-    // 3) Create FaceID/IPAdapter conditioning node
-    // This node should output a MODEL that is identity-conditioned.
-    // If your node outputs different ports, adjust indices.
     const faceStrength =
-      fluxLock?.strength === "subtle" ? 0.55 : fluxLock?.strength === "strong" ? 0.9 : 0.75;
+      fluxLock?.strength === "subtle"
+        ? 0.55
+        : fluxLock?.strength === "strong"
+        ? 0.9
+        : 0.75;
 
     const faceNodeId = String(nextId++);
     wf[faceNodeId] = {
       class_type: FACEID_NODE_CLASS,
       inputs: {
-        model: [loraNodeId, 0],   // LoraLoader MODEL
-        image: [batchId, 0],      // batched DNA refs
-        weight: faceStrength,     // blend strength
+        model: [loraNodeId, 0],
+        image: [batchId, 0],
+        weight: faceStrength,
       },
     };
 
-    // 4) Redirect KSampler to use conditioned model
     for (const id of Object.keys(wf)) {
       const node = wf[id];
       if (node?.class_type === "KSampler") {
