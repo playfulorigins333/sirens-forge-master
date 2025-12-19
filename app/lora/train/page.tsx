@@ -1,3 +1,5 @@
+// UI POLISH CONFIRMED
+
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
