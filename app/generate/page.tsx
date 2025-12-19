@@ -556,58 +556,12 @@ function ModelStyleSection(props: {
             Content Mode
           </p>
           <div className="space-y-2 text-xs">
-            <label
-              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-                props.contentMode === "sfw"
-                  ? "border-emerald-500 bg-emerald-500/10"
-                  : "border-gray-800 hover:border-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="contentMode"
-                  checked={props.contentMode === "sfw"}
-                  onChange={() => props.onContentModeChange("sfw")}
-                />
-                <div>
-                  <div className="font-semibold">SFW</div>
-                  <div className="text-[10px] text-gray-300">
-                    Safe-for-work content, social-friendly.
-                  </div>
-                </div>
-              </div>
-              <Shield className="w-4 h-4 text-emerald-400" />
-            </label>
-
-            <label
-              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-                props.contentMode === "nsfw"
-                  ? "border-amber-500 bg-amber-500/10"
-                  : "border-gray-800 hover:border-gray-700"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="contentMode"
-                  checked={props.contentMode === "nsfw"}
-                  onChange={() => props.onContentModeChange("nsfw")}
-                />
-                <div>
-                  <div className="font-semibold">NSFW</div>
-                  <div className="text-[10px] text-gray-300">
-                    Adult content within policy.
-                  </div>
-                </div>
-              </div>
-            </label>
 
             <label
               className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
                 props.contentMode === "ultra"
-                  ? "border-rose-500 bg-rose-500/10"
-                  : "border-gray-800 hover:border-gray-700"
+                  ? "border-rose-500 bg-rose-500/10 text-gray-100"
+                  : "border-gray-800 hover:border-gray-700 text-gray-200"
               }`}
             >
               <div className="flex items-center gap-2">
@@ -619,13 +573,13 @@ function ModelStyleSection(props: {
                 />
                 <div>
                   <div className="font-semibold flex items-center gap-2">
-                    ULTRA
+                    NSFW
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500 text-white">
                       18+
                     </span>
                   </div>
                   <div className="text-[10px] text-gray-300">
-                    Full NSFW pipeline (no illegal content).
+                    Adult content within policy.
                   </div>
                 </div>
               </div>
