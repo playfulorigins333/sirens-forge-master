@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 /* ──────────────────────────────────────────────
-   Supabase (service role)
+   Supabase (service role – authoritative)
 ────────────────────────────────────────────── */
 const SUPABASE_URL =
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -72,21 +73,25 @@ export async function POST(req: Request) {
     }
 
     /* ──────────────────────────────────────────────
-       Seat enforcement (unchanged)
+       1️⃣ Load tier limits
     ────────────────────────────────────────────── */
-    const { data: tierRow } = await supabase
+    const { data: tierRow, error: tierErr } = await supabase
       .from("subscription_tiers")
-      .select("max_slots")
+      .select("id, max_slots")
       .eq("name", tierName)
       .single();
 
-    if (!tierRow) {
+    if (tierErr || !tierRow) {
       return NextResponse.json(
         { error: "Subscription tier not found" },
         { status: 404 }
       );
     }
 
+    /* ──────────────────────────────────────────────
+       2️⃣ Count active subscriptions
+       (OG excludes testers)
+    ────────────────────────────────────────────── */
     let activeCount = 0;
 
     if (tierName === "og_throne") {
@@ -127,23 +132,34 @@ export async function POST(req: Request) {
     }
 
     /* ──────────────────────────────────────────────
-       Stripe Checkout
-       OG = payment | Others = subscription
+       3️⃣ Create Stripe Checkout Session
     ────────────────────────────────────────────── */
-    const session = await stripe.checkout.sessions.create({
-      mode: tierName === "og_throne" ? "payment" : "subscription",
-      line_items: [
-        {
-          price: priceId,
-          quantity: 1,
+
+    // OG = ONE-TIME PAYMENT
+    if (tierName === "og_throne") {
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL}/billing/success`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/billing/cancel`,
+        metadata: {
+          tier_name: tierName,
+          type: "one_time",
         },
-      ],
+      });
+
+      return NextResponse.json({ url: session.url });
+    }
+
+    // EARLY BIRD / PRIME = SUBSCRIPTION
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/billing/success`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/billing/cancel`,
       metadata: {
         tier_name: tierName,
-        source: "public_pricing",
-        type: tierName === "og_throne" ? "lifetime" : "subscription",
+        type: "subscription",
       },
     });
 
