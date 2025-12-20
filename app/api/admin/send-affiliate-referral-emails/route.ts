@@ -3,9 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 
 /*
-TEMPORARY BYPASS VERSION
-Auth is intentionally disabled for one-time execution.
-DO NOT leave this deployed after send.
+FINAL LOCKED VERSION
+Admin-only route protected by ADMIN_EMAIL_TOKEN
 */
 
 const supabase = createClient(
@@ -15,8 +14,26 @@ const supabase = createClient(
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
-export async function POST() {
+export async function POST(req: Request) {
   try {
+    /* ─────────────────────────────────────────────
+       ADMIN AUTH (RE-ENABLED)
+    ───────────────────────────────────────────── */
+    const authHeader = req.headers.get("authorization");
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const token = authHeader.replace("Bearer ", "").trim();
+
+    if (token !== process.env.ADMIN_EMAIL_TOKEN) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    /* ─────────────────────────────────────────────
+       FETCH AFFILIATE USERS
+    ───────────────────────────────────────────── */
     const { data: users, error } = await supabase
       .from("profiles")
       .select("email, referral_code")
@@ -24,13 +41,27 @@ export async function POST() {
 
     if (error) {
       console.error("Supabase error:", error);
-      return NextResponse.json({ error: "Fetch failed" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to fetch affiliate users" },
+        { status: 500 }
+      );
     }
 
+    if (!users || users.length === 0) {
+      return NextResponse.json(
+        { message: "No affiliate users found" },
+        { status: 200 }
+      );
+    }
+
+    /* ─────────────────────────────────────────────
+       SEND EMAILS
+       (Should NOT normally be re-run)
+    ───────────────────────────────────────────── */
     let sent = 0;
     let failed: { email: string; reason: string }[] = [];
 
-    for (const user of users || []) {
+    for (const user of users) {
       const { email, referral_code } = user;
       if (!email || !referral_code) continue;
 
@@ -69,11 +100,11 @@ export async function POST() {
               <p>
                 After covering infrastructure, servers, Stripe, email, and security —
                 with Christmas days away and first-of-the-month bills coming up —
-                we’re tapped out right at the finish line.
+                we were tapped out right at the finish line.
               </p>
 
               <p>
-                We’re extremely close now. What we need is an influx of momentum
+                We’re extremely close now. What we needed was an influx of momentum
                 and funding to push this across the finish line.
               </p>
 
@@ -95,18 +126,26 @@ export async function POST() {
 
         sent++;
       } catch (err: any) {
-        failed.push({ email, reason: err?.message || "Unknown error" });
+        console.error(`Email failed for ${email}`, err);
+        failed.push({
+          email,
+          reason: err?.message || "Unknown error",
+        });
       }
     }
 
     return NextResponse.json({
       success: true,
-      total_users: users?.length || 0,
+      total_users: users.length,
       emails_sent: sent,
       emails_failed: failed.length,
       failed,
     });
   } catch (err) {
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    console.error("Unhandled error:", err);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
