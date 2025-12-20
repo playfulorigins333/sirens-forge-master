@@ -9,15 +9,9 @@ const supabase = createClient(
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
-// Hard throttle to avoid 429
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
-export async function POST(req: Request) {
-  const auth = req.headers.get("authorization");
-  if (!auth || auth !== `Bearer ${process.env.ADMIN_EMAIL_TOKEN}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
+export async function POST() {
   const { data: users, error } = await supabase
     .from("profiles")
     .select("id, email, referral_code")
@@ -33,31 +27,24 @@ export async function POST(req: Request) {
 
   for (const user of users || []) {
     try {
-      const result = await resend.emails.send({
+      const res = await resend.emails.send({
         from: "Sirens Forge <noreply@sirensforge.vip>",
         to: user.email,
         subject: "Your Sirens Forge referral code — we’re almost there",
         html: `
           <p>Hey,</p>
-
-          <p>Here’s your personal Sirens Forge referral code:</p>
-
+          <p>Your referral code:</p>
           <p><strong>${user.referral_code}</strong></p>
-
           <p>
             <a href="https://sirensforge.vip/pricing?ref=${user.referral_code}">
               https://sirensforge.vip/pricing?ref=${user.referral_code}
             </a>
           </p>
-
-          <p>
-            🧡<br/>
-            Dustin & Allison
-          </p>
+          <p>🧡<br/>Dustin & Allison</p>
         `,
       });
 
-      if (!result.error) {
+      if (!res.error) {
         await supabase
           .from("profiles")
           .update({ referral_email_sent_at: new Date().toISOString() })
@@ -65,10 +52,9 @@ export async function POST(req: Request) {
 
         sent++;
       } else {
-        failed.push({ email: user.email, error: result.error });
+        failed.push({ email: user.email, error: res.error });
       }
 
-      // CRITICAL: throttle
       await sleep(1200);
     } catch (err) {
       failed.push({ email: user.email, error: err });
