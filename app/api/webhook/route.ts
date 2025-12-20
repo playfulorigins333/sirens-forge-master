@@ -25,10 +25,7 @@ async function findProfileIdByStripeCustomer(
     .maybeSingle();
 
   if (error) {
-    console.error(
-      "❌ Supabase error finding profile by stripe_customer_id:",
-      error
-    );
+    console.error("❌ Error finding profile by stripe_customer_id:", error);
     return null;
   }
 
@@ -47,10 +44,7 @@ async function findProfileByConnectAccount(
     .maybeSingle();
 
   if (error) {
-    console.error(
-      "❌ Supabase error finding profile by stripe_connect_account_id:",
-      error
-    );
+    console.error("❌ Error finding profile by stripe_connect_account_id:", error);
     return null;
   }
 
@@ -67,14 +61,24 @@ async function findTierByPriceId(priceId: string | null | undefined) {
     .maybeSingle();
 
   if (error) {
-    console.error(
-      "❌ Supabase error finding subscription_tiers by priceId:",
-      error
-    );
+    console.error("❌ Error finding tier by priceId:", error);
     return null;
   }
 
   return data ?? null;
+}
+
+/**
+ * HARD SAFETY CHECK
+ * Commission may only unlock if destination charge was used
+ */
+function destinationChargeUsed(obj: any): boolean {
+  const md = obj?.metadata ?? {};
+  return (
+    md.connect_mode === "destination_charge" &&
+    typeof md.connect_destination_account === "string" &&
+    md.connect_destination_account.length > 0
+  );
 }
 
 async function upsertUserSubscriptionFromStripe(sub: any) {
@@ -82,43 +86,15 @@ async function upsertUserSubscriptionFromStripe(sub: any) {
   const stripeSubscriptionId = sub.id;
 
   const profileId = await findProfileIdByStripeCustomer(stripeCustomerId);
-  if (!profileId) {
-    console.warn(
-      "⚠️ No profile found for stripe_customer_id, skipping user_subscriptions upsert:",
-      stripeCustomerId
-    );
-    return;
-  }
+  if (!profileId) return;
 
   const firstItem = sub.items?.data?.[0];
   const priceId = firstItem?.price?.id ?? null;
 
   const tier = await findTierByPriceId(priceId);
-  if (!tier) {
-    console.warn(
-      "⚠️ No subscription_tier found for priceId, skipping user_subscriptions upsert:",
-      priceId
-    );
-    return;
-  }
+  if (!tier) return;
 
-  const currentPeriodStart = sub.current_period_start
-    ? new Date(sub.current_period_start * 1000).toISOString()
-    : null;
-
-  const currentPeriodEnd = sub.current_period_end
-    ? new Date(sub.current_period_end * 1000).toISOString()
-    : null;
-
-  const trialStart = sub.trial_start
-    ? new Date(sub.trial_start * 1000).toISOString()
-    : null;
-
-  const trialEnd = sub.trial_end
-    ? new Date(sub.trial_end * 1000).toISOString()
-    : null;
-
-  const status: string = sub.status ?? "active";
+  const status = sub.status ?? "active";
 
   const { error } = await supabaseAdmin
     .from("user_subscriptions")
@@ -130,14 +106,22 @@ async function upsertUserSubscriptionFromStripe(sub: any) {
         stripe_subscription_id: stripeSubscriptionId,
         stripe_customer_id: stripeCustomerId,
         status,
-        current_period_start: currentPeriodStart,
-        current_period_end: currentPeriodEnd,
+        current_period_start: sub.current_period_start
+          ? new Date(sub.current_period_start * 1000).toISOString()
+          : null,
+        current_period_end: sub.current_period_end
+          ? new Date(sub.current_period_end * 1000).toISOString()
+          : null,
         cancel_at_period_end: Boolean(sub.cancel_at_period_end),
         canceled_at: sub.canceled_at
           ? new Date(sub.canceled_at * 1000).toISOString()
           : null,
-        trial_start: trialStart,
-        trial_end: trialEnd,
+        trial_start: sub.trial_start
+          ? new Date(sub.trial_start * 1000).toISOString()
+          : null,
+        trial_end: sub.trial_end
+          ? new Date(sub.trial_end * 1000).toISOString()
+          : null,
         metadata: {
           stripe_price_id: priceId,
         },
@@ -146,7 +130,7 @@ async function upsertUserSubscriptionFromStripe(sub: any) {
     );
 
   if (error) {
-    console.error("❌ Supabase error upserting user_subscriptions:", error);
+    console.error("❌ Error upserting user_subscriptions:", error);
   }
 }
 
@@ -167,11 +151,11 @@ export async function POST(req: Request) {
       process.env.STRIPE_WEBHOOK_SECRET!
     );
   } catch (err: any) {
-    console.error("❌ Invalid Stripe Signature:", err.message);
+    console.error("❌ Invalid Stripe signature:", err.message);
     return new NextResponse("Invalid signature", { status: 400 });
   }
 
-  console.log("🔔 Stripe Event:", event.type, "ID:", event.id);
+  console.log("🔔 Stripe Event:", event.type);
 
   try {
     switch (event.type) {
@@ -181,25 +165,32 @@ export async function POST(req: Request) {
       case "account.updated": {
         const account: any = event.data.object;
 
-        if (
-          account.charges_enabled === true &&
-          account.payouts_enabled === true
-        ) {
+        if (account.charges_enabled && account.payouts_enabled) {
           const profileId = await findProfileByConnectAccount(account.id);
 
           if (profileId) {
             await supabaseAdmin
               .from("profiles")
-              .update({
-                stripe_connect_onboarded: true,
-              })
+              .update({ stripe_connect_onboarded: true })
               .eq("id", profileId);
 
-            console.log(
-              "✅ Stripe Connect onboarding complete for profile:",
-              profileId
-            );
+            console.log("✅ Connect onboarded:", profileId);
           }
+        }
+        break;
+      }
+
+      // -------------------------------------------------
+      // CHECKOUT SESSION
+      // -------------------------------------------------
+      case "checkout.session.completed": {
+        const session: any = event.data.object;
+
+        if (session.mode === "subscription" && session.subscription) {
+          const sub = await stripe.subscriptions.retrieve(
+            String(session.subscription)
+          );
+          await upsertUserSubscriptionFromStripe(sub);
         }
 
         break;
@@ -213,15 +204,17 @@ export async function POST(req: Request) {
         const sub: any = event.data.object;
         await upsertUserSubscriptionFromStripe(sub);
 
-        // 🔓 Release commissions if cooldown passed
-        await supabaseAdmin.rpc("release_affiliate_commissions");
+        // 🚫 Only release commissions if destination charge confirmed
+        if (destinationChargeUsed(sub)) {
+          await supabaseAdmin.rpc("release_affiliate_commissions");
+        }
+
         break;
       }
 
       case "customer.subscription.deleted": {
         const sub: any = event.data.object;
 
-        // ❌ Void commissions immediately
         await supabaseAdmin.rpc("void_affiliate_commissions", {
           p_stripe_subscription_id: String(sub.id),
         });
@@ -233,7 +226,13 @@ export async function POST(req: Request) {
       // INVOICES
       // -------------------------------------------------
       case "invoice.payment_succeeded": {
-        await supabaseAdmin.rpc("release_affiliate_commissions");
+        const invoice: any = event.data.object;
+
+        // 🚫 DO NOT release unless destination charge was used
+        if (destinationChargeUsed(invoice)) {
+          await supabaseAdmin.rpc("release_affiliate_commissions");
+        }
+
         break;
       }
 
@@ -249,35 +248,15 @@ export async function POST(req: Request) {
         break;
       }
 
-      // -------------------------------------------------
-      // CHECKOUT
-      // -------------------------------------------------
-      case "checkout.session.completed": {
-        const session: any = event.data.object;
-
-        if (session.mode === "subscription" && session.subscription) {
-          const sub = await stripe.subscriptions.retrieve(
-            String(session.subscription)
-          );
-
-          await upsertUserSubscriptionFromStripe(sub);
-
-          // 🔓 Release if eligible
-          await supabaseAdmin.rpc("release_affiliate_commissions");
-        }
-
-        break;
-      }
-
       default:
-        console.log("ℹ️ Ignoring event type:", event.type);
+        console.log("ℹ️ Ignored event:", event.type);
     }
 
     return NextResponse.json({ received: true });
   } catch (err: any) {
-    console.error("🔥 Webhook processing error:", err);
+    console.error("🔥 Webhook error:", err);
     return NextResponse.json(
-      { error: err?.message ?? "Webhook handler failed" },
+      { error: err?.message ?? "Webhook failed" },
       { status: 500 }
     );
   }
