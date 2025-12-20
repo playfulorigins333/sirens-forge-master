@@ -13,7 +13,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 /* ──────────────────────────────────────────────
-   Supabase (service role – authoritative)
+   Supabase (service role)
 ────────────────────────────────────────────── */
 const SUPABASE_URL =
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
@@ -44,7 +44,6 @@ function clampNonNegative(n: number) {
 
 /* ──────────────────────────────────────────────
    POST /api/checkout/subscription
-   PUBLIC — Stripe Checkout happens BEFORE auth
 ────────────────────────────────────────────── */
 export async function POST(req: Request) {
   try {
@@ -73,25 +72,21 @@ export async function POST(req: Request) {
     }
 
     /* ──────────────────────────────────────────────
-       1️⃣ Load tier limits
+       Seat enforcement (unchanged)
     ────────────────────────────────────────────── */
-    const { data: tierRow, error: tierErr } = await supabase
+    const { data: tierRow } = await supabase
       .from("subscription_tiers")
-      .select("id, max_slots")
+      .select("max_slots")
       .eq("name", tierName)
       .single();
 
-    if (tierErr || !tierRow) {
+    if (!tierRow) {
       return NextResponse.json(
         { error: "Subscription tier not found" },
         { status: 404 }
       );
     }
 
-    /* ──────────────────────────────────────────────
-       2️⃣ Count active subscriptions
-       (OG excludes testers)
-    ────────────────────────────────────────────── */
     let activeCount = 0;
 
     if (tierName === "og_throne") {
@@ -132,11 +127,11 @@ export async function POST(req: Request) {
     }
 
     /* ──────────────────────────────────────────────
-       3️⃣ Create Stripe Checkout Session
-       (NO customer yet — webhook handles it)
+       Stripe Checkout
+       OG = payment | Others = subscription
     ────────────────────────────────────────────── */
     const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
+      mode: tierName === "og_throne" ? "payment" : "subscription",
       line_items: [
         {
           price: priceId,
@@ -148,7 +143,7 @@ export async function POST(req: Request) {
       metadata: {
         tier_name: tierName,
         source: "public_pricing",
-        type: "subscription",
+        type: tierName === "og_throne" ? "lifetime" : "subscription",
       },
     });
 
