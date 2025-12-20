@@ -3,12 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 
 /*
-REQUIRED ENV VARS (SERVER ONLY)
-
-RESEND_API_KEY
-SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY
-ADMIN_EMAIL_TOKEN
+TEMPORARY BYPASS VERSION
+Auth is intentionally disabled for one-time execution.
+DO NOT leave this deployed after send.
 */
 
 const supabase = createClient(
@@ -18,26 +15,8 @@ const supabase = createClient(
 
 const resend = new Resend(process.env.RESEND_API_KEY!);
 
-export async function POST(req: Request) {
+export async function POST() {
   try {
-    /* ─────────────────────────────────────────────
-       ADMIN AUTH (HARD BLOCK)
-    ───────────────────────────────────────────── */
-    const authHeader = req.headers.get("authorization");
-
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const token = authHeader.replace("Bearer ", "").trim();
-
-    if (token !== process.env.ADMIN_EMAIL_TOKEN) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    /* ─────────────────────────────────────────────
-       FETCH AFFILIATE USERS
-    ───────────────────────────────────────────── */
     const { data: users, error } = await supabase
       .from("profiles")
       .select("email, referral_code")
@@ -45,28 +24,14 @@ export async function POST(req: Request) {
 
     if (error) {
       console.error("Supabase error:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch affiliate users" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Fetch failed" }, { status: 500 });
     }
 
-    if (!users || users.length === 0) {
-      return NextResponse.json(
-        { message: "No affiliate users found" },
-        { status: 200 }
-      );
-    }
-
-    /* ─────────────────────────────────────────────
-       SEND EMAILS
-    ───────────────────────────────────────────── */
     let sent = 0;
     let failed: { email: string; reason: string }[] = [];
 
-    for (const user of users) {
+    for (const user of users || []) {
       const { email, referral_code } = user;
-
       if (!email || !referral_code) continue;
 
       const referralLink = `https://sirensforge.vip/pricing?ref=${referral_code}`;
@@ -102,69 +67,27 @@ export async function POST(req: Request) {
               </p>
 
               <p>
-                Here’s the honest part.
-              </p>
-
-              <p>
                 After covering infrastructure, servers, Stripe, email, and security —
-                with <strong>Christmas days away and first-of-the-month bills coming up</strong> —
-                we’re basically tapped out right at the finish line.
+                with Christmas days away and first-of-the-month bills coming up —
+                we’re tapped out right at the finish line.
               </p>
 
               <p>
-                Just to be transparent, I’ve personally put around
-                <strong>$375–$400</strong> into RunPod alone to get us here.
-                I’m not sharing that for sympathy — just clarity.
-              </p>
-
-              <p>
-                We’re extremely close now. Payments are live. Affiliates are live.
-                Access control is live. What we need at this point is an
-                <strong>influx of momentum and funding</strong> to push this
-                across the finish line and fully launch.
-              </p>
-
-              <p>
-                So I’m breaking my own rule <strong>one time</strong> and opening the doors early.
+                We’re extremely close now. What we need is an influx of momentum
+                and funding to push this across the finish line.
               </p>
 
               <hr />
 
-              <p><strong>Your personal referral code:</strong></p>
+              <p><strong>Your referral code:</strong></p>
+              <p style="font-size:18px;font-weight:bold;">${referral_code}</p>
 
-              <p style="font-size: 20px; font-weight: bold;">
-                ${referral_code}
-              </p>
-
-              <p><strong>Your tracked referral link:</strong></p>
-
-              <p>
-                <a href="${referralLink}">
-                  ${referralLink}
-                </a>
-              </p>
-
-              <p>
-                <strong>Important:</strong><br/>
-                Your referral code must be entered at checkout.<br/>
-                No code = no commission. This is enforced automatically.
-              </p>
-
-              <p>
-                I know people are cautious — and they should be.
-                I’m not asking for blind faith. Just help taking the last step across the line.
-              </p>
-
-              <p>
-                You’ll be among the first inside.<br/>
-                You’ll help shake things down.<br/>
-                And if this becomes what I believe it can, you’ll know you helped build it — not just use it.
-              </p>
+              <p><strong>Your referral link:</strong></p>
+              <p><a href="${referralLink}">${referralLink}</a></p>
 
               <p>
                 🧡<br/>
-                Dustin<br/>
-                <em>Founder, Sirens Forge</em>
+                Dustin & Allison
               </p>
             </div>
           `,
@@ -172,29 +95,18 @@ export async function POST(req: Request) {
 
         sent++;
       } catch (err: any) {
-        console.error(`Email failed for ${email}`, err);
-        failed.push({
-          email,
-          reason: err?.message || "Unknown error",
-        });
+        failed.push({ email, reason: err?.message || "Unknown error" });
       }
     }
 
-    /* ─────────────────────────────────────────────
-       RESPONSE SUMMARY
-    ───────────────────────────────────────────── */
     return NextResponse.json({
       success: true,
-      total_users: users.length,
+      total_users: users?.length || 0,
       emails_sent: sent,
       emails_failed: failed.length,
       failed,
     });
   } catch (err) {
-    console.error("Unhandled error:", err);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }
