@@ -257,6 +257,7 @@ export default function PricingPage() {
             <p className="text-gray-400 text-sm md:text-base max-w-xl mx-auto md:mx-0">
               Lock in OG or Early Bird benefits before public pricing activates.
               Seats update in real time as founders join.
+              Founder pricing ends before public launch.
             </p>
           </div>
 
@@ -453,7 +454,7 @@ export default function PricingPage() {
 
                     <div className="space-y-3">
                       <div className="flex flex-col items-center gap-1.5 text-center">
-                        <div className="text-3xl font-black tracking-tight">
+                        <div className="text-5xl font-black tracking-tight bg-gradient-to-r from-purple-200 via-white to-purple-200 bg-clip-text text-transparent">
                           $1,333
                         </div>
                         <div className="text-gray-400 text-xs uppercase tracking-[0.25em]">
@@ -596,6 +597,7 @@ export default function PricingPage() {
                         </span>
                       </div>
 
+                      <div className="flex justify-center">
                       <NeonButton
                         disabled={earlyBirdSoldOut || checkoutLoading !== null}
                         loading={checkoutLoading === "early_bird"}
@@ -611,6 +613,7 @@ export default function PricingPage() {
                           !earlyBirdSoldOut && handleCheckout("early_bird")
                         }
                       />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
