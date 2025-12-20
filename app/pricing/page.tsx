@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, animate } from "framer-motion";
+import { useSearchParams } from "next/navigation";
 
 import {
   Card,
@@ -67,7 +68,7 @@ function AnimatedNumber({ value }: { value: number }) {
 }
 
 export default function PricingPage() {
-  const [viewMode, setViewMode] = useState<ViewMode>("compare");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
   const [seats, setSeats] = useState<SeatState>(FALLBACK_SEATS);
   const [loadingSeats, setLoadingSeats] = useState<boolean>(false);
 
@@ -76,8 +77,45 @@ export default function PricingPage() {
   );
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
+  // Referral / affiliate code (optional but required for commissions)
+  const searchParams = useSearchParams();
+  const [referralCode, setReferralCode] = useState<string>("");
+  const [referralSaved, setReferralSaved] = useState<boolean>(false);
+
+
   const ogSoldOut = seats.og.remaining <= 0;
   const earlyBirdSoldOut = seats.earlyBird.remaining <= 0;
+
+  // Hydrate referral code from URL (?ref=CODE) or localStorage
+  useEffect(() => {
+    try {
+      const fromUrl =
+        (searchParams?.get("ref") ||
+          searchParams?.get("r") ||
+          searchParams?.get("code") ||
+          "")?.trim();
+
+      const fromStorage =
+        (typeof window !== "undefined" &&
+          window.localStorage.getItem("sf_referral_code")) ||
+        "";
+
+      const pick = (fromUrl || fromStorage || "").trim();
+      if (!pick) return;
+
+      const normalized = pick.toUpperCase().replace(/\s+/g, "");
+      setReferralCode(normalized);
+
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("sf_referral_code", normalized);
+        setReferralSaved(true);
+      }
+    } catch {
+      // ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
 
   // Live seat polling – wired to /api/subscription/seat-count
   useEffect(() => {
@@ -135,6 +173,7 @@ export default function PricingPage() {
         // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
         body: JSON.stringify({
           tierName,
+          referralCode: referralCode ? referralCode.trim().toUpperCase() : undefined,
         }),
       });
 
@@ -357,6 +396,50 @@ export default function PricingPage() {
                 </p>
               )}
             </div>
+
+              <div className="w-full sm:w-auto sm:min-w-[280px]">
+                <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                    Referral / affiliate code
+                  </p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      value={referralCode}
+                      onChange={(e) => {
+                        const v = e.target.value
+                          .toUpperCase()
+                          .replace(/\s+/g, "");
+                        setReferralCode(v);
+                        try {
+                          window.localStorage.setItem("sf_referral_code", v);
+                          setReferralSaved(true);
+                        } catch {
+                          // ignore
+                        }
+                      }}
+                      placeholder="Example: USER9389"
+                      className="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-purple-400/70 focus:ring-2 focus:ring-purple-500/20"
+                      inputMode="text"
+                      autoCapitalize="characters"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    {referralCode ? (
+                      <span className="text-[10px] font-semibold text-emerald-300 whitespace-nowrap">
+                        {referralSaved ? "Saved" : "OK"}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-amber-200 whitespace-nowrap">
+                        Required for commission
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    If you&apos;re supporting an affiliate, enter their code before checkout. No code = no commission.
+                  </p>
+                </div>
+              </div>
+
           </div>
         </motion.section>
 
