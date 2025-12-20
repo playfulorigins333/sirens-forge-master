@@ -14,11 +14,13 @@ import {
   AlertTriangle,
   Link as LinkIcon,
   CheckCircle,
+  Loader2,
 } from "lucide-react"
 import { motion } from "framer-motion"
 
 export default function AffiliateDashboard() {
   const [loading, setLoading] = useState(true)
+  const [connecting, setConnecting] = useState(false)
   const [profile, setProfile] = useState<any>(null)
   const [tierName, setTierName] = useState<string>("Standard")
   const [code, setCode] = useState<string>("")
@@ -42,7 +44,6 @@ export default function AffiliateDashboard() {
       return
     }
 
-    // PROFILE
     const { data: p } = await supabase
       .from("profiles")
       .select("*")
@@ -51,7 +52,6 @@ export default function AffiliateDashboard() {
 
     setProfile(p)
 
-    // ACTIVE SUBSCRIPTION → TIER BADGE
     const { data: sub } = await supabase
       .from("user_subscriptions")
       .select("tier_name")
@@ -63,7 +63,6 @@ export default function AffiliateDashboard() {
 
     setTierName(sub?.tier_name ?? "Standard")
 
-    // REFERRAL CODE
     const { data: codeData } = await supabase
       .from("referral_codes")
       .select("code")
@@ -72,7 +71,6 @@ export default function AffiliateDashboard() {
 
     setCode(codeData?.code || "")
 
-    // SUMMARY
     const { data: summaryData } = await supabase.rpc(
       "get_user_stats",
       { user_id_input: user.id }
@@ -80,7 +78,6 @@ export default function AffiliateDashboard() {
 
     setSummary(summaryData)
 
-    // COMMISSION ACTIVITY
     const { data: recent } = await supabase
       .from("affiliate_commissions")
       .select("*")
@@ -90,7 +87,6 @@ export default function AffiliateDashboard() {
 
     setActivity(recent || [])
 
-    // PAYOUT HISTORY
     const { data: payoutItems } = await supabase
       .from("affiliate_payout_items")
       .select(`
@@ -115,9 +111,35 @@ export default function AffiliateDashboard() {
     )
   }
 
-  function handleConnectStripe() {
-    // Phase 1.5 will activate this
-    alert("Stripe Connect onboarding will be enabled shortly.")
+  async function handleConnectStripe() {
+    try {
+      setConnecting(true)
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        throw new Error("Not authenticated")
+      }
+
+      const res = await fetch("/api/stripe/connect/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: user.id }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok || !json?.url) {
+        throw new Error(json?.error || "Unable to start Stripe onboarding")
+      }
+
+      window.location.href = json.url
+    } catch (err: any) {
+      alert(err?.message ?? "Stripe Connect unavailable. Try again later.")
+      setConnecting(false)
+    }
   }
 
   if (loading) {
@@ -139,7 +161,6 @@ export default function AffiliateDashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black text-white px-6 py-12">
-      {/* HEADER */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -153,7 +174,6 @@ export default function AffiliateDashboard() {
         </p>
       </motion.div>
 
-      {/* STRIPE CONNECT STATUS */}
       {!stripeConnected ? (
         <Card className="border-amber-500/40 bg-amber-500/10 mb-12">
           <CardHeader>
@@ -164,16 +184,24 @@ export default function AffiliateDashboard() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-amber-100 text-sm">
-              You’ve earned commissions, but payouts are locked until you
-              connect a Stripe account. This is required so earnings can be
-              routed directly to you — we never hold affiliate funds.
+              Stripe Connect is required so commissions are paid directly to you.
             </p>
             <Button
-              className="flex items-center gap-2"
               onClick={handleConnectStripe}
+              disabled={connecting}
+              className="flex items-center gap-2"
             >
-              <LinkIcon className="w-4 h-4" />
-              Connect Stripe to Unlock Earnings
+              {connecting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Redirecting…
+                </>
+              ) : (
+                <>
+                  <LinkIcon className="w-4 h-4" />
+                  Connect Stripe
+                </>
+              )}
             </Button>
           </CardContent>
         </Card>
@@ -187,112 +215,12 @@ export default function AffiliateDashboard() {
           </CardHeader>
           <CardContent>
             <p className="text-emerald-100 text-sm">
-              Your Stripe account is connected. Eligible commissions will be
-              routed directly to you automatically.
+              Your Stripe account is connected. Commissions are routed directly
+              to you.
             </p>
           </CardContent>
         </Card>
       )}
-
-      {/* TIER BADGE */}
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className={`mx-auto mb-12 px-8 py-4 rounded-full w-fit text-2xl font-bold bg-gradient-to-r ${
-          tierColors[tierName] || tierColors.Standard
-        }`}
-      >
-        {tierName.replace("_", " ").toUpperCase()} 👑
-      </motion.div>
-
-      {/* STATS */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-14">
-        <StatCard icon={<Users className="w-8 h-8 text-purple-300" />} label="Total Referrals" value={summary?.total_referrals || 0} />
-        <StatCard icon={<TrendingUp className="w-8 h-8 text-green-300" />} label="Active Subscribers" value={summary?.active_subscribers || 0} />
-        <StatCard icon={<DollarSign className="w-8 h-8 text-yellow-300" />} label="Total Earned" value={`$${(summary?.total_earned ?? 0).toFixed(2)}`} />
-        <StatCard icon={<Gift className="w-8 h-8 text-pink-300" />} label="Pending" value={`$${(summary?.pending_payout ?? 0).toFixed(2)}`} />
-      </div>
-
-      {/* REFERRAL LINK */}
-      <Card className="bg-gray-900/60 border-gray-700 mb-16">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-3 text-3xl">
-            <Crown className="w-8 h-8 text-yellow-400" />
-            Your Referral Link
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="p-5 bg-black/40 rounded-lg border border-gray-700 flex justify-between items-center">
-            <code className="text-xl text-purple-300">
-              https://sirensforge.vip?ref={code}
-            </code>
-            <Button onClick={copyLink}>
-              <Copy className="w-4 h-4 mr-2" />
-              Copy
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* ACTIVITY */}
-      <Section title="Recent Activity">
-        {activity.length === 0 ? (
-          <EmptyMessage message="No commissions yet." />
-        ) : (
-          activity.map((a, i) => (
-            <div key={i} className="bg-gray-900/40 border border-gray-700 p-4 rounded-lg flex justify-between">
-              <span>Earned ${(a.commission_amount_cents / 100).toFixed(2)}</span>
-              <span className="text-sm text-gray-500">
-                {new Date(a.created_at).toLocaleDateString()}
-              </span>
-            </div>
-          ))
-        )}
-      </Section>
-
-      {/* PAYOUTS */}
-      <Section title="Payout History">
-        {payouts.length === 0 ? (
-          <EmptyMessage message="No payouts yet." />
-        ) : (
-          payouts.map((p, i) => (
-            <div key={i} className="bg-gray-900/40 border border-gray-700 p-4 rounded-lg flex justify-between">
-              <span>
-                ${(p.amount_cents / 100).toFixed(2)} —{" "}
-                {p.affiliate_payout_batches?.status ?? "processing"}
-              </span>
-              <span className="text-sm text-gray-500">
-                {new Date(p.created_at).toLocaleDateString()}
-              </span>
-            </div>
-          ))
-        )}
-      </Section>
     </div>
   )
-}
-
-/* ---------------- COMPONENTS ---------------- */
-
-function StatCard({ icon, label, value }: any) {
-  return (
-    <Card className="bg-gray-900/70 border-gray-700 text-center p-6">
-      <div className="flex justify-center mb-3">{icon}</div>
-      <div className="text-gray-300">{label}</div>
-      <div className="text-4xl font-bold mt-2">{value}</div>
-    </Card>
-  )
-}
-
-function Section({ title, children }: any) {
-  return (
-    <div className="mb-16">
-      <h2 className="text-4xl font-bold mb-6">{title}</h2>
-      {children}
-    </div>
-  )
-}
-
-function EmptyMessage({ message }: any) {
-  return <p className="text-gray-400 text-center py-8">{message}</p>
 }
