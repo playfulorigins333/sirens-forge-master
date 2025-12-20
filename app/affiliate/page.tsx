@@ -11,6 +11,9 @@ import {
   Copy,
   TrendingUp,
   Gift,
+  AlertTriangle,
+  Link as LinkIcon,
+  CheckCircle,
 } from "lucide-react"
 import { motion } from "framer-motion"
 
@@ -69,7 +72,7 @@ export default function AffiliateDashboard() {
 
     setCode(codeData?.code || "")
 
-    // SUMMARY (RPC YOU ALREADY HAVE)
+    // SUMMARY
     const { data: summaryData } = await supabase.rpc(
       "get_user_stats",
       { user_id_input: user.id }
@@ -77,7 +80,7 @@ export default function AffiliateDashboard() {
 
     setSummary(summaryData)
 
-    // COMMISSION ACTIVITY (LEDGER)
+    // COMMISSION ACTIVITY
     const { data: recent } = await supabase
       .from("affiliate_commissions")
       .select("*")
@@ -87,7 +90,7 @@ export default function AffiliateDashboard() {
 
     setActivity(recent || [])
 
-    // PAYOUT HISTORY (BATCHED)
+    // PAYOUT HISTORY
     const { data: payoutItems } = await supabase
       .from("affiliate_payout_items")
       .select(`
@@ -112,6 +115,11 @@ export default function AffiliateDashboard() {
     )
   }
 
+  function handleConnectStripe() {
+    // Phase 1.5 will activate this
+    alert("Stripe Connect onboarding will be enabled shortly.")
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center text-white text-xl animate-pulse">
@@ -126,6 +134,8 @@ export default function AffiliateDashboard() {
     prime_access: "from-cyan-400 to-blue-500",
     Standard: "from-gray-600 to-gray-800",
   }
+
+  const stripeConnected = Boolean(profile?.stripe_connect_onboarded)
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black text-white px-6 py-12">
@@ -143,6 +153,47 @@ export default function AffiliateDashboard() {
         </p>
       </motion.div>
 
+      {/* STRIPE CONNECT STATUS */}
+      {!stripeConnected ? (
+        <Card className="border-amber-500/40 bg-amber-500/10 mb-12">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3 text-amber-200">
+              <AlertTriangle className="w-6 h-6" />
+              Earnings Locked — Action Required
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-amber-100 text-sm">
+              You’ve earned commissions, but payouts are locked until you
+              connect a Stripe account. This is required so earnings can be
+              routed directly to you — we never hold affiliate funds.
+            </p>
+            <Button
+              className="flex items-center gap-2"
+              onClick={handleConnectStripe}
+            >
+              <LinkIcon className="w-4 h-4" />
+              Connect Stripe to Unlock Earnings
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-emerald-500/40 bg-emerald-500/10 mb-12">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-3 text-emerald-200">
+              <CheckCircle className="w-6 h-6" />
+              Stripe Connected
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-emerald-100 text-sm">
+              Your Stripe account is connected. Eligible commissions will be
+              routed directly to you automatically.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
       {/* TIER BADGE */}
       <motion.div
         initial={{ scale: 0.9, opacity: 0 }}
@@ -156,26 +207,10 @@ export default function AffiliateDashboard() {
 
       {/* STATS */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-14">
-        <StatCard
-          icon={<Users className="w-8 h-8 text-purple-300" />}
-          label="Total Referrals"
-          value={summary?.total_referrals || 0}
-        />
-        <StatCard
-          icon={<TrendingUp className="w-8 h-8 text-green-300" />}
-          label="Active Subscribers"
-          value={summary?.active_subscribers || 0}
-        />
-        <StatCard
-          icon={<DollarSign className="w-8 h-8 text-yellow-300" />}
-          label="Total Earned"
-          value={`$${(summary?.total_earned ?? 0).toFixed(2)}`}
-        />
-        <StatCard
-          icon={<Gift className="w-8 h-8 text-pink-300" />}
-          label="Pending"
-          value={`$${(summary?.pending_payout ?? 0).toFixed(2)}`}
-        />
+        <StatCard icon={<Users className="w-8 h-8 text-purple-300" />} label="Total Referrals" value={summary?.total_referrals || 0} />
+        <StatCard icon={<TrendingUp className="w-8 h-8 text-green-300" />} label="Active Subscribers" value={summary?.active_subscribers || 0} />
+        <StatCard icon={<DollarSign className="w-8 h-8 text-yellow-300" />} label="Total Earned" value={`$${(summary?.total_earned ?? 0).toFixed(2)}`} />
+        <StatCard icon={<Gift className="w-8 h-8 text-pink-300" />} label="Pending" value={`$${(summary?.pending_payout ?? 0).toFixed(2)}`} />
       </div>
 
       {/* REFERRAL LINK */}
@@ -191,7 +226,10 @@ export default function AffiliateDashboard() {
             <code className="text-xl text-purple-300">
               https://sirensforge.vip?ref={code}
             </code>
-            <Button onClick={copyLink}>Copy</Button>
+            <Button onClick={copyLink}>
+              <Copy className="w-4 h-4 mr-2" />
+              Copy
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -202,13 +240,8 @@ export default function AffiliateDashboard() {
           <EmptyMessage message="No commissions yet." />
         ) : (
           activity.map((a, i) => (
-            <div
-              key={i}
-              className="bg-gray-900/40 border border-gray-700 p-4 rounded-lg flex justify-between"
-            >
-              <span>
-                Earned ${(a.commission_amount_cents / 100).toFixed(2)}
-              </span>
+            <div key={i} className="bg-gray-900/40 border border-gray-700 p-4 rounded-lg flex justify-between">
+              <span>Earned ${(a.commission_amount_cents / 100).toFixed(2)}</span>
               <span className="text-sm text-gray-500">
                 {new Date(a.created_at).toLocaleDateString()}
               </span>
@@ -223,10 +256,7 @@ export default function AffiliateDashboard() {
           <EmptyMessage message="No payouts yet." />
         ) : (
           payouts.map((p, i) => (
-            <div
-              key={i}
-              className="bg-gray-900/40 border border-gray-700 p-4 rounded-lg flex justify-between"
-            >
+            <div key={i} className="bg-gray-900/40 border border-gray-700 p-4 rounded-lg flex justify-between">
               <span>
                 ${(p.amount_cents / 100).toFixed(2)} —{" "}
                 {p.affiliate_payout_batches?.status ?? "processing"}
