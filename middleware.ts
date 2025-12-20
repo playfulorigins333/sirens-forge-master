@@ -16,6 +16,16 @@ export function middleware(req: NextRequest) {
 
   // Allow age gate itself
   if (pathname === "/age") {
+    // If already age-verified, send them straight to pricing
+    const ageVerified =
+      req.cookies.get("sf_age_verified")?.value === "true";
+
+    if (ageVerified) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/pricing";
+      return NextResponse.redirect(url);
+    }
+
     return NextResponse.next();
   }
 
@@ -23,9 +33,18 @@ export function middleware(req: NextRequest) {
   const ageVerified =
     req.cookies.get("sf_age_verified")?.value === "true";
 
+  // Not age-verified → force age gate
   if (!ageVerified) {
     const url = req.nextUrl.clone();
     url.pathname = "/age";
+    return NextResponse.redirect(url);
+  }
+
+  // Age-verified users:
+  // Allow pricing only, redirect everything else to pricing
+  if (pathname !== "/pricing") {
+    const url = req.nextUrl.clone();
+    url.pathname = "/pricing";
     return NextResponse.redirect(url);
   }
 
