@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
-import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,15 +43,16 @@ function clampNonNegative(n: number) {
 }
 
 /* ──────────────────────────────────────────────
-   POST /api/checkout
+   POST /api/checkout/subscription
+   PUBLIC — Stripe Checkout happens BEFORE auth
 ────────────────────────────────────────────── */
 export async function POST(req: Request) {
   try {
-    const { userId, tierName } = await req.json();
+    const { tierName } = await req.json();
 
-    if (!userId || !tierName) {
+    if (!tierName) {
       return NextResponse.json(
-        { error: "Missing userId or tierName" },
+        { error: "Missing tierName" },
         { status: 400 }
       );
     }
@@ -90,7 +90,7 @@ export async function POST(req: Request) {
 
     /* ──────────────────────────────────────────────
        2️⃣ Count active subscriptions
-       (OG excludes testers via metadata flag)
+       (OG excludes testers)
     ────────────────────────────────────────────── */
     let activeCount = 0;
 
@@ -132,16 +132,11 @@ export async function POST(req: Request) {
     }
 
     /* ──────────────────────────────────────────────
-       3️⃣ Create / fetch Stripe customer
-    ────────────────────────────────────────────── */
-    const customerId = await getOrCreateStripeCustomer(userId);
-
-    /* ──────────────────────────────────────────────
-       4️⃣ Create Stripe Checkout Session
+       3️⃣ Create Stripe Checkout Session
+       (NO customer yet — webhook handles it)
     ────────────────────────────────────────────── */
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      customer: customerId,
       line_items: [
         {
           price: priceId,
@@ -151,8 +146,8 @@ export async function POST(req: Request) {
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/billing/success`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/billing/cancel`,
       metadata: {
-        user_id: userId,
         tier_name: tierName,
+        source: "public_pricing",
         type: "subscription",
       },
     });
