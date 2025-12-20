@@ -35,6 +35,28 @@ async function findProfileIdByStripeCustomer(
   return data?.id ?? null;
 }
 
+async function findProfileByConnectAccount(
+  connectAccountId: string
+): Promise<string | null> {
+  if (!connectAccountId) return null;
+
+  const { data, error } = await supabaseAdmin
+    .from("profiles")
+    .select("id")
+    .eq("stripe_connect_account_id", connectAccountId)
+    .maybeSingle();
+
+  if (error) {
+    console.error(
+      "❌ Supabase error finding profile by stripe_connect_account_id:",
+      error
+    );
+    return null;
+  }
+
+  return data?.id ?? null;
+}
+
 async function findTierByPriceId(priceId: string | null | undefined) {
   if (!priceId) return null;
 
@@ -153,6 +175,39 @@ export async function POST(req: Request) {
 
   try {
     switch (event.type) {
+      // -------------------------------------------------
+      // STRIPE CONNECT — ONBOARDING COMPLETE
+      // -------------------------------------------------
+      case "account.updated": {
+        const account: any = event.data.object;
+
+        if (
+          account.charges_enabled === true &&
+          account.payouts_enabled === true
+        ) {
+          const profileId = await findProfileByConnectAccount(account.id);
+
+          if (profileId) {
+            await supabaseAdmin
+              .from("profiles")
+              .update({
+                stripe_connect_onboarded: true,
+              })
+              .eq("id", profileId);
+
+            console.log(
+              "✅ Stripe Connect onboarding complete for profile:",
+              profileId
+            );
+          }
+        }
+
+        break;
+      }
+
+      // -------------------------------------------------
+      // SUBSCRIPTIONS
+      // -------------------------------------------------
       case "customer.subscription.created":
       case "customer.subscription.updated": {
         const sub: any = event.data.object;
@@ -174,8 +229,10 @@ export async function POST(req: Request) {
         break;
       }
 
+      // -------------------------------------------------
+      // INVOICES
+      // -------------------------------------------------
       case "invoice.payment_succeeded": {
-        // 🔓 Attempt unlock after payment success
         await supabaseAdmin.rpc("release_affiliate_commissions");
         break;
       }
@@ -192,6 +249,9 @@ export async function POST(req: Request) {
         break;
       }
 
+      // -------------------------------------------------
+      // CHECKOUT
+      // -------------------------------------------------
       case "checkout.session.completed": {
         const session: any = event.data.object;
 
