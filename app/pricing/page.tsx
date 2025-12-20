@@ -67,7 +67,7 @@ function AnimatedNumber({ value }: { value: number }) {
 }
 
 export default function PricingPage() {
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = useState<ViewMode>("compare");
   const [seats, setSeats] = useState<SeatState>(FALLBACK_SEATS);
   const [loadingSeats, setLoadingSeats] = useState<boolean>(false);
 
