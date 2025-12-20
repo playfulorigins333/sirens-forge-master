@@ -260,12 +260,91 @@ export async function POST(req: Request) {
       case "checkout.session.completed": {
         const session: any = event.data.object as any;
 
+        // Subscription checkout → retrieve subscription and upsert
         if (session.mode === "subscription" && session.subscription) {
           const sub: any = await stripe.subscriptions.retrieve(
             String(session.subscription)
           );
-
           await upsertUserSubscriptionFromStripe(sub);
+          break;
+        }
+
+        // One-time checkout (OG Eternal Throne) → upsert "lifetime" row
+        if (session.mode === "payment") {
+          const stripeCustomerId = String(session.customer ?? "");
+          const checkoutSessionId = String(session.id ?? "");
+
+          if (!stripeCustomerId) {
+            console.warn(
+              "⚠️ checkout.session.completed (payment) missing customer id; cannot grant OG access."
+            );
+            break;
+          }
+
+          // Load line items so we can read the price id that was purchased
+          const full = await stripe.checkout.sessions.retrieve(checkoutSessionId, {
+            expand: ["line_items.data.price"],
+          });
+
+          const firstItem = full.line_items?.data?.[0] as any;
+          const priceId: string | null = firstItem?.price?.id ?? null;
+
+          const profileId = await findProfileIdByStripeCustomer(stripeCustomerId);
+          if (!profileId) {
+            console.warn(
+              "⚠️ No profile found for stripe_customer_id (payment); cannot grant OG access:",
+              stripeCustomerId
+            );
+            break;
+          }
+
+          const tier = await findTierByPriceId(priceId);
+          if (!tier) {
+            console.warn(
+              "⚠️ No subscription_tier found for priceId (payment); cannot grant OG access:",
+              priceId
+            );
+            break;
+          }
+
+          // Use a stable unique key so this upsert is idempotent.
+          // This DOES NOT represent a Stripe subscription; it is a one-time purchase record stored in user_subscriptions.
+          const pseudoSubscriptionId = `og_${checkoutSessionId}`;
+
+          const { error } = await supabaseAdmin
+            .from("user_subscriptions")
+            .upsert(
+              {
+                user_id: profileId,
+                tier_id: tier.id,
+                tier_name: tier.display_name ?? tier.name,
+                stripe_subscription_id: pseudoSubscriptionId,
+                stripe_customer_id: stripeCustomerId,
+                status: "active",
+                current_period_start: new Date().toISOString(),
+                current_period_end: null,
+                cancel_at_period_end: false,
+                canceled_at: null,
+                trial_start: null,
+                trial_end: null,
+                metadata: {
+                  stripe_price_id: priceId,
+                  checkout_session_id: checkoutSessionId,
+                  mode: "payment",
+                  type: "one_time",
+                  counts_toward_seats: true,
+                },
+              },
+              { onConflict: "stripe_subscription_id" }
+            );
+
+          if (error) {
+            console.error("❌ Supabase error upserting OG one-time access:", error);
+          } else {
+            console.log("✅ OG one-time access granted via checkout session:", checkoutSessionId);
+          }
+
+          break;
         }
 
         break;
