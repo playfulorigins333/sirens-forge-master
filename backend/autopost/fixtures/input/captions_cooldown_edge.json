@@ -1,0 +1,23 @@
+{
+  "now": "2025-12-22T00:00:00Z",
+  "captions": [
+    {
+      "caption_id": "cap_edge_1",
+      "approved": true,
+      "active": true,
+      "explicitness_level": 2,
+      "platform": "fanvue",
+      "times_used": 0,
+      "last_used_at": "2025-12-18T00:00:00Z"
+    },
+    {
+      "caption_id": "cap_edge_2",
+      "approved": true,
+      "active": true,
+      "explicitness_level": 2,
+      "platform": "fanvue",
+      "times_used": 0,
+      "last_used_at": "2025-12-18T00:00:01Z"
+    }
+  ]
+}

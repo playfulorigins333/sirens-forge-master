@@ -1,0 +1,18 @@
+{
+  "selected_caption_id": "cap_002",
+  "reasoning": {
+    "approved_required": true,
+    "active_required": true,
+    "explicitness_gate": 3,
+    "cooldown_seconds": 259200,
+    "eligible_captions": ["cap_001", "cap_002"],
+    "cooldown_blocked": ["cap_003"],
+    "rejected": {
+      "not_approved": ["cap_004"]
+    },
+    "ranking": [
+      "cap_002",
+      "cap_001"
+    ]
+  }
+}

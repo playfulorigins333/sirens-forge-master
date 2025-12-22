@@ -1,0 +1,53 @@
+{
+  "now": "2025-12-22T00:00:00Z",
+  "captions": [
+    {
+      "caption_id": "cap_001",
+      "caption_text": "Feeling cute tonight 😈",
+      "approved": true,
+      "active": true,
+      "explicitness_level": 2,
+      "platform": "fanvue",
+      "tone": ["teasing"],
+      "job_id": "job_a",
+      "times_used": 5,
+      "last_used_at": "2025-12-10T00:00:00Z"
+    },
+    {
+      "caption_id": "cap_002",
+      "caption_text": "Who wants a private show?",
+      "approved": true,
+      "active": true,
+      "explicitness_level": 3,
+      "platform": "fanvue",
+      "tone": ["playful"],
+      "job_id": "job_b",
+      "times_used": 1,
+      "last_used_at": null
+    },
+    {
+      "caption_id": "cap_003",
+      "caption_text": "Good morning babes ☀️",
+      "approved": true,
+      "active": true,
+      "explicitness_level": 1,
+      "platform": "fanvue",
+      "tone": ["sweet"],
+      "job_id": "job_c",
+      "times_used": 1,
+      "last_used_at": "2025-12-21T23:00:00Z"
+    },
+    {
+      "caption_id": "cap_004",
+      "caption_text": "Exclusive content dropping tonight",
+      "approved": false,
+      "active": true,
+      "explicitness_level": 1,
+      "platform": "fanvue",
+      "tone": ["promo"],
+      "job_id": "job_d",
+      "times_used": 0,
+      "last_used_at": null
+    }
+  ]
+}

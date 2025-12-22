@@ -1,0 +1,6 @@
+{
+  "cooldown_seconds": 345600,
+  "eligible": ["cap_edge_1"],
+  "blocked": ["cap_edge_2"],
+  "selected_caption_id": "cap_edge_1"
+}
