@@ -18,6 +18,13 @@ import {
   ChevronRight,
   Settings,
   ExternalLink,
+  RefreshCw,
+  PauseCircle,
+  PlayCircle,
+  Trash2,
+  Save,
+  List,
+  Link2,
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -32,175 +39,61 @@ type PlatformId =
   | "justforfans"
   | "x"
   | "reddit"
-
-type PlatformStatus = "live" | "ready" | "coming_soon"
-type PreviewStatus = "ready" | "partial" | "blocked"
+  | string
 
 type Platform = {
   id: PlatformId
   name: string
-  status: PlatformStatus
-  connected: boolean
-  // Capabilities (we use these to enforce safe, production behavior)
-  supports_hashtags: boolean
-  supports_cta: boolean
-  max_explicitness_cap: number // hard cap per platform (UI-level gate)
-  notes?: string
+  status?: "connected" | "not_connected" | "unknown"
+  hint?: string
 }
 
-type AutopostPreviewPayload = {
-  caption_text: string | null
-  cta_text: string | null
-  hashtags: string[] | null
-  platform: PlatformId
-  revenue: {
-    creator_pct: number
-    platform_pct: number
-  }
-}
-
-type AutopostDiagnostics = {
-  platform: PlatformId
-  timestamp: string
-  state: "READY" | "PARTIAL_READY" | "BLOCKED"
-  reason?: string
-  caption?: any
-  cta?: any
-  hashtags?: any
-}
+type PreviewStatus = "blocked" | "eligible" | "ineligible" | "error"
 
 type AutopostPreviewResponse = {
-  state: "READY" | "PARTIAL_READY" | "BLOCKED"
-  reason?: string
-  payload?: AutopostPreviewPayload
-  diagnostics?: AutopostDiagnostics
+  state?: "ELIGIBLE" | "INELIGIBLE" | "BLOCKED" | string
+  reason?: string | null
+  payload?: any
+  diagnostics?: any
+}
+
+type AutopostRule = {
+  id: string
+  platform?: PlatformId | null
+  selected_platforms?: PlatformId[] | null
+  enabled: boolean
+  approval_state: "DRAFT" | "APPROVED" | "PAUSED" | "REVOKED" | string
+  explicitness?: number | null
+  tones?: string[] | null
+  frequency?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+  last_ran_at?: string | null
+  next_run_at?: string | null
+}
+
+type RunResponse = {
+  ran_at?: string
+  processed?: number
+  rules?: any[]
+  error?: string
 }
 
 // -----------------------------
-// Floating particles background
-// -----------------------------
-const FloatingParticles = () => {
-  const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 })
-
-  useEffect(() => {
-    setDimensions({
-      width: window.innerWidth,
-      height: window.innerHeight,
-    })
-  }, [])
-
-  return (
-    <div className="absolute inset-0 overflow-hidden pointer-events-none">
-      {[...Array(20)].map((_, i) => (
-        <motion.div
-          key={i}
-          className="absolute w-1 h-1 bg-purple-400 rounded-full"
-          style={{
-            left: `${Math.random() * 100}%`,
-            filter: "blur(1px)",
-          }}
-          initial={{
-            y: dimensions.height + 10,
-            opacity: 0,
-          }}
-          animate={{
-            y: -50,
-            opacity: [0, 1, 1, 0],
-          }}
-          transition={{
-            duration: Math.random() * 3 + 2,
-            repeat: Infinity,
-            delay: Math.random() * 2,
-            ease: "linear",
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
-// -----------------------------
-// Launch-safe defaults (used if /api/autopost/platforms is not wired yet)
-// IMPORTANT: X + Reddit are included and treated as launch-ready (connection required).
+// Fallback platforms (if /api/autopost/platforms fails)
 // -----------------------------
 const FALLBACK_PLATFORMS: Platform[] = [
-  {
-    id: "fanvue",
-    name: "Fanvue",
-    status: "live",
-    connected: true,
-    supports_hashtags: false,
-    supports_cta: false,
-    max_explicitness_cap: 5,
-    notes: "Fully supported at launch.",
-  },
-  {
-    id: "onlyfans",
-    name: "OnlyFans",
-    status: "ready",
-    connected: false,
-    supports_hashtags: false,
-    supports_cta: false,
-    max_explicitness_cap: 5,
-    notes: "Connection required.",
-  },
-  {
-    id: "fansly",
-    name: "Fansly",
-    status: "ready",
-    connected: false,
-    supports_hashtags: true,
-    supports_cta: true,
-    max_explicitness_cap: 5,
-    notes: "Connection required.",
-  },
-  {
-    id: "loyalfans",
-    name: "LoyalFans",
-    status: "ready",
-    connected: false,
-    supports_hashtags: true,
-    supports_cta: true,
-    max_explicitness_cap: 5,
-    notes: "Connection required.",
-  },
-  {
-    id: "justforfans",
-    name: "JustForFans",
-    status: "ready",
-    connected: false,
-    supports_hashtags: true,
-    supports_cta: true,
-    max_explicitness_cap: 5,
-    notes: "Connection required.",
-  },
-  {
-    id: "x",
-    name: "X (Twitter)",
-    status: "ready",
-    connected: false,
-    supports_hashtags: true,
-    supports_cta: false,
-    // Hard launch rule: keep explicitness conservative for public platforms
-    max_explicitness_cap: 2,
-    notes: "Public platform: teaser-only recommended.",
-  },
-  {
-    id: "reddit",
-    name: "Reddit",
-    status: "ready",
-    connected: false,
-    supports_hashtags: false,
-    supports_cta: false,
-    max_explicitness_cap: 2,
-    notes: "Public platform: teaser-only recommended.",
-  },
+  { id: "fanvue", name: "Fanvue", status: "unknown" },
+  { id: "onlyfans", name: "OnlyFans", status: "unknown" },
+  { id: "fansly", name: "Fansly", status: "unknown" },
+  { id: "loyalfans", name: "LoyalFans", status: "unknown" },
+  { id: "justforfans", name: "JustForFans", status: "unknown" },
+  { id: "x", name: "X (Twitter)", status: "unknown" },
+  { id: "reddit", name: "Reddit", status: "unknown" },
 ]
 
-const toneOptions = ["Playful", "Teasing", "Confident", "Soft", "Dominant"] as const
-
 // -----------------------------
-// API helpers (production wiring)
+// Helpers
 // -----------------------------
 async function safeJson<T>(res: Response): Promise<T | null> {
   try {
@@ -210,28 +103,77 @@ async function safeJson<T>(res: Response): Promise<T | null> {
   }
 }
 
+function asRulesArray(maybe: any): AutopostRule[] {
+  if (Array.isArray(maybe)) return maybe as AutopostRule[]
+  if (maybe && Array.isArray(maybe.rules)) return maybe.rules as AutopostRule[]
+  return []
+}
+
+function asPlatformsArray(maybe: any): Platform[] | null {
+  if (!maybe) return null
+  if (Array.isArray(maybe)) return maybe as Platform[]
+  if (Array.isArray(maybe.platforms)) return maybe.platforms as Platform[]
+  return null
+}
+
+function formatTs(ts?: string | null) {
+  if (!ts) return "—"
+  const d = new Date(ts)
+  if (Number.isNaN(d.getTime())) return "—"
+  return d.toLocaleString()
+}
+
+function prettyPlatform(p?: PlatformId | null) {
+  if (!p) return "—"
+  const map: Record<string, string> = {
+    fanvue: "Fanvue",
+    onlyfans: "OnlyFans",
+    fansly: "Fansly",
+    loyalfans: "LoyalFans",
+    justforfans: "JustForFans",
+    x: "X (Twitter)",
+    reddit: "Reddit",
+  }
+  return map[p] ?? String(p)
+}
+
+function badgeForState(state: string) {
+  const s = String(state || "").toUpperCase()
+  if (s === "APPROVED") return { label: "APPROVED", icon: CheckCircle, cls: "bg-emerald-500/15 border-emerald-500/30 text-emerald-200" }
+  if (s === "PAUSED") return { label: "PAUSED", icon: PauseCircle, cls: "bg-amber-500/15 border-amber-500/30 text-amber-200" }
+  if (s === "REVOKED") return { label: "REVOKED", icon: X, cls: "bg-rose-500/15 border-rose-500/30 text-rose-200" }
+  return { label: "DRAFT", icon: AlertCircle, cls: "bg-slate-500/15 border-slate-500/30 text-slate-200" }
+}
+
+function actionsFor(rule: AutopostRule) {
+  const state = String(rule.approval_state).toUpperCase()
+  return {
+    canApprove: state === "DRAFT",
+    canPause: state === "APPROVED",
+    canResume: state === "PAUSED",
+    canRevoke: state !== "REVOKED",
+  }
+}
+
+// -----------------------------
+// API calls
+// -----------------------------
 async function fetchPlatforms(): Promise<Platform[] | null> {
-  // If you later add a real API, this will automatically start using it.
-  // Expected response: { platforms: Platform[] }
   try {
     const res = await fetch("/api/autopost/platforms", { method: "GET" })
     if (!res.ok) return null
-    const data = await safeJson<{ platforms: Platform[] }>(res)
-    if (!data?.platforms?.length) return null
-    return data.platforms
+    const data = await safeJson<any>(res)
+    return asPlatformsArray(data)
   } catch {
     return null
   }
 }
 
-async function startConnectFlow(platform: PlatformId): Promise<{ redirectUrl?: string } | null> {
-  // Expected response: { url: string }
+async function startConnectFlow(platform: PlatformId): Promise<{ redirectUrl?: string; url?: string } | null> {
   try {
-    const res = await fetch(`/api/autopost/connect?platform=${encodeURIComponent(platform)}`, {
-      method: "GET",
-    })
+    const res = await fetch(`/api/autopost/connect?platform=${encodeURIComponent(platform)}`, { method: "GET" })
     if (!res.ok) return null
-    const data = await safeJson<{ redirectUrl?: string }>(res)
+    const data = await safeJson<{ redirectUrl?: string; url?: string }>(res)
     return data
   } catch {
     return null
@@ -245,32 +187,70 @@ async function runPreviewSelection(input: {
   tones: string[]
   frequency: string
 }): Promise<AutopostPreviewResponse | null> {
-  // Expected response (matches your local tests): { state, payload, diagnostics, reason }
   try {
     const res = await fetch("/api/autopost/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     })
-    if (!res.ok) return null
-    const data = await safeJson<AutopostPreviewResponse>(res)
-    return data
+    if (!res.ok) return await safeJson<any>(res)
+    return await safeJson<AutopostPreviewResponse>(res)
   } catch {
     return null
   }
 }
 
+async function fetchRules(): Promise<any> {
+  const res = await fetch("/api/autopost/rules", { method: "GET" })
+  const j = await safeJson<any>(res)
+  if (!res.ok) throw new Error(j?.error ? String(j.error) : `Failed to load rules (${res.status})`)
+  return j
+}
+
+async function createRule(body: any): Promise<any> {
+  const res = await fetch("/api/autopost/rules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  const j = await safeJson<any>(res)
+  if (!res.ok) throw new Error(j?.error ? String(j.error) : `Create rule failed (${res.status})`)
+  return j
+}
+
+async function postRuleAction(ruleId: string, action: "approve" | "pause" | "resume" | "revoke", body?: any): Promise<any> {
+  const res = await fetch(`/api/autopost/rules/${encodeURIComponent(ruleId)}/${action}`, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const j = await safeJson<any>(res)
+  if (!res.ok) throw new Error(j?.error ? String(j.error) : `${action} failed (${res.status})`)
+  return j
+}
+
+async function runEligibleNow(): Promise<RunResponse> {
+  const res = await fetch("/api/autopost/run", { method: "POST" })
+  const j = await safeJson<RunResponse>(res)
+  if (!res.ok) throw new Error(j?.error ? String(j.error) : `Run failed (${res.status})`)
+  return j ?? {}
+}
+
 // -----------------------------
-// Component
+// Page
 // -----------------------------
+type Tab = "rules" | "builder" | "connect"
+
 export default function AutopostPage() {
   const [mounted, setMounted] = useState(false)
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 })
 
+  const [tab, setTab] = useState<Tab>("rules")
+
   // Server-backed state (with safe fallback)
   const [platforms, setPlatforms] = useState<Platform[]>(FALLBACK_PLATFORMS)
 
-  // Config state
+  // Builder config state (matches your /preview contract)
   const [enabled, setEnabled] = useState(false)
   const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(["fanvue"])
   const [frequency, setFrequency] = useState("manual")
@@ -282,233 +262,244 @@ export default function AutopostPage() {
   const [isEvaluating, setIsEvaluating] = useState(false)
   const [showDiagnostics, setShowDiagnostics] = useState(false)
   const [previewResult, setPreviewResult] = useState<AutopostPreviewResponse | null>(null)
+  const [builderError, setBuilderError] = useState<string | null>(null)
+  const [builderSuccess, setBuilderSuccess] = useState<string | null>(null)
 
-  // Modals
-  const [showWhyBlockedModal, setShowWhyBlockedModal] = useState(false)
-  const [showConnectionModal, setShowConnectionModal] = useState(false)
-  const [selectedPlatformForConnection, setSelectedPlatformForConnection] = useState<PlatformId | null>(null)
-  const [isConnecting, setIsConnecting] = useState(false)
+  // Rules state
+  const [rules, setRules] = useState<AutopostRule[]>([])
+  const [rulesLoading, setRulesLoading] = useState(false)
+  const [rulesError, setRulesError] = useState<string | null>(null)
+  const [busyRuleId, setBusyRuleId] = useState<string | null>(null)
 
-  useEffect(() => {
-    setMounted(true)
-  }, [])
+  // Approve modal state
+  const [showApproveModal, setShowApproveModal] = useState(false)
+  const [approveTarget, setApproveTarget] = useState<AutopostRule | null>(null)
+  const [ackSplit, setAckSplit] = useState(false)
+  const [ackAutomation, setAckAutomation] = useState(false)
+  const [ackControl, setAckControl] = useState(false)
+
+  // Run now state
+  const [runningJob, setRunningJob] = useState(false)
+  const [runResult, setRunResult] = useState<RunResponse | null>(null)
+
+  useEffect(() => setMounted(true), [])
 
   useEffect(() => {
     if (!mounted) return
-
-    const handleMouseMove = (e: MouseEvent) => {
-      setMousePosition({ x: e.clientX, y: e.clientY })
-    }
+    const handleMouseMove = (e: MouseEvent) => setMousePosition({ x: e.clientX, y: e.clientY })
     window.addEventListener("mousemove", handleMouseMove)
     return () => window.removeEventListener("mousemove", handleMouseMove)
   }, [mounted])
 
-  // Load platforms from server if available
+  // Load platforms once
   useEffect(() => {
     if (!mounted) return
     ;(async () => {
-      const serverPlatforms = await fetchPlatforms()
-      if (serverPlatforms?.length) {
-        setPlatforms(serverPlatforms)
-
-        // Keep selection valid if server returns different availability
-        const connectedIds = new Set(serverPlatforms.filter(p => p.connected).map(p => p.id))
-        setSelectedPlatforms(prev => prev.filter(id => connectedIds.has(id) || id === "fanvue"))
-      }
+      const p = await fetchPlatforms()
+      if (p && p.length) setPlatforms(p)
     })()
   }, [mounted])
 
-  const platformById = useMemo(() => {
-    const map = new Map<PlatformId, Platform>()
-    platforms.forEach(p => map.set(p.id, p))
-    return map
-  }, [platforms])
+  const eligibleRulesCount = useMemo(() => {
+    return rules.filter(r => String(r.approval_state).toUpperCase() === "APPROVED" && r.enabled === true).length
+  }, [rules])
 
-  // Enforce per-platform explicitness caps (production safety)
-  const effectiveExplicitnessCap = useMemo(() => {
-    if (!selectedPlatforms.length) return 1
-    let cap = 5
-    for (const pid of selectedPlatforms) {
-      const p = platformById.get(pid)
-      if (p) cap = Math.min(cap, p.max_explicitness_cap)
+  const refreshRules = async () => {
+    setRulesLoading(true)
+    setRulesError(null)
+    try {
+      const data = await fetchRules()
+      setRules(asRulesArray(data))
+    } catch (e: any) {
+      setRulesError(e?.message ? String(e.message) : "Failed to load rules")
+      setRules([])
+    } finally {
+      setRulesLoading(false)
     }
-    return cap
-  }, [selectedPlatforms, platformById])
+  }
 
+  // Auto-load rules when tab opened
   useEffect(() => {
-    if (explicitness > effectiveExplicitnessCap) {
-      setExplicitness(effectiveExplicitnessCap)
-    }
+    if (!mounted) return
+    if (tab !== "rules") return
+    refreshRules()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveExplicitnessCap])
+  }, [tab, mounted])
 
-  // Preview status logic (launch behavior)
-  useEffect(() => {
-    if (!enabled) {
-      setPreviewStatus("blocked")
-      setPreviewResult(null)
-      setShowDiagnostics(false)
+  // -----------------------------
+  // Connect actions
+  // -----------------------------
+  const handleConnect = async (platform: PlatformId) => {
+    setBuilderError(null)
+    const result = await startConnectFlow(platform)
+    const url = result?.redirectUrl || result?.url
+    if (!url) {
+      setBuilderError("Connect flow failed (no redirect URL returned).")
       return
     }
-    if (enabled && selectedPlatforms.length > 0) {
-      // Until a preview is run, we’re “partial” (meaning: enabled/configured but not evaluated)
-      setPreviewStatus("partial")
-    } else {
-      setPreviewStatus("blocked")
-    }
-  }, [enabled, selectedPlatforms])
-
-  const togglePlatform = (platformId: PlatformId) => {
-    const platform = platformById.get(platformId)
-    if (!platform) return
-
-    // If platform is ready but not connected, open connect flow
-    if (!platform.connected && platform.status !== "coming_soon") {
-      setSelectedPlatformForConnection(platformId)
-      setShowConnectionModal(true)
-      return
-    }
-
-    // Toggle selection only if connected
-    if (platform.connected) {
-      setSelectedPlatforms(prev => {
-        if (prev.includes(platformId)) return prev.filter(p => p !== platformId)
-        return [...prev, platformId]
-      })
-    }
+    window.open(url, "_blank", "noopener,noreferrer")
   }
 
-  const toggleTone = (tone: string) => {
-    setSelectedTones(prev => (prev.includes(tone) ? prev.filter(t => t !== tone) : [...prev, tone]))
-  }
-
-  const handlePreviewSelection = async () => {
+  // -----------------------------
+  // Preview + Save rule
+  // -----------------------------
+  const evaluatePreview = async () => {
     setIsEvaluating(true)
-    setShowDiagnostics(false)
+    setBuilderError(null)
+    setBuilderSuccess(null)
+    setPreviewResult(null)
+    setRunResult(null)
+    try {
+      const res = await runPreviewSelection({
+        enabled,
+        selected_platforms: selectedPlatforms,
+        explicitness,
+        tones: selectedTones,
+        frequency,
+      })
 
-    // Production: call the API
-    const apiResult = await runPreviewSelection({
+      if (!res) {
+        setPreviewStatus("error")
+        setBuilderError("Preview failed (no response).")
+        setIsEvaluating(false)
+        return
+      }
+
+      setPreviewResult(res)
+
+      const state = String(res.state || "").toUpperCase()
+      if (state === "ELIGIBLE") setPreviewStatus("eligible")
+      else if (state === "INELIGIBLE") setPreviewStatus("ineligible")
+      else setPreviewStatus("blocked")
+    } catch (e: any) {
+      setPreviewStatus("error")
+      setBuilderError(e?.message ? String(e.message) : "Preview failed")
+    } finally {
+      setIsEvaluating(false)
+    }
+  }
+
+  const saveAsRule = async () => {
+    setBuilderError(null)
+    setBuilderSuccess(null)
+
+    // We save the SAME config that preview uses.
+    // Backend can store it as rule config + set approval_state=DRAFT by default.
+    const body = {
       enabled,
       selected_platforms: selectedPlatforms,
       explicitness,
       tones: selectedTones,
       frequency,
-    })
-
-    if (apiResult) {
-      setPreviewResult(apiResult)
-
-      if (apiResult.state === "READY") setPreviewStatus("ready")
-      else if (apiResult.state === "PARTIAL_READY") setPreviewStatus("partial")
-      else setPreviewStatus("blocked")
-
-      setShowDiagnostics(true)
-      setIsEvaluating(false)
-      return
+      // optional: store latest preview output if your backend wants it
+      preview_state: previewResult?.state ?? null,
+      preview_reason: previewResult?.reason ?? null,
+      preview_payload: previewResult?.payload ?? null,
     }
 
-    // Fallback (should rarely happen in production; prevents dead UI)
-    const firstPlatform = selectedPlatforms[0] ?? "fanvue"
-    const fallback: AutopostPreviewResponse = {
-      state: "PARTIAL_READY",
-      payload: {
-        caption_text: "Who wants a private show?",
-        cta_text: null,
-        hashtags: null,
-        platform: firstPlatform,
-        revenue: { creator_pct: 80, platform_pct: 20 },
-      },
-      diagnostics: {
-        platform: firstPlatform,
-        timestamp: new Date().toISOString(),
-        state: "PARTIAL_READY",
-        reason: "FALLBACK_PREVIEW",
-      },
-    }
-
-    setPreviewResult(fallback)
-    setPreviewStatus("partial")
-    setShowDiagnostics(true)
-    setIsEvaluating(false)
-  }
-
-  const getStatusColor = () => {
-    switch (previewStatus) {
-      case "ready":
-        return "from-emerald-500 to-green-500"
-      case "partial":
-        return "from-amber-500 to-orange-500"
-      case "blocked":
-        return "from-rose-500 to-red-500"
+    try {
+      await createRule(body)
+      setBuilderSuccess("Rule saved as DRAFT. Approve it in My Rules when ready.")
+      setTab("rules")
+      await refreshRules()
+    } catch (e: any) {
+      setBuilderError(e?.message ? String(e.message) : "Save rule failed")
     }
   }
 
-  const getStatusIcon = () => {
-    switch (previewStatus) {
-      case "ready":
-        return CheckCircle
-      case "partial":
-        return AlertCircle
-      case "blocked":
-        return X
+  // -----------------------------
+  // Rule lifecycle actions
+  // -----------------------------
+  const openApprove = (rule: AutopostRule) => {
+    setApproveTarget(rule)
+    setAckSplit(false)
+    setAckAutomation(false)
+    setAckControl(false)
+    setShowApproveModal(true)
+  }
+
+  const confirmApprove = async () => {
+    if (!approveTarget) return
+    setBusyRuleId(approveTarget.id)
+    setRulesError(null)
+    try {
+      await postRuleAction(approveTarget.id, "approve", {
+        accept_split: ackSplit,
+        accept_automation: ackAutomation,
+        accept_control: ackControl,
+      })
+      setShowApproveModal(false)
+      setApproveTarget(null)
+    } catch (e: any) {
+      setRulesError(e?.message ? String(e.message) : "Approve failed")
+    } finally {
+      setBusyRuleId(null)
+      await refreshRules()
     }
   }
 
-  const getStatusText = () => {
-    switch (previewStatus) {
-      case "ready":
-        return "Autopost Ready"
-      case "partial":
-        return "Configured (Run Preview)"
-      case "blocked":
-        return "Autopost Blocked"
+  const doPause = async (rule: AutopostRule) => {
+    setBusyRuleId(rule.id)
+    setRulesError(null)
+    try {
+      await postRuleAction(rule.id, "pause")
+    } catch (e: any) {
+      setRulesError(e?.message ? String(e.message) : "Pause failed")
+    } finally {
+      setBusyRuleId(null)
+      await refreshRules()
     }
   }
 
-  const selectedPlatformNames = useMemo(() => {
-    return selectedPlatforms
-      .map(id => platformById.get(id)?.name)
-      .filter(Boolean)
-      .join(", ")
-  }, [selectedPlatforms, platformById])
-
-  const connectedCount = useMemo(() => platforms.filter(p => p.connected).length, [platforms])
-
-  const previewPayload = previewResult?.payload
-  const previewDiagnostics = previewResult?.diagnostics
-
-  const canScheduleNow = false // Phase 3 per your plan
-
-  const publicPlatformSelected = useMemo(() => {
-    return selectedPlatforms.includes("x") || selectedPlatforms.includes("reddit")
-  }, [selectedPlatforms])
-
-  const connectModalPlatform = selectedPlatformForConnection ? platformById.get(selectedPlatformForConnection) : null
-
-  const handleConnect = async () => {
-    if (!selectedPlatformForConnection) return
-    setIsConnecting(true)
-
-    const data = await startConnectFlow(selectedPlatformForConnection)
-
-    // If backend provides a URL, send them to OAuth immediately (production wiring)
-    if (data?.redirectUrl) {
-      window.location.href = data.redirectUrl
-      return
+  const doResume = async (rule: AutopostRule) => {
+    setBusyRuleId(rule.id)
+    setRulesError(null)
+    try {
+      await postRuleAction(rule.id, "resume")
+    } catch (e: any) {
+      setRulesError(e?.message ? String(e.message) : "Resume failed")
+    } finally {
+      setBusyRuleId(null)
+      await refreshRules()
     }
+  }
 
-    // If backend isn’t wired yet, fail safely (no fake “connected” state)
-    setIsConnecting(false)
-    alert(
-      "Connection endpoint is not available yet.\n\nWire /api/autopost/connect to return an OAuth URL, then this will go live."
-    )
+  const doRevoke = async (rule: AutopostRule) => {
+    setBusyRuleId(rule.id)
+    setRulesError(null)
+    try {
+      await postRuleAction(rule.id, "revoke")
+    } catch (e: any) {
+      setRulesError(e?.message ? String(e.message) : "Revoke failed")
+    } finally {
+      setBusyRuleId(null)
+      await refreshRules()
+    }
+  }
+
+  // -----------------------------
+  // Run eligible now
+  // -----------------------------
+  const handleRunNow = async () => {
+    setRunningJob(true)
+    setRunResult(null)
+    setRulesError(null)
+    try {
+      const res = await runEligibleNow()
+      setRunResult(res)
+      await refreshRules()
+    } catch (e: any) {
+      setRulesError(e?.message ? String(e.message) : "Run failed")
+    } finally {
+      setRunningJob(false)
+    }
   }
 
   if (!mounted) return null
 
   return (
     <div className="min-h-screen bg-black text-white relative overflow-hidden">
-      {/* Animated Background */}
+      {/* Background */}
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-black to-pink-900/20" />
         <motion.div
@@ -517,761 +508,630 @@ export default function AutopostPage() {
             background: `radial-gradient(600px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(168, 85, 247, 0.15), transparent 40%)`,
           }}
         />
-        <FloatingParticles />
       </div>
 
       {/* Header */}
       <header className="border-b border-gray-800/50 bg-black/50 backdrop-blur-xl sticky top-0 z-40 relative">
         <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <motion.h1
-                className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent"
-                animate={{
-                  backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"],
-                }}
-                transition={{ duration: 5, repeat: Infinity }}
-                style={{ backgroundSize: "200% 200%" }}
-              >
-                SirensForge
-              </motion.h1>
-              <ChevronRight className="w-4 h-4 text-gray-600" />
-              <span className="text-gray-400">Autopost</span>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <motion.div animate={{ rotate: [0, 6, -6, 0], scale: [1, 1.05, 1] }} transition={{ duration: 5, repeat: Infinity }}>
+                <Sparkles className="w-7 h-7 text-purple-400" />
+              </motion.div>
+              <div>
+                <h1 className="text-xl sm:text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
+                  Autopost
+                </h1>
+                <p className="text-xs sm:text-sm text-gray-400">
+                  Launch-ready: Connect → Build → Save → Approve/Pause/Resume/Revoke → Run
+                </p>
+              </div>
             </div>
 
-            <div className="flex items-center gap-4">
-              <div className="hidden md:flex items-center gap-2 text-xs text-gray-400 bg-gray-900/60 border border-gray-800 rounded-full px-3 py-2">
-                <span className="text-gray-500">Connected:</span>
-                <span className="text-white font-semibold">{connectedCount}</span>
-                <span className="text-gray-600">•</span>
-                <span className="text-gray-500">Selected:</span>
-                <span className="text-white font-semibold">{selectedPlatforms.length}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-full bg-gray-900/60 border border-gray-800 text-xs text-gray-300">
+                <Shield className="w-4 h-4 text-cyan-300" />
+                Eligible rules: <span className="text-white font-semibold">{eligibleRulesCount}</span>
               </div>
 
-              <motion.div animate={{ scale: previewStatus === "ready" ? [1, 1.05, 1] : 1 }} transition={{ duration: 2, repeat: Infinity }}>
-                <div className={`px-4 py-2 rounded-full bg-gradient-to-r ${getStatusColor()} text-white text-sm font-semibold`}>
-                  {getStatusText()}
-                </div>
-              </motion.div>
+              <Button
+                onClick={handleRunNow}
+                disabled={runningJob}
+                className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+              >
+                {runningJob ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Running…
+                  </>
+                ) : (
+                  <>
+                    <PlayCircle className="w-4 h-4 mr-2" />
+                    Run Eligible Rules Now
+                  </>
+                )}
+              </Button>
 
-              <Button variant="ghost" onClick={() => (window.location.href = "/")} className="hover:bg-purple-500/10">
-                Dashboard
+              <Button
+                variant="outline"
+                className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                onClick={() => (tab === "rules" ? refreshRules() : setTab("rules"))}
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${rulesLoading ? "animate-spin" : ""}`} />
+                Refresh Rules
               </Button>
             </div>
           </div>
+
+          {/* Tabs */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              variant={tab === "rules" ? "default" : "outline"}
+              onClick={() => setTab("rules")}
+              className={tab === "rules" ? "bg-gray-900 border border-gray-700" : "border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"}
+            >
+              <List className="w-4 h-4 mr-2" />
+              My Rules
+            </Button>
+
+            <Button
+              variant={tab === "builder" ? "default" : "outline"}
+              onClick={() => setTab("builder")}
+              className={tab === "builder" ? "bg-gray-900 border border-gray-700" : "border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"}
+            >
+              <Settings className="w-4 h-4 mr-2" />
+              Build Rule
+            </Button>
+
+            <Button
+              variant={tab === "connect" ? "default" : "outline"}
+              onClick={() => setTab("connect")}
+              className={tab === "connect" ? "bg-gray-900 border border-gray-700" : "border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"}
+            >
+              <Link2 className="w-4 h-4 mr-2" />
+              Connect
+            </Button>
+          </div>
+
+          {runResult && (
+            <div className="mt-3 text-xs text-gray-300 bg-gray-900/60 border border-gray-800 rounded-xl p-3">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 items-center">
+                <span className="text-gray-400">ran_at:</span> <span className="text-white">{runResult.ran_at ?? "—"}</span>
+                <span className="text-gray-400">processed:</span> <span className="text-white">{String(runResult.processed ?? 0)}</span>
+              </div>
+            </div>
+          )}
+
+          {rulesError && (
+            <div className="mt-3 text-sm text-rose-200 bg-rose-950/40 border border-rose-900/40 rounded-xl p-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-5 h-5 mt-0.5" />
+                <div>
+                  <div className="font-semibold">Error</div>
+                  <div className="text-rose-200/90">{rulesError}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
-      {/* Hero */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8 }}
-        className="max-w-7xl mx-auto px-6 pt-12 pb-8 text-center relative z-10"
-      >
-        <motion.div
-          animate={{
-            rotate: [0, 5, -5, 0],
-            scale: [1, 1.05, 1],
-          }}
-          transition={{ duration: 4, repeat: Infinity }}
-          className="inline-block mb-4"
-        >
-          <Sparkles className="w-16 h-16 text-purple-400" />
-        </motion.div>
-
-        <h1 className="text-5xl md:text-6xl font-bold mb-4">
-          <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">Automated Posting</span>
-        </h1>
-
-        <p className="text-xl text-gray-300 mb-4 max-w-2xl mx-auto">
-          Publish approved content to your connected platforms with{" "}
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 font-semibold">full control</span>
-          .
-        </p>
-
-        <div className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-purple-500/20 via-pink-500/20 to-cyan-500/20 border border-purple-500/30 backdrop-blur-sm">
-          <Shield className="w-5 h-5 text-cyan-400" />
-          <span className="text-sm font-semibold text-gray-300">No AI generation • No surprises • Full transparency</span>
-        </div>
-
-        {publicPlatformSelected && (
-          <div className="mt-4 max-w-2xl mx-auto">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">
-              <AlertCircle className="w-4 h-4" />
-              Public platforms selected (X/Reddit): explicitness is capped for safety.
-            </div>
-          </div>
-        )}
-      </motion.div>
-
       {/* Main */}
-      <div className="max-w-7xl mx-auto px-6 pb-20 relative z-10">
-        <div className="grid lg:grid-cols-5 gap-8">
-          {/* Left: Config */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Toggle */}
-            <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }}>
-              <Card className="border-gray-800/50 bg-gradient-to-br from-gray-900/90 to-gray-800/90 backdrop-blur-xl shadow-2xl shadow-purple-500/10 relative overflow-hidden">
-                <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-purple-600/10 via-pink-600/10 to-cyan-600/10"
-                  animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
-                  transition={{ duration: 10, repeat: Infinity }}
-                  style={{ backgroundSize: "200% 200%" }}
-                />
-                <CardContent className="p-6 relative z-10">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="text-lg font-bold text-white mb-1">Autopost Master Toggle</h3>
-                      <p className="text-sm text-gray-400">Enable selection + posting (only for connected platforms)</p>
-                    </div>
-                    <button
-                      onClick={() => setEnabled(!enabled)}
-                      className={`relative w-16 h-8 rounded-full transition-all duration-300 ${
-                        enabled ? "bg-gradient-to-r from-purple-600 to-pink-600" : "bg-gray-700"
-                      }`}
-                      style={{ boxShadow: enabled ? "0 0 20px rgba(168, 85, 247, 0.5)" : "none" }}
-                    >
-                      <motion.div
-                        className="absolute top-1 left-1 w-6 h-6 bg-white rounded-full"
-                        animate={{ x: enabled ? 32 : 0 }}
-                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                      />
-                    </button>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Platforms */}
-            <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 }}>
-              <Card className="border-gray-800/50 bg-gradient-to-br from-gray-900/90 to-gray-800/90 backdrop-blur-xl shadow-2xl shadow-pink-500/10 relative overflow-hidden">
-                <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-pink-600/10 via-purple-600/10 to-cyan-600/10"
-                  animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
-                  transition={{ duration: 10, repeat: Infinity }}
-                  style={{ backgroundSize: "200% 200%" }}
-                />
-                <CardHeader className="relative z-10">
-                  <CardTitle className="text-2xl bg-gradient-to-r from-pink-300 to-cyan-300 bg-clip-text text-transparent">
-                    Posting Platforms
+      <main className="relative z-10 max-w-7xl mx-auto px-6 py-8">
+        <AnimatePresence mode="wait">
+          {tab === "rules" && (
+            <motion.div
+              key="rules"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-4"
+            >
+              <Card className="bg-gray-900/40 border-gray-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Crown className="w-5 h-5 text-amber-300" />
+                    My Rules
                   </CardTitle>
-                  <CardDescription className="text-gray-400">Connected platforms can be selected for autopost</CardDescription>
+                  <CardDescription className="text-gray-400">
+                    Approve / Pause / Resume / Revoke are fully wired to your backend.
+                    Only APPROVED + enabled rules run.
+                  </CardDescription>
                 </CardHeader>
+                <CardContent>
+                  {rulesLoading ? (
+                    <div className="text-gray-300 flex items-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin" /> Loading…
+                    </div>
+                  ) : rules.length === 0 ? (
+                    <div className="text-gray-400">
+                      No rules yet. Go to <span className="text-white font-semibold">Build Rule</span> to create one.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      {rules.map(rule => {
+                        const badge = badgeForState(rule.approval_state)
+                        const BadgeIcon = badge.icon
+                        const a = actionsFor(rule)
+                        const busy = busyRuleId === rule.id
 
-                <CardContent className="space-y-3 relative z-10">
-                  {platforms.map((platform, index) => {
-                    const isSelected = selectedPlatforms.includes(platform.id)
-                    const canInteract = enabled && platform.status !== "coming_soon"
-
-                    return (
-                      <motion.div
-                        key={platform.id}
-                        initial={{ opacity: 0, y: 20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.4 + index * 0.06 }}
-                        whileHover={canInteract ? { scale: 1.02 } : undefined}
-                        whileTap={canInteract ? { scale: 0.98 } : undefined}
-                      >
-                        <button
-                          onClick={() => togglePlatform(platform.id)}
-                          disabled={!canInteract}
-                          className={`w-full p-4 rounded-xl border-2 transition-all ${
-                            isSelected ? "border-purple-500 bg-purple-500/10" : "border-gray-700 hover:border-gray-600 bg-gray-800/50"
-                          } ${!canInteract ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                              <div
-                                className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                                  isSelected ? "border-purple-500 bg-purple-500" : "border-gray-600"
-                                }`}
-                              >
-                                {isSelected && (
-                                  <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: "spring" }}>
-                                    <Check className="w-3 h-3 text-white" />
-                                  </motion.div>
-                                )}
+                        return (
+                          <div key={rule.id} className="rounded-2xl border border-gray-800 bg-black/30 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm text-gray-400">Rule</div>
+                                <div className="text-white font-semibold break-all">{rule.id}</div>
+                                <div className="mt-2 text-sm text-gray-300">
+                                  Platforms:{" "}
+                                  <span className="text-white">
+                                    {(rule.selected_platforms && rule.selected_platforms.length
+                                      ? rule.selected_platforms
+                                      : rule.platform
+                                        ? [rule.platform]
+                                        : []
+                                    )
+                                      .map(p => prettyPlatform(p))
+                                      .join(", ") || "—"}
+                                  </span>
+                                </div>
+                                <div className="mt-1 text-sm text-gray-300">
+                                  Enabled: <span className="text-white font-semibold">{rule.enabled ? "true" : "false"}</span>
+                                </div>
                               </div>
 
-                              <div className="text-left">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-white">{platform.name}</span>
-                                  {(platform.id === "x" || platform.id === "reddit") && (
-                                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/30 text-amber-200">
-                                      PUBLIC
-                                    </span>
-                                  )}
+                              <div className={`shrink-0 px-3 py-2 rounded-xl border ${badge.cls}`}>
+                                <div className="flex items-center gap-2 text-xs font-semibold">
+                                  <BadgeIcon className="w-4 h-4" />
+                                  {badge.label}
                                 </div>
-                                {platform.notes && <div className="text-xs text-gray-500 mt-0.5">{platform.notes}</div>}
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
-                              {platform.connected ? (
-                                <span className="px-3 py-1 rounded-full bg-emerald-500 text-white text-xs font-bold">CONNECTED</span>
-                              ) : platform.status === "coming_soon" ? (
-                                <span className="px-3 py-1 rounded-full bg-gray-700 text-gray-200 text-xs font-bold">COMING SOON</span>
-                              ) : (
-                                <span className="px-3 py-1 rounded-full bg-amber-500 text-white text-xs font-bold">CONNECT</span>
+                            <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-400">
+                              <div>
+                                <div>Last ran</div>
+                                <div className="text-gray-200">{formatTs(rule.last_ran_at)}</div>
+                              </div>
+                              <div>
+                                <div>Next run</div>
+                                <div className="text-gray-200">{formatTs(rule.next_run_at)}</div>
+                              </div>
+                            </div>
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              {a.canApprove && (
+                                <Button
+                                  onClick={() => openApprove(rule)}
+                                  disabled={busy}
+                                  className="bg-emerald-600 hover:bg-emerald-500"
+                                >
+                                  <CheckCircle className="w-4 h-4 mr-2" />
+                                  Approve
+                                </Button>
+                              )}
+
+                              {a.canPause && (
+                                <Button
+                                  variant="outline"
+                                  onClick={() => doPause(rule)}
+                                  disabled={busy}
+                                  className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                                >
+                                  <PauseCircle className="w-4 h-4 mr-2" />
+                                  Pause
+                                </Button>
+                              )}
+
+                              {a.canResume && (
+                                <Button
+                                  onClick={() => doResume(rule)}
+                                  disabled={busy}
+                                  className="bg-cyan-600 hover:bg-cyan-500"
+                                >
+                                  <PlayCircle className="w-4 h-4 mr-2" />
+                                  Resume
+                                </Button>
+                              )}
+
+                              {a.canRevoke && (
+                                <Button
+                                  variant="outline"
+                                  onClick={() => doRevoke(rule)}
+                                  disabled={busy}
+                                  className="border-rose-900/60 bg-rose-950/20 text-rose-200 hover:bg-rose-950/40"
+                                >
+                                  <Trash2 className="w-4 h-4 mr-2" />
+                                  Revoke
+                                </Button>
+                              )}
+
+                              {busy && (
+                                <div className="flex items-center text-xs text-gray-400 ml-2">
+                                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                                  Working…
+                                </div>
                               )}
                             </div>
                           </div>
-                        </button>
-                      </motion.div>
-                    )
-                  })}
-                </CardContent>
-              </Card>
-            </motion.div>
-
-            {/* Frequency */}
-            <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.4 }}>
-              <Card className="border-gray-800/50 bg-gradient-to-br from-gray-900/90 to-gray-800/90 backdrop-blur-xl shadow-2xl shadow-cyan-500/10 relative overflow-hidden">
-                <CardContent className="p-6">
-                  <Label htmlFor="frequency" className="text-base text-gray-200 mb-3 block">
-                    Posting Frequency
-                  </Label>
-
-                  <Select value={frequency} onValueChange={setFrequency} disabled={!enabled || !canScheduleNow}>
-                    <SelectTrigger className="bg-gray-900 border-gray-700 text-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="manual">Manual (run each post)</SelectItem>
-                      <SelectItem value="daily">Once per day</SelectItem>
-                      <SelectItem value="48h">Every 48 hours</SelectItem>
-                      <SelectItem value="72h">Every 72 hours</SelectItem>
-                    </SelectContent>
-                  </Select>
-
-                  {!canScheduleNow ? (
-                    <p className="text-xs text-amber-400 mt-2">⚡ Scheduling switches on after launch hardening (Phase 3)</p>
-                  ) : (
-                    <p className="text-xs text-gray-500 mt-2">Scheduling enabled</p>
+                        )
+                      })}
+                    </div>
                   )}
                 </CardContent>
               </Card>
             </motion.div>
+          )}
 
-            {/* Content Filters */}
-            <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.5 }}>
-              <Card className="border-gray-800/50 bg-gradient-to-br from-gray-900/90 to-gray-800/90 backdrop-blur-xl shadow-2xl shadow-purple-500/10 relative overflow-hidden">
+          {tab === "builder" && (
+            <motion.div
+              key="builder"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-4"
+            >
+              <Card className="bg-gray-900/40 border-gray-800">
                 <CardHeader>
-                  <CardTitle className="text-xl text-white">Content Filters</CardTitle>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Settings className="w-5 h-5 text-purple-300" />
+                    Build Rule
+                  </CardTitle>
                   <CardDescription className="text-gray-400">
-                    These filters control what can be selected for a post (nothing is posted until you run it).
+                    This uses your existing /api/autopost/preview contract, then saves the same config as a DRAFT rule.
                   </CardDescription>
                 </CardHeader>
 
                 <CardContent className="space-y-6">
-                  {/* Explicitness */}
-                  <div>
-                    <Label className="text-base text-gray-200 mb-3 block">
-                      Max Explicitness:{" "}
-                      <span className="text-purple-400 font-bold">
-                        {explicitness}
-                        <span className="text-gray-500 font-normal"> / {effectiveExplicitnessCap}</span>
-                      </span>
-                    </Label>
-
-                    <input
-                      type="range"
-                      min="1"
-                      max={effectiveExplicitnessCap}
-                      value={explicitness}
-                      onChange={e => setExplicitness(parseInt(e.target.value))}
-                      disabled={!enabled}
-                      className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
-                    />
-
-                    <div className="flex justify-between text-xs text-gray-500 mt-2">
-                      <span>Soft</span>
-                      <span>Moderate</span>
-                      <span>Explicit</span>
-                    </div>
-
-                    {effectiveExplicitnessCap < 5 && (
-                      <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm">
-                        <div className="flex items-start gap-2">
-                          <AlertCircle className="w-4 h-4 mt-0.5" />
-                          <div>
-                            <div className="font-semibold">Platform cap applied</div>
-                            <div className="text-xs text-amber-200/80 mt-0.5">
-                              One or more selected platforms enforces a lower explicitness ceiling for safety.
-                            </div>
-                          </div>
-                        </div>
+                  {(builderError || builderSuccess) && (
+                    <div
+                      className={`text-sm rounded-xl p-3 border ${
+                        builderError
+                          ? "bg-rose-950/40 border-rose-900/40 text-rose-200"
+                          : "bg-emerald-950/30 border-emerald-900/30 text-emerald-200"
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        {builderError ? <AlertCircle className="w-5 h-5 mt-0.5" /> : <CheckCircle className="w-5 h-5 mt-0.5" />}
+                        <div>{builderError ?? builderSuccess}</div>
                       </div>
-                    )}
+                    </div>
+                  )}
+
+                  {/* Enabled */}
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <Label className="text-gray-200">Enabled</Label>
+                      <div className="text-xs text-gray-400">Rules won’t run unless enabled AND approved.</div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      className={`border-gray-800 bg-transparent ${
+                        enabled ? "text-emerald-200 hover:bg-emerald-950/30" : "text-gray-200 hover:bg-gray-900"
+                      }`}
+                      onClick={() => setEnabled(v => !v)}
+                    >
+                      {enabled ? (
+                        <>
+                          <Check className="w-4 h-4 mr-2" /> Enabled
+                        </>
+                      ) : (
+                        <>
+                          <X className="w-4 h-4 mr-2" /> Disabled
+                        </>
+                      )}
+                    </Button>
+                  </div>
+
+                  {/* Platforms */}
+                  <div className="space-y-2">
+                    <Label className="text-gray-200">Platforms</Label>
+                    <div className="flex flex-wrap gap-2">
+                      {platforms.map(p => {
+                        const active = selectedPlatforms.includes(p.id)
+                        return (
+                          <Button
+                            key={p.id}
+                            variant="outline"
+                            className={`border-gray-800 bg-transparent ${
+                              active ? "text-white bg-gray-900" : "text-gray-200 hover:bg-gray-900"
+                            }`}
+                            onClick={() => {
+                              setSelectedPlatforms(prev =>
+                                prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id]
+                              )
+                            }}
+                          >
+                            {active ? <Check className="w-4 h-4 mr-2" /> : <span className="w-4 h-4 mr-2" />}
+                            {p.name}
+                          </Button>
+                        )
+                      })}
+                    </div>
+                    <div className="text-xs text-gray-400">Select 1+ platforms for this rule.</div>
+                  </div>
+
+                  {/* Frequency */}
+                  <div className="space-y-2">
+                    <Label className="text-gray-200">Frequency</Label>
+                    <Select value={frequency} onValueChange={setFrequency}>
+                      <SelectTrigger className="bg-black/30 border-gray-800 text-gray-200">
+                        <SelectValue placeholder="Select frequency" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-950 border-gray-800 text-gray-200">
+                        <SelectItem value="manual">Manual (run via job)</SelectItem>
+                        <SelectItem value="daily">Daily</SelectItem>
+                        <SelectItem value="twice_daily">Twice Daily</SelectItem>
+                        <SelectItem value="hourly">Hourly</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Explicitness */}
+                  <div className="space-y-2">
+                    <Label className="text-gray-200">Explicitness</Label>
+                    <Select value={String(explicitness)} onValueChange={v => setExplicitness(Number(v))}>
+                      <SelectTrigger className="bg-black/30 border-gray-800 text-gray-200">
+                        <SelectValue placeholder="Select explicitness" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-950 border-gray-800 text-gray-200">
+                        <SelectItem value="1">1 — Safe</SelectItem>
+                        <SelectItem value="2">2 — Flirty</SelectItem>
+                        <SelectItem value="3">3 — Teasing</SelectItem>
+                        <SelectItem value="4">4 — Explicit</SelectItem>
+                        <SelectItem value="5">5 — Hardcore</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Tones */}
-                  <div>
-                    <Label className="text-base text-gray-200 mb-3 block">
-                      Tone Filters <span className="text-sm text-gray-500">({selectedTones.length} selected)</span>
-                    </Label>
-
+                  <div className="space-y-2">
+                    <Label className="text-gray-200">Tones</Label>
                     <div className="flex flex-wrap gap-2">
-                      {toneOptions.map(tone => (
-                        <motion.button
-                          key={tone}
-                          onClick={() => toggleTone(tone)}
-                          disabled={!enabled}
-                          whileHover={{ scale: 1.05 }}
-                          whileTap={{ scale: 0.95 }}
-                          className={`px-4 py-2 rounded-full text-sm font-semibold transition-all ${
-                            selectedTones.includes(tone)
-                              ? "bg-gradient-to-r from-purple-500/30 to-pink-500/30 border-2 border-purple-500 text-white"
-                              : "bg-gray-800 border-2 border-gray-700 text-gray-400 hover:border-gray-600"
-                          } ${!enabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                        >
-                          {tone}
-                        </motion.button>
-                      ))}
+                      {["Playful", "Teasing", "Luxury", "Dominant", "Sweet", "Dirty", "Confident", "Soft"].map(t => {
+                        const active = selectedTones.includes(t)
+                        return (
+                          <Button
+                            key={t}
+                            variant="outline"
+                            className={`border-gray-800 bg-transparent ${
+                              active ? "text-white bg-gray-900" : "text-gray-200 hover:bg-gray-900"
+                            }`}
+                            onClick={() => {
+                              setSelectedTones(prev => (prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]))
+                            }}
+                          >
+                            {active ? <Check className="w-4 h-4 mr-2" /> : <span className="w-4 h-4 mr-2" />}
+                            {t}
+                          </Button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={evaluatePreview}
+                      disabled={isEvaluating || selectedPlatforms.length === 0}
+                      className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+                    >
+                      {isEvaluating ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Evaluating…
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="w-4 h-4 mr-2" />
+                          Preview Selection
+                        </>
+                      )}
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowDiagnostics(v => !v)}
+                      className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                      disabled={!previewResult}
+                    >
+                      <ChevronRight className={`w-4 h-4 mr-2 ${showDiagnostics ? "rotate-90" : ""}`} />
+                      Diagnostics
+                    </Button>
+
+                    <Button
+                      onClick={saveAsRule}
+                      disabled={selectedPlatforms.length === 0}
+                      className="bg-emerald-600 hover:bg-emerald-500"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      Save as Rule (DRAFT)
+                    </Button>
+                  </div>
+
+                  {/* Preview output */}
+                  <div className="rounded-2xl border border-gray-800 bg-black/30 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-white font-semibold">Preview Result</div>
+                      <div className="text-xs text-gray-400">
+                        status:{" "}
+                        <span className="text-gray-200 font-semibold">
+                          {previewStatus.toUpperCase()}
+                        </span>
+                      </div>
                     </div>
 
-                    {selectedTones.length > 0 && (
-                      <button onClick={() => setSelectedTones([])} className="text-xs text-purple-400 hover:text-purple-300 mt-2">
-                        Clear all
-                      </button>
+                    <div className="mt-3 text-sm text-gray-300">
+                      {previewResult?.reason ? (
+                        <>
+                          <span className="text-gray-400">reason:</span> <span className="text-gray-200">{String(previewResult.reason)}</span>
+                        </>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </div>
+
+                    {previewResult?.payload && (
+                      <pre className="mt-3 text-xs text-gray-200 bg-black/40 border border-gray-800 rounded-xl p-3 overflow-auto">
+                        {JSON.stringify(previewResult.payload, null, 2)}
+                      </pre>
+                    )}
+
+                    {showDiagnostics && previewResult?.diagnostics && (
+                      <pre className="mt-3 text-xs text-gray-200 bg-black/40 border border-gray-800 rounded-xl p-3 overflow-auto">
+                        {JSON.stringify(previewResult.diagnostics, null, 2)}
+                      </pre>
                     )}
                   </div>
                 </CardContent>
               </Card>
             </motion.div>
+          )}
 
-            {/* Revenue Split */}
-            <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.6 }}>
-              <Card className="border-gray-800/50 bg-gradient-to-br from-purple-900/30 via-pink-900/30 to-gray-900/90 backdrop-blur-xl relative overflow-hidden">
-                <motion.div
-                  className="absolute inset-0 border-2 border-transparent rounded-lg"
-                  style={{
-                    background: "linear-gradient(90deg, #a855f7, #ec4899, #06b6d4) border-box",
-                    WebkitMask: "linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0)",
-                    WebkitMaskComposite: "xor",
-                    maskComposite: "exclude",
-                  }}
-                  animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
-                  transition={{ duration: 5, repeat: Infinity }}
-                />
-
-                <CardContent className="p-6 relative z-10">
-                  <div className="flex items-center gap-3 mb-4">
-                    <Crown className="w-6 h-6 text-yellow-400" />
-                    <h3 className="text-lg font-bold bg-gradient-to-r from-purple-300 to-pink-300 bg-clip-text text-transparent">
-                      Revenue Split
-                    </h3>
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <div className="text-center">
-                      <div className="text-4xl font-bold bg-gradient-to-r from-emerald-400 to-green-400 bg-clip-text text-transparent">
-                        80%
-                      </div>
-                      <div className="text-sm text-gray-400 mt-1">Creator</div>
-                    </div>
-                    <div className="text-2xl text-gray-600">|</div>
-                    <div className="text-center">
-                      <div className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                        20%
-                      </div>
-                      <div className="text-sm text-gray-400 mt-1">SirensForge</div>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-gray-500 mt-4 text-center">Used for internal reporting only (payments handled elsewhere).</p>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </div>
-
-          {/* Right: Status + Preview */}
-          <div className="lg:col-span-3 space-y-6">
-            {/* Status */}
-            <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 }}>
-              <Card className="border-gray-800/50 bg-gradient-to-br from-gray-900/90 to-gray-800/90 backdrop-blur-xl shadow-2xl relative overflow-hidden">
-                <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-purple-600/10 via-pink-600/10 to-cyan-600/10"
-                  animate={{ backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"] }}
-                  transition={{ duration: 8, repeat: Infinity }}
-                  style={{ backgroundSize: "200% 200%" }}
-                />
-
-                <CardContent className="p-8 relative z-10">
-                  <div className="flex items-start gap-6">
-                    <motion.div
-                      animate={previewStatus === "ready" ? { scale: [1, 1.05, 1] } : {}}
-                      transition={{ duration: 2, repeat: Infinity }}
-                      className={`p-6 rounded-2xl bg-gradient-to-br ${getStatusColor()}/30 backdrop-blur-sm relative`}
-                      style={{
-                        boxShadow:
-                          previewStatus === "ready"
-                            ? "0 0 20px rgba(16, 185, 129, 0.3)"
-                            : previewStatus === "partial"
-                            ? "0 0 20px rgba(245, 158, 11, 0.3)"
-                            : "0 0 20px rgba(239, 68, 68, 0.3)",
-                      }}
-                    >
-                      {React.createElement(getStatusIcon(), { className: "w-12 h-12 text-white" })}
-                    </motion.div>
-
-                    <div className="flex-1">
-                      <h3 className={`text-3xl font-bold bg-gradient-to-r ${getStatusColor()} bg-clip-text text-transparent mb-2`}>
-                        {getStatusText()}
-                      </h3>
-
-                      {previewStatus === "blocked" && (
-                        <p className="text-gray-300 mb-4">Autopost is disabled. Enable the toggle to begin configuration.</p>
-                      )}
-
-                      {previewStatus !== "blocked" && (
-                        <p className="text-gray-300 mb-4">
-                          Selected platforms: <span className="text-white font-semibold">{selectedPlatformNames || "None"}</span>
-                        </p>
-                      )}
-
-                      {previewResult?.state === "BLOCKED" && previewResult.reason && (
-                        <div className="mb-4 p-4 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-200 text-sm">
-                          <div className="flex items-start gap-2">
-                            <AlertCircle className="w-4 h-4 mt-0.5" />
-                            <div>
-                              <div className="font-semibold">Blocked</div>
-                              <div className="text-xs text-rose-200/80 mt-0.5">{previewResult.reason}</div>
+          {tab === "connect" && (
+            <motion.div
+              key="connect"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 10 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-4"
+            >
+              <Card className="bg-gray-900/40 border-gray-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <ExternalLink className="w-5 h-5 text-cyan-300" />
+                    Connect Platforms
+                  </CardTitle>
+                  <CardDescription className="text-gray-400">
+                    Uses /api/autopost/connect for each platform.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                    {platforms.map(p => (
+                      <div key={p.id} className="rounded-2xl border border-gray-800 bg-black/30 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-white font-semibold">{p.name}</div>
+                            <div className="text-xs text-gray-400 mt-1">
+                              status: <span className="text-gray-200">{p.status ?? "unknown"}</span>
                             </div>
+                            {p.hint && <div className="text-xs text-gray-500 mt-1">{p.hint}</div>}
                           </div>
+                          <Button
+                            onClick={() => handleConnect(p.id)}
+                            className="bg-cyan-600 hover:bg-cyan-500"
+                          >
+                            <ExternalLink className="w-4 h-4 mr-2" />
+                            Connect
+                          </Button>
                         </div>
-                      )}
-
-                      {previewStatus === "blocked" && (
-                        <Button
-                          variant="outline"
-                          onClick={() => setShowWhyBlockedModal(true)}
-                          className="border-rose-500/50 text-rose-400 hover:bg-rose-500/10"
-                        >
-                          Why is Autopost blocked?
-                        </Button>
-                      )}
-                    </div>
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
             </motion.div>
+          )}
+        </AnimatePresence>
 
-            {/* Live Preview */}
-            {(previewStatus === "ready" || previewStatus === "partial") && previewPayload && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}>
-                <Card className="border-gray-800/50 bg-gradient-to-br from-gray-900/90 to-gray-800/90 backdrop-blur-xl shadow-2xl relative overflow-hidden">
-                  <CardHeader>
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-2xl bg-gradient-to-r from-cyan-300 to-purple-300 bg-clip-text text-transparent">
-                        Live Post Preview
-                      </CardTitle>
-                      <span className="text-xs text-gray-500 bg-gray-800 px-3 py-1 rounded-full">Preview</span>
-                    </div>
-                    <CardDescription className="text-gray-400">
-                      This shows what would be posted if you run it now (nothing is posted automatically at launch).
-                    </CardDescription>
-                  </CardHeader>
-
-                  <CardContent className="space-y-4">
-                    <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-                      <div className="flex items-center gap-2 mb-4">
-                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                        <span className="font-semibold text-white">{platformById.get(previewPayload.platform)?.name ?? previewPayload.platform}</span>
-                      </div>
-
-                      <div className="space-y-4">
-                        <div>
-                          <Label className="text-sm text-gray-400 mb-2 block">Caption:</Label>
-                          <p className="text-white whitespace-pre-wrap">{previewPayload.caption_text ?? "— none —"}</p>
-                        </div>
-
-                        <div className={previewPayload.cta_text ? "" : "opacity-50"}>
-                          <Label className="text-sm text-gray-400 mb-2 block">CTA:</Label>
-                          <p className={previewPayload.cta_text ? "text-white" : "text-gray-500 italic"}>
-                            {previewPayload.cta_text ?? "— none —"}
-                          </p>
-                        </div>
-
-                        <div className={previewPayload.hashtags?.length ? "" : "opacity-50"}>
-                          <Label className="text-sm text-gray-400 mb-2 block">Hashtags:</Label>
-                          <p className={previewPayload.hashtags?.length ? "text-white" : "text-gray-500 italic"}>
-                            {previewPayload.hashtags?.length ? previewPayload.hashtags.join(" ") : "— none —"}
-                          </p>
-                        </div>
-
-                        <div className="pt-4 border-t border-gray-700">
-                          <Label className="text-sm text-gray-400 mb-2 block">Revenue:</Label>
-                          <p className="text-sm">
-                            <span className="text-emerald-400 font-semibold">Creator {previewPayload.revenue.creator_pct}%</span>
-                            <span className="text-gray-500 mx-2">|</span>
-                            <span className="text-purple-400 font-semibold">SirensForge {previewPayload.revenue.platform_pct}%</span>
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-
-            {/* Diagnostics */}
-            {showDiagnostics && previewDiagnostics && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
-                <Card className="border-gray-800/50 bg-gradient-to-br from-gray-900/90 to-gray-800/90 backdrop-blur-xl">
-                  <CardContent className="p-6">
-                    <button onClick={() => setShowDiagnostics(!showDiagnostics)} className="flex items-center justify-between w-full mb-2">
-                      <div className="text-left">
-                        <span className="font-semibold text-cyan-400 flex items-center gap-2">
-                          <Settings className="w-5 h-5" />
-                          Selection Diagnostics
-                        </span>
-                        <p className="text-xs text-gray-500 mt-1">Why this content was selected (no data was modified)</p>
-                      </div>
-                      <motion.div animate={{ rotate: showDiagnostics ? 180 : 0 }}>
-                        <ChevronRight className="w-5 h-5 text-cyan-400" />
-                      </motion.div>
-                    </button>
-
-                    <div className="mt-4 space-y-3 font-mono text-sm">
-                      <div className="flex justify-between text-gray-300">
-                        <span>State:</span>
-                        <span className="text-white font-bold">{previewResult?.state ?? "—"}</span>
-                      </div>
-
-                      <div className="flex justify-between text-gray-300">
-                        <span>Platform:</span>
-                        <span className="text-white font-bold">{platformById.get(previewDiagnostics.platform)?.name ?? previewDiagnostics.platform}</span>
-                      </div>
-
-                      <div className="flex justify-between text-gray-300">
-                        <span>Timestamp:</span>
-                        <span className="text-gray-400">{previewDiagnostics.timestamp}</span>
-                      </div>
-
-                      {previewResult?.reason && (
-                        <div className="pt-3 border-t border-gray-700">
-                          <div className="flex justify-between text-gray-300">
-                            <span>Reason:</span>
-                            <span className="text-gray-400">{previewResult.reason}</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer Actions */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.7 }}
-          className="mt-12 sticky bottom-6 z-30"
-        >
-          <div className="bg-gray-900/95 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 shadow-2xl">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex-1">
-                <h3 className="font-semibold text-white mb-1">Ready to preview?</h3>
-                <p className="text-sm text-gray-400">Evaluate your selection criteria against the current approved pool</p>
-              </div>
-
-              <Button
-                onClick={handlePreviewSelection}
-                disabled={!enabled || selectedPlatforms.length === 0 || isEvaluating}
-                className="px-8 py-6 text-lg font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed shadow-xl relative overflow-hidden"
+        {/* Approve Modal */}
+        <AnimatePresence>
+          {showApproveModal && approveTarget && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+            >
+              <motion.div
+                initial={{ opacity: 0, y: 12, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 12, scale: 0.98 }}
+                transition={{ duration: 0.18 }}
+                className="w-full max-w-xl rounded-2xl border border-gray-800 bg-gray-950 p-6"
               >
-                <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent"
-                  animate={{ x: ["-100%", "200%"] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                />
-                {isEvaluating ? (
-                  <>
-                    <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }}>
-                      <Clock className="w-5 h-5 mr-2" />
-                    </motion.div>
-                    Evaluating…
-                  </>
-                ) : (
-                  <>
-                    <Settings className="w-5 h-5 mr-2" />
-                    Preview Autopost Selection
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        </motion.div>
-      </div>
-
-      {/* Why Blocked Modal */}
-      <AnimatePresence>
-        {showWhyBlockedModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center p-4"
-            onClick={() => setShowWhyBlockedModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              className="max-w-lg w-full bg-gradient-to-br from-gray-900 to-black rounded-3xl border border-gray-800 shadow-2xl overflow-hidden"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="p-8 space-y-6">
-                <div className="flex items-center gap-4">
-                  <div className="p-4 rounded-2xl bg-rose-500/20">
-                    <AlertCircle className="w-8 h-8 text-rose-400" />
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-white text-lg font-semibold">Approve Rule</div>
+                    <div className="text-xs text-gray-400 mt-1 break-all">{approveTarget.id}</div>
                   </div>
-                  <h3 className="text-2xl font-bold text-white">Why is Autopost Blocked?</h3>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-                    <div className="flex items-start gap-3">
-                      <X className="w-5 h-5 text-rose-400 mt-0.5" />
-                      <div>
-                        <h4 className="font-semibold text-white mb-1">Autopost is disabled</h4>
-                        <p className="text-sm text-gray-400">Enable the master toggle to activate selection + posting controls.</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-lg bg-gray-800/50 border border-gray-700">
-                    <div className="flex items-start gap-3">
-                      <Check className="w-5 h-5 text-emerald-400 mt-0.5" />
-                      <div>
-                        <h4 className="font-semibold text-white mb-1">How to fix</h4>
-                        <p className="text-sm text-gray-400">Toggle the master switch at the top of the configuration panel.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <Button
-                  onClick={() => setShowWhyBlockedModal(false)}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
-                >
-                  Got it
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Platform Connection Modal */}
-      <AnimatePresence>
-        {showConnectionModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center p-4"
-            onClick={() => {
-              if (!isConnecting) setShowConnectionModal(false)
-            }}
-          >
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              className="max-w-lg w-full bg-gradient-to-br from-gray-900 to-black rounded-3xl border border-gray-800 shadow-2xl overflow-hidden"
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="p-8 space-y-6">
-                <div className="text-center">
-                  <div className="inline-flex p-6 rounded-full bg-gradient-to-br from-purple-500/20 to-pink-500/20 mb-4">
-                    <Shield className="w-12 h-12 text-purple-400" />
-                  </div>
-
-                  <h3 className="text-2xl font-bold text-white mb-2">
-                    Connect {connectModalPlatform?.name ?? "Platform"}
-                  </h3>
-
-                  <p className="text-gray-400">
-                    This will open a secure authorization flow. You can revoke access anytime.
-                  </p>
-                </div>
-
-                {(connectModalPlatform?.id === "x" || connectModalPlatform?.id === "reddit") && (
-                  <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/30">
-                    <div className="flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 mt-0.5 text-amber-300" />
-                      <div className="text-sm text-amber-200">
-                        <div className="font-semibold">Public platform safety</div>
-                        <div className="text-xs text-amber-200/80 mt-0.5">
-                          We enforce a conservative explicitness cap for public platforms to reduce account risk.
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-800/50">
-                    <Check className="w-5 h-5 text-emerald-400" />
-                    <span className="text-sm text-gray-300">Secure authentication</span>
-                  </div>
-                  <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-800/50">
-                    <Check className="w-5 h-5 text-emerald-400" />
-                    <span className="text-sm text-gray-300">Posting permissions only</span>
-                  </div>
-                  <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-800/50">
-                    <Check className="w-5 h-5 text-emerald-400" />
-                    <span className="text-sm text-gray-300">Revoke anytime</span>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
                   <Button
                     variant="outline"
-                    onClick={() => setShowConnectionModal(false)}
-                    className="flex-1 border-gray-700"
-                    disabled={isConnecting}
+                    className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                    onClick={() => {
+                      setShowApproveModal(false)
+                      setApproveTarget(null)
+                    }}
                   >
-                    Cancel
-                  </Button>
-
-                  <Button
-                    onClick={handleConnect}
-                    className="flex-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
-                    disabled={isConnecting}
-                  >
-                    {isConnecting ? (
-                      <>
-                        <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }}>
-                          <Clock className="w-4 h-4 mr-2" />
-                        </motion.div>
-                        Opening…
-                      </>
-                    ) : (
-                      <>
-                        <ExternalLink className="w-4 h-4 mr-2" />
-                        Connect
-                      </>
-                    )}
+                    <X className="w-4 h-4" />
                   </Button>
                 </div>
 
-                <p className="text-xs text-gray-500 text-center">
-                  Implementation note: wire <span className="text-gray-300">/api/autopost/connect</span> to return an OAuth URL.
-                </p>
-              </div>
+                <div className="mt-4 space-y-3">
+                  <div className="text-sm text-gray-300">
+                    You must acknowledge all three items to approve.
+                  </div>
+
+                  <label className="flex items-start gap-3 text-sm text-gray-200 cursor-pointer">
+                    <input type="checkbox" checked={ackSplit} onChange={e => setAckSplit(e.target.checked)} className="mt-1" />
+                    <span>I understand revenue splits / platform rules are my responsibility.</span>
+                  </label>
+
+                  <label className="flex items-start gap-3 text-sm text-gray-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ackAutomation}
+                      onChange={e => setAckAutomation(e.target.checked)}
+                      className="mt-1"
+                    />
+                    <span>I understand this rule may post automatically when scheduled.</span>
+                  </label>
+
+                  <label className="flex items-start gap-3 text-sm text-gray-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={ackControl}
+                      onChange={e => setAckControl(e.target.checked)}
+                      className="mt-1"
+                    />
+                    <span>I understand I’m in control and can pause/revoke anytime.</span>
+                  </label>
+
+                  <div className="flex flex-wrap gap-2 mt-4">
+                    <Button
+                      onClick={confirmApprove}
+                      disabled={!(ackSplit && ackAutomation && ackControl) || busyRuleId === approveTarget.id}
+                      className="bg-emerald-600 hover:bg-emerald-500"
+                    >
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Approve
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                      onClick={() => {
+                        setShowApproveModal(false)
+                        setApproveTarget(null)
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    {busyRuleId === approveTarget.id && (
+                      <div className="flex items-center text-xs text-gray-400 ml-2">
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Working…
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </motion.div>
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          )}
+        </AnimatePresence>
+      </main>
     </div>
   )
 }
-
-// END OF FILE

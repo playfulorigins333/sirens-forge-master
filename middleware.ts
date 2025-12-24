@@ -1,56 +1,29 @@
-// middleware.ts
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+  const url = req.nextUrl;
+  const hostname = req.headers.get("host") || "";
 
-  // Allow Next internals, static files, and API routes
+  // ✅ ALWAYS ALLOW LOCALHOST (screenshots, dev, recording)
   if (
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/api") ||
-    pathname.includes(".")
+    hostname.includes("localhost") ||
+    hostname.includes("127.0.0.1")
   ) {
     return NextResponse.next();
   }
 
-  // Allow age gate itself
-  if (pathname === "/age") {
-    // If already age-verified, send them straight to pricing
-    const ageVerified =
-      req.cookies.get("sf_age_verified")?.value === "true";
-
-    if (ageVerified) {
-      const url = req.nextUrl.clone();
-      url.pathname = "/pricing";
-      return NextResponse.redirect(url);
+  // 🔒 PRODUCTION LOCK — force pricing page
+  if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
+    if (!url.pathname.startsWith("/pricing")) {
+      return NextResponse.redirect(
+        new URL("/pricing", req.url)
+      );
     }
-
-    return NextResponse.next();
-  }
-
-  // 🔐 Check age verification cookie (CANONICAL NAME)
-  const ageVerified =
-    req.cookies.get("sf_age_verified")?.value === "true";
-
-  // Not age-verified → force age gate
-  if (!ageVerified) {
-    const url = req.nextUrl.clone();
-    url.pathname = "/age";
-    return NextResponse.redirect(url);
-  }
-
-  // Age-verified users:
-  // Allow pricing only, redirect everything else to pricing
-  if (pathname !== "/pricing") {
-    const url = req.nextUrl.clone();
-    url.pathname = "/pricing";
-    return NextResponse.redirect(url);
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next|api).*)"],
+  matcher: "/:path*",
 };
