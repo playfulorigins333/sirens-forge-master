@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { supabaseAdmin } from "@/lib/supabaseAdmin"
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { spawn } from "child_process"
 import fs from "fs"
 import path from "path"
@@ -11,6 +11,8 @@ export const dynamic = "force-dynamic"
 const TRAIN_ROOT = "/workspace/train_data"
 
 export async function POST(req: Request) {
+  const supabaseAdmin = getSupabaseAdmin()
+
   try {
     const form = await req.formData()
 
@@ -82,7 +84,7 @@ export async function POST(req: Request) {
       .eq("id", lora_id)
 
     /* ──────────────────────────────────────────────
-       4️⃣ SPAWN TRAINER (THIS WAS MISSING BEFORE)
+       4️⃣ SPAWN TRAINER
     ────────────────────────────────────────────── */
     console.log("🚀 START-TRAINING ROUTE REACHED — SPAWNING TRAINER", {
       lora_id,

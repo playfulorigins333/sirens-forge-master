@@ -1,74 +1,64 @@
-import { NextResponse } from "next/server"
+import { NextRequest, NextResponse } from "next/server"
+import { requireUserId } from "@/lib/supabaseServer"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 
+type ApproveBody = {
+  accept_split: boolean
+  accept_automation: boolean
+  accept_control: boolean
+}
+
 export async function POST(
-  _req: Request,
+  req: NextRequest,
   context: { params: Promise<{ rule_id: string }> }
 ) {
-  try {
-    // ✅ Next.js 16 FIX — params is a Promise
-    const { rule_id } = await context.params
+  const { rule_id } = await context.params
 
-    if (!rule_id) {
-      return NextResponse.json(
-        { error: "Missing rule_id" },
-        { status: 400 }
-      )
-    }
+  const userId = await requireUserId()
+  if (!userId) {
+    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 })
+  }
 
-    const userId = process.env.DEV_BYPASS_USER_ID
+  if (!rule_id) {
+    return NextResponse.json({ error: "MISSING_RULE_ID" }, { status: 400 })
+  }
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "DEV_BYPASS_USER_ID not set" },
-        { status: 500 }
-      )
-    }
+  const body = (await req.json().catch(() => null)) as ApproveBody | null
+  if (!body) {
+    return NextResponse.json({ error: "INVALID_JSON" }, { status: 400 })
+  }
 
-    const supabase = getSupabaseAdmin()
+  if (
+    body.accept_split !== true ||
+    body.accept_automation !== true ||
+    body.accept_control !== true
+  ) {
+    return NextResponse.json({ error: "MISSING_ACKS" }, { status: 400 })
+  }
 
-    // 🔍 Verify rule belongs to this user
-    const { data: rule, error: fetchError } = await supabase
-      .from("autopost_rules")
-      .select("*")
-      .eq("id", rule_id)
-      .eq("user_id", userId)
-      .single()
+  const supabaseAdmin = getSupabaseAdmin()
 
-    if (fetchError || !rule) {
-      return NextResponse.json(
-        { error: "Rule not found or not owned by user" },
-        { status: 404 }
-      )
-    }
+  const { data, error } = await supabaseAdmin
+    .from("autopost_rules")
+    .update({
+      approval_state: "APPROVED",
+      approved_at: new Date().toISOString(),
+      enabled: true,
+    })
+    .eq("id", rule_id)
+    .eq("user_id", userId)
+    .select("*")
+    .single()
 
-    // ✅ Approve rule
-    const { data: updatedRule, error: updateError } = await supabase
-      .from("autopost_rules")
-      .update({
-        approval_state: "APPROVED",
-        approved_at: new Date().toISOString(),
-        enabled: true,
-      })
-      .eq("id", rule_id)
-      .select()
-      .single()
-
-    if (updateError) {
-      return NextResponse.json(
-        { error: updateError.message },
-        { status: 500 }
-      )
-    }
-
+  if (error || !data) {
     return NextResponse.json(
-      { rule: updatedRule },
-      { status: 200 }
-    )
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: err?.message ?? "Unknown error" },
+      { error: error?.message ?? "UPDATE_FAILED" },
       { status: 500 }
     )
   }
+
+  return NextResponse.json({
+    success: true,
+    rule: data,
+  })
 }

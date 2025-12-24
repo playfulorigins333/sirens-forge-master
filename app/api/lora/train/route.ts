@@ -1,92 +1,103 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { NextResponse } from "next/server";
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
-export const runtime = "nodejs"
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+const TRAIN_ROOT = "/workspace/train_data";
 
 export async function POST(req: Request) {
   try {
-    // 🔐 Auth
-    const authHeader = req.headers.get("authorization")
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+    // ✅ CREATE SUPABASE CLIENT AT RUNTIME ONLY
+    const supabaseAdmin = getSupabaseAdmin();
+
+    const form = await req.formData();
+    const lora_id = form.get("lora_id") as string;
+
+    if (!lora_id) {
+      return NextResponse.json({ error: "Missing lora_id" }, { status: 400 });
     }
 
-    const userToken = authHeader.replace("Bearer ", "")
-    const { data: { user }, error: userErr } =
-      await supabase.auth.getUser(userToken)
+    // 1️⃣ Guard: block if job already active
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from("user_loras")
+      .select("id, status")
+      .eq("id", lora_id)
+      .single();
 
-    if (userErr || !user) {
-      return NextResponse.json({ error: "Invalid user" }, { status: 401 })
+    if (existingErr || !existing) {
+      return NextResponse.json({ error: "LoRA job not found" }, { status: 404 });
     }
 
-    // 📦 JSON body (NOT multipart)
-    const body = await req.json()
+    if (existing.status === "queued" || existing.status === "training") {
+      return NextResponse.json({
+        status: existing.status,
+        message: "Job already active",
+      });
+    }
 
-    const {
-      lora_id,
-      identityName,
-      description,
-      image_count,
-      storage_bucket,
-      storage_prefix,
-    } = body
+    // 2️⃣ Prepare dataset directory
+    const datasetDir = path.join(TRAIN_ROOT, `sf_${lora_id}`, "10_class1");
+    fs.mkdirSync(datasetDir, { recursive: true });
 
-    if (
-      !lora_id ||
-      !identityName ||
-      !storage_bucket ||
-      !storage_prefix ||
-      typeof image_count !== "number" ||
-      image_count < 10 ||
-      image_count > 20
-    ) {
+    let imageCount = 0;
+
+    for (const [, value] of form.entries()) {
+      if (!(value instanceof File)) continue;
+      if (!value.type.startsWith("image/")) continue;
+
+      const buffer = Buffer.from(await value.arrayBuffer());
+      const ext = value.name.split(".").pop() || "png";
+      const filename = `${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2)}.${ext}`;
+
+      fs.writeFileSync(path.join(datasetDir, filename), buffer);
+      imageCount++;
+    }
+
+    if (imageCount < 10 || imageCount > 20) {
       return NextResponse.json(
-        { error: "Invalid input" },
+        { error: `Invalid image count: ${imageCount} (10–20 required)` },
         { status: 400 }
-      )
+      );
     }
 
-    // ✅ Confirm storage path exists (lightweight check)
-    const { data: files, error: listErr } = await supabase.storage
-      .from(storage_bucket)
-      .list(storage_prefix, { limit: 1 })
-
-    if (listErr || !files || files.length === 0) {
-      return NextResponse.json(
-        { error: "Training images not found in storage" },
-        { status: 400 }
-      )
-    }
-
-    // 🚦 Mark job queued (worker will pick it up)
-    const { error: updateErr } = await supabase
+    // 3️⃣ Update DB → queued
+    await supabaseAdmin
       .from("user_loras")
       .update({
         status: "queued",
-        image_count,
+        image_count: imageCount,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", lora_id)
-      .eq("user_id", user.id)
+      .eq("id", lora_id);
 
-    if (updateErr) {
-      throw updateErr
-    }
+    // 4️⃣ Spawn trainer
+    const child = spawn("python", ["runpod/train_lora.py"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        LORA_ID: lora_id,
+      },
+      detached: true,
+      stdio: "ignore",
+    });
+
+    child.unref();
 
     return NextResponse.json({
       status: "queued",
-      lora_id,
-    })
-  } catch (err) {
-    console.error("LoRA train error:", err)
+      images_written: imageCount,
+    });
+  } catch (err: any) {
+    console.error("[lora/train] Fatal error:", err);
     return NextResponse.json(
-      { error: "Server error" },
+      { error: "Failed to start training" },
       { status: 500 }
-    )
+    );
   }
 }
