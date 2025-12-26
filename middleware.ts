@@ -2,37 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(req: NextRequest) {
   const url = req.nextUrl;
-  const pathname = url.pathname;
   const hostname = req.headers.get("host") || "";
+  const pathname = url.pathname;
 
-  // ✅ NEVER touch Next.js internals or assets
+  // ✅ ALWAYS ALLOW LOCAL DEV
+  if (hostname.includes("localhost") || hostname.includes("127.0.0.1")) {
+    return NextResponse.next();
+  }
+
+  // ✅ ALWAYS ALLOW API, NEXT, CHECKOUT, & STATIC ASSETS
+  // CRITICAL: prevents seat-count JSON from being hijacked
+  // CRITICAL: prevents Stripe checkout breakage
   if (
+    pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
-    pathname.startsWith("/favicon") ||
-    pathname.endsWith(".ico") ||
-    pathname.endsWith(".png") ||
-    pathname.endsWith(".jpg") ||
-    pathname.endsWith(".jpeg") ||
-    pathname.endsWith(".svg") ||
-    pathname.endsWith(".css") ||
-    pathname.endsWith(".js") ||
-    pathname.endsWith(".map")
+    pathname.startsWith("/checkout") ||
+    pathname === "/favicon.ico" ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml"
   ) {
     return NextResponse.next();
   }
 
-  // ✅ ALWAYS allow localhost
-  if (
-    hostname.includes("localhost") ||
-    hostname.includes("127.0.0.1")
-  ) {
-    return NextResponse.next();
-  }
-
-  // 🔒 PRODUCTION LOCK — force pricing page ONLY for pages
+  // 🔒 PRODUCTION LOCK — force pricing page only
   if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
     if (!pathname.startsWith("/pricing")) {
-      return NextResponse.redirect(new URL("/pricing", req.url));
+      const to = new URL("/pricing", req.url);
+
+      // Preserve referral codes (?ref=)
+      const ref = url.searchParams.get("ref");
+      if (ref) to.searchParams.set("ref", ref);
+
+      return NextResponse.redirect(to);
     }
   }
 
@@ -40,5 +41,8 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: "/:path*",
+  // Extra safety: matcher excludes API, NEXT, CHECKOUT, and static assets
+  matcher: [
+    "/((?!api|_next|checkout|favicon.ico|robots.txt|sitemap.xml).*)",
+  ],
 };
