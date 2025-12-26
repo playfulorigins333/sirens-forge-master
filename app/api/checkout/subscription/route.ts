@@ -1,3 +1,4 @@
+// app/api/checkout/subscription/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
@@ -8,16 +9,22 @@ export const dynamic = "force-dynamic";
 /* ──────────────────────────────────────────────
    Stripe setup
 ────────────────────────────────────────────── */
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-11-17.clover",
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
+  apiVersion: "2025-11-17.clover" as any,
 });
 
 /* ──────────────────────────────────────────────
    Supabase (service role – authoritative)
 ────────────────────────────────────────────── */
 const SUPABASE_URL =
-  process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  "";
+
+const SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  "";
 
 const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
@@ -63,6 +70,22 @@ function clampPercent(n: number) {
   return n;
 }
 
+function getBaseUrl(req: Request) {
+  // Prefer explicit env (best practice)
+  const env = safeString(process.env.NEXT_PUBLIC_APP_URL);
+  if (env) return env.replace(/\/+$/, "");
+
+  // Fallback: derive from request (prevents deploy-time “undefined URL” issues)
+  const proto = req.headers.get("x-forwarded-proto") || "https";
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  const derived = host ? `${proto}://${host}` : "";
+  return derived.replace(/\/+$/, "");
+}
+
+function missingEnv(keys: string[]) {
+  return keys.filter((k) => !safeString((process.env as any)[k]));
+}
+
 type ReferralResolution = {
   ok: boolean;
   referralCode: string | null;
@@ -72,16 +95,6 @@ type ReferralResolution = {
   connectOnboarded: boolean;
 };
 
-/**
- * Resolves referral code -> affiliate user + commission percent + connect account
- *
- * Assumptions (kept intentionally flexible by selecting "*"):
- * - referral_codes table has at least: code, affiliate_user_id (or user_id), commission_percent (or percent)
- * - profiles table has: stripe_connect_account_id, stripe_connect_onboarded
- *
- * If referral code is invalid or missing => ok=false, commission=0
- * If referral valid but affiliate NOT onboarded => ok=true, but connectAccountId=null/connectOnboarded=false (commission remains locked)
- */
 async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolution> {
   const referralCode = safeString(referralCodeRaw);
 
@@ -96,7 +109,6 @@ async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolu
     };
   }
 
-  // 1) Load referral row
   const { data: referralRow, error: refErr } = await supabase
     .from("referral_codes")
     .select("*")
@@ -114,7 +126,6 @@ async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolu
     };
   }
 
-  // 2) Extract affiliate user id (common variants)
   const affiliateUserId =
     safeString((referralRow as any).affiliate_user_id) ||
     safeString((referralRow as any).affiliate_id) ||
@@ -122,7 +133,6 @@ async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolu
     safeString((referralRow as any).owner_user_id) ||
     null;
 
-  // 3) Extract commission percent (common variants)
   const maybePercent =
     toPercentNumber((referralRow as any).commission_percent) ??
     toPercentNumber((referralRow as any).commissionPercent) ??
@@ -133,7 +143,6 @@ async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolu
   const commissionPercent = clampPercent(maybePercent ?? 0);
 
   if (!affiliateUserId) {
-    // Referral exists but malformed => treat as invalid for payout, still pass code along
     return {
       ok: true,
       referralCode,
@@ -144,7 +153,6 @@ async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolu
     };
   }
 
-  // 4) Load affiliate profile for connect status
   const { data: profileRow, error: profErr } = await supabase
     .from("profiles")
     .select("stripe_connect_account_id, stripe_connect_onboarded")
@@ -165,7 +173,6 @@ async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolu
   const connectAccountId = safeString((profileRow as any).stripe_connect_account_id) || null;
   const connectOnboarded = Boolean((profileRow as any).stripe_connect_onboarded);
 
-  // Only treat as payable if BOTH are true
   const payable = connectOnboarded && !!connectAccountId;
 
   return {
@@ -178,19 +185,15 @@ async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolu
   };
 }
 
-/**
- * For one-time payments, we must provide application_fee_amount (in cents).
- * We compute it from the Stripe Price unit_amount.
- */
-async function computePlatformFeeAmountCents(priceId: string, platformFeePercent: number): Promise<number> {
+async function computePlatformFeeAmountCents(
+  priceId: string,
+  platformFeePercent: number
+): Promise<number> {
   const price = await stripe.prices.retrieve(priceId);
-
   const unitAmount = typeof price.unit_amount === "number" ? price.unit_amount : null;
 
   if (unitAmount == null) {
-    // If price is not a fixed unit_amount, we cannot safely compute application_fee_amount.
-    // Fail hard because destination charge correctness is a hard requirement.
-    throw new Error("Price unit_amount missing — cannot compute application_fee_amount for destination charge.");
+    throw new Error("Price unit_amount missing — cannot compute application_fee_amount.");
   }
 
   const fee = Math.round((unitAmount * clampPercent(platformFeePercent)) / 100);
@@ -202,10 +205,25 @@ async function computePlatformFeeAmountCents(priceId: string, platformFeePercent
 ────────────────────────────────────────────── */
 export async function POST(req: Request) {
   try {
+    // Hard guardrails: fail with clear server error (not silent)
+    const missing = [
+      ...missingEnv(["STRIPE_SECRET_KEY"]),
+      ...(SUPABASE_URL ? [] : ["SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL"]),
+      ...(SERVICE_ROLE_KEY ? [] : ["SUPABASE_SERVICE_ROLE_KEY"]),
+    ];
+
+    if (missing.length > 0) {
+      console.error("❌ Missing required env:", missing);
+      return NextResponse.json(
+        { error: `Server misconfigured: missing ${missing.join(", ")}` },
+        { status: 500 }
+      );
+    }
+
     const body = await req.json().catch(() => ({} as any));
 
     const tierName = body?.tierName as LaunchTier | undefined;
-    const referralCode = body?.referralCode; // confirmed by you: passed in POST body
+    const referralCode = body?.referralCode;
 
     if (!tierName) {
       return NextResponse.json({ error: "Missing tierName" }, { status: 400 });
@@ -217,8 +235,18 @@ export async function POST(req: Request) {
 
     const priceId = PRICE_ID_MAP[tierName];
     if (!priceId) {
+      console.error("❌ Missing Stripe price env for tier:", tierName);
       return NextResponse.json({ error: "Stripe price not configured for tier" }, { status: 500 });
     }
+
+    const baseUrl = getBaseUrl(req);
+    if (!baseUrl) {
+      console.error("❌ Could not determine base URL (NEXT_PUBLIC_APP_URL missing and host unavailable)");
+      return NextResponse.json({ error: "Server misconfigured: app URL missing" }, { status: 500 });
+    }
+
+    const successUrl = `${baseUrl}/billing/success`;
+    const cancelUrl = `${baseUrl}/billing/cancel`;
 
     /* ──────────────────────────────────────────────
        1️⃣ Load tier limits
@@ -270,16 +298,11 @@ export async function POST(req: Request) {
 
     /* ──────────────────────────────────────────────
        2.5️⃣ Resolve referral (optional)
-       - if connect is onboarded -> destination charges enabled
-       - else -> referral metadata only (commission locked)
     ────────────────────────────────────────────── */
     const referral = await resolveReferral(referralCode);
 
-    // commissionPercent is affiliate cut
-    // platformFeePercent is platform cut
     const platformFeePercent = clampPercent(100 - referral.commissionPercent);
 
-    // Shared metadata: session + downstream objects
     const sharedMetadata: Record<string, string> = {
       tier_name: tierName,
       referral_code: referral.referralCode ?? "",
@@ -292,17 +315,11 @@ export async function POST(req: Request) {
 
     /* ──────────────────────────────────────────────
        3️⃣ Create Stripe Checkout Session
-       PHASE 1.2: Destination Charges (if connect onboarded)
     ────────────────────────────────────────────── */
-
-    const successUrl = `${process.env.NEXT_PUBLIC_APP_URL}/billing/success`;
-    const cancelUrl = `${process.env.NEXT_PUBLIC_APP_URL}/billing/cancel`;
 
     // OG = ONE-TIME PAYMENT
     if (tierName === "og_throne") {
-      // If affiliate is onboarded, we MUST split at charge time
       if (referral.connectOnboarded && referral.connectAccountId) {
-        // Compute fee amount from price unit_amount
         const applicationFeeAmount = await computePlatformFeeAmountCents(priceId, platformFeePercent);
 
         const session = await stripe.checkout.sessions.create({
@@ -310,44 +327,25 @@ export async function POST(req: Request) {
           line_items: [{ price: priceId, quantity: 1 }],
           success_url: successUrl,
           cancel_url: cancelUrl,
-          metadata: {
-            ...sharedMetadata,
-            type: "one_time",
-            connect_mode: "destination_charge",
-          },
+          metadata: { ...sharedMetadata, type: "one_time", connect_mode: "destination_charge" },
           payment_intent_data: {
             application_fee_amount: applicationFeeAmount,
-            transfer_data: {
-              destination: referral.connectAccountId,
-            },
-            metadata: {
-              ...sharedMetadata,
-              type: "one_time",
-              connect_mode: "destination_charge",
-            },
+            transfer_data: { destination: referral.connectAccountId },
+            metadata: { ...sharedMetadata, type: "one_time", connect_mode: "destination_charge" },
           },
         });
 
         return NextResponse.json({ url: session.url });
       }
 
-      // No connect: create normal checkout (commission stays locked)
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: successUrl,
         cancel_url: cancelUrl,
-        metadata: {
-          ...sharedMetadata,
-          type: "one_time",
-          connect_mode: "none",
-        },
+        metadata: { ...sharedMetadata, type: "one_time", connect_mode: "none" },
         payment_intent_data: {
-          metadata: {
-            ...sharedMetadata,
-            type: "one_time",
-            connect_mode: "none",
-          },
+          metadata: { ...sharedMetadata, type: "one_time", connect_mode: "none" },
         },
       });
 
@@ -361,51 +359,34 @@ export async function POST(req: Request) {
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: successUrl,
         cancel_url: cancelUrl,
-        metadata: {
-          ...sharedMetadata,
-          type: "subscription",
-          connect_mode: "destination_charge",
-        },
+        metadata: { ...sharedMetadata, type: "subscription", connect_mode: "destination_charge" },
         subscription_data: {
-          // Platform fee percent of each invoice; remainder routes to destination
           application_fee_percent: platformFeePercent,
-          transfer_data: {
-            destination: referral.connectAccountId,
-          },
-          metadata: {
-            ...sharedMetadata,
-            type: "subscription",
-            connect_mode: "destination_charge",
-          },
+          transfer_data: { destination: referral.connectAccountId },
+          metadata: { ...sharedMetadata, type: "subscription", connect_mode: "destination_charge" },
         },
       });
 
       return NextResponse.json({ url: session.url });
     }
 
-    // No connect: create normal subscription checkout (commission stays locked)
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: {
-        ...sharedMetadata,
-        type: "subscription",
-        connect_mode: "none",
-      },
+      metadata: { ...sharedMetadata, type: "subscription", connect_mode: "none" },
       subscription_data: {
-        metadata: {
-          ...sharedMetadata,
-          type: "subscription",
-          connect_mode: "none",
-        },
+        metadata: { ...sharedMetadata, type: "subscription", connect_mode: "none" },
       },
     });
 
     return NextResponse.json({ url: session.url });
   } catch (err: any) {
     console.error("❌ Checkout route error:", err);
-    return NextResponse.json({ error: err?.message ?? "Checkout failed" }, { status: 500 });
+    return NextResponse.json(
+      { error: err?.message ?? "Checkout failed" },
+      { status: 500 }
+    );
   }
 }
