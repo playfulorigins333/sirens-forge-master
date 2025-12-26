@@ -1,8 +1,13 @@
-﻿{
+{
+  "version": 2,
   "crons": [
     {
       "path": "/api/autopost/run",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/5 * * * *",
+      "method": "POST",
+      "headers": {
+        "Authorization": "Bearer {{VERCEL_CRON_SECRET}}"
+      }
     }
   ]
 }
