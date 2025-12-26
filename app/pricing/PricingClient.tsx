@@ -4,13 +4,7 @@ import { useEffect, useState } from "react";
 import { motion, animate } from "framer-motion";
 import { useSearchParams } from "next/navigation";
 
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Crown, Star, Sparkles, AlertTriangle, Check } from "lucide-react";
 
 type ViewMode = "cards" | "compare";
@@ -25,11 +19,6 @@ interface SeatState {
   og: TierSeats;
   earlyBird: TierSeats;
 }
-
-const FALLBACK_SEATS: SeatState = {
-  og: { remaining: 10, total: 35 },
-  earlyBird: { remaining: 120, total: 150 }, // updated totals (Early Bird max = 150)
-};
 
 interface SeatCountTier {
   max_slots: number | null;
@@ -47,11 +36,16 @@ interface SeatCountApiResponse {
   };
 }
 
+function isFiniteNumber(n: unknown): n is number {
+  return typeof n === "number" && Number.isFinite(n);
+}
+
 // Small helper to animate numeric transitions (seat counters)
 function AnimatedNumber({ value }: { value: number }) {
   const [display, setDisplay] = useState<number>(value);
 
   useEffect(() => {
+    // ensure start point tracks the last displayed value
     const controls = animate(display, value, {
       duration: 0.6,
       ease: "easeOut",
@@ -67,24 +61,24 @@ function AnimatedNumber({ value }: { value: number }) {
   return <span>{display.toLocaleString()}</span>;
 }
 
-export default function PricingPage() {
+export default function PricingClient() {
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
-  const [seats, setSeats] = useState<SeatState>(FALLBACK_SEATS);
+
+  // ✅ NO FALLBACK NUMBERS. Seats are authoritative from /api/subscription/seat-count only.
+  // null = not yet hydrated
+  const [seats, setSeats] = useState<SeatState | null>(null);
   const [loadingSeats, setLoadingSeats] = useState<boolean>(false);
 
-  const [checkoutLoading, setCheckoutLoading] = useState<CheckoutTier | null>(
-    null
-  );
+  const [checkoutLoading, setCheckoutLoading] = useState<CheckoutTier | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
-  // Referral / affiliate code (optional but required for commissions)
+  // Referral / affiliate code
   const searchParams = useSearchParams();
   const [referralCode, setReferralCode] = useState<string>("");
   const [referralSaved, setReferralSaved] = useState<boolean>(false);
 
-
-  const ogSoldOut = seats.og.remaining <= 0;
-  const earlyBirdSoldOut = seats.earlyBird.remaining <= 0;
+  const ogSoldOut = seats ? seats.og.remaining <= 0 : false;
+  const earlyBirdSoldOut = seats ? seats.earlyBird.remaining <= 0 : false;
 
   // Hydrate referral code from URL (?ref=CODE) or localStorage
   useEffect(() => {
@@ -96,9 +90,7 @@ export default function PricingPage() {
           "")?.trim();
 
       const fromStorage =
-        (typeof window !== "undefined" &&
-          window.localStorage.getItem("sf_referral_code")) ||
-        "";
+        (typeof window !== "undefined" && window.localStorage.getItem("sf_referral_code")) || "";
 
       const pick = (fromUrl || fromStorage || "").trim();
       if (!pick) return;
@@ -116,46 +108,66 @@ export default function PricingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-
-  // Live seat polling – wired to /api/subscription/seat-count
+  // ✅ Live seat polling – wired to /api/subscription/seat-count (authoritative)
   useEffect(() => {
     let active = true;
 
     const fetchSeats = async () => {
       try {
         setLoadingSeats(true);
+
         const res = await fetch("/api/subscription/seat-count", {
           cache: "no-store",
         });
-        if (!res.ok) throw new Error("Seat endpoint not ready");
+
+        if (!res.ok) {
+          throw new Error("Seat endpoint not ready");
+        }
 
         const data = (await res.json()) as SeatCountApiResponse;
 
-        if (!active || !data?.tiers) return;
+        if (!active) return;
+        if (!data?.success || !data?.tiers) {
+          throw new Error("Seat response invalid");
+        }
 
         const ogTier = data.tiers.og_throne;
         const ebTier = data.tiers.early_bird;
 
-        setSeats((prev) => ({
-          og: {
-            remaining: ogTier?.slots_remaining ?? prev.og.remaining,
-            total: ogTier?.max_slots ?? prev.og.total,
-          },
-          earlyBird: {
-            remaining: ebTier?.slots_remaining ?? prev.earlyBird.remaining,
-            total: ebTier?.max_slots ?? prev.earlyBird.total,
-          },
-        }));
+        const ogRemaining = ogTier?.slots_remaining;
+        const ogTotal = ogTier?.max_slots;
+
+        const ebRemaining = ebTier?.slots_remaining;
+        const ebTotal = ebTier?.max_slots;
+
+        // Require valid numbers to hydrate/update — prevents accidental drift
+        if (
+          !isFiniteNumber(ogRemaining) ||
+          !isFiniteNumber(ogTotal) ||
+          !isFiniteNumber(ebRemaining) ||
+          !isFiniteNumber(ebTotal)
+        ) {
+          throw new Error("Seat numbers missing");
+        }
+
+        setSeats({
+          og: { remaining: ogRemaining, total: ogTotal },
+          earlyBird: { remaining: ebRemaining, total: ebTotal },
+        });
       } catch {
-        // Silently fall back to hard-coded counts
+        // Do nothing — keep last known good state.
+        // If we haven't hydrated yet, seats remain null (shows "Loading…" instead of fake numbers).
       } finally {
         if (active) setLoadingSeats(false);
       }
     };
 
+    // hydrate immediately
     fetchSeats();
 
-    const interval = setInterval(fetchSeats, 15_000); // poll every 15s
+    // poll every 15s
+    const interval = setInterval(fetchSeats, 15_000);
+
     return () => {
       active = false;
       clearInterval(interval);
@@ -182,9 +194,7 @@ export default function PricingPage() {
       if (!res.ok) {
         const msg =
           json?.error ||
-          (res.status === 409
-            ? "That tier is sold out."
-            : "Checkout failed. Please try again.");
+          (res.status === 409 ? "That tier is sold out." : "Checkout failed. Please try again.");
         setCheckoutError(msg);
         return;
       }
@@ -202,8 +212,7 @@ export default function PricingPage() {
     }
   };
 
-  const seatText = (tier: TierSeats) =>
-    `${tier.remaining}/${tier.total} seats left`;
+  const seatText = (tier: TierSeats) => `${tier.remaining}/${tier.total} seats left`;
 
   const compareRows: {
     label: string;
@@ -263,6 +272,8 @@ export default function PricingPage() {
     },
   ];
 
+  const canCheckout = seats !== null && checkoutLoading === null;
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-slate-950 to-black text-white relative overflow-hidden">
       {/* Background glow */}
@@ -294,9 +305,8 @@ export default function PricingPage() {
               Choose your entry tier
             </h1>
             <p className="text-gray-400 text-sm md:text-base max-w-xl mx-auto md:mx-0">
-              Lock in OG or Early Bird benefits before public pricing activates.
-              Seats update in real time as founders join.
-              Founder pricing ends before public launch.
+              Lock in OG or Early Bird benefits before public pricing activates. Seats update in real time
+              as founders join. Founder pricing ends before public launch.
             </p>
           </div>
 
@@ -349,12 +359,9 @@ export default function PricingPage() {
                 </div>
               </div>
               <div className="text-xs md:text-sm">
-                <p className="font-semibold text-slate-50">
-                  Live Founder Seat Tracking
-                </p>
+                <p className="font-semibold text-slate-50">Live Founder Seat Tracking</p>
                 <p className="text-slate-400">
-                  OG and Early Bird seat counters sync directly with the
-                  database. Numbers update as soon as a tier is claimed.
+                  OG and Early Bird seat counters sync directly with the database. Numbers update as soon as a tier is claimed.
                 </p>
               </div>
             </div>
@@ -365,81 +372,86 @@ export default function PricingPage() {
                   <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
                   <span>OG: </span>
                   <span className="font-semibold text-slate-100">
-                    {ogSoldOut ? (
+                    {!seats ? (
+                      <span className="text-slate-500">Loading…</span>
+                    ) : ogSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
                     ) : (
                       <AnimatedNumber value={seats.og.remaining} />
                     )}
                     <span className="mx-0.5">/</span>
-                    <AnimatedNumber value={seats.og.total} />
+                    {!seats ? <span className="text-slate-500">—</span> : <AnimatedNumber value={seats.og.total} />}
                   </span>
                 </div>
               </div>
+
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1">
                   <span className="inline-flex h-1.5 w-1.5 rounded-full bg-pink-400 animate-pulse shadow-[0_0_12px_rgba(244,114,182,0.8)]" />
                   <span>Early Bird: </span>
                   <span className="font-semibold text-slate-100">
-                    {earlyBirdSoldOut ? (
+                    {!seats ? (
+                      <span className="text-slate-500">Loading…</span>
+                    ) : earlyBirdSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
                     ) : (
                       <AnimatedNumber value={seats.earlyBird.remaining} />
                     )}
                     <span className="mx-0.5">/</span>
-                    <AnimatedNumber value={seats.earlyBird.total} />
+                    {!seats ? (
+                      <span className="text-slate-500">—</span>
+                    ) : (
+                      <AnimatedNumber value={seats.earlyBird.total} />
+                    )}
                   </span>
                 </div>
               </div>
+
               {loadingSeats && (
-                <p className="text-[10px] text-slate-500">
-                  Syncing with live seat data…
-                </p>
+                <p className="text-[10px] text-slate-500">Syncing with live seat data…</p>
               )}
             </div>
 
-              <div className="w-full sm:w-auto sm:min-w-[280px]">
-                <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
-                    Referral / affiliate code
-                  </p>
-                  <div className="mt-1 flex items-center gap-2">
-                    <input
-                      value={referralCode}
-                      onChange={(e) => {
-                        const v = e.target.value
-                          .toUpperCase()
-                          .replace(/\s+/g, "");
-                        setReferralCode(v);
-                        try {
-                          window.localStorage.setItem("sf_referral_code", v);
-                          setReferralSaved(true);
-                        } catch {
-                          // ignore
-                        }
-                      }}
-                      placeholder="Example: USER9389"
-                      className="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-purple-400/70 focus:ring-2 focus:ring-purple-500/20"
-                      inputMode="text"
-                      autoCapitalize="characters"
-                      autoCorrect="off"
-                      spellCheck={false}
-                    />
-                    {referralCode ? (
-                      <span className="text-[10px] font-semibold text-emerald-300 whitespace-nowrap">
-                        {referralSaved ? "Saved" : "OK"}
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-semibold text-amber-200 whitespace-nowrap">
-                        Required for commission
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    If you&apos;re supporting an affiliate, enter their code before checkout. No code = no commission.
-                  </p>
+            <div className="w-full sm:w-auto sm:min-w-[280px]">
+              <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                  Referral / affiliate code
+                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    value={referralCode}
+                    onChange={(e) => {
+                      const v = e.target.value.toUpperCase().replace(/\s+/g, "");
+                      setReferralCode(v);
+                      try {
+                        window.localStorage.setItem("sf_referral_code", v);
+                        setReferralSaved(true);
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                    placeholder="Example: USER9389"
+                    className="w-full rounded-lg bg-slate-900/70 border border-slate-700/80 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 outline-none focus:border-purple-400/70 focus:ring-2 focus:ring-purple-500/20"
+                    inputMode="text"
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  {referralCode ? (
+                    <span className="text-[10px] font-semibold text-emerald-300 whitespace-nowrap">
+                      {referralSaved ? "Saved" : "OK"}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-semibold text-amber-200 whitespace-nowrap">
+                      Required for commission
+                    </span>
+                  )}
                 </div>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  If you&apos;re supporting an affiliate, enter their code before checkout. No code = no commission.
+                </p>
               </div>
-
+            </div>
           </div>
         </motion.section>
 
@@ -464,12 +476,7 @@ export default function PricingPage() {
                 initial={{ opacity: 0, y: 25, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ duration: 0.7, ease: "easeOut" }}
-                whileHover={{
-                  y: -8,
-                  scale: 1.02,
-                  rotateX: -1.5,
-                  rotateY: -1.5,
-                }}
+                whileHover={{ y: -8, scale: 1.02, rotateX: -1.5, rotateY: -1.5 }}
                 className="transform-gpu"
               >
                 <Card className="relative h-full border border-purple-600/70 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950/90 rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(168,85,247,0.45)]">
@@ -477,7 +484,7 @@ export default function PricingPage() {
                   <AnimatedGlow className="bg-purple-500/40" />
 
                   {/* Selling fast micro banner when <= 10 and > 0 */}
-                  {seats.og.remaining > 0 && seats.og.remaining <= 10 && (
+                  {seats && seats.og.remaining > 0 && seats.og.remaining <= 10 && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -501,37 +508,28 @@ export default function PricingPage() {
                         <p className="text-[11px] uppercase tracking-[0.25em] text-purple-200/80">
                           OG Eternal Throne
                         </p>
-                        <CardTitle className="text-xl font-bold text-white">
-                          Founding Empire Tier
-                        </CardTitle>
+                        <CardTitle className="text-xl font-bold text-white">Founding Empire Tier</CardTitle>
                       </div>
                     </div>
 
                     <CardDescription className="text-sm text-gray-300/95 text-center max-w-xs mx-auto">
-                      Own a <span className="font-semibold">lifetime</span>{" "}
-                      stake in SirensForge. Highest commissions, deepest
-                      recognition, and top-tier leverage forever.
+                      Own a <span className="font-semibold">lifetime</span> stake in SirensForge. Highest commissions,
+                      deepest recognition, and top-tier leverage forever.
                     </CardDescription>
                   </CardHeader>
 
                   <CardContent className="space-y-6 pb-6">
                     <ul className="space-y-2.5 text-gray-200 text-sm">
                       <li>
-                        • <strong>50% commission</strong> on subscription
-                        referrals (first 6 months)
+                        • <strong>50% commission</strong> on subscription referrals (first 6 months)
                       </li>
                       <li>
-                        • <strong>25% lifetime commission</strong> on
-                        subscriptions after 6 months
+                        • <strong>25% lifetime commission</strong> on subscriptions after 6 months
                       </li>
-                      <li>
-                        • Highest priority in feature voting and early beta
-                        access
-                      </li>
+                      <li>• Highest priority in feature voting and early beta access</li>
                       <li>• Lifetime OG badge and top-tier platform status</li>
                       <li>
-                        • Locked-in <strong>lifetime deal</strong> — pay once,
-                        never again.
+                        • Locked-in <strong>lifetime deal</strong> — pay once, never again.
                       </li>
                     </ul>
 
@@ -540,48 +538,51 @@ export default function PricingPage() {
                         <div className="text-5xl font-black tracking-tight bg-gradient-to-r from-purple-200 via-white to-purple-200 bg-clip-text text-transparent">
                           $1,333
                         </div>
-                        <div className="text-gray-400 text-xs uppercase tracking-[0.25em]">
-                          One-time • Lifetime
-                        </div>
+                        <div className="text-gray-400 text-xs uppercase tracking-[0.25em]">One-time • Lifetime</div>
                       </div>
 
                       <div className="flex flex-col items-center gap-1.5 text-xs text-gray-300">
                         <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/90 border border-purple-500/70 px-3 py-1 shadow-[0_0_25px_rgba(168,85,247,0.9)]">
-                          {ogSoldOut ? (
+                          {!seats ? (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
+                              <span className="font-semibold text-slate-300">
+                                <span className="uppercase tracking-[0.18em] text-[9px] mr-1">OG Seats</span>
+                                Loading…
+                              </span>
+                            </>
+                          ) : ogSoldOut ? (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                              <span className="font-semibold text-amber-200">
-                                SOLD OUT
-                              </span>
+                              <span className="font-semibold text-amber-200">SOLD OUT</span>
                             </>
                           ) : (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse" />
                               <span className="font-semibold text-amber-100">
-                                <span className="uppercase tracking-[0.18em] text-[9px] mr-1">
-                                  OG Seats
-                                </span>
+                                <span className="uppercase tracking-[0.18em] text-[9px] mr-1">OG Seats</span>
                                 {seatText(seats.og)}
                               </span>
                             </>
                           )}
                         </div>
                         <span className="block text-xs text-gray-400 max-w-xs mx-auto">
-                          Secure one of the final OG Founder slots and lock in
-                          elite affiliate benefits for life.
+                          Secure one of the final OG Founder slots and lock in elite affiliate benefits for life.
                         </span>
                       </div>
 
                       <NeonButton
-                        disabled={ogSoldOut || checkoutLoading !== null}
+                        disabled={!canCheckout || !seats || ogSoldOut}
                         loading={checkoutLoading === "og_throne"}
-                        label={ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
+                        label={!seats ? "Loading seats…" : ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
                         sublabel={
-                          ogSoldOut
+                          !seats
+                            ? "Seat counter is syncing…"
+                            : ogSoldOut
                             ? "Join Early Bird below instead."
                             : "Lifetime elite access • No recurring payment"
                         }
-                        onClick={() => !ogSoldOut && handleCheckout("og_throne")}
+                        onClick={() => seats && !ogSoldOut && handleCheckout("og_throne")}
                       />
                     </div>
                   </CardContent>
@@ -593,12 +594,7 @@ export default function PricingPage() {
                 initial={{ opacity: 0, y: 25, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ delay: 0.1, duration: 0.7, ease: "easeOut" }}
-                whileHover={{
-                  y: -8,
-                  scale: 1.02,
-                  rotateX: 1.5,
-                  rotateY: 1.5,
-                }}
+                whileHover={{ y: -8, scale: 1.02, rotateX: 1.5, rotateY: 1.5 }}
                 className="transform-gpu"
               >
                 <Card className="relative h-full border border-pink-500/80 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950/90 rounded-3xl overflow-hidden shadow-[0_0_40px_rgba(236,72,153,0.45)]">
@@ -614,28 +610,21 @@ export default function PricingPage() {
                         </div>
                       </div>
                       <div className="text-center">
-                        <p className="text-[11px] uppercase tracking-[0.25em] text-pink-100/80">
-                          Early Bird Access
-                        </p>
-                        <CardTitle className="text-xl font-bold text-white">
-                          Founding Monthly Tier
-                        </CardTitle>
+                        <p className="text-[11px] uppercase tracking-[0.25em] text-pink-100/80">Early Bird Access</p>
+                        <CardTitle className="text-xl font-bold text-white">Founding Monthly Tier</CardTitle>
                       </div>
                     </div>
 
                     <CardDescription className="text-sm text-gray-300/95 text-center max-w-xs mx-auto">
-                      Lock in a{" "}
-                      <span className="font-semibold">$29.99</span> monthly
-                      rate before prices rise. Strong commissions, full access,
-                      and founder recognition baked in.
+                      Lock in a <span className="font-semibold">$29.99</span> monthly rate before prices rise. Strong commissions,
+                      full access, and founder recognition baked in.
                     </CardDescription>
                   </CardHeader>
 
                   <CardContent className="space-y-6 pb-6">
                     <ul className="space-y-2.5 text-gray-200 text-sm">
                       <li>
-                        • Affiliate: <strong>20%</strong> first 6 months,{" "}
-                        <strong>10% lifetime</strong>
+                        • Affiliate: <strong>20%</strong> first 6 months, <strong>10% lifetime</strong>
                       </li>
                       <li>• 10% commission on one-time purchases</li>
                       <li>• Crowned forever in platform</li>
@@ -643,59 +632,55 @@ export default function PricingPage() {
 
                     <div className="space-y-3">
                       <div className="flex flex-col items-center gap-1.5 text-center">
-                        <div className="text-4xl font-extrabold tracking-tight">
-                          $29.99
-                        </div>
-                        <div className="text-gray-400 text-xs uppercase tracking-[0.25em]">
-                          Per month
-                        </div>
+                        <div className="text-4xl font-extrabold tracking-tight">$29.99</div>
+                        <div className="text-gray-400 text-xs uppercase tracking-[0.25em]">Per month</div>
                       </div>
 
                       <div className="flex flex-col items-center gap-1.5 text-xs text-gray-300">
                         <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/90 border border-pink-500/70 px-3 py-1 shadow-[0_0_25px_rgba(236,72,153,0.9)]">
-                          {earlyBirdSoldOut ? (
+                          {!seats ? (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
+                              <span className="font-semibold text-slate-300">
+                                <span className="uppercase tracking-[0.18em] text-[9px] mr-1">Early Bird</span>
+                                Loading…
+                              </span>
+                            </>
+                          ) : earlyBirdSoldOut ? (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                              <span className="font-semibold text-amber-200">
-                                SOLD OUT
-                              </span>
+                              <span className="font-semibold text-amber-200">SOLD OUT</span>
                             </>
                           ) : (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-pink-300 animate-pulse" />
                               <span className="font-semibold text-pink-100">
-                                <span className="uppercase tracking-[0.18em] text-[9px] mr-1">
-                                  Early Bird
-                                </span>
+                                <span className="uppercase tracking-[0.18em] text-[9px] mr-1">Early Bird</span>
                                 {seatText(seats.earlyBird)}
                               </span>
                             </>
                           )}
                         </div>
                         <span className="block text-xs text-gray-400 max-w-xs mx-auto">
-                          Once Early Bird sells out, pricing moves to Prime and
-                          then Standard. This is the{" "}
-                          <span className="font-semibold">sweet spot</span> for
-                          most creators.
+                          Once Early Bird sells out, pricing moves to Prime and then Standard. This is the{" "}
+                          <span className="font-semibold">sweet spot</span> for most creators.
                         </span>
                       </div>
 
                       <div className="flex justify-center">
-                      <NeonButton
-                        disabled={earlyBirdSoldOut || checkoutLoading !== null}
-                        loading={checkoutLoading === "early_bird"}
-                        label={
-                          earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"
-                        }
-                        sublabel={
-                          earlyBirdSoldOut
-                            ? "Prime & Standard will open next."
-                            : "Lock in founding $29.99/month pricing."
-                        }
-                        onClick={() =>
-                          !earlyBirdSoldOut && handleCheckout("early_bird")
-                        }
-                      />
+                        <NeonButton
+                          disabled={!canCheckout || !seats || earlyBirdSoldOut}
+                          loading={checkoutLoading === "early_bird"}
+                          label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
+                          sublabel={
+                            !seats
+                              ? "Seat counter is syncing…"
+                              : earlyBirdSoldOut
+                              ? "Prime & Standard will open next."
+                              : "Lock in founding $29.99/month pricing."
+                          }
+                          onClick={() => seats && !earlyBirdSoldOut && handleCheckout("early_bird")}
+                        />
                       </div>
                     </div>
                   </CardContent>
@@ -721,18 +706,15 @@ export default function PricingPage() {
                         </div>
                       </div>
                       <div className="text-center">
-                        <p className="text-[11px] uppercase tracking-[0.25em] text-cyan-100/80">
-                          Future Tiers
-                        </p>
+                        <p className="text-[11px] uppercase tracking-[0.25em] text-cyan-100/80">Future Tiers</p>
                         <CardTitle className="text-xl font-bold text-white">
-                          Prime & Standard (Coming Soon)
+                          Prime &amp; Standard (Coming Soon)
                         </CardTitle>
                       </div>
                     </div>
 
                     <CardDescription className="text-sm text-gray-300/95 text-center max-w-xs mx-auto">
-                      These tiers open once OG and Early Bird fill. Pricing will
-                      never be this low again.
+                      These tiers open once OG and Early Bird fill. Pricing will never be this low again.
                     </CardDescription>
                   </CardHeader>
 
@@ -745,9 +727,7 @@ export default function PricingPage() {
                         </div>
                         <p className="text-xs text-gray-400">250 total seats</p>
                         <p className="text-[11px] mt-1 text-gray-500">
-                          10% commission (6 months) • 7.5% lifetime after
-                          launch. Reserved for creators who join once Early Bird
-                          is full.
+                          10% commission (6 months) • 7.5% lifetime after launch. Reserved for creators who join once Early Bird is full.
                         </p>
                       </div>
 
@@ -759,32 +739,22 @@ export default function PricingPage() {
                           </span>
                         </div>
                         <p className="text-[11px] text-gray-400">
-                          Early tiers lock in better commissions, higher
-                          visibility, and stronger influence over the roadmap.
-                          Once we move to Prime and Standard, the economics
-                          shift in favor of the platform instead of just early
-                          adopters.
+                          Early tiers lock in better commissions, higher visibility, and stronger influence over the roadmap.
+                          Once we move to Prime and Standard, the economics shift in favor of the platform instead of just early adopters.
                         </p>
                       </div>
 
                       <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                        <p className="text-xs font-semibold text-slate-100">
-                          Standard Subscription (Post-Launch)
-                        </p>
+                        <p className="text-xs font-semibold text-slate-100">Standard Subscription (Post-Launch)</p>
                         <p className="text-[11px] text-gray-400 mt-1">
-                          Standard users will pay higher rates with lower
-                          commission and fewer perks. OG and Early Bird are{" "}
-                          <span className="font-semibold">
-                            intentionally overpowered
-                          </span>{" "}
-                          to reward the first wave of believers.
+                          Standard users will pay higher rates with lower commission and fewer perks. OG and Early Bird are{" "}
+                          <span className="font-semibold">intentionally overpowered</span> to reward the first wave of believers.
                         </p>
                       </div>
                     </div>
 
                     <div className="pt-1 text-[11px] text-gray-500 text-center">
-                      Prime & Standard will open automatically once Early Bird
-                      seats reach capacity.
+                      Prime &amp; Standard will open automatically once Early Bird seats reach capacity.
                     </div>
                   </CardContent>
                 </Card>
@@ -794,10 +764,7 @@ export default function PricingPage() {
             {/* Comparison hint */}
             <p className="text-[11px] text-center text-slate-500 mb-3">
               Want to see everything side by side? Switch to{" "}
-              <span className="font-semibold text-slate-200">
-                Comparison View
-              </span>{" "}
-              above.
+              <span className="font-semibold text-slate-200">Comparison View</span> above.
             </p>
           </>
         ) : (
@@ -807,76 +774,43 @@ export default function PricingPage() {
               <div className="grid grid-cols-[1.3fr,1fr,1fr,1fr] text-xs md:text-sm">
                 {/* Header row */}
                 <div className="border-b border-slate-800/80 bg-slate-950/90 px-4 py-3 flex items-center gap-2">
-                  <span className="text-[11px] uppercase tracking-[0.25em] text-slate-400">
-                    Feature
-                  </span>
+                  <span className="text-[11px] uppercase tracking-[0.25em] text-slate-400">Feature</span>
                 </div>
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-purple-900/90 via-purple-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
-                  <span className="text-[10px] uppercase tracking-[0.24em] text-purple-200/80">
-                    OG Eternal Throne
-                  </span>
-                  <span className="text-xs font-semibold text-purple-50">
-                    $1,333 one-time
-                  </span>
-                  <span className="text-[10px] text-purple-200/80">
-                    35 total seats • Lifetime
-                  </span>
+                  <span className="text-[10px] uppercase tracking-[0.24em] text-purple-200/80">OG Eternal Throne</span>
+                  <span className="text-xs font-semibold text-purple-50">$1,333 one-time</span>
+                  <span className="text-[10px] text-purple-200/80">35 total seats • Lifetime</span>
                 </div>
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-pink-900/90 via-pink-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
-                  <span className="text-[10px] uppercase tracking-[0.24em] text-pink-200/80">
-                    Early Bird
-                  </span>
-                  <span className="text-xs font-semibold text-pink-50">
-                    $29.99/month
-                  </span>
-                  <span className="text-[10px] text-pink-200/80">
-                    150 total seats
-                  </span>
+                  <span className="text-[10px] uppercase tracking-[0.24em] text-pink-200/80">Early Bird</span>
+                  <span className="text-xs font-semibold text-pink-50">$29.99/month</span>
+                  <span className="text-[10px] text-pink-200/80">150 total seats</span>
                 </div>
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-cyan-900/80 via-slate-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
-                  <span className="text-[10px] uppercase tracking-[0.24em] text-cyan-200/80">
-                    Prime (Coming Soon)
-                  </span>
-                  <span className="text-xs font-semibold text-cyan-50">
-                    $59.99/month
-                  </span>
-                  <span className="text-[10px] text-cyan-200/80">
-                    250 total seats
-                  </span>
+                  <span className="text-[10px] uppercase tracking-[0.24em] text-cyan-200/80">Prime (Coming Soon)</span>
+                  <span className="text-xs font-semibold text-cyan-50">$59.99/month</span>
+                  <span className="text-[10px] text-cyan-200/80">250 total seats</span>
                 </div>
 
                 {/* Rows */}
                 {compareRows.map((row, idx) => (
                   <div
                     key={row.label}
-                    className={`contents ${
-                      idx % 2 === 0 ? "bg-slate-950/80" : "bg-slate-950/60"
-                    }`}
+                    className={`contents ${idx % 2 === 0 ? "bg-slate-950/80" : "bg-slate-950/60"}`}
                   >
                     {/* Label */}
                     <div className="border-t border-slate-800/80 px-4 py-3 flex items-center">
-                      <span className="font-medium text-slate-100">
-                        {row.label}
-                      </span>
+                      <span className="font-medium text-slate-100">{row.label}</span>
                     </div>
 
                     {/* OG */}
-                    <CompareCell
-                      highlight={row.highlight === "og"}
-                      value={row.og}
-                    />
+                    <CompareCell highlight={row.highlight === "og"} value={row.og} />
 
                     {/* Early Bird */}
-                    <CompareCell
-                      highlight={row.highlight === "earlybird"}
-                      value={row.earlyBird}
-                    />
+                    <CompareCell highlight={row.highlight === "earlybird"} value={row.earlyBird} />
 
                     {/* Prime */}
-                    <CompareCell
-                      highlight={row.highlight === "prime"}
-                      value={row.prime ?? "Opens after Early Bird fills"}
-                    />
+                    <CompareCell highlight={row.highlight === "prime"} value={row.prime ?? "Opens after Early Bird fills"} />
                   </div>
                 ))}
               </div>
@@ -884,56 +818,49 @@ export default function PricingPage() {
 
             <div className="flex flex-col md:flex-row gap-4 md:gap-6 items-stretch md:items-center justify-between">
               <div className="text-xs text-slate-400 max-w-2xl">
-                <p className="mb-2 font-semibold text-slate-100">
-                  How to choose your tier:
-                </p>
+                <p className="mb-2 font-semibold text-slate-100">How to choose your tier:</p>
                 <ul className="space-y-1.5 list-disc list-inside">
                   <li>
-                    If you want <span className="font-semibold">maximum</span>{" "}
-                    upside, lifetime perks, and top platform visibility, OG
-                    Eternal Throne is designed for you.
+                    If you want <span className="font-semibold">maximum</span> upside, lifetime perks, and top platform visibility,
+                    OG Eternal Throne is designed for you.
                   </li>
                   <li>
-                    If you want{" "}
-                    <span className="font-semibold">flexibility</span> with
-                    strong commissions and full access, Early Bird is the best
-                    monthly option.
+                    If you want <span className="font-semibold">flexibility</span> with strong commissions and full access, Early Bird is
+                    the best monthly option.
                   </li>
                   <li>
-                    If you plan to join{" "}
-                    <span className="font-semibold">after</span> launch,
-                    you&apos;ll likely end up in Prime or Standard at higher
-                    pricing and lower upside.
+                    If you plan to join <span className="font-semibold">after</span> launch, you&apos;ll likely end up in Prime or Standard
+                    at higher pricing and lower upside.
                   </li>
                 </ul>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 md:gap-4 w-full md:w-auto">
                 <NeonButton
-                  disabled={ogSoldOut || checkoutLoading !== null}
+                  disabled={!canCheckout || !seats || ogSoldOut}
                   loading={checkoutLoading === "og_throne"}
-                  label={
-                    ogSoldOut
-                      ? "OG Sold Out • View Early Bird"
-                      : "Claim OG Eternal Throne"
-                  }
+                  label={!seats ? "Loading seats…" : ogSoldOut ? "OG Sold Out • View Early Bird" : "Claim OG Eternal Throne"}
                   sublabel={
-                    ogSoldOut
+                    !seats
+                      ? "Seat counter is syncing…"
+                      : ogSoldOut
                       ? "OG seats are gone. Early Bird is now the top tier."
                       : "Lifetime elite access • Highest commissions"
                   }
-                  onClick={() => !ogSoldOut && handleCheckout("og_throne")}
+                  onClick={() => seats && !ogSoldOut && handleCheckout("og_throne")}
                 />
                 <NeonButton
-                  disabled={earlyBirdSoldOut || checkoutLoading !== null}
+                  disabled={!canCheckout || !seats || earlyBirdSoldOut}
                   loading={checkoutLoading === "early_bird"}
-                  label={earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
+                  label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
                   sublabel={
-                    earlyBirdSoldOut
+                    !seats
+                      ? "Seat counter is syncing…"
+                      : earlyBirdSoldOut
                       ? "Prime & Standard will open next."
                       : "Founding monthly rate • Limited seats"
                   }
-                  onClick={() => !earlyBirdSoldOut && handleCheckout("early_bird")}
+                  onClick={() => seats && !earlyBirdSoldOut && handleCheckout("early_bird")}
                 />
               </div>
             </div>
@@ -944,13 +871,7 @@ export default function PricingPage() {
   );
 }
 
-function AnimatedBadge({
-  label,
-  className = "",
-}: {
-  label: string;
-  className?: string;
-}) {
+function AnimatedBadge({ label, className = "" }: { label: string; className?: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: -6 }}
@@ -973,13 +894,7 @@ function AnimatedGlow({ className = "" }: { className?: string }) {
   );
 }
 
-function CompareCell({
-  value,
-  highlight,
-}: {
-  value: string;
-  highlight?: boolean;
-}) {
+function CompareCell({ value, highlight }: { value: string; highlight?: boolean }) {
   return (
     <div
       className={`border-t border-slate-800/80 px-4 py-3 text-xs md:text-sm flex items-center ${
@@ -989,9 +904,7 @@ function CompareCell({
       }`}
     >
       <div className="flex items-start gap-1.5">
-        {highlight && (
-          <Check className="w-3 h-3 mt-0.5 text-emerald-400 flex-shrink-0" />
-        )}
+        {highlight && <Check className="w-3 h-3 mt-0.5 text-emerald-400 flex-shrink-0" />}
         <span>{value}</span>
       </div>
     </div>
@@ -1022,30 +935,17 @@ function NeonButton({
       disabled={disabled}
     >
       {!disabled && !loading && (
-        <motion.div
-          aria-hidden
-          className="pointer-events-none absolute -inset-1 opacity-70"
-        >
+        <motion.div aria-hidden className="pointer-events-none absolute -inset-1 opacity-70">
           <motion.div
             className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/40 to-transparent"
             initial={{ x: "-120%" }}
             animate={{ x: ["-120%", "140%"] }}
-            transition={{
-              duration: 1.8,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
+            transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
           />
         </motion.div>
       )}
-      <span className="relative z-10">
-        {loading ? "Redirecting to Stripe…" : label}
-      </span>
-      {sublabel && (
-        <span className="relative z-10 text-[10px] text-slate-600 mt-0.5">
-          {sublabel}
-        </span>
-      )}
+      <span className="relative z-10">{loading ? "Redirecting to Stripe…" : label}</span>
+      {sublabel && <span className="relative z-10 text-[10px] text-slate-600 mt-0.5">{sublabel}</span>}
     </button>
   );
 }

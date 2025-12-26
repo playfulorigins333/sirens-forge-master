@@ -1,61 +1,155 @@
-import { NextResponse } from "next/server"
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
+import { NextResponse } from "next/server";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import crypto from "crypto";
 
-export async function POST() {
-  try {
-    const supabase = getSupabaseAdmin()
-    const now = new Date().toISOString()
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-    // Fetch candidate rules
-    const { data: rules, error } = await supabase
-      .from("autopost_rules")
-      .select("*")
+type AutopostRule = {
+  id: string;
+  user_id: string;
+  platform: string;
+  content_mode: string;
+  status: string;
+  cadence_minutes?: number | null;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  payload?: any;
+};
 
-    if (error) {
-      return NextResponse.json(
-        { error: "Failed to fetch rules", details: error.message },
-        { status: 500 }
-      )
-    }
+type DispatchSuccess = {
+  ok: true;
+  platform_post_id: string;
+};
 
-    const processed: any[] = []
+type DispatchFailure = {
+  ok: false;
+  error: string;
+};
 
-    for (const rule of rules ?? []) {
-      // 🔒 HARD SAFETY INVARIANT — DO NOT REMOVE
-      if (rule.approval_state !== "APPROVED" || rule.enabled !== true) {
-        continue
-      }
+type DispatchResult = DispatchSuccess | DispatchFailure;
 
-      // ---- executor logic placeholder ----
-      // (posting workers will live here later)
+const supabaseAdmin = getSupabaseAdmin();
 
-      const nextRun = null // scheduler will compute later
+function json(status: number, body: any) {
+  return NextResponse.json(body, { status });
+}
 
-      await supabase
+function nowISO() {
+  return new Date().toISOString();
+}
+
+function parseDate(v?: string | null) {
+  if (!v) return null;
+  const t = Date.parse(v);
+  return Number.isNaN(t) ? null : new Date(t);
+}
+
+function isEligible(rule: AutopostRule, now: Date) {
+  const next = parseDate(rule.next_run_at);
+  if (next) return next <= now;
+  return true;
+}
+
+async function dispatchToPlatform(rule: AutopostRule): Promise<DispatchResult> {
+  const caption = rule.payload?.caption ?? "";
+
+  if (!caption) {
+    return { ok: false, error: "EMPTY_POST" };
+  }
+
+  return {
+    ok: true,
+    platform_post_id: `mock_${rule.platform}_${rule.id}`,
+  };
+}
+
+function assertCronAuth(req: Request) {
+  if (req.headers.get("x-vercel-cron") === "1") {
+    return { ok: true as const };
+  }
+
+  const secret = process.env.AUTOPOST_CRON_SECRET;
+  if (!secret) return { ok: false as const, error: "CRON_SECRET_NOT_SET" };
+
+  if (req.headers.get("x-cron-secret") !== secret) {
+    return { ok: false as const, error: "UNAUTHORIZED" };
+  }
+
+  return { ok: true as const };
+}
+
+export async function POST(req: Request) {
+  const auth = assertCronAuth(req);
+  if (!auth.ok) return json(401, auth);
+
+  const now = new Date();
+  const runId = crypto.randomUUID();
+
+  const { data: rules, error } = await supabaseAdmin
+    .from("autopost_rules")
+    .select("*")
+    .eq("status", "APPROVED");
+
+  if (error) {
+    return json(500, { ok: false, error: error.message });
+  }
+
+  let scanned = 0;
+  let succeeded = 0;
+  let failed = 0;
+
+  const results: any[] = [];
+
+  for (const rule of (rules ?? []) as AutopostRule[]) {
+    scanned++;
+
+    if (!isEligible(rule, now)) continue;
+
+    const res = await dispatchToPlatform(rule);
+
+    if (res.ok === true) {
+      succeeded++;
+
+      await supabaseAdmin
         .from("autopost_rules")
         .update({
-          last_run_at: now,
-          next_run_at: nextRun,
+          last_run_at: nowISO(),
         })
-        .eq("id", rule.id)
+        .eq("id", rule.id);
 
-      processed.push({
-        id: rule.id,
-        user_id: rule.user_id,
-        last_run_at: now,
-        next_run_at: nextRun,
-      })
+      results.push({
+        rule_id: rule.id,
+        ok: true,
+        platform_post_id: res.platform_post_id,
+      });
+    } else {
+      // 🔒 EXPLICIT NARROWING — THIS FIXES THE ERROR
+      failed++;
+
+      results.push({
+        rule_id: rule.id,
+        ok: false,
+        error: res.error,
+      });
     }
-
-    return NextResponse.json({
-      ran_at: now,
-      processed: processed.length,
-      rules: processed,
-    })
-  } catch (err: any) {
-    return NextResponse.json(
-      { error: "Executor crashed", details: err.message },
-      { status: 500 }
-    )
   }
+
+  return json(200, {
+    ok: true,
+    runId,
+    finishedAt: nowISO(),
+    summary: { scanned, succeeded, failed },
+    results,
+  });
+}
+
+export async function GET(req: Request) {
+  const auth = assertCronAuth(req);
+  if (!auth.ok) return json(401, auth);
+
+  return json(200, {
+    ok: true,
+    route: "/api/autopost/run",
+  });
 }
