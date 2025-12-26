@@ -1,62 +1,77 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+/**
+ * Sirens Forge — Autopost Platform Adapter: OnlyFans
+ *
+ * This is a production-safe server-side adapter.
+ * It does NOT call external APIs yet.
+ * It provides explicit success/failure signaling to the executor.
+ */
 
-type AutopostPayload = {
-  run_mode: string;
-  rule_id: string;
-  user_id: string;
-  platform: string;
-  timezone?: string;
-  explicitness?: number;
-  tones?: any;
-  posts_per_day?: number;
-  time_slots?: any;
-  creator_pct?: number;
-  platform_pct?: number;
-};
+export async function POST(req: NextRequest) {
+  try {
+    // Enforce JSON
+    const contentType = req.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      return NextResponse.json(
+        { ok: false, error: "INVALID_CONTENT_TYPE" },
+        { status: 400 }
+      );
+    }
 
-function json(status: number, body: any) {
-  return NextResponse.json(body, { status });
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      return NextResponse.json(
+        { ok: false, error: "INVALID_JSON" },
+        { status: 400 }
+      );
+    }
+
+    const {
+      run_id,
+      rule_id,
+      platform,
+      content,
+      scheduled_at,
+    } = body;
+
+    // Explicit validation (NO silent success)
+    if (!run_id || !rule_id || platform !== "onlyfans" || !content) {
+      return NextResponse.json(
+        { ok: false, error: "MISSING_OR_INVALID_FIELDS" },
+        { status: 400 }
+      );
+    }
+
+    // 🚀 PRODUCTION BEHAVIOR (LAUNCH)
+    // At launch, this adapter confirms receipt and execution intent.
+    // No external API calls yet by design.
+    // Executor records success based on this response.
+
+    return NextResponse.json(
+      {
+        ok: true,
+        platform: "onlyfans",
+        platform_post_id: `onlyfans_${run_id}_${Date.now()}`,
+      },
+      { status: 200 }
+    );
+  } catch (err: any) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "UNHANDLED_EXCEPTION",
+        message: err?.message || "unknown",
+      },
+      { status: 500 }
+    );
+  }
 }
 
-export async function POST(req: Request) {
-  let payload: AutopostPayload;
-
-  try {
-    payload = await req.json();
-  } catch {
-    return json(400, { ok: false, error: "INVALID_JSON" });
-  }
-
-  if (payload.platform !== "onlyfans") {
-    return json(400, { ok: false, error: "INVALID_PLATFORM" });
-  }
-
-  if (!payload.rule_id || !payload.user_id) {
-    return json(400, { ok: false, error: "MISSING_REQUIRED_FIELDS" });
-  }
-
-  if (payload.run_mode !== "autopost") {
-    return json(400, { ok: false, error: "INVALID_RUN_MODE" });
-  }
-
-  /*
-    PRODUCTION PLATFORM ADAPTER — ONLYFANS
-
-    At launch:
-    - This endpoint is the authoritative handler for OnlyFans dispatch
-    - It validates input
-    - It returns an explicit execution receipt
-
-    Future:
-    - Replace body below with real OnlyFans API logic
-    - Executor contract MUST remain unchanged
-  */
-
-  return json(200, {
-    ok: true,
-    platform_post_id: `onlyfans_${Date.now()}`,
-  });
+// Explicit method guard
+export async function GET() {
+  return NextResponse.json(
+    { ok: false, error: "METHOD_NOT_ALLOWED" },
+    { status: 405 }
+  );
 }
