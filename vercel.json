@@ -3,11 +3,7 @@
   "crons": [
     {
       "path": "/api/autopost/run",
-      "schedule": "*/5 * * * *",
-      "method": "POST",
-      "headers": {
-        "Authorization": "Bearer {{VERCEL_CRON_SECRET}}"
-      }
+      "schedule": "*/5 * * * *"
     }
   ]
 }

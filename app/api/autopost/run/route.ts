@@ -7,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /* ──────────────────────────────────────────────
-   Supabase Admin (Service Role)
+   Supabase Admin
 ────────────────────────────────────────────── */
 const SUPABASE_URL =
   process.env.SUPABASE_URL ||
@@ -17,7 +17,10 @@ const SUPABASE_URL =
 const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-const supabaseAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+const supabaseAdmin = createClient(
+  SUPABASE_URL,
+  SERVICE_ROLE_KEY
+);
 
 /* ──────────────────────────────────────────────
    Types
@@ -40,24 +43,14 @@ type AutopostRule = {
 type DispatchSuccess = {
   ok: true;
   platform_post_id: string;
-  details?: any;
 };
 
 type DispatchFailure = {
   ok: false;
   error: string;
-  details?: any;
 };
 
 type DispatchResult = DispatchSuccess | DispatchFailure;
-
-/**
- * ✅ HARD STOP FOR TS2339
- * This guard makes narrowing 100% reliable everywhere.
- */
-function isDispatchFailure(res: DispatchResult): res is DispatchFailure {
-  return res.ok === false;
-}
 
 /* ──────────────────────────────────────────────
    Helpers
@@ -76,71 +69,48 @@ function parseDate(v?: string | null) {
   return Number.isNaN(t) ? null : new Date(t);
 }
 
-function clampInt(v: any, min: number, max: number, fallback: number) {
-  const n =
-    typeof v === "string"
-      ? Number.parseInt(v, 10)
-      : typeof v === "number"
-      ? v
-      : NaN;
-
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-}
-
 /* ──────────────────────────────────────────────
-   Vercel Cron Auth (Authorization: Bearer ...)
-────────────────────────────────────────────── */
-function assertCronAuth(req: Request) {
-  const expected = process.env.VERCEL_CRON_SECRET;
-  if (!expected) return { ok: false as const, error: "CRON_SECRET_NOT_CONFIGURED" };
-
-  const auth = req.headers.get("authorization") || "";
-  if (auth !== `Bearer ${expected}`) return { ok: false as const, error: "UNAUTHORIZED" };
-
-  return { ok: true as const };
-}
-
-/* ──────────────────────────────────────────────
-   Schedule Eligibility
+   Schedule
 ────────────────────────────────────────────── */
 function isEligibleToRun(rule: AutopostRule, now: Date) {
   const nra = parseDate(rule.next_run_at);
-  if (nra) return nra.getTime() <= now.getTime();
+  if (nra) return nra <= now;
 
-  const cadence = typeof rule.cadence_minutes === "number" ? rule.cadence_minutes : null;
-  if (cadence && cadence > 0) {
-    const last = parseDate(rule.last_run_at);
-    if (!last) return true;
-    const next = last.getTime() + cadence * 60_000;
-    return next <= now.getTime();
-  }
+  const cadence =
+    typeof rule.cadence_minutes === "number"
+      ? rule.cadence_minutes
+      : null;
 
-  // Safe default: skip if schedule is unknown
-  return false;
+  if (!cadence) return false;
+
+  const last = parseDate(rule.last_run_at);
+  if (!last) return true;
+
+  return last.getTime() + cadence * 60000 <= now.getTime();
 }
 
-function computeNextRunAt(rule: AutopostRule, now: Date): string | null {
-  const cadence = typeof rule.cadence_minutes === "number" ? rule.cadence_minutes : null;
-  if (cadence && cadence > 0) return new Date(now.getTime() + cadence * 60_000).toISOString();
-  return null;
+function computeNextRunAt(rule: AutopostRule, now: Date) {
+  if (!rule.cadence_minutes) return null;
+  return new Date(
+    now.getTime() + rule.cadence_minutes * 60000
+  ).toISOString();
 }
 
 /* ──────────────────────────────────────────────
-   Dispatch (MOCKED but strict success/fail)
-   IMPORTANT: returns MUST preserve literal ok true/false
+   Dispatch (mocked)
 ────────────────────────────────────────────── */
-async function dispatchToPlatform(rule: AutopostRule): Promise<DispatchResult> {
-  const payload = rule.payload ?? {};
-  const caption = typeof payload.caption === "string" ? payload.caption : "";
-  const media = payload.media ?? rule.media ?? null;
+async function dispatchToPlatform(
+  rule: AutopostRule
+): Promise<DispatchResult> {
+  const caption =
+    rule.payload?.caption ??
+    "";
 
-  // Return literal union members (no inference drift)
-  const fail = (error: string, details?: any): DispatchFailure => ({ ok: false, error, details });
-  const ok = (platform_post_id: string, details?: any): DispatchSuccess => ({ ok: true, platform_post_id, details });
+  const media = rule.media ?? null;
 
-  if (!caption && !media) return fail("EMPTY_POST", { hint: "caption or media required" });
-  if (String(rule.content_mode) === "video" && !media) return fail("MISSING_MEDIA_FOR_VIDEO");
+  if (!caption && !media) {
+    return { ok: false, error: "EMPTY_POST" };
+  }
 
   const id = crypto
     .createHash("sha256")
@@ -148,148 +118,80 @@ async function dispatchToPlatform(rule: AutopostRule): Promise<DispatchResult> {
     .digest("hex")
     .slice(0, 12);
 
-  return ok(`mock_${String(rule.platform).toLowerCase()}_${id}`, { mocked: true });
+  return {
+    ok: true,
+    platform_post_id: `mock_${rule.platform}_${id}`,
+  };
 }
 
 /* ──────────────────────────────────────────────
-   POST — Executor
+   EXECUTOR (shared)
 ────────────────────────────────────────────── */
-export async function POST(req: Request) {
-  const auth = assertCronAuth(req);
-  if (!auth.ok) return json(401, auth);
-
-  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-    return json(500, { ok: false, error: "SUPABASE_NOT_CONFIGURED" });
-  }
-
-  const runId = crypto.randomUUID();
+async function runExecutor() {
   const now = new Date();
-
-  const maxRules = clampInt(process.env.AUTOPOST_RUN_MAX_RULES, 1, 500, 100);
-  const dryRun = req.headers.get("x-autopost-dry-run") === "1";
 
   const { data: rules, error } = await supabaseAdmin
     .from("autopost_rules")
     .select("*")
-    .eq("status", "APPROVED")
-    .limit(maxRules);
+    .eq("status", "APPROVED");
 
   if (error) {
-    return json(500, { ok: false, error: "RULE_QUERY_FAILED", details: error.message, runId });
+    return { ok: false, error: error.message };
   }
 
-  const allRules = (rules ?? []) as AutopostRule[];
-
-  let scanned = allRules.length;
+  let scanned = rules.length;
   let eligible = 0;
   let dispatched = 0;
   let succeeded = 0;
   let failed = 0;
 
-  const results: Array<{
-    rule_id: string;
-    user_id: string;
-    platform: string;
-    eligible: boolean;
-    dispatched: boolean;
-    ok?: boolean;
-    error?: string;
-    platform_post_id?: string;
-  }> = [];
-
-  for (const rule of allRules) {
-    if (String(rule.status) !== "APPROVED") continue;
-
-    const canRun = isEligibleToRun(rule, now);
-    if (!canRun) {
-      results.push({
-        rule_id: rule.id,
-        user_id: rule.user_id,
-        platform: String(rule.platform),
-        eligible: false,
-        dispatched: false,
-      });
-      continue;
-    }
-
+  for (const rule of rules as AutopostRule[]) {
+    if (!isEligibleToRun(rule, now)) continue;
     eligible++;
 
-    if (dryRun) {
-      results.push({
-        rule_id: rule.id,
-        user_id: rule.user_id,
-        platform: String(rule.platform),
-        eligible: true,
-        dispatched: false,
-        ok: true,
-        platform_post_id: "dry_run",
-      });
-      continue;
-    }
-
     dispatched++;
-
     const res = await dispatchToPlatform(rule);
 
-    if (!isDispatchFailure(res)) {
-      // ✅ success branch
+    if (res.ok) {
       succeeded++;
 
-      const nextRunAt = computeNextRunAt(rule, now);
-      const updatePayload: Record<string, any> = { last_run_at: now.toISOString() };
-      if (nextRunAt) updatePayload.next_run_at = nextRunAt;
-
-      await supabaseAdmin.from("autopost_rules").update(updatePayload).eq("id", rule.id);
-
-      results.push({
-        rule_id: rule.id,
-        user_id: rule.user_id,
-        platform: String(rule.platform),
-        eligible: true,
-        dispatched: true,
-        ok: true,
-        platform_post_id: res.platform_post_id,
-      });
+      await supabaseAdmin
+        .from("autopost_rules")
+        .update({
+          last_run_at: nowISO(),
+          next_run_at: computeNextRunAt(rule, now),
+        })
+        .eq("id", rule.id);
     } else {
-      // ✅ failure branch (narrowed by guard)
       failed++;
-
-      const errorMessage = res.error;
-
-      results.push({
-        rule_id: rule.id,
-        user_id: rule.user_id,
-        platform: String(rule.platform),
-        eligible: true,
-        dispatched: true,
-        ok: false,
-        error: errorMessage,
-      });
     }
   }
 
-  return json(200, {
+  return {
     ok: true,
-    runId,
-    startedAt: nowISO(),
-    finishedAt: nowISO(),
-    dryRun,
-    maxRules,
     summary: { scanned, eligible, dispatched, succeeded, failed },
-    results,
-  });
+  };
 }
 
 /* ──────────────────────────────────────────────
-   GET — Health Check
+   GET — Vercel Cron (NO AUTH)
 ────────────────────────────────────────────── */
-export async function GET(req: Request) {
-  const auth = assertCronAuth(req);
-  if (!auth.ok) return json(401, auth);
+export async function GET() {
+  const result = await runExecutor();
+  return json(200, result);
+}
 
-  return json(200, {
-    ok: true,
-    route: "/api/autopost/run",
-    trigger: "vercel-cron",
-  });
+/* ──────────────────────────────────────────────
+   POST — Manual / internal (AUTH REQUIRED)
+────────────────────────────────────────────── */
+export async function POST(req: Request) {
+  const secret = process.env.VERCEL_CRON_SECRET;
+  const auth = req.headers.get("authorization") || "";
+
+  if (!secret || auth !== `Bearer ${secret}`) {
+    return json(401, { ok: false, error: "UNAUTHORIZED" });
+  }
+
+  const result = await runExecutor();
+  return json(200, result);
 }
