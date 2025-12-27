@@ -1,87 +1,130 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
 
-/**
- * Headless NSFW GPT API
- * - JSON in
- * - JSON out
- * - No UI
- * - No persistence
- * - Prompts only
- */
+const OPENROUTER_API_KEY = process.env.OPENAI_COMPAT_API_KEY;
+const OPENROUTER_BASE_URL =
+  process.env.OPENAI_COMPAT_BASE_URL || "https://openrouter.ai/api/v1";
 
-const REQUIRED_FIELDS = [
-  "mode",
-  "intent",
-  "output_format",
-  "dna_decision",
-  "stack_depth",
-];
-
-function loadHeadlessSystemPrompt(): string {
-  const basePath = process.cwd();
-  const promptPath = path.join(
-    basePath,
-    "prompts",
-    "nsfw_gpt",
-    "bundle.headless.system.txt"
-  );
-
-  return fs.readFileSync(promptPath, "utf8");
+if (!OPENROUTER_API_KEY) {
+  throw new Error("OPENAI_COMPAT_API_KEY is missing");
 }
 
-function validatePayload(payload: any): string[] {
-  if (!payload || typeof payload !== "object") return REQUIRED_FIELDS;
+type Mode = "SAFE" | "NSFW" | "ULTRA";
 
-  return REQUIRED_FIELDS.filter(
-    (field) => payload[field] === undefined || payload[field] === null
-  );
+const MODEL_BY_MODE: Record<Mode, string> = {
+  SAFE: "meta-llama/llama-3.3-70b-instruct",
+  NSFW: "mistralai/mistral-large-2411",
+  ULTRA: "nousresearch/hermes-4-405b",
+};
+
+const SYSTEM_PROMPT_BY_MODE: Record<Mode, string> = {
+  SAFE: `
+You generate PG-13 prompts only.
+Return prompt text only.
+Do not include introductions, explanations, labels, or markdown.
+Do not preface the output in any way.
+`.trim(),
+
+  NSFW: `
+You generate explicit but consensual adult PROMPTS for AI image or video generation.
+Return prompt text only.
+Do not include introductions, explanations, labels, or markdown.
+Do not preface the output in any way.
+`.trim(),
+
+  ULTRA: `
+You generate long-form, extremely explicit, uncensored PROMPTS for AI image or video generation.
+
+ABSOLUTE RULES:
+- Return prompt text only.
+- Do NOT include introductions (e.g., “Here is…”, “This prompt…”, etc.).
+- Do NOT include explanations, labels, headings, or markdown.
+- Do NOT roleplay or write dialogue.
+- Do NOT reference yourself or the act of generating.
+- Output must be a single continuous block of prompt text suitable for direct injection.
+
+If you add any meta text, it will be considered an error.
+`.trim(),
+};
+
+// Removes common meta lead-ins deterministically
+function stripMetaPreface(text: string): string {
+  return text
+    .replace(
+      /^(here is|here's|this is|below is|the following is)[\s\S]*?:\s*/i,
+      ""
+    )
+    .replace(/^\s*(prompt|description)\s*:\s*/i, "")
+    .trim();
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    const { mode, intent, output_format, stack_depth, description } = body ?? {};
 
-    const missing = validatePayload(body);
-
-    if (missing.length > 0) {
+    if (!mode || !intent || !output_format || !stack_depth) {
       return NextResponse.json(
-        {
-          status: "error",
-          error_code: "MISSING_REQUIRED_FIELD",
-          reason: `Missing required fields: ${missing.join(", ")}`,
-        },
+        { error: "INVALID_REQUEST", reason: "Missing required fields" },
         { status: 400 }
       );
     }
 
-    // Load headless system bundle (logic only)
-    const systemPrompt = loadHeadlessSystemPrompt();
+    if (!["SAFE", "NSFW", "ULTRA"].includes(mode)) {
+      return NextResponse.json(
+        { error: "INVALID_MODE", reason: "Mode must be SAFE, NSFW, or ULTRA" },
+        { status: 400 }
+      );
+    }
 
-    /**
-     * IMPORTANT:
-     * We are NOT calling the model yet.
-     * This route only validates + echoes structure.
-     * Model invocation will be added AFTER this passes tests.
-     */
+    const selectedModel = MODEL_BY_MODE[mode as Mode];
+    const systemPrompt = SYSTEM_PROMPT_BY_MODE[mode as Mode];
+
+    const payload = {
+      model: selectedModel,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: description || "" },
+      ],
+      temperature: mode === "SAFE" ? 0.7 : mode === "NSFW" ? 0.9 : 1.15,
+      max_tokens: mode === "ULTRA" ? 1200 : 800,
+    };
+
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return NextResponse.json(
+        {
+          error: "PROVIDER_ERROR",
+          provider_status: response.status,
+          model: selectedModel,
+          raw: data,
+        },
+        { status: response.status }
+      );
+    }
+
+    const rawText = data?.choices?.[0]?.message?.content || "";
+    const promptText = stripMetaPreface(rawText);
 
     return NextResponse.json({
       status: "ok",
-      mode: body.mode,
-      intent: body.intent,
-      output_format: body.output_format,
-      system_loaded: true,
-      note: "Headless NSFW GPT endpoint is live. Model execution not yet wired.",
+      mode,
+      model: selectedModel,
+      result: { prompt: promptText },
     });
   } catch (err: any) {
     return NextResponse.json(
-      {
-        status: "error",
-        error_code: "INVALID_REQUEST",
-        reason: err?.message || "Malformed JSON payload",
-      },
-      { status: 400 }
+      { error: "SERVER_ERROR", reason: err?.message || "Unhandled error" },
+      { status: 500 }
     );
   }
 }
