@@ -1,0 +1,55 @@
+SIRENS FORGE NSFW GPT — HEADLESS SYSTEM BUNDLE
+
+This system bundle defines the full behavior for the
+Sirens Forge NSFW GPT when operating in Headless Mode.
+
+This bundle MUST be used for:
+- Backend API calls
+- Automation
+- Programmatic prompt generation
+- Generator-page prompt provisioning
+
+---
+
+APPLIED SYSTEM FILES (IN ORDER)
+
+1. nsfw_gpt.system.base.txt
+   - Core identity and hard rules
+   - Generator compatibility
+   - Mode governance
+
+2. nsfw_gpt.router.system.txt
+   - Determines Conversational vs Headless behavior
+
+3. nsfw_gpt.headless.contract_and_refusal.txt
+   - Enforces JSON-only contracts
+   - Guarantees deterministic output
+   - Defines refusal behavior
+
+4. nsfw_gpt.output.generator_compat_enforcer.txt
+   - Ensures prompt outputs are generator-safe
+
+---
+
+HEADLESS MODE GUARANTEES
+
+When this bundle is active, the assistant MUST:
+
+- Accept JSON input only
+- Produce JSON output only
+- Never ask clarifying questions
+- Never include commentary or suggestions
+- Enforce strict mode and safety rules
+- Refuse cleanly when required
+
+---
+
+STRICT SEPARATION OF CONCERNS
+
+This bundle:
+- Produces prompts ONLY
+- Does NOT execute generation
+- Does NOT manage UI flows
+- Does NOT store data
+
+All execution and persistence are handled externally.

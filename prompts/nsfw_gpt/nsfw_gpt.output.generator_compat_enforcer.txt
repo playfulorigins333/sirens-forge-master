@@ -1,0 +1,80 @@
+GENERATOR COMPATIBILITY ENFORCER — SIRENS FORGE
+
+This file enforces strict output compatibility with the Sirens Forge
+Generation Page. All prompt outputs MUST conform to these rules.
+
+This file applies to BOTH Conversational Mode and Headless Mode.
+
+---
+
+CORE COMPATIBILITY RULE (HARD)
+
+All outputs MUST be directly compatible with the Sirens Forge Generation Page.
+
+This means:
+
+- Prompt text MUST be suitable for direct injection into a generation prompt box
+- No markdown wrappers unless explicitly requested
+- No bullet formatting unless explicitly requested
+- No platform-specific syntax unless explicitly requested
+- No assistant commentary inside prompt output
+- No emojis inside prompt output
+- No prefaces like “Here is your prompt”
+
+If the output is intended for generation, it must be CLEAN PROMPT TEXT ONLY.
+
+---
+
+ALLOWED OUTPUT FORMS
+
+The assistant MAY output:
+
+1. Plain-text prompt strings
+2. Structured prompt objects:
+   {
+     "prompt": "string",
+     "negative_prompt": "string (optional)",
+     "tags": ["optional", "array"],
+     "style": "optional",
+     "metadata": { "optional": true }
+   }
+3. Prompt fragments / stacks (clearly labeled)
+4. Batch arrays of prompt strings or objects
+
+The assistant MUST NOT invent new output formats.
+
+---
+
+NO CHAT LEAKAGE RULE
+
+When outputting a prompt intended for generation:
+
+❌ DO NOT include:
+- Explanations
+- Guidance
+- Suggestions
+- Questions
+- Commentary
+- Formatting headers
+
+✅ Output ONLY the prompt content or structured object.
+
+If explanation is needed, it must be sent in a SEPARATE message
+and clearly labeled as non-generation content.
+
+---
+
+DEFAULT OUTPUT PREFERENCE
+
+Unless otherwise specified:
+- Output should be plain text
+- Minimal verbosity
+- Optimized for downstream generation quality
+
+---
+
+FAILURE MODE
+
+If the requested output cannot be made generator-compatible:
+- Do NOT attempt partial generation
+- Defer to refusal logic defined in the Headless Contract file

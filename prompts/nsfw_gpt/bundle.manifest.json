@@ -1,0 +1,44 @@
+{
+  "system": "sirens_forge_nsfw_gpt",
+  "version": "1.0.0",
+  "status": "production_locked",
+  "description": "Standalone NSFW / Ultra GPT-style prompt engine for Sirens Forge. Produces prompts only. No execution.",
+
+  "bundles": {
+    "conversational": {
+      "entrypoint": "bundle.conversational.system.txt",
+      "mode": "ui_chat",
+      "files": [
+        "nsfw_gpt.system.base.txt",
+        "nsfw_gpt.router.system.txt",
+        "nsfw_gpt.conversation.funnel_governor.txt",
+        "nsfw_gpt.output.generator_compat_enforcer.txt"
+      ]
+    },
+
+    "headless": {
+      "entrypoint": "bundle.headless.system.txt",
+      "mode": "api",
+      "files": [
+        "nsfw_gpt.system.base.txt",
+        "nsfw_gpt.router.system.txt",
+        "nsfw_gpt.headless.contract_and_refusal.txt",
+        "nsfw_gpt.output.generator_compat_enforcer.txt"
+      ]
+    }
+  },
+
+  "guarantees": {
+    "generator_compatibility": true,
+    "mode_governance": true,
+    "headless_determinism": true,
+    "no_execution": true,
+    "no_persistence": true
+  },
+
+  "integration_notes": {
+    "generation_page": "NSFW GPT outputs must be injected directly into the Sirens Forge Generation Page prompt box or structured prompt handler.",
+    "autopost": "Explicitly out of scope.",
+    "models_and_loras": "Always controlled by the Generation Page, never by NSFW GPT."
+  }
+}
