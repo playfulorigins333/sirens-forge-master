@@ -41,8 +41,17 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  // Extra safety: matcher excludes API, NEXT, CHECKOUT, and static assets
+  /**
+   * ✅ SAFETY MATCHER (LAUNCH LOCK)
+   *
+   * This matcher ensures middleware ONLY runs on non-API, non-static, non-checkout pages.
+   *
+   * IMPORTANT:
+   * - We explicitly exclude autopost control-plane endpoints.
+   * - We explicitly exclude all /api routes.
+   * - This prevents pricing redirects from ever affecting cron or platform adapters.
+   */
   matcher: [
-    "/((?!api|_next|checkout|favicon.ico|robots.txt|sitemap.xml).*)",
+    "/((?!api/autopost/run|api/autopost/platforms|api|_next|checkout|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };
