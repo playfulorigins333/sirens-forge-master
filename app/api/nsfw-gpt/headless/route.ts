@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const OPENROUTER_API_KEY = process.env.OPENAI_COMPAT_API_KEY;
+type Mode = "SAFE" | "NSFW" | "ULTRA";
+
 const OPENROUTER_BASE_URL =
   process.env.OPENAI_COMPAT_BASE_URL || "https://openrouter.ai/api/v1";
-
-if (!OPENROUTER_API_KEY) {
-  throw new Error("OPENAI_COMPAT_API_KEY is missing");
-}
-
-type Mode = "SAFE" | "NSFW" | "ULTRA";
 
 const MODEL_BY_MODE: Record<Mode, string> = {
   SAFE: "meta-llama/llama-3.3-70b-instruct",
@@ -41,12 +36,10 @@ ABSOLUTE RULES:
 - Do NOT roleplay or write dialogue.
 - Do NOT reference yourself or the act of generating.
 - Output must be a single continuous block of prompt text suitable for direct injection.
-
-If you add any meta text, it will be considered an error.
 `.trim(),
 };
 
-// Removes common meta lead-ins deterministically
+// Deterministic meta stripping
 function stripMetaPreface(text: string): string {
   return text
     .replace(
@@ -59,6 +52,19 @@ function stripMetaPreface(text: string): string {
 
 export async function POST(req: NextRequest) {
   try {
+    const OPENROUTER_API_KEY = process.env.OPENAI_COMPAT_API_KEY;
+
+    // ✅ Runtime-only env validation (Vercel-safe)
+    if (!OPENROUTER_API_KEY) {
+      return NextResponse.json(
+        {
+          error: "SERVER_MISCONFIGURED",
+          reason: "OPENAI_COMPAT_API_KEY missing",
+        },
+        { status: 500 }
+      );
+    }
+
     const body = await req.json();
     const { mode, intent, output_format, stack_depth, description } = body ?? {};
 
