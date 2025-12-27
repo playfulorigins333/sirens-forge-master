@@ -1,135 +1,172 @@
 import { NextRequest, NextResponse } from "next/server";
+import fs from "fs";
+import path from "path";
 
-type Mode = "SAFE" | "NSFW" | "ULTRA";
+/**
+ * Runtime-safe env access (NO build-time crashes)
+ */
+function getEnv(name: string): string | null {
+  return process.env[name] ?? null;
+}
 
-const OPENROUTER_BASE_URL =
-  process.env.OPENAI_COMPAT_BASE_URL || "https://openrouter.ai/api/v1";
+/**
+ * Load prompt bundle files from disk
+ */
+function loadPrompt(file: string): string {
+  const fullPath = path.join(process.cwd(), "prompts", "nsfw_gpt", file);
+  return fs.readFileSync(fullPath, "utf-8");
+}
 
-const MODEL_BY_MODE: Record<Mode, string> = {
-  SAFE: "meta-llama/llama-3.3-70b-instruct",
-  NSFW: "mistralai/mistral-large-2411",
+/**
+ * Load ALL required system layers (LOCKED)
+ */
+const SYSTEM_BASE = loadPrompt("nsfw_gpt.system.base.txt");
+const ROUTER = loadPrompt("nsfw_gpt.router.system.txt");
+const FUNNEL = loadPrompt("nsfw_gpt.conversation.funnel_governor.txt");
+const OUTPUT_ENFORCER = loadPrompt("nsfw_gpt.output_generator_compat_enforcer.txt");
+const HEADLESS_CONTRACT = loadPrompt("nsfw_gpt.headless.contract_and_refusal.txt");
+const HEADLESS_SYSTEM = loadPrompt("bundle.headless.system.txt");
+
+/**
+ * ULTRA model (CONFIRMED VALID)
+ */
+const MODEL_BY_MODE: Record<string, string> = {
+  SAFE: "openai/gpt-5-mini",
+  NSFW: "openai/gpt-4o",
   ULTRA: "nousresearch/hermes-4-405b",
 };
 
-const SYSTEM_PROMPT_BY_MODE: Record<Mode, string> = {
-  SAFE: `
-You generate PG-13 prompts only.
-Return prompt text only.
-Do not include introductions, explanations, labels, or markdown.
-Do not preface the output in any way.
-`.trim(),
-
-  NSFW: `
-You generate explicit but consensual adult PROMPTS for AI image or video generation.
-Return prompt text only.
-Do not include introductions, explanations, labels, or markdown.
-Do not preface the output in any way.
-`.trim(),
-
-  ULTRA: `
-You generate long-form, extremely explicit, uncensored PROMPTS for AI image or video generation.
-
-ABSOLUTE RULES:
-- Return prompt text only.
-- Do NOT include introductions (e.g., “Here is…”, “This prompt…”, etc.).
-- Do NOT include explanations, labels, headings, or markdown.
-- Do NOT roleplay or write dialogue.
-- Do NOT reference yourself or the act of generating.
-- Output must be a single continuous block of prompt text suitable for direct injection.
-`.trim(),
-};
-
-// Deterministic meta stripping
-function stripMetaPreface(text: string): string {
-  return text
-    .replace(
-      /^(here is|here's|this is|below is|the following is)[\s\S]*?:\s*/i,
-      ""
-    )
-    .replace(/^\s*(prompt|description)\s*:\s*/i, "")
-    .trim();
-}
+/**
+ * Required fields for headless execution
+ */
+const REQUIRED_FIELDS = [
+  "mode",
+  "intent",
+  "output_format",
+  "dna_decision",
+  "stack_depth",
+  "description",
+];
 
 export async function POST(req: NextRequest) {
   try {
-    const OPENROUTER_API_KEY = process.env.OPENAI_COMPAT_API_KEY;
+    const body = await req.json();
 
-    // ✅ Runtime-only env validation (Vercel-safe)
-    if (!OPENROUTER_API_KEY) {
+    // -----------------------------
+    // Validate required fields
+    // -----------------------------
+    const missing = REQUIRED_FIELDS.filter((f) => !body[f]);
+    if (missing.length > 0) {
+      return NextResponse.json(
+        {
+          error: "MISSING_REQUIRED_FIELDS",
+          missing,
+        },
+        { status: 400 }
+      );
+    }
+
+    const mode = String(body.mode).toUpperCase();
+    const model = MODEL_BY_MODE[mode];
+
+    if (!model) {
+      return NextResponse.json(
+        {
+          error: "INVALID_MODE",
+          allowed: Object.keys(MODEL_BY_MODE),
+        },
+        { status: 400 }
+      );
+    }
+
+    // -----------------------------
+    // Runtime env validation
+    // -----------------------------
+    const apiKey = getEnv("OPENAI_COMPAT_API_KEY");
+    const baseUrl = getEnv("OPENAI_COMPAT_BASE_URL");
+
+    if (!apiKey || !baseUrl) {
       return NextResponse.json(
         {
           error: "SERVER_MISCONFIGURED",
-          reason: "OPENAI_COMPAT_API_KEY missing",
+          reason: "OPENAI_COMPAT_API_KEY or BASE_URL missing",
         },
         { status: 500 }
       );
     }
 
-    const body = await req.json();
-    const { mode, intent, output_format, stack_depth, description } = body ?? {};
+    // -----------------------------
+    // Assemble SYSTEM PROMPT (LOCKED ORDER)
+    // -----------------------------
+    const systemPrompt = [
+      SYSTEM_BASE,
+      ROUTER,
+      FUNNEL,
+      OUTPUT_ENFORCER,
+      HEADLESS_CONTRACT,
+      HEADLESS_SYSTEM,
+    ].join("\n\n");
 
-    if (!mode || !intent || !output_format || !stack_depth) {
-      return NextResponse.json(
-        { error: "INVALID_REQUEST", reason: "Missing required fields" },
-        { status: 400 }
-      );
-    }
-
-    if (!["SAFE", "NSFW", "ULTRA"].includes(mode)) {
-      return NextResponse.json(
-        { error: "INVALID_MODE", reason: "Mode must be SAFE, NSFW, or ULTRA" },
-        { status: 400 }
-      );
-    }
-
-    const selectedModel = MODEL_BY_MODE[mode as Mode];
-    const systemPrompt = SYSTEM_PROMPT_BY_MODE[mode as Mode];
-
-    const payload = {
-      model: selectedModel,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: description || "" },
-      ],
-      temperature: mode === "SAFE" ? 0.7 : mode === "NSFW" ? 0.9 : 1.15,
-      max_tokens: mode === "ULTRA" ? 1200 : 800,
-    };
-
-    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+    // -----------------------------
+    // OpenRouter request
+    // -----------------------------
+    const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
+        "Authorization": `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        model,
+        max_tokens: 1200,
+        temperature: mode === "SAFE" ? 0.6 : 0.85,
+        messages: [
+          {
+            role: "system",
+            content: systemPrompt,
+          },
+          {
+            role: "user",
+            content: body.description,
+          },
+        ],
+      }),
     });
 
-    const data = await response.json();
+    const raw = await response.json();
 
+    // -----------------------------
+    // Provider error passthrough (JSON ONLY)
+    // -----------------------------
     if (!response.ok) {
       return NextResponse.json(
         {
           error: "PROVIDER_ERROR",
           provider_status: response.status,
-          model: selectedModel,
-          raw: data,
+          model,
+          raw,
         },
         { status: response.status }
       );
     }
 
-    const rawText = data?.choices?.[0]?.message?.content || "";
-    const promptText = stripMetaPreface(rawText);
+    const prompt =
+      raw?.choices?.[0]?.message?.content?.trim() ?? "";
 
     return NextResponse.json({
       status: "ok",
       mode,
-      model: selectedModel,
-      result: { prompt: promptText },
+      model,
+      result: {
+        prompt,
+      },
     });
   } catch (err: any) {
     return NextResponse.json(
-      { error: "SERVER_ERROR", reason: err?.message || "Unhandled error" },
+      {
+        error: "UNHANDLED_EXCEPTION",
+        message: err?.message ?? "Unknown error",
+      },
       { status: 500 }
     );
   }
