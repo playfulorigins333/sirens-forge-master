@@ -536,8 +536,9 @@ export default function AutopostPage() {
 
               <Button
                 onClick={handleRunNow}
-                disabled={runningJob}
-                className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+                disabled={runningJob || eligibleRulesCount === 0}
+                className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={eligibleRulesCount === 0 ? "No eligible rules: rule must be APPROVED and enabled" : undefined}
               >
                 {runningJob ? (
                   <>
@@ -551,6 +552,11 @@ export default function AutopostPage() {
                   </>
                 )}
               </Button>
+              {eligibleRulesCount === 0 && (
+                <div className="mt-1 text-xs text-amber-300">
+                  No eligible rules. A rule must be <span className="font-semibold">APPROVED</span> and <span className="font-semibold">enabled</span> to run.
+                </div>
+              )}
 
               <Button
                 variant="outline"
