@@ -10,9 +10,8 @@ export const dynamic = "force-dynamic";
  * ============================================================
  * AUTOPOST CRON EXECUTOR (LAUNCH-SAFE)
  * - Vercel Cron triggers via HTTP GET
- * - Server-side only
- * - Cloudflare compatible
- * - Observable Supabase writes
+ * - We execute on GET (normal) and allow ?health=1 for health check
+ * - Security: Authorization: Bearer <secret>
  * ============================================================
  */
 
@@ -20,57 +19,57 @@ export const dynamic = "force-dynamic";
    Env / Clients
 ────────────────────────────────────────────── */
 const SUPABASE_URL =
-  process.env.SUPABASE_URL ||
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  "";
+  process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 
-const SUPABASE_SERVICE_ROLE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-/**
- * IMPORTANT:
- * Vercel Cron ONLY injects Authorization header when
- * env var name is EXACTLY `CRON_SECRET`
- */
+// NOTE:
+// - Vercel Cron sends Authorization: Bearer <CRON_SECRET> ONLY when env var is named CRON_SECRET in Vercel.
+// - We still allow VERCEL_CRON_SECRET as a fallback for manual testing / legacy.
 const CRON_SECRET =
-  process.env.CRON_SECRET ||
-  process.env.VERCEL_CRON_SECRET ||
-  "";
+  process.env.CRON_SECRET || process.env.VERCEL_CRON_SECRET || "";
 
-const supabaseAdmin = createClient(
-  SUPABASE_URL,
-  SUPABASE_SERVICE_ROLE_KEY
-);
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
 /* ──────────────────────────────────────────────
-   Types
+   Types (based on your DB schema)
 ────────────────────────────────────────────── */
 type AutopostRule = {
   id: string;
   user_id: string;
-  approval_state: string;
+
+  approval_state: string; // DRAFT | APPROVED | PAUSED | REVOKED
   enabled: boolean;
-  selected_platforms: any;
+
+  selected_platforms: any; // jsonb array
   explicitness: number;
-  tones: any;
+  tones: any; // jsonb array
   timezone: string;
-  start_date: string | null;
-  end_date: string | null;
+
+  start_date: string | null; // date
+  end_date: string | null; // date
   posts_per_day: number;
-  time_slots: any;
+  time_slots: any; // jsonb array
+
   paused_at: string | null;
   revoked_at: string | null;
+
   accept_split: boolean;
   accept_automation: boolean;
   accept_control: boolean;
+
   creator_pct: number;
   platform_pct: number;
-  next_run_at: string | null;
-  last_run_at: string | null;
+
+  next_run_at: string | null; // timestamptz
+  last_run_at: string | null; // timestamptz
+
   created_at: string;
   updated_at: string;
 };
 
+// IMPORTANT FIX:
+// Use a single object type with optional fields so TS never loops on union narrowing.
 type DispatchResult = {
   ok: boolean;
   platform_post_id?: string | null;
@@ -88,7 +87,7 @@ type RunSummary = {
 };
 
 /* ──────────────────────────────────────────────
-   Helpers
+   Small helpers
 ────────────────────────────────────────────── */
 function json(status: number, body: any) {
   return NextResponse.json(body, { status });
@@ -109,14 +108,14 @@ function clampInt(v: any, min: number, max: number, fallback: number) {
     typeof v === "string"
       ? Number.parseInt(v, 10)
       : typeof v === "number"
-      ? v
-      : NaN;
+        ? v
+        : NaN;
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, n));
 }
 
 /* ──────────────────────────────────────────────
-   Cron Auth (STRICT)
+   Cron Auth
 ────────────────────────────────────────────── */
 function assertCronAuth(req: Request) {
   if (!CRON_SECRET) {
@@ -124,10 +123,10 @@ function assertCronAuth(req: Request) {
   }
 
   const auth = req.headers.get("authorization") || "";
+  const xCron = req.headers.get("x-vercel-cron-secret") || "";
 
-  if (auth === `Bearer ${CRON_SECRET}`) {
-    return { ok: true as const };
-  }
+  if (auth === `Bearer ${CRON_SECRET}`) return { ok: true as const };
+  if (xCron === CRON_SECRET) return { ok: true as const };
 
   return { ok: false as const, error: "UNAUTHORIZED" };
 }
@@ -145,12 +144,12 @@ function isRunnableLifecycle(rule: AutopostRule) {
 
 function isEligibleNow(rule: AutopostRule, now: Date) {
   const nra = parseDate(rule.next_run_at);
-  if (!nra) return false;
+  if (!nra) return false; // safe default
   return nra.getTime() <= now.getTime();
 }
 
 /* ──────────────────────────────────────────────
-   Dispatch (webhook based)
+   Platform Dispatch (REAL, NO SILENT SUCCESS)
 ────────────────────────────────────────────── */
 const PLATFORM_WEBHOOK_ENV: Record<string, string> = {
   onlyfans: "AUTOPOST_WEBHOOK_ONLYFANS",
@@ -158,9 +157,24 @@ const PLATFORM_WEBHOOK_ENV: Record<string, string> = {
   fansly: "AUTOPOST_WEBHOOK_FANSLY",
 };
 
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function normalizePlatforms(selected_platforms: any): string[] {
   if (Array.isArray(selected_platforms)) {
-    return selected_platforms.map(String).filter(Boolean);
+    return selected_platforms.map((p) => String(p)).filter(Boolean);
   }
   return [];
 }
@@ -172,12 +186,12 @@ async function dispatchToPlatformWebhook(params: {
 }): Promise<DispatchResult> {
   const { platform, rule, dryRun } = params;
 
-  const envKey = PLATFORM_WEBHOOK_ENV[platform.toLowerCase()];
+  const envKey = PLATFORM_WEBHOOK_ENV[String(platform).toLowerCase()];
   if (!envKey) {
     return {
       ok: false,
       error_code: "UNSUPPORTED_PLATFORM",
-      error_message: `No adapter for ${platform}`,
+      error_message: `No adapter registered for platform '${platform}'`,
       platform_post_id: null,
     };
   }
@@ -186,8 +200,8 @@ async function dispatchToPlatformWebhook(params: {
   if (!webhookUrl) {
     return {
       ok: false,
-      error_code: "WEBHOOK_NOT_CONFIGURED",
-      error_message: `Missing ${envKey}`,
+      error_code: "PLATFORM_WEBHOOK_NOT_CONFIGURED",
+      error_message: `Missing env var ${envKey}`,
       platform_post_id: null,
     };
   }
@@ -196,60 +210,170 @@ async function dispatchToPlatformWebhook(params: {
     return {
       ok: true,
       platform_post_id: "dry_run",
+      error_code: null,
+      error_message: null,
+      details: { platform, adapter: "webhook", envKey },
     };
   }
 
+  const body = {
+    run_mode: "autopost",
+    rule_id: rule.id,
+    user_id: rule.user_id,
+    platform,
+    timezone: rule.timezone,
+    explicitness: rule.explicitness,
+    tones: rule.tones,
+    posts_per_day: rule.posts_per_day,
+    time_slots: rule.time_slots,
+    creator_pct: rule.creator_pct,
+    platform_pct: rule.platform_pct,
+  };
+
   try {
-    const res = await fetch(webhookUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-sf-source": "autopost",
+    const res = await fetchWithTimeout(
+      webhookUrl,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-sf-source": "autopost-executor",
+        },
+        body: JSON.stringify(body),
       },
-      body: JSON.stringify({
-        rule_id: rule.id,
-        user_id: rule.user_id,
-        platform,
-        timezone: rule.timezone,
-        explicitness: rule.explicitness,
-        tones: rule.tones,
-        posts_per_day: rule.posts_per_day,
-        time_slots: rule.time_slots,
-        creator_pct: rule.creator_pct,
-        platform_pct: rule.platform_pct,
-      }),
-    });
+      clampInt(process.env.AUTOPOST_DISPATCH_TIMEOUT_MS, 2_000, 60_000, 15_000)
+    );
+
+    const text = await res.text().catch(() => "");
+    let parsed: any = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      parsed = null;
+    }
 
     if (!res.ok) {
       return {
         ok: false,
-        error_code: "DISPATCH_HTTP_ERROR",
-        error_message: `HTTP ${res.status}`,
+        error_code: "PLATFORM_DISPATCH_HTTP_ERROR",
+        error_message: `Webhook returned ${res.status}`,
         platform_post_id: null,
+        details: { status: res.status, body: parsed ?? text },
       };
     }
 
-    const data = await res.json().catch(() => null);
-    const pid = data?.platform_post_id || data?.id || null;
+    const platformPostId =
+      parsed?.platform_post_id || parsed?.id || parsed?.post_id || null;
 
-    if (!pid) {
+    const okFlag = parsed?.ok === true || parsed?.success === true;
+
+    if (!okFlag || !platformPostId) {
       return {
         ok: false,
-        error_code: "INVALID_RESPONSE",
-        error_message: "Missing platform_post_id",
+        error_code: "PLATFORM_DISPATCH_INVALID_RESPONSE",
+        error_message:
+          "Webhook did not return explicit success + platform_post_id",
         platform_post_id: null,
+        details: { body: parsed ?? text },
       };
     }
 
-    return { ok: true, platform_post_id: String(pid) };
+    return {
+      ok: true,
+      platform_post_id: String(platformPostId),
+      error_code: null,
+      error_message: null,
+      details: parsed,
+    };
   } catch (e: any) {
+    const msg =
+      e?.name === "AbortError"
+        ? "Dispatch timeout"
+        : typeof e?.message === "string"
+          ? e.message
+          : "Dispatch failed";
     return {
       ok: false,
-      error_code: "DISPATCH_EXCEPTION",
-      error_message: e?.message || "Dispatch failed",
+      error_code: "PLATFORM_DISPATCH_EXCEPTION",
+      error_message: msg,
       platform_post_id: null,
+      details: { platform, envKey },
     };
   }
+}
+
+/* ──────────────────────────────────────────────
+   DB Writes (Observability)
+   FIX: autopost_run_results insert must NEVER be silent.
+   - We capture insert failures and hard-fail the run with details,
+     because "zero rows written" must be impossible without a visible error.
+────────────────────────────────────────────── */
+async function insertRunRow(args: {
+  run_id: string;
+  triggered_by: string;
+  started_at: string;
+  finished_at: string;
+  summary: RunSummary;
+  dry_run: boolean;
+}) {
+  const { run_id, triggered_by, started_at, finished_at, summary, dry_run } =
+    args;
+
+  const { error } = await supabaseAdmin.from("autopost_runs").insert({
+    run_id,
+    triggered_by,
+    started_at,
+    finished_at,
+    scanned: summary.scanned,
+    eligible: summary.eligible,
+    dispatched: summary.dispatched,
+    succeeded: summary.succeeded,
+    failed: summary.failed,
+    dry_run,
+  });
+
+  if (error) {
+    // never crash the run because logging failed
+    // eslint-disable-next-line no-console
+    console.error("[autopost_runs insert error]", error);
+  }
+}
+
+type RunResultRow = {
+  run_id: string;
+  rule_id: string;
+  user_id: string;
+  platform: string;
+  eligible: boolean;
+  dispatched: boolean;
+  success: boolean | null;
+  error_code: string | null;
+  error_message: string | null;
+  platform_post_id: string | null;
+};
+
+async function insertRunResultRow(row: RunResultRow): Promise<{
+  ok: boolean;
+  error?: any;
+}> {
+  const { error } = await supabaseAdmin
+    .from("autopost_run_results")
+    .insert(row);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error("[autopost_run_results insert error]", {
+      message: error.message,
+      details: (error as any).details,
+      hint: (error as any).hint,
+      code: (error as any).code,
+      attemptedRow: row,
+    });
+
+    return { ok: false, error };
+  }
+
+  return { ok: true };
 }
 
 /* ──────────────────────────────────────────────
@@ -263,27 +387,43 @@ async function executeAutopost(req: Request) {
     return json(500, { ok: false, error: "SUPABASE_NOT_CONFIGURED" });
   }
 
+  const url = new URL(req.url);
   const dryRun =
-    new URL(req.url).searchParams.get("dry") === "1";
+    url.searchParams.get("dry") === "1" ||
+    req.headers.get("x-autopost-dry-run") === "1";
+
+  const maxRules = clampInt(process.env.AUTOPOST_RUN_MAX_RULES, 1, 500, 100);
+  const triggeredBy =
+    req.headers.get("user-agent")?.includes("vercel-cron")
+      ? "vercel-cron"
+      : "manual";
 
   const startedAt = nowISO();
   const now = new Date();
 
+  // Keep your existing run_id format (no schema assumptions),
+  // but make it unambiguously unique.
   const runId = `run_${crypto.randomBytes(8).toString("hex")}`;
+
+  // Track insert failures so "zero result rows" can never be hidden.
+  let resultInsertFailures = 0;
+  let firstResultInsertError: any = null;
 
   const { data, error } = await supabaseAdmin
     .from("autopost_rules")
-    .select("*");
+    .select("*")
+    .limit(maxRules);
 
   if (error) {
     return json(500, {
       ok: false,
       error: "RULE_QUERY_FAILED",
       details: error.message,
+      runId,
     });
   }
 
-  const rules = (data || []) as AutopostRule[];
+  const rules = (data ?? []) as AutopostRule[];
 
   const summary: RunSummary = {
     scanned: rules.length,
@@ -293,58 +433,242 @@ async function executeAutopost(req: Request) {
     failed: 0,
   };
 
-  for (const rule of rules) {
-    if (!isRunnableLifecycle(rule)) continue;
-    if (!isEligibleNow(rule, now)) continue;
-
-    summary.eligible++;
-
-    const platforms = normalizePlatforms(rule.selected_platforms);
-    for (const platform of platforms) {
-      summary.dispatched++;
-
-      const res = await dispatchToPlatformWebhook({
-        platform,
-        rule,
-        dryRun,
-      });
-
-      if (res.ok) summary.succeeded++;
-      else summary.failed++;
+  // Helper: attempt insert, and if it fails, we record it.
+  async function mustLogResult(row: RunResultRow) {
+    const ins = await insertRunResultRow(row);
+    if (!ins.ok) {
+      resultInsertFailures += 1;
+      if (!firstResultInsertError) firstResultInsertError = ins.error;
     }
   }
 
-  await supabaseAdmin.from("autopost_runs").insert({
+  for (const rule of rules) {
+    try {
+      if (!isRunnableLifecycle(rule)) continue;
+
+      const eligible = isEligibleNow(rule, now);
+      if (!eligible) {
+        await mustLogResult({
+          run_id: runId,
+          rule_id: rule.id,
+          user_id: rule.user_id,
+          platform: "MULTI",
+          eligible: false,
+          dispatched: false,
+          success: null,
+          error_code: null,
+          error_message: null,
+          platform_post_id: null,
+        });
+        continue;
+      }
+
+      summary.eligible += 1;
+
+      const platforms = normalizePlatforms(rule.selected_platforms);
+      if (platforms.length === 0) {
+        summary.dispatched += 1;
+        summary.failed += 1;
+
+        await mustLogResult({
+          run_id: runId,
+          rule_id: rule.id,
+          user_id: rule.user_id,
+          platform: "MULTI",
+          eligible: true,
+          dispatched: true,
+          success: false,
+          error_code: "NO_PLATFORMS_SELECTED",
+          error_message: "selected_platforms is empty",
+          platform_post_id: null,
+        });
+        continue;
+      }
+
+      let anySuccess = false;
+
+      for (const platform of platforms) {
+        summary.dispatched += 1;
+
+        // HARD GUARANTEE:
+        // Even if dispatch unexpectedly throws (outside its internal try/catch),
+        // we STILL log a failure result row.
+        let dispatchRes: DispatchResult | null = null;
+        let dispatchThrown: any = null;
+
+        try {
+          dispatchRes = await dispatchToPlatformWebhook({
+            platform,
+            rule,
+            dryRun,
+          });
+        } catch (e: any) {
+          dispatchThrown = e;
+        }
+
+        if (dispatchThrown) {
+          summary.failed += 1;
+
+          await mustLogResult({
+            run_id: runId,
+            rule_id: rule.id,
+            user_id: rule.user_id,
+            platform,
+            eligible: true,
+            dispatched: true,
+            success: false,
+            error_code: "PLATFORM_DISPATCH_THROWN",
+            error_message:
+              typeof dispatchThrown?.message === "string"
+                ? dispatchThrown.message
+                : "Dispatch threw before returning a result",
+            platform_post_id: null,
+          });
+
+          continue;
+        }
+
+        const res = dispatchRes as DispatchResult;
+
+        if (res.ok) {
+          anySuccess = true;
+          summary.succeeded += 1;
+
+          await mustLogResult({
+            run_id: runId,
+            rule_id: rule.id,
+            user_id: rule.user_id,
+            platform,
+            eligible: true,
+            dispatched: true,
+            success: true,
+            error_code: null,
+            error_message: null,
+            platform_post_id: res.platform_post_id
+              ? String(res.platform_post_id)
+              : null,
+          });
+        } else {
+          summary.failed += 1;
+
+          await mustLogResult({
+            run_id: runId,
+            rule_id: rule.id,
+            user_id: rule.user_id,
+            platform,
+            eligible: true,
+            dispatched: true,
+            success: false,
+            error_code: res.error_code ? String(res.error_code) : "DISPATCH_FAILED",
+            error_message: res.error_message
+              ? String(res.error_message)
+              : "Dispatch failed",
+            platform_post_id: null,
+          });
+        }
+      }
+
+      if (anySuccess && !dryRun) {
+        const bumpMinutes = clampInt(
+          process.env.AUTOPOST_MIN_INTERVAL_MINUTES,
+          1,
+          1440,
+          5
+        );
+        const next = new Date(now.getTime() + bumpMinutes * 60_000).toISOString();
+
+        await supabaseAdmin
+          .from("autopost_rules")
+          .update({
+            last_run_at: now.toISOString(),
+            next_run_at: next,
+            updated_at: now.toISOString(),
+          })
+          .eq("id", rule.id);
+      }
+    } catch (e: any) {
+      summary.failed += 1;
+
+      await mustLogResult({
+        run_id: runId,
+        rule_id: rule.id,
+        user_id: rule.user_id,
+        platform: "MULTI",
+        eligible: true,
+        dispatched: true,
+        success: false,
+        error_code: "RULE_EXECUTION_EXCEPTION",
+        error_message:
+          typeof e?.message === "string" ? e.message : "Rule execution failed",
+        platform_post_id: null,
+      });
+
+      continue;
+    }
+  }
+
+  const finishedAt = nowISO();
+
+  await insertRunRow({
     run_id: runId,
-    triggered_by: "vercel-cron",
+    triggered_by: triggeredBy,
     started_at: startedAt,
-    finished_at: nowISO(),
-    scanned: summary.scanned,
-    eligible: summary.eligible,
-    dispatched: summary.dispatched,
-    succeeded: summary.succeeded,
-    failed: summary.failed,
+    finished_at: finishedAt,
+    summary,
     dry_run: dryRun,
   });
 
-  return json(200, { ok: true, runId, summary });
+  // CRITICAL: If result inserts failed, this run must NOT pretend it succeeded.
+  // This makes "ZERO rows written" impossible without a visible error payload.
+  if (resultInsertFailures > 0) {
+    return json(500, {
+      ok: false,
+      error: "AUTOPOST_RUN_RESULTS_INSERT_FAILED",
+      runId,
+      startedAt,
+      finishedAt,
+      dryRun,
+      maxRules,
+      summary,
+      resultInsertFailures,
+      firstInsertError: firstResultInsertError
+        ? {
+            message: firstResultInsertError.message,
+            details: (firstResultInsertError as any).details,
+            hint: (firstResultInsertError as any).hint,
+            code: (firstResultInsertError as any).code,
+          }
+        : null,
+    });
+  }
+
+  return json(200, {
+    ok: true,
+    runId,
+    startedAt,
+    finishedAt,
+    dryRun,
+    maxRules,
+    summary,
+  });
 }
 
 /* ──────────────────────────────────────────────
-   GET (Cron)
+   GET
 ────────────────────────────────────────────── */
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const health = url.searchParams.get("health") === "1";
+
   const auth = assertCronAuth(req);
   if (!auth.ok) return json(401, auth);
-
-  const health =
-    new URL(req.url).searchParams.get("health") === "1";
 
   if (health) {
     return json(200, {
       ok: true,
       route: "/api/autopost/run",
       mode: "health",
+      expects: "GET + Authorization: Bearer <CRON_SECRET>",
     });
   }
 
@@ -352,7 +676,7 @@ export async function GET(req: Request) {
 }
 
 /* ──────────────────────────────────────────────
-   POST (internal manual)
+   POST (manual internal trigger)
 ────────────────────────────────────────────── */
 export async function POST(req: Request) {
   return executeAutopost(req);
