@@ -1,77 +1,113 @@
-import { NextRequest, NextResponse } from "next/server";
+// app/api/autopost/platforms/onlyfans/route.ts
+import { NextResponse } from "next/server";
 
 /**
- * Sirens Forge — Autopost Platform Adapter: OnlyFans
+ * ============================================================
+ * ONLYFANS AUTOPOST ADAPTER (LAUNCH-SAFE)
  *
- * This is a production-safe server-side adapter.
- * It does NOT call external APIs yet.
- * It provides explicit success/failure signaling to the executor.
+ * Aligned to executor contract.
+ * No external API calls yet by design.
+ *
+ * Contract:
+ * - Input matches executor payload
+ * - Output MUST be:
+ *     { ok: true, platform_post_id }
+ *   OR
+ *     { ok: false, error_code, error_message }
+ * ============================================================
  */
 
-export async function POST(req: NextRequest) {
-  try {
-    // Enforce JSON
-    const contentType = req.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      return NextResponse.json(
-        { ok: false, error: "INVALID_CONTENT_TYPE" },
-        { status: 400 }
-      );
-    }
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-    const body = await req.json().catch(() => null);
-    if (!body) {
-      return NextResponse.json(
-        { ok: false, error: "INVALID_JSON" },
-        { status: 400 }
-      );
-    }
+type AutopostPayload = {
+  run_mode: "autopost";
+  rule_id: string;
+  user_id: string;
+  platform: "onlyfans";
+  timezone: string;
+  explicitness: number;
+  tones: any;
+  posts_per_day: number;
+  time_slots: any;
+  creator_pct: number;
+  platform_pct: number;
+};
 
-    const {
-      run_id,
-      rule_id,
-      platform,
-      content,
-      scheduled_at,
-    } = body;
-
-    // Explicit validation (NO silent success)
-    if (!run_id || !rule_id || platform !== "onlyfans" || !content) {
-      return NextResponse.json(
-        { ok: false, error: "MISSING_OR_INVALID_FIELDS" },
-        { status: 400 }
-      );
-    }
-
-    // 🚀 PRODUCTION BEHAVIOR (LAUNCH)
-    // At launch, this adapter confirms receipt and execution intent.
-    // No external API calls yet by design.
-    // Executor records success based on this response.
-
-    return NextResponse.json(
-      {
-        ok: true,
-        platform: "onlyfans",
-        platform_post_id: `onlyfans_${run_id}_${Date.now()}`,
-      },
-      { status: 200 }
-    );
-  } catch (err: any) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "UNHANDLED_EXCEPTION",
-        message: err?.message || "unknown",
-      },
-      { status: 500 }
-    );
-  }
+function json(status: number, body: any) {
+  return NextResponse.json(body, { status });
 }
 
-// Explicit method guard
+export async function POST(req: Request) {
+  let payload: AutopostPayload;
+
+  // ──────────────────────────────────────────────
+  // Enforce JSON
+  // ──────────────────────────────────────────────
+  try {
+    payload = (await req.json()) as AutopostPayload;
+  } catch {
+    return json(400, {
+      ok: false,
+      error_code: "INVALID_JSON",
+      error_message: "Request body must be valid JSON",
+    });
+  }
+
+  // ──────────────────────────────────────────────
+  // HARD VALIDATION (NO SILENT COERCION)
+  // ──────────────────────────────────────────────
+  if (payload.run_mode !== "autopost") {
+    return json(400, {
+      ok: false,
+      error_code: "INVALID_RUN_MODE",
+      error_message: "run_mode must be 'autopost'",
+    });
+  }
+
+  if (!payload.rule_id || !payload.user_id) {
+    return json(400, {
+      ok: false,
+      error_code: "MISSING_IDENTIFIERS",
+      error_message: "rule_id and user_id are required",
+    });
+  }
+
+  if (payload.platform !== "onlyfans") {
+    return json(400, {
+      ok: false,
+      error_code: "PLATFORM_MISMATCH",
+      error_message: "Platform must be 'onlyfans'",
+    });
+  }
+
+  if (!Array.isArray(payload.time_slots)) {
+    return json(400, {
+      ok: false,
+      error_code: "INVALID_TIME_SLOTS",
+      error_message: "time_slots must be an array",
+    });
+  }
+
+  // ──────────────────────────────────────────────
+  // LAUNCH BEHAVIOR (NO EXTERNAL API YET)
+  // Executor records success based on this response.
+  // ──────────────────────────────────────────────
+  const platformPostId = `onlyfans_${payload.rule_id}_${Date.now()}`;
+
+  return json(200, {
+    ok: true,
+    platform_post_id: platformPostId,
+  });
+}
+
+/**
+ * Explicitly reject other methods
+ */
 export async function GET() {
-  return NextResponse.json(
-    { ok: false, error: "METHOD_NOT_ALLOWED" },
-    { status: 405 }
-  );
+  return json(405, {
+    ok: false,
+    error_code: "METHOD_NOT_ALLOWED",
+    error_message: "POST only",
+  });
 }
