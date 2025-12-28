@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -1396,30 +1396,6 @@ function HistorySidebar(props: {
 // -----------------------------------------------------------------------------
 
 export default function GeneratePage() {
-  // ---------------------------------------------------------------------------
-  // Siren’s Mind → Generator injection (LOCKED)
-  // Listens for global prompt events and injects into prompt state ONLY.
-  // NO refactors, NO auto-generate, NO side effects.
-  // ---------------------------------------------------------------------------
-  React.useEffect(() => {
-    const handler = (e: Event) => {
-      const evt = e as CustomEvent<{ prompt?: string }>;
-      if (evt?.detail?.prompt && typeof evt.detail.prompt === "string") {
-        setPrompt(evt.detail.prompt);
-        // Optional UX: focus prompt textarea if present
-        const el = document.querySelector("textarea");
-        if (el instanceof HTMLTextAreaElement) {
-          el.focus();
-        }
-      }
-    };
-
-    window.addEventListener("sirensmind:sendToGenerator", handler as EventListener);
-    return () => {
-      window.removeEventListener("sirensmind:sendToGenerator", handler as EventListener);
-    };
-  }, []);
-
   const router = useRouter();
 
   // Core state
@@ -1456,6 +1432,40 @@ export default function GeneratePage() {
 
   // Subscription modal state
   const [showSubModal, setShowSubModal] = useState(false);
+
+
+
+// ------------------------------------------------------------
+// Siren's Mind → Generator injection (LOCKED)
+// - Listen for global event
+// - Inject prompt into existing prompt state
+// - Optionally route mode for IMAGE/VIDEO (no auto-run)
+// ------------------------------------------------------------
+useEffect(() => {
+  const handler = (e: Event) => {
+    const ce = e as CustomEvent<any>;
+    const detail = (ce as any)?.detail ?? {};
+    const incomingPrompt = typeof detail.prompt === "string" ? detail.prompt : "";
+
+    if (incomingPrompt) {
+      setPrompt(incomingPrompt);
+    }
+
+    const otRaw = typeof detail.output_type === "string" ? detail.output_type : "";
+    const ot = otRaw.trim().toUpperCase();
+
+    // Route internally (no UI changes beyond existing mode state)
+    if (ot === "IMAGE") {
+      setMode("text_to_image");
+    } else if (ot === "VIDEO") {
+      setMode("text_to_video");
+    }
+    // STORY: keep current mode; prompt is injected into the same editor area.
+  };
+
+  window.addEventListener("sirensmind:sendToGenerator", handler as EventListener);
+  return () => window.removeEventListener("sirensmind:sendToGenerator", handler as EventListener);
+}, []);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(
     null
   );
