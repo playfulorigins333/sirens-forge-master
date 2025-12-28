@@ -49,69 +49,25 @@ type VaultId =
   | "pain_endurance_threshold"
   | "ultra_extremes_no_limits"
 
+type VaultCategory =
+  | "visual"
+  | "body"
+  | "context"
+  | "psychology"
+  | "multi"
+  | "style"
+  | "sensory"
+  | "system"
+
 type VaultDef = {
   id: VaultId
   label: string
   minMode: Mode
+  category: VaultCategory
+  description?: string
 }
 
-/**
- * Vault registry (UI-side)
- * - ids are stable + used in the API payload as vault_ids
- * - labels are UI-friendly
- * - minMode controls availability by Session Mode
- */
-const VAULTS: VaultDef[] = [
-  { id: "composition_framing_ultra", label: "Composition & Framing Ultra", minMode: "SAFE" },
-  { id: "lighting_environment_fx", label: "Lighting & Environmental Effects", minMode: "SAFE" },
-  { id: "camera_style_lens_fx", label: "Camera Style & Lens Effects", minMode: "SAFE" },
-  { id: "color_tone_mood", label: "Color, Tone & Visual Mood", minMode: "SAFE" },
-
-  { id: "breasts_chest_upper", label: "Breasts, Chest & Upper Body", minMode: "NSFW" },
-  { id: "legs_thighs_hips", label: "Legs, Thighs & Hips", minMode: "NSFW" },
-  { id: "position_restraint_bondage", label: "Position, Restraint & Bondage", minMode: "NSFW" },
-  { id: "face_mouth_expressions", label: "Face, Mouth & Expressions", minMode: "SAFE" },
-  { id: "eyes_gaze_emotion", label: "Eyes, Gaze & Emotion", minMode: "SAFE" },
-  { id: "skin_sweat_marks_texture", label: "Skin, Sweat, Marks & Texture", minMode: "NSFW" },
-
-  { id: "public_risk_exhibition_ultra", label: "Public Risk & Exhibition Ultra", minMode: "ULTRA" },
-  { id: "private_intimacy_soft", label: "Private Intimacy & Soft Scenes", minMode: "SAFE" },
-  { id: "anal_ass_tail_ultra", label: "Anal, Ass & Tail Ultra", minMode: "ULTRA" },
-  { id: "oral_throat_mouth_play", label: "Oral, Throat & Mouth Play", minMode: "NSFW" },
-  { id: "fluid_mess_aftermath", label: "Fluid, Mess & Aftermath", minMode: "ULTRA" },
-
-  { id: "domination_control", label: "Domination & Control", minMode: "ULTRA" },
-  { id: "submission_obedience", label: "Submission & Obedience", minMode: "ULTRA" },
-  { id: "praise_degradation_mindplay", label: "Praise, Degradation & Mindplay", minMode: "ULTRA" },
-  { id: "ritual_ceremony_symbolism", label: "Ritual, Ceremony & Symbolism", minMode: "NSFW" },
-  { id: "hands_fingers_nails_ultra", label: "Hands, Fingers & Nails Ultra", minMode: "NSFW" },
-
-  { id: "multi_partner_orgy_cuckoldry_ultra", label: "Multi-Partner, Orgy & Cuckoldry Ultra", minMode: "ULTRA" },
-  { id: "partner_interaction_power_exchange", label: "Partner Interaction & Power Exchange", minMode: "NSFW" },
-  { id: "voyeur_filming_performance", label: "Voyeur, Filming & Performance", minMode: "ULTRA" },
-  { id: "audience_crowd_exposure", label: "Audience, Crowd & Exposure", minMode: "ULTRA" },
-
-  { id: "clothing_lingerie_accessories", label: "Clothing, Lingerie & Accessories", minMode: "SAFE" },
-  { id: "latex_leather_fetishwear", label: "Latex, Leather & Fetishwear", minMode: "NSFW" },
-  { id: "roleplay_fantasy_costume_ultra", label: "Roleplay, Fantasy & Costume Ultra", minMode: "ULTRA" },
-
-  { id: "smell_sweat_pheromones_ultra", label: "Smell, Sweat & Pheromones Ultra", minMode: "ULTRA" },
-  { id: "pain_endurance_threshold", label: "Pain, Endurance & Threshold", minMode: "ULTRA" },
-  { id: "ultra_extremes_no_limits", label: "Ultra Extremes / No-Limits Layer", minMode: "ULTRA" },
-]
-
-function isModeAllowed(current: Mode, minMode: Mode) {
-  const rank = (m: Mode) => (m === "SAFE" ? 0 : m === "NSFW" ? 1 : 2)
-  return rank(current) >= rank(minMode)
-}
-
-interface StackState {
-  mode: Mode
-  intent: string | null
-  dna: string | null
-  vault_ids: VaultId[]
-  macros: string[]
-}
+type InferredIntent = "image" | "story" | "batch" | "explore"
 
 type HeadlessSuccess = {
   status: "ok"
@@ -127,9 +83,156 @@ type HeadlessSuccess = {
 }
 
 type HeadlessRefusal = {
-  status: "refused"
+  status?: "refused"
   error_code: string
   reason: string
+}
+
+/**
+ * Vault registry (UI-side)
+ * - ids are stable + used in the API payload as vault_ids
+ * - labels are UI-friendly
+ * - minMode controls availability by Session Mode
+ * - category powers suggestions
+ */
+const VAULTS: VaultDef[] = [
+  // 🎥 Core Visual / Structural
+  { id: "composition_framing_ultra", label: "Composition & Framing Ultra", minMode: "SAFE", category: "visual" },
+  { id: "lighting_environment_fx", label: "Lighting & Environmental Effects", minMode: "SAFE", category: "visual" },
+  { id: "camera_style_lens_fx", label: "Camera Style & Lens Effects", minMode: "SAFE", category: "visual" },
+  { id: "color_tone_mood", label: "Color, Tone & Visual Mood", minMode: "SAFE", category: "visual" },
+
+  // 🧍 Body-Focused
+  { id: "breasts_chest_upper", label: "Breasts, Chest & Upper Body", minMode: "NSFW", category: "body" },
+  { id: "legs_thighs_hips", label: "Legs, Thighs & Hips", minMode: "NSFW", category: "body" },
+  { id: "position_restraint_bondage", label: "Position, Restraint & Bondage", minMode: "NSFW", category: "body" },
+  { id: "face_mouth_expressions", label: "Face, Mouth & Expressions", minMode: "SAFE", category: "body" },
+  { id: "eyes_gaze_emotion", label: "Eyes, Gaze & Emotion", minMode: "SAFE", category: "body" },
+  { id: "skin_sweat_marks_texture", label: "Skin, Sweat, Marks & Texture", minMode: "NSFW", category: "body" },
+
+  // 🌍 Context & Scenario
+  { id: "public_risk_exhibition_ultra", label: "Public Risk & Exhibition Ultra", minMode: "ULTRA", category: "context" },
+  { id: "private_intimacy_soft", label: "Private Intimacy & Soft Scenes", minMode: "SAFE", category: "context" },
+  { id: "anal_ass_tail_ultra", label: "Anal, Ass & Tail Ultra", minMode: "ULTRA", category: "context" },
+  { id: "oral_throat_mouth_play", label: "Oral, Throat & Mouth Play", minMode: "NSFW", category: "context" },
+  { id: "fluid_mess_aftermath", label: "Fluid, Mess & Aftermath", minMode: "ULTRA", category: "context" },
+
+  // 🧠 Psychological / Power Dynamics
+  { id: "domination_control", label: "Domination & Control", minMode: "ULTRA", category: "psychology" },
+  { id: "submission_obedience", label: "Submission & Obedience", minMode: "ULTRA", category: "psychology" },
+  { id: "praise_degradation_mindplay", label: "Praise, Degradation & Mindplay", minMode: "ULTRA", category: "psychology" },
+  { id: "ritual_ceremony_symbolism", label: "Ritual, Ceremony & Symbolism", minMode: "NSFW", category: "psychology" },
+  { id: "hands_fingers_nails_ultra", label: "Hands, Fingers & Nails Ultra", minMode: "NSFW", category: "psychology" },
+
+  // 👥 Multi-Person / Advanced Dynamics
+  {
+    id: "multi_partner_orgy_cuckoldry_ultra",
+    label: "Multi-Partner, Orgy & Cuckoldry Ultra",
+    minMode: "ULTRA",
+    category: "multi",
+  },
+  {
+    id: "partner_interaction_power_exchange",
+    label: "Partner Interaction & Power Exchange",
+    minMode: "NSFW",
+    category: "multi",
+  },
+  { id: "voyeur_filming_performance", label: "Voyeur, Filming & Performance", minMode: "ULTRA", category: "multi" },
+  { id: "audience_crowd_exposure", label: "Audience, Crowd & Exposure", minMode: "ULTRA", category: "multi" },
+
+  // 🧥 Style, Clothing & Identity
+  { id: "clothing_lingerie_accessories", label: "Clothing, Lingerie & Accessories", minMode: "SAFE", category: "style" },
+  { id: "latex_leather_fetishwear", label: "Latex, Leather & Fetishwear", minMode: "NSFW", category: "style" },
+  { id: "roleplay_fantasy_costume_ultra", label: "Roleplay, Fantasy & Costume Ultra", minMode: "ULTRA", category: "style" },
+
+  // 🧪 Sensory & Physical Intensity
+  {
+    id: "smell_sweat_pheromones_ultra",
+    label: "Smell, Sweat & Pheromones Ultra",
+    minMode: "ULTRA",
+    category: "sensory",
+  },
+  { id: "pain_endurance_threshold", label: "Pain, Endurance & Threshold", minMode: "ULTRA", category: "sensory" },
+  { id: "ultra_extremes_no_limits", label: "Ultra Extremes / No-Limits Layer", minMode: "ULTRA", category: "system" },
+]
+
+function isModeAllowed(current: Mode, minMode: Mode) {
+  const rank = (m: Mode) => (m === "SAFE" ? 0 : m === "NSFW" ? 1 : 2)
+  return rank(current) >= rank(minMode)
+}
+
+// Lightweight intent inference (start simple; refine later)
+function inferIntent(input: string): { intent: InferredIntent; confidence: number } {
+  const s = (input || "").toLowerCase()
+  const has = (w: string) => s.includes(w)
+  const hits: Array<{ intent: InferredIntent; score: number }> = [
+    { intent: "batch", score: ["batch", "pack", "set of", "variants", "10 prompts", "20 prompts"].some(has) ? 2 : 0 },
+    { intent: "story", score: ["story", "scene", "narrative", "plot", "chapter"].some(has) ? 2 : 0 },
+    { intent: "image", score: ["image", "photo", "prompt", "shot", "cinematic", "portrait"].some(has) ? 2 : 0 },
+  ]
+
+  const top = hits.sort((a, b) => b.score - a.score)[0]
+  if (!top || top.score === 0) return { intent: "explore", confidence: 0.35 }
+  return { intent: top.intent, confidence: Math.min(0.95, 0.55 + top.score * 0.2) }
+}
+
+function suggestVaults(params: {
+  mode: Mode
+  inferredIntent: InferredIntent
+  activeVaultIds: VaultId[]
+  allVaults: VaultDef[]
+}) {
+  const { mode, inferredIntent, activeVaultIds, allVaults } = params
+
+  const intentCategories: Record<InferredIntent, VaultCategory[]> = {
+    image: ["visual", "style", "body"],
+    story: ["context", "psychology", "style"],
+    batch: ["visual", "style", "context"],
+    explore: ["visual", "context", "style", "psychology", "body", "multi"],
+  }
+
+  const preferred = new Set(intentCategories[inferredIntent] || intentCategories.explore)
+
+  // Minimal synergy starters (expand later)
+  const SYNERGY: Partial<Record<VaultId, VaultId[]>> = {
+    roleplay_fantasy_costume_ultra: ["lighting_environment_fx", "composition_framing_ultra", "partner_interaction_power_exchange"],
+    public_risk_exhibition_ultra: ["voyeur_filming_performance", "audience_crowd_exposure", "lighting_environment_fx"],
+    domination_control: ["hands_fingers_nails_ultra", "submission_obedience"],
+  }
+
+  const active = new Set<VaultId>(activeVaultIds)
+
+  const candidates = allVaults
+    .filter((v) => isModeAllowed(mode, v.minMode))
+    .filter((v) => !active.has(v.id))
+
+  const scored = candidates
+    .map((v) => {
+      let score = 0
+
+      if (preferred.has(v.category)) score += 3
+
+      for (const a of activeVaultIds) {
+        const syn = SYNERGY[a] || []
+        if (syn.includes(v.id)) score += 4
+      }
+
+      // small boost to foundational vaults
+      if (["composition_framing_ultra", "lighting_environment_fx", "camera_style_lens_fx", "color_tone_mood"].includes(v.id)) score += 1
+
+      return { v, score }
+    })
+    .sort((a, b) => b.score - a.score)
+
+  return scored.slice(0, 5).map((x) => x.v)
+}
+
+interface StackState {
+  mode: Mode
+  intent: string | null
+  dna: string | null
+  vault_ids: VaultId[]
+  macros: string[]
 }
 
 const FloatingParticles = () => {
@@ -190,6 +293,21 @@ export const ChatUI: React.FC = () => {
     macros: [],
   })
 
+  // Session-state helpers (intent inference + vault suggestions)
+  const [inferredIntent, setInferredIntent] = useState<InferredIntent>("explore")
+  const [intentConfidence, setIntentConfidence] = useState<number>(0.35)
+
+  const vaultRegistry: VaultDef[] = useMemo(() => VAULTS, [])
+
+  const suggestedVaults = useMemo(() => {
+    return suggestVaults({
+      mode: stackState.mode,
+      inferredIntent,
+      activeVaultIds: stackState.vault_ids,
+      allVaults: vaultRegistry,
+    })
+  }, [stackState.mode, stackState.vault_ids, inferredIntent, vaultRegistry])
+
   useEffect(() => setMounted(true), [])
 
   useEffect(() => {
@@ -201,7 +319,7 @@ export const ChatUI: React.FC = () => {
   }, [stackState.mode])
 
   const selectedVaultLabels = useMemo(() => {
-    const byId = new Map(VAULTS.map((v) => [v.id, v.label] as const))
+    const byId = new Map<VaultId, string>(VAULTS.map((v) => [v.id, v.label]))
     return stackState.vault_ids.map((id) => byId.get(id) ?? id)
   }, [stackState.vault_ids])
 
@@ -210,7 +328,7 @@ export const ChatUI: React.FC = () => {
       const exists = prev.vault_ids.includes(id)
       const next = exists ? prev.vault_ids.filter((x) => x !== id) : [...prev.vault_ids, id]
       // keep order stable by VAULTS list
-      const order = new Map(VAULTS.map((v, i) => [v.id, i] as const))
+      const order = new Map<VaultId, number>(VAULTS.map((v, i) => [v.id, i]))
       next.sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))
       return { ...prev, vault_ids: next }
     })
@@ -240,6 +358,11 @@ export const ChatUI: React.FC = () => {
 
     setMessages((prev) => [...prev, userMessage])
 
+    // 🔥 Maintain session state like ChatGPT: infer intent every message (soft, no nagging)
+    const inf = inferIntent(trimmed)
+    setInferredIntent(inf.intent)
+    setIntentConfidence(inf.confidence)
+
     // Simulated stack updates (visual only)
     const lowerMessage = trimmed.toLowerCase()
     if (lowerMessage.includes("image") || lowerMessage.includes("prompt")) {
@@ -255,7 +378,7 @@ export const ChatUI: React.FC = () => {
       setTimeout(() => setStackState((prev) => ({ ...prev, macros: [...prev.macros, `Macro ${prev.macros.length + 1}`] })), 600)
     }
 
-    // Check if ready for generation (UI behavior only)
+    // UI-only confirmation path (no generator auto-run)
     if (lowerMessage.includes("generate") || lowerMessage.includes("create")) {
       setTimeout(() => setShowConfirmation(true), 400)
       return
@@ -274,7 +397,7 @@ export const ChatUI: React.FC = () => {
         dna_decision: "none",
         stack_depth: "light",
         description: trimmed,
-        // ✅ NEW: vault wiring (optional)
+        // ✅ vault wiring
         vault_ids: stackState.vault_ids,
       }
 
@@ -590,6 +713,47 @@ export const ChatUI: React.FC = () => {
                 >
                   <div className="text-[11px] text-gray-400">
                     Choose vaults to stack into the prompt brain. Availability follows Session Mode.
+                  </div>
+
+                  <div className="space-y-2 mb-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] text-gray-300">
+                        Suggested vaults (based on your message • {inferredIntent.toUpperCase()} • {(intentConfidence * 100).toFixed(0)}%
+                        confidence)
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVaultPanelOpen(true)}
+                        className="text-[11px] text-purple-300 hover:text-purple-200"
+                      >
+                        Advanced
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      {suggestedVaults.length === 0 ? (
+                        <span className="text-[11px] text-gray-500">No suggestions yet — start describing a scene.</span>
+                      ) : (
+                        suggestedVaults.map((v) => {
+                          const active = stackState.vault_ids.includes(v.id)
+                          return (
+                            <button
+                              key={v.id}
+                              type="button"
+                              onClick={() => toggleVault(v.id)}
+                              className={`px-3 py-1.5 rounded-full text-[11px] border transition-all ${
+                                active
+                                  ? "bg-purple-500/20 border-purple-500/40 text-purple-200"
+                                  : "bg-gray-900 border-gray-800 text-gray-200 hover:border-gray-700"
+                              }`}
+                            >
+                              {active ? "✓ " : "+ "}
+                              {v.label}
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
                   </div>
 
                   <div className="max-h-60 overflow-y-auto pr-1 space-y-1">
