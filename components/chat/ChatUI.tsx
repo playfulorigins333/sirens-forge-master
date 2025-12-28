@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import { Button } from "@/components/ui/button"
-import { Shield, Users, Star, X, Check } from 'lucide-react'
+import { Shield, Users, Star, X, Check, Copy, Send } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChatMessage, TypingIndicator } from './ChatMessage'
 import { ChatInput } from './ChatInput'
@@ -31,7 +31,7 @@ type HeadlessSuccess = {
   model: string
   result: {
     prompt: string
-    negative_prompt?: string
+    negative_prompt?: string[]
     tags?: string[]
     style?: string
     metadata?: Record<string, any>
@@ -91,6 +91,9 @@ export const ChatUI: React.FC = () => {
   const [showConfirmation, setShowConfirmation] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // NEW: small UX state for Copy button feedback (no new components)
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+
   // Stack state
   const [stackState, setStackState] = useState<StackState>({
     mode: 'SAFE',
@@ -107,6 +110,34 @@ export const ChatUI: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isTyping])
+
+  // NEW: Copy + Send actions (UI only)
+  const handleCopy = async (text: string, messageId: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedMessageId(messageId)
+      window.setTimeout(() => setCopiedMessageId(null), 1200)
+    } catch {
+      // If clipboard fails, do not crash UI
+      setCopiedMessageId(null)
+    }
+  }
+
+  const handleSendToGenerator = (text: string) => {
+    // UI-only: emit an event for later wiring to Generation prompt box
+    // (the generation page can listen for this event and inject prompt text)
+    try {
+      window.dispatchEvent(
+        new CustomEvent("sirensmind:sendToGenerator", {
+          detail: { prompt: text }
+        })
+      )
+    } catch {
+      // do nothing
+    }
+    // still useful for dev verification
+    console.log("sirensmind:sendToGenerator", text)
+  }
 
   const handleSendMessage = async (content: string) => {
     const trimmed = content?.trim()
@@ -141,7 +172,7 @@ export const ChatUI: React.FC = () => {
       })), 2000)
     }
 
-    // Check if ready for generation (UI behavior only, unchanged)
+    // Check if ready for generation
     if (lowerMessage.includes('generate') || lowerMessage.includes('create')) {
       setTimeout(() => setShowConfirmation(true), 500)
       return
@@ -338,14 +369,41 @@ export const ChatUI: React.FC = () => {
         <div className="flex-1 overflow-y-auto px-4 md:px-6 py-6 pb-48 sm:pb-44 md:pb-44">
           <div className="max-w-4xl mx-auto">
             {messages.map((message, index) => (
-              <ChatMessage
-                key={message.id}
-                role={message.role}
-                content={message.content}
-                isStreaming={message.isStreaming}
-                onStreamComplete={handleStreamComplete}
-                isFirstMessage={index === 0 && message.role === 'assistant'}
-              />
+              <div key={message.id} className="mb-4">
+                <ChatMessage
+                  role={message.role}
+                  content={message.content}
+                  isStreaming={message.isStreaming}
+                  onStreamComplete={handleStreamComplete}
+                  isFirstMessage={index === 0 && message.role === 'assistant'}
+                />
+
+                {/* NEW: Actions for assistant prompt messages (non-error, non-streaming) */}
+                {message.role === 'assistant' && !message.isError && !message.isStreaming && (
+                  <div className="mt-2 flex flex-wrap gap-2 justify-start">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-gray-700 hover:bg-gray-800"
+                      onClick={() => handleCopy(message.content, message.id)}
+                    >
+                      <Copy className="w-4 h-4 mr-2" />
+                      {copiedMessageId === message.id ? "Copied" : "Copy"}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
+                      onClick={() => handleSendToGenerator(message.content)}
+                    >
+                      <Send className="w-4 h-4 mr-2" />
+                      Send to Generator
+                    </Button>
+                  </div>
+                )}
+              </div>
             ))}
 
             <AnimatePresence>
