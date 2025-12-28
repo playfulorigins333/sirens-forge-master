@@ -14,6 +14,7 @@ interface Message {
   role: 'assistant' | 'user'
   content: string
   isStreaming?: boolean
+  isError?: boolean
 }
 
 interface StackState {
@@ -24,18 +25,24 @@ interface StackState {
   macros: string[]
 }
 
-// Mock responses
-const mockResponses = [
-  "Understood. Continue.",
-  "Tell me more about your vision.",
-  "What specific elements are most important?",
-  "I can help refine that concept.",
-  "Describe the mood you want to capture.",
-  "What style resonates with you?",
-  "Let's build on that foundation.",
-  "Consider the emotional tone.",
-  "What details matter most?"
-]
+type HeadlessSuccess = {
+  status: "ok"
+  mode: string
+  model: string
+  result: {
+    prompt: string
+    negative_prompt?: string
+    tags?: string[]
+    style?: string
+    metadata?: Record<string, any>
+  }
+}
+
+type HeadlessRefusal = {
+  status: "refused"
+  error_code: string
+  reason: string
+}
 
 // Floating particles component
 const FloatingParticles = () => {
@@ -101,17 +108,20 @@ export const ChatUI: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isTyping])
 
-  const handleSendMessage = (content: string) => {
+  const handleSendMessage = async (content: string) => {
+    const trimmed = content?.trim()
+    if (!trimmed) return
+
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content
+      content: trimmed
     }
 
     setMessages(prev => [...prev, userMessage])
 
     // Simulate stack updates (visual only)
-    const lowerMessage = content.toLowerCase()
+    const lowerMessage = trimmed.toLowerCase()
     if (lowerMessage.includes('image') || lowerMessage.includes('prompt')) {
       setTimeout(() => setStackState(prev => ({ ...prev, intent: 'Image Prompt' })), 1000)
     }
@@ -119,40 +129,93 @@ export const ChatUI: React.FC = () => {
       setTimeout(() => setStackState(prev => ({ ...prev, dna: 'Character DNA' })), 1500)
     }
     if (lowerMessage.includes('vault')) {
-      setTimeout(() => setStackState(prev => ({ 
-        ...prev, 
-        vaults: [...prev.vaults, `Vault ${prev.vaults.length + 1}`] 
+      setTimeout(() => setStackState(prev => ({
+        ...prev,
+        vaults: [...prev.vaults, `Vault ${prev.vaults.length + 1}`]
       })), 2000)
     }
     if (lowerMessage.includes('macro')) {
-      setTimeout(() => setStackState(prev => ({ 
-        ...prev, 
-        macros: [...prev.macros, `Macro ${prev.macros.length + 1}`] 
+      setTimeout(() => setStackState(prev => ({
+        ...prev,
+        macros: [...prev.macros, `Macro ${prev.macros.length + 1}`]
       })), 2000)
     }
 
-    // Check if ready for generation
+    // Check if ready for generation (UI behavior only, unchanged)
     if (lowerMessage.includes('generate') || lowerMessage.includes('create')) {
       setTimeout(() => setShowConfirmation(true), 500)
       return
     }
 
-    // Simulate typing
+    // Real typing indicator while request in-flight
     setIsTyping(true)
 
-    setTimeout(() => {
+    try {
+      const intentToSend =
+        stackState.intent
+          ? stackState.intent.toLowerCase().includes("image") ? "image_prompt" : stackState.intent
+          : "image_prompt"
+
+      const payload = {
+        mode: stackState.mode,
+        intent: intentToSend,
+        output_format: "plain",
+        dna_decision: "none",
+        stack_depth: "light",
+        description: trimmed
+      }
+
+      const res = await fetch("/api/nsfw-gpt/headless", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+
+      const data = (await res.json()) as HeadlessSuccess | HeadlessRefusal
+
+      // Preserve the "streaming feel" (no true streaming; visual only)
       setIsTyping(false)
       setIsStreaming(true)
-      
+
+      // Slight delay so it feels like it "starts responding"
+      await new Promise(r => setTimeout(r, 250))
+
+      let assistantText = ""
+      let isError = false
+
+      if ((data as HeadlessRefusal).error_code) {
+        const refused = data as HeadlessRefusal
+        assistantText = `${refused.error_code}: ${refused.reason}`
+        isError = true
+      } else {
+        const ok = data as HeadlessSuccess
+        assistantText = ok?.result?.prompt ?? "SYSTEM_ERROR: Missing result.prompt"
+        if (!ok?.result?.prompt) isError = true
+      }
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: mockResponses[Math.floor(Math.random() * mockResponses.length)],
-        isStreaming: true
+        content: assistantText,
+        isStreaming: true,
+        isError
       }
-      
+
       setMessages(prev => [...prev, assistantMessage])
-    }, 800 + Math.random() * 1200)
+    } catch (e) {
+      setIsTyping(false)
+      setIsStreaming(true)
+
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: "SYSTEM_ERROR: Failed to reach /api/nsfw-gpt/headless",
+        isStreaming: true,
+        isError: true
+      }
+
+      setMessages(prev => [...prev, assistantMessage])
+    }
   }
 
   const handleStreamComplete = () => {
@@ -167,18 +230,18 @@ export const ChatUI: React.FC = () => {
   const handleConfirmGeneration = () => {
     setShowConfirmation(false)
     setIsTyping(true)
-    
+
     setTimeout(() => {
       setIsTyping(false)
       setIsStreaming(true)
-      
+
       const assistantMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
         content: "Generation confirmed. Your prompt has been queued.\n\nI'll notify you when it's ready.",
         isStreaming: true
       }
-      
+
       setMessages(prev => [...prev, assistantMessage])
     }, 1000)
   }
@@ -216,9 +279,9 @@ export const ChatUI: React.FC = () => {
           <div className="px-4 md:px-6 py-4">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <motion.h1 
+                <motion.h1
                   className="text-xl md:text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent"
-                  animate={{ 
+                  animate={{
                     backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'],
                   }}
                   transition={{ duration: 5, repeat: Infinity }}
@@ -238,7 +301,7 @@ export const ChatUI: React.FC = () => {
                   const Icon = getModeIcon(m)
                   const isActive = stackState.mode === m
                   const isUltra = m === 'ULTRA'
-                  
+
                   return (
                     <motion.button
                       key={m}
@@ -284,24 +347,24 @@ export const ChatUI: React.FC = () => {
                 isFirstMessage={index === 0 && message.role === 'assistant'}
               />
             ))}
-            
+
             <AnimatePresence>
               {isTyping && <TypingIndicator />}
             </AnimatePresence>
-            
+
             <div ref={messagesEndRef} />
           </div>
         </div>
 
         {/* Fixed Input Bar with Safe Area Support */}
-        <div 
+        <div
           className="fixed bottom-0 left-0 right-0 md:right-80 border-t border-gray-800/50 bg-black/90 backdrop-blur-xl z-50"
           style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
         >
           <div className="max-w-4xl mx-auto px-4 md:px-6 py-4">
-            <ChatInput 
-              onSendMessage={handleSendMessage} 
-              disabled={isTyping || isStreaming} 
+            <ChatInput
+              onSendMessage={handleSendMessage}
+              disabled={isTyping || isStreaming}
             />
             <p className="text-xs text-gray-500 mt-2 text-center">
               Press Enter to send • Shift+Enter for new line
@@ -450,8 +513,8 @@ export const ChatUI: React.FC = () => {
               <motion.div
                 className="h-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500"
                 initial={{ width: 0 }}
-                animate={{ 
-                  width: `${([stackState.mode, stackState.intent, stackState.dna].filter(Boolean).length / 3) * 100}%` 
+                animate={{
+                  width: `${([stackState.mode, stackState.intent, stackState.dna].filter(Boolean).length / 3) * 100}%`
                 }}
                 transition={{ duration: 0.5 }}
               />
@@ -480,7 +543,7 @@ export const ChatUI: React.FC = () => {
               <h3 className="text-xl font-bold mb-4 bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
                 Confirm Generation
               </h3>
-              
+
               <div className="space-y-3 mb-6">
                 <div className="flex justify-between items-center py-2 border-b border-gray-800">
                   <span className="text-sm text-gray-400">Mode</span>
