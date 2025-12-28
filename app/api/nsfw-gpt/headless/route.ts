@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 import { validateVaultIds, type Mode as VaultMode } from "@/prompts/nsfw_gpt/vault_registry";
+import { validateMacroIds } from "@/prompts/nsfw_gpt/macro_registry";
 
 export const runtime = "nodejs";
 
@@ -107,6 +108,20 @@ function loadVaultText(vaultId: string): string | null {
 }
 
 /**
+ * Load a macro text file by id.
+ * Convention: prompts/nsfw_gpt/macros/<macro_id>.txt
+ */
+function loadMacroText(macroId: string): string | null {
+  try {
+    const fullPath = path.join(process.cwd(), "prompts", "nsfw_gpt", "macros", `${macroId}.txt`);
+    if (!fs.existsSync(fullPath)) return null;
+    return fs.readFileSync(fullPath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Models by mode
  * NOTE: these are OpenAI-compatible provider model names; your OPENAI_COMPAT_* env vars control the actual gateway.
  */
@@ -139,6 +154,7 @@ type HeadlessBody = {
 
   // optional (v0)
   vault_ids?: string[]; // UI sends vault_ids
+  macro_ids?: string[]; // ✅ UI sends macro_ids (new)
 };
 
 type HeadlessSuccess = {
@@ -161,10 +177,17 @@ type HeadlessSuccess = {
 
     metadata: {
       output_type: OutputType;
+
       vault_ids: string[];
       invalid_vaults: string[];
       blocked_vaults: string[];
       missing_vault_files: string[];
+
+      macro_ids: string[];
+      invalid_macros: string[];
+      blocked_macros: string[];
+      missing_macro_files: string[];
+
       contract_parse: "ok" | "fallback_text";
     };
   };
@@ -253,6 +276,11 @@ export async function POST(req: NextRequest) {
     const v = validateVaultIds(inputVaultIds, mode);
     const vaultIds: string[] = v.vault_ids;
 
+    // ✅ Macro validation (optional)
+    const inputMacroIds = Array.isArray(body.macro_ids) ? body.macro_ids : [];
+    const m = validateMacroIds(inputMacroIds, mode);
+    const macroIds: string[] = m.macro_ids;
+
     // ✅ Load vault texts (only for validated + allowed vaults)
     const vaultTexts: string[] = [];
     const missingVaultFiles: string[] = [];
@@ -260,6 +288,15 @@ export async function POST(req: NextRequest) {
       const txt = loadVaultText(id);
       if (txt && txt.trim().length > 0) vaultTexts.push(`--- VAULT:${id} ---\n${txt.trim()}`);
       else missingVaultFiles.push(id);
+    }
+
+    // ✅ Load macro texts (only for validated + allowed macros)
+    const macroTexts: string[] = [];
+    const missingMacroFiles: string[] = [];
+    for (const id of macroIds) {
+      const txt = loadMacroText(id);
+      if (txt && txt.trim().length > 0) macroTexts.push(`--- MACRO:${id} ---\n${txt.trim()}`);
+      else missingMacroFiles.push(id);
     }
 
     // ✅ OutputType router system layer (no UI)
@@ -274,6 +311,7 @@ export async function POST(req: NextRequest) {
       HEADLESS_SYSTEM,
       OUTPUT_TYPE_SYSTEM,
       ...(vaultTexts.length > 0 ? ["\n\n# VAULT STACK (APPLIED)\n" + vaultTexts.join("\n\n")] : []),
+      ...(macroTexts.length > 0 ? ["\n\n# MACRO STACK (APPLIED)\n" + macroTexts.join("\n\n")] : []),
     ].join("\n\n");
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -322,10 +360,17 @@ export async function POST(req: NextRequest) {
         structured: structured,
         metadata: {
           output_type: outputType,
+
           vault_ids: vaultIds,
           invalid_vaults: v.invalid_ids,
           blocked_vaults: v.blocked_ids,
           missing_vault_files: missingVaultFiles,
+
+          macro_ids: macroIds,
+          invalid_macros: m.invalid_ids,
+          blocked_macros: m.blocked_ids,
+          missing_macro_files: missingMacroFiles,
+
           contract_parse: structured ? "ok" : legacyPrompt ? "ok" : "fallback_text",
         },
       },
@@ -333,9 +378,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(out, { status: 200 });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: "UNHANDLED_EXCEPTION", message: err?.message } satisfies HeadlessError,
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "UNHANDLED_EXCEPTION", message: err?.message } satisfies HeadlessError, { status: 500 });
   }
 }
