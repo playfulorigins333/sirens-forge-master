@@ -1396,6 +1396,30 @@ function HistorySidebar(props: {
 // -----------------------------------------------------------------------------
 
 export default function GeneratePage() {
+  // ---------------------------------------------------------------------------
+  // Siren’s Mind → Generator injection (LOCKED)
+  // Listens for global prompt events and injects into prompt state ONLY.
+  // NO refactors, NO auto-generate, NO side effects.
+  // ---------------------------------------------------------------------------
+  React.useEffect(() => {
+    const handler = (e: Event) => {
+      const evt = e as CustomEvent<{ prompt?: string }>;
+      if (evt?.detail?.prompt && typeof evt.detail.prompt === "string") {
+        setPrompt(evt.detail.prompt);
+        // Optional UX: focus prompt textarea if present
+        const el = document.querySelector("textarea");
+        if (el instanceof HTMLTextAreaElement) {
+          el.focus();
+        }
+      }
+    };
+
+    window.addEventListener("sirensmind:sendToGenerator", handler as EventListener);
+    return () => {
+      window.removeEventListener("sirensmind:sendToGenerator", handler as EventListener);
+    };
+  }, []);
+
   const router = useRouter();
 
   // Core state
