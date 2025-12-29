@@ -1400,6 +1400,7 @@ export default function GeneratePage() {
 
   // Core state
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
+  const [outputType, setOutputType] = useState<"IMAGE" | "VIDEO" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
@@ -1456,11 +1457,15 @@ useEffect(() => {
 
     // Route internally (no UI changes beyond existing mode state)
     if (ot === "IMAGE") {
+      setOutputType("IMAGE");
       setMode("text_to_image");
     } else if (ot === "VIDEO") {
+      setOutputType("VIDEO");
       setMode("text_to_video");
+    } else if (ot === "STORY") {
+      setOutputType("STORY");
+      // Keep current mode; prompt is injected into the same editor area.
     }
-    // STORY: keep current mode; prompt is injected into the same editor area.
   };
 
   window.addEventListener("sirensmind:sendToGenerator", handler as EventListener);
@@ -1479,7 +1484,23 @@ useEffect(() => {
     setErrorMessage(null);
 
     try {
+      // STORY: text-only execution (no media call)
+      if (outputType === "STORY") {
+        try {
+          if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(prompt);
+            setErrorMessage("Story copied to clipboard.");
+          } else {
+            setErrorMessage("Story ready in the prompt box.");
+          }
+        } catch {
+          setErrorMessage("Story ready in the prompt box.");
+        }
+        return;
+      }
+
       // Build payload to match /api/generate GenerationRequestPayload
+
       const payload = {
         mode,
         prompt,
@@ -1627,10 +1648,15 @@ useEffect(() => {
       setHistory((prev) => [...generated, ...prev]);
     } catch (err: any) {
       console.error("Generation error:", err);
-      setErrorMessage(
-        err?.message ||
-          "Something went wrong starting the generation. Check backend logs."
-      );
+
+      const fallback =
+        outputType === "VIDEO"
+          ? "Something went wrong generating your video. Check backend logs."
+          : outputType === "IMAGE"
+          ? "Something went wrong generating your image. Check backend logs."
+          : "Something went wrong generating your story. Check backend logs.";
+
+      setErrorMessage(err?.message || fallback);
     } finally {
       setIsGenerating(false);
     }
