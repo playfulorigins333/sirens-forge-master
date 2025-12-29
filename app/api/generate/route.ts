@@ -28,10 +28,9 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const COMFY_ENDPOINT = process.env.RUNPOD_COMFY_WEBHOOK || "";
 
 // ------------------------------------------------------------
-// Launch hardening (IMAGE ONLY in Phase 1)
-// NOTE: contract uses txt2img/img2img/txt2vid/img2vid
+// Phase 1 IMAGE modes (LOCKED)
 // ------------------------------------------------------------
-const SUPPORTED_MODE: GenerationRequest["mode"] = "txt2img";
+const IMAGE_MODES: GenerationRequest["mode"][] = ["txt2img", "img2img"];
 const COMFY_TIMEOUT_MS = 120_000;
 
 // ------------------------------------------------------------
@@ -65,7 +64,7 @@ function validateSafety(prompt?: string, negative?: string) {
 }
 
 // ------------------------------------------------------------
-// Deterministic seed (when seed is not provided)
+// Deterministic seed (only when seed not provided)
 // ------------------------------------------------------------
 function fnv1a32(input: string): number {
   let h = 0x811c9dc5;
@@ -188,25 +187,25 @@ export async function POST(req: Request) {
       });
     }
 
-    // Phase 1: IMAGE ONLY
-    if (request.mode !== SUPPORTED_MODE) {
+    // Phase 1 IMAGE gate
+    if (!IMAGE_MODES.includes(request.mode)) {
       return errJson(
         "unsupported_mode",
         400,
-        `Phase 1 supports mode '${SUPPORTED_MODE}' only.`,
+        "Phase 1 supports IMAGE modes only (txt2img, img2img).",
         { requestId, mode: request.mode }
       );
     }
 
     validateSafety(request.params.prompt, request.params.negative_prompt);
 
-    // RESOLVE MODEL STACK
+    // RESOLVE MODEL STACK (UNCHANGED)
     const loraStack = resolveLoraStack(
       request.params.body_mode,
       request.params.user_lora
     );
 
-    // BUILD WORKFLOW
+    // BUILD WORKFLOW (UNCHANGED)
     const seed =
       typeof request.params.seed === "number"
         ? request.params.seed
