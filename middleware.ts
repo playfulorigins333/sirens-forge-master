@@ -26,7 +26,7 @@ export function middleware(req: NextRequest) {
   }
 
   // 🔐 Detect Supabase session (v2-compatible)
-  // Supabase v2 uses cookies named: sb-<project-ref>-auth-token
+  // Supabase v2 cookies: sb-<project-ref>-auth-token
   const hasSession = req.cookies
     .getAll()
     .some(
@@ -37,8 +37,14 @@ export function middleware(req: NextRequest) {
 
   // 🔒 PRODUCTION DOMAIN RULES
   if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
-    // 🚫 NOT LOGGED IN → pricing + login only
+    // 🚫 NOT LOGGED IN
     if (!hasSession) {
+      // ✅ ALLOW post-login landing page to avoid auth race condition
+      if (pathname === "/generate") {
+        return NextResponse.next();
+      }
+
+      // 🔒 Everything else → pricing
       if (!pathname.startsWith("/pricing")) {
         const to = new URL("/pricing", req.url);
 
