@@ -1,294 +1,287 @@
 "use client";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
-
-import React, {
-  useState,
-  useCallback,
-  useEffect,
-  useRef,
-  Suspense,
-} from "react";
-import { useSearchParams } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Upload,
   X,
+  Check,
+  Sparkles,
+  Crown,
   AlertCircle,
   Clock,
   CheckCircle,
-  Sparkles,
+  Star,
+  Zap,
+  Heart,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { createClient } from "@supabase/supabase-js";
 
-/* ────────────────────────────────────────────── */
+/* ------------------------------------------------------------------ */
 /* SUPABASE */
-/* ────────────────────────────────────────────── */
+/* ------------------------------------------------------------------ */
 
-const supabase = createClient(
+const supabaseClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type TrainingStatus = "idle" | "queued" | "training" | "completed" | "failed";
+/* ------------------------------------------------------------------ */
+/* TYPES */
+/* ------------------------------------------------------------------ */
 
-type UploadedImage = {
+interface UploadedImage {
   id: string;
   file: File;
   preview: string;
+  uploadStatus: "uploading" | "complete" | "error";
+}
+
+type TrainingStatus = "idle" | "queued" | "training" | "completed" | "failed";
+
+type LoraRow = {
+  id: string;
+  status: TrainingStatus;
+  progress?: number | null;
+  error_message?: string | null;
+  updated_at?: string | null;
 };
 
 const POLL_INTERVAL_MS = 5000;
 
-/* ────────────────────────────────────────────── */
-/* OUTER PAGE — REQUIRED FOR NEXT 16 */
-/* ────────────────────────────────────────────── */
+/* ------------------------------------------------------------------ */
+/* EFFECTS */
+/* ------------------------------------------------------------------ */
 
-export default function Page() {
+const FloatingParticles = () => {
+  const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 });
+
+  useEffect(() => {
+    setDimensions({ width: window.innerWidth, height: window.innerHeight });
+  }, []);
+
   return (
-    <Suspense fallback={<LoadingScreen />}>
-      <LoRATrainInner />
-    </Suspense>
-  );
-}
-
-/* ────────────────────────────────────────────── */
-/* LOADING */
-/* ────────────────────────────────────────────── */
-
-function LoadingScreen() {
-  return (
-    <div className="min-h-screen bg-black text-white flex items-center justify-center">
-      <Sparkles className="w-12 h-12 text-purple-400 animate-spin" />
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {[...Array(20)].map((_, i) => (
+        <motion.div
+          key={i}
+          className="absolute w-1 h-1 bg-purple-400 rounded-full"
+          initial={{
+            x: Math.random() * dimensions.width,
+            y: Math.random() * dimensions.height,
+            opacity: 0,
+          }}
+          animate={{
+            y: Math.random() * -100 - 50,
+            opacity: [0, 1, 0],
+          }}
+          transition={{
+            duration: Math.random() * 3 + 2,
+            repeat: Infinity,
+            delay: Math.random() * 2,
+          }}
+        />
+      ))}
     </div>
   );
-}
+};
 
-/* ────────────────────────────────────────────── */
-/* INNER CLIENT COMPONENT */
-/* ────────────────────────────────────────────── */
+const Confetti = () => {
+  const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 });
 
-function LoRATrainInner() {
-  const params = useSearchParams();
-  const loraId = params.get("lora_id"); // REQUIRED
+  useEffect(() => {
+    setDimensions({ width: window.innerWidth, height: window.innerHeight });
+  }, []);
 
+  return (
+    <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {[...Array(50)].map((_, i) => (
+        <motion.div
+          key={i}
+          className="absolute w-2 h-2 rounded-full"
+          style={{
+            background: ["#a855f7", "#ec4899", "#06b6d4", "#10b981", "#f59e0b"][i % 5],
+            left: `${Math.random() * 100}%`,
+            top: "-10px",
+          }}
+          initial={{ y: -10, opacity: 1, rotate: 0 }}
+          animate={{
+            y: dimensions.height + 10,
+            opacity: 0,
+            rotate: Math.random() * 360,
+          }}
+          transition={{
+            duration: Math.random() * 2 + 1,
+            delay: Math.random() * 0.5,
+          }}
+        />
+      ))}
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
+/* PAGE */
+/* ------------------------------------------------------------------ */
+
+export default function LoRATrainerPage() {
+  const [identityName, setIdentityName] = useState("");
+  const [description, setDescription] = useState("");
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>("idle");
   const [trainingProgress, setTrainingProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showConfetti, setShowConfetti] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
-  /* ────────────────────────────────────────────── */
-  /* GUARD */
-  /* ────────────────────────────────────────────── */
-
-  useEffect(() => {
-    if (!loraId) {
-      setErrorMessage("Missing LoRA ID. Return to dashboard.");
-    }
-  }, [loraId]);
-
-  /* ────────────────────────────────────────────── */
-  /* FILES */
-  /* ────────────────────────────────────────────── */
-
-  const handleFiles = (files: File[]) => {
-    const images = files.filter((f) => f.type.startsWith("image/"));
-
-    if (uploadedImages.length + images.length > 20) {
-      setErrorMessage("Maximum 20 images allowed.");
-      return;
-    }
-
-    const next = images.map((file) => ({
-      id: crypto.randomUUID(),
-      file,
-      preview: URL.createObjectURL(file),
-    }));
-
-    setUploadedImages((prev) => [...prev, ...next]);
-    setErrorMessage(null);
-  };
-
-  const removeImage = (id: string) => {
-    setUploadedImages((prev) => {
-      const img = prev.find((i) => i.id === id);
-      if (img) URL.revokeObjectURL(img.preview);
-      return prev.filter((i) => i.id !== id);
-    });
-  };
-
-  /* ────────────────────────────────────────────── */
-  /* AUTH */
-  /* ────────────────────────────────────────────── */
-
-  const getAccessToken = async () => {
-    const { data } = await supabase.auth.getSession();
-    return data.session?.access_token ?? null;
-  };
-
-  /* ────────────────────────────────────────────── */
-  /* START TRAINING */
-  /* ────────────────────────────────────────────── */
-
-  const handleStartTraining = async () => {
-    if (!loraId) return;
-    if (uploadedImages.length < 10 || uploadedImages.length > 20) return;
-
-    setTrainingStatus("queued");
-    setTrainingProgress(0);
-    setErrorMessage(null);
-
-    try {
-      const token = await getAccessToken();
-      if (!token) throw new Error("Not authenticated.");
-
-      const form = new FormData();
-      form.append("lora_id", loraId);
-
-      uploadedImages.forEach((img) => {
-        form.append("images", img.file);
-      });
-
-      const res = await fetch("/api/lora/start-training", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: form,
-      });
-
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || "Training failed.");
-    } catch (err: any) {
-      setTrainingStatus("failed");
-      setErrorMessage(err.message);
+  const clearPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
     }
   };
 
-  /* ────────────────────────────────────────────── */
-  /* POLLING */
-  /* ────────────────────────────────────────────── */
+  const mapStatus = (status: string): TrainingStatus => {
+    if (status === "queued") return "queued";
+    if (status === "training") return "training";
+    if (status === "completed") return "completed";
+    if (status === "failed") return "failed";
+    return "idle";
+  };
 
   const pollStatus = useCallback(async () => {
-    if (!loraId) return;
-
-    const { data } = await supabase
+    const { data } = await supabaseClient
       .from("user_loras")
       .select("status,progress,error_message")
-      .eq("id", loraId)
+      .limit(1)
       .single();
 
     if (!data) return;
 
-    setTrainingStatus(data.status);
+    const next = mapStatus(data.status);
+    setTrainingStatus(next);
+
     if (typeof data.progress === "number") {
-      setTrainingProgress(Math.min(100, Math.max(0, data.progress)));
+      setTrainingProgress(Math.max(0, Math.min(100, data.progress)));
     }
 
-    if (data.status === "completed" || data.status === "failed") {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-      if (data.status === "failed") {
-        setErrorMessage(data.error_message || "Training failed.");
-      }
+    if (next === "failed") {
+      setErrorMessage(data.error_message || "Training failed.");
+      clearPolling();
     }
-  }, [loraId]);
+
+    if (next === "completed") {
+      setTrainingProgress(100);
+      setShowConfetti(true);
+      setTimeout(() => setShowConfetti(false), 3000);
+      clearPolling();
+    }
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (trainingStatus === "queued" || trainingStatus === "training") {
       pollStatus();
       pollingRef.current = setInterval(pollStatus, POLL_INTERVAL_MS);
     }
-    return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current);
-    };
+
+    return () => clearPolling();
   }, [trainingStatus, pollStatus]);
 
-  /* ────────────────────────────────────────────── */
-  /* RENDER */
-  /* ────────────────────────────────────────────── */
-
-  const ready =
-    uploadedImages.length >= 10 && uploadedImages.length <= 20;
+  if (!mounted) return null;
 
   return (
-    <div className="min-h-screen bg-black text-white p-10">
-      <Card className="max-w-3xl mx-auto bg-gray-900 border-gray-800">
-        <CardHeader>
-          <CardTitle className="text-3xl">Train Your Identity</CardTitle>
-          <CardDescription>Upload 10–20 images</CardDescription>
-        </CardHeader>
+    <div className="min-h-screen bg-black text-white relative overflow-hidden">
+      <FloatingParticles />
+      {showConfetti && <Confetti />}
 
-        <CardContent className="space-y-6">
-          <div>
-            <Label>Training Images</Label>
-            <div className="border-2 border-dashed border-gray-700 rounded-xl p-8 text-center">
-              <input
-                type="file"
-                multiple
-                accept="image/*"
-                id="file"
-                className="hidden"
-                onChange={(e) =>
-                  e.target.files && handleFiles(Array.from(e.target.files))
-                }
-              />
-              <label htmlFor="file" className="cursor-pointer">
-                <Upload className="w-10 h-10 mx-auto mb-2 text-purple-400" />
-                <p>Click or drag images here</p>
-              </label>
-            </div>
-          </div>
+      <div className="max-w-4xl mx-auto px-6 py-20 space-y-8">
+        <Card className="bg-gray-900 border-gray-800">
+          <CardHeader>
+            <CardTitle className="text-3xl">Train Your Identity</CardTitle>
+            <CardDescription>
+              Upload 10–20 images to forge your AI twin
+            </CardDescription>
+          </CardHeader>
 
-          {uploadedImages.length > 0 && (
-            <div className="grid grid-cols-4 gap-4">
-              {uploadedImages.map((img) => (
-                <div key={img.id} className="relative">
-                  <img src={img.preview} className="rounded-lg" />
-                  <button
-                    onClick={() => removeImage(img.id)}
-                    className="absolute top-1 right-1 bg-black/70 rounded-full p-1"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <CardContent className="space-y-6">
+            <Label>Identity Name</Label>
+            <Input
+              value={identityName}
+              onChange={(e) => setIdentityName(e.target.value)}
+              placeholder="Scarlet Muse"
+              className="bg-gray-900 border-gray-700 text-white"
+            />
 
-          {errorMessage && (
-            <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex gap-3">
-              <AlertCircle />
-              <span>{errorMessage}</span>
-            </div>
-          )}
+            <Label>Description (optional)</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="bg-gray-900 border-gray-700 text-white"
+            />
 
-          <Button
-            disabled={!ready || trainingStatus !== "idle"}
-            onClick={handleStartTraining}
-            className="w-full py-6 text-lg bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600"
-          >
-            {trainingStatus === "idle"
-              ? "Start Training"
-              : "Training in progress…"}
-          </Button>
-        </CardContent>
-      </Card>
+            {errorMessage && (
+              <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex gap-3">
+                <AlertCircle />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <Button
+              disabled
+              className="w-full py-6 text-lg bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600"
+            >
+              Start Training
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
 
       <AnimatePresence>
         {trainingStatus !== "idle" && (
           <motion.div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
             <Card className="bg-gray-900 border-gray-800 p-10 text-center space-y-6">
-              {trainingStatus === "queued" && <Clock className="w-16 h-16 mx-auto text-amber-400 animate-spin" />}
-              {trainingStatus === "training" && <Sparkles className="w-16 h-16 mx-auto text-cyan-400 animate-spin" />}
-              {trainingStatus === "completed" && <CheckCircle className="w-16 h-16 mx-auto text-emerald-400" />}
-              {trainingStatus === "failed" && <AlertCircle className="w-16 h-16 mx-auto text-rose-400" />}
+              {trainingStatus === "queued" && (
+                <>
+                  <Clock className="w-16 h-16 mx-auto text-amber-400 animate-spin" />
+                  <h2 className="text-2xl font-bold">Queued</h2>
+                </>
+              )}
+              {trainingStatus === "training" && (
+                <>
+                  <Sparkles className="w-16 h-16 mx-auto text-cyan-400 animate-spin" />
+                  <h2 className="text-2xl font-bold">Training…</h2>
+                  <p>{trainingProgress}%</p>
+                </>
+              )}
+              {trainingStatus === "completed" && (
+                <>
+                  <CheckCircle className="w-16 h-16 mx-auto text-emerald-400" />
+                  <h2 className="text-2xl font-bold">Training Complete</h2>
+                </>
+              )}
+              {trainingStatus === "failed" && (
+                <>
+                  <AlertCircle className="w-16 h-16 mx-auto text-rose-400" />
+                  <h2 className="text-2xl font-bold">Training Failed</h2>
+                </>
+              )}
             </Card>
           </motion.div>
         )}
