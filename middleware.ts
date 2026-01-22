@@ -10,13 +10,14 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // ✅ ALWAYS ALLOW API, NEXT, CHECKOUT, & STATIC ASSETS
-  // CRITICAL: prevents seat-count JSON from being hijacked
-  // CRITICAL: prevents Stripe checkout breakage
+  // ✅ ALWAYS ALLOW API, NEXT, CHECKOUT, STATIC, AUTH, LOGIN
+  // CRITICAL: prevents Stripe + Supabase auth breakage
   if (
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/checkout") ||
+    pathname.startsWith("/auth") ||   // Supabase callbacks
+    pathname === "/login" ||           // Login page
     pathname === "/favicon.ico" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml"
@@ -24,17 +25,28 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 🔒 PRODUCTION LOCK — force pricing page only
+  // 🔐 Detect Supabase session
+  const hasSession =
+    req.cookies.get("sb-access-token") ||
+    req.cookies.get("sb-refresh-token");
+
+  // 🔒 PRODUCTION DOMAIN RULES
   if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
-    if (!pathname.startsWith("/pricing")) {
-      const to = new URL("/pricing", req.url);
+    // 🚫 NOT LOGGED IN → pricing + login only
+    if (!hasSession) {
+      if (!pathname.startsWith("/pricing")) {
+        const to = new URL("/pricing", req.url);
 
-      // Preserve referral codes (?ref=)
-      const ref = url.searchParams.get("ref");
-      if (ref) to.searchParams.set("ref", ref);
+        // Preserve referral codes (?ref=)
+        const ref = url.searchParams.get("ref");
+        if (ref) to.searchParams.set("ref", ref);
 
-      return NextResponse.redirect(to);
+        return NextResponse.redirect(to);
+      }
     }
+
+    // ✅ LOGGED IN USERS → allow everything
+    return NextResponse.next();
   }
 
   return NextResponse.next();
@@ -43,15 +55,8 @@ export function middleware(req: NextRequest) {
 export const config = {
   /**
    * ✅ SAFETY MATCHER (LAUNCH LOCK)
-   *
-   * This matcher ensures middleware ONLY runs on non-API, non-static, non-checkout pages.
-   *
-   * IMPORTANT:
-   * - We explicitly exclude autopost control-plane endpoints.
-   * - We explicitly exclude all /api routes.
-   * - This prevents pricing redirects from ever affecting cron or platform adapters.
    */
   matcher: [
-    "/((?!api/autopost/run|api/autopost/platforms|api|_next|checkout|favicon.ico|robots.txt|sitemap.xml).*)",
+    "/((?!api/autopost/run|api/autopost/platforms|api|_next|checkout|auth|login|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };
