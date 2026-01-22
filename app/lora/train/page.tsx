@@ -3,37 +3,31 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  Suspense,
+} from "react";
+import { useSearchParams } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Upload,
   X,
-  Check,
-  Sparkles,
-  Crown,
   AlertCircle,
   Clock,
   CheckCircle,
-  Star,
-  Zap,
-  Heart,
+  Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { createClient } from "@supabase/supabase-js";
-import { useSearchParams } from "next/navigation";
 
 /* ────────────────────────────────────────────── */
-/* CONFIG */
+/* SUPABASE */
 /* ────────────────────────────────────────────── */
 
 const supabase = createClient(
@@ -52,35 +46,56 @@ type UploadedImage = {
 const POLL_INTERVAL_MS = 5000;
 
 /* ────────────────────────────────────────────── */
-/* PAGE */
+/* OUTER PAGE — REQUIRED FOR NEXT 16 */
 /* ────────────────────────────────────────────── */
 
-export default function LoRATrainerPage() {
-  const params = useSearchParams();
-  const loraId = params.get("lora_id"); // REQUIRED, already exists
+export default function Page() {
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      <LoRATrainInner />
+    </Suspense>
+  );
+}
 
-  const [identityName, setIdentityName] = useState("");
-  const [description, setDescription] = useState("");
+/* ────────────────────────────────────────────── */
+/* LOADING */
+/* ────────────────────────────────────────────── */
+
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen bg-black text-white flex items-center justify-center">
+      <Sparkles className="w-12 h-12 text-purple-400 animate-spin" />
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────── */
+/* INNER CLIENT COMPONENT */
+/* ────────────────────────────────────────────── */
+
+function LoRATrainInner() {
+  const params = useSearchParams();
+  const loraId = params.get("lora_id"); // REQUIRED
+
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
-  const [trainingStatus, setTrainingStatus] =
-    useState<TrainingStatus>("idle");
+  const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>("idle");
   const [trainingProgress, setTrainingProgress] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   /* ────────────────────────────────────────────── */
-  /* GUARDS */
+  /* GUARD */
   /* ────────────────────────────────────────────── */
 
   useEffect(() => {
     if (!loraId) {
-      setErrorMessage("Missing LoRA ID. Please return to your dashboard.");
+      setErrorMessage("Missing LoRA ID. Return to dashboard.");
     }
   }, [loraId]);
 
   /* ────────────────────────────────────────────── */
-  /* FILE HANDLING */
+  /* FILES */
   /* ────────────────────────────────────────────── */
 
   const handleFiles = (files: File[]) => {
@@ -126,13 +141,13 @@ export default function LoRATrainerPage() {
     if (!loraId) return;
     if (uploadedImages.length < 10 || uploadedImages.length > 20) return;
 
-    setErrorMessage(null);
     setTrainingStatus("queued");
     setTrainingProgress(0);
+    setErrorMessage(null);
 
     try {
       const token = await getAccessToken();
-      if (!token) throw new Error("You must be logged in.");
+      if (!token) throw new Error("Not authenticated.");
 
       const form = new FormData();
       form.append("lora_id", loraId);
@@ -150,13 +165,10 @@ export default function LoRATrainerPage() {
       });
 
       const json = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        throw new Error(json?.error || "Failed to start training.");
-      }
+      if (!res.ok) throw new Error(json?.error || "Training failed.");
     } catch (err: any) {
       setTrainingStatus("failed");
-      setErrorMessage(err.message || "Training failed.");
+      setErrorMessage(err.message);
     }
   };
 
@@ -167,13 +179,13 @@ export default function LoRATrainerPage() {
   const pollStatus = useCallback(async () => {
     if (!loraId) return;
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("user_loras")
       .select("status,progress,error_message")
       .eq("id", loraId)
       .single();
 
-    if (error || !data) return;
+    if (!data) return;
 
     setTrainingStatus(data.status);
     if (typeof data.progress === "number") {
@@ -193,7 +205,6 @@ export default function LoRATrainerPage() {
       pollStatus();
       pollingRef.current = setInterval(pollStatus, POLL_INTERVAL_MS);
     }
-
     return () => {
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
@@ -211,9 +222,7 @@ export default function LoRATrainerPage() {
       <Card className="max-w-3xl mx-auto bg-gray-900 border-gray-800">
         <CardHeader>
           <CardTitle className="text-3xl">Train Your Identity</CardTitle>
-          <CardDescription>
-            Upload 10–20 images to train this LoRA
-          </CardDescription>
+          <CardDescription>Upload 10–20 images</CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-6">
@@ -224,11 +233,11 @@ export default function LoRATrainerPage() {
                 type="file"
                 multiple
                 accept="image/*"
+                id="file"
+                className="hidden"
                 onChange={(e) =>
                   e.target.files && handleFiles(Array.from(e.target.files))
                 }
-                className="hidden"
-                id="file"
               />
               <label htmlFor="file" className="cursor-pointer">
                 <Upload className="w-10 h-10 mx-auto mb-2 text-purple-400" />
@@ -241,10 +250,7 @@ export default function LoRATrainerPage() {
             <div className="grid grid-cols-4 gap-4">
               {uploadedImages.map((img) => (
                 <div key={img.id} className="relative">
-                  <img
-                    src={img.preview}
-                    className="rounded-lg object-cover"
-                  />
+                  <img src={img.preview} className="rounded-lg" />
                   <button
                     onClick={() => removeImage(img.id)}
                     className="absolute top-1 right-1 bg-black/70 rounded-full p-1"
@@ -279,31 +285,10 @@ export default function LoRATrainerPage() {
         {trainingStatus !== "idle" && (
           <motion.div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
             <Card className="bg-gray-900 border-gray-800 p-10 text-center space-y-6">
-              {trainingStatus === "queued" && (
-                <>
-                  <Clock className="w-16 h-16 mx-auto text-amber-400 animate-spin" />
-                  <h2 className="text-2xl font-bold">Queued</h2>
-                </>
-              )}
-              {trainingStatus === "training" && (
-                <>
-                  <Sparkles className="w-16 h-16 mx-auto text-cyan-400 animate-spin" />
-                  <h2 className="text-2xl font-bold">Training…</h2>
-                  <p>{trainingProgress}%</p>
-                </>
-              )}
-              {trainingStatus === "completed" && (
-                <>
-                  <CheckCircle className="w-16 h-16 mx-auto text-emerald-400" />
-                  <h2 className="text-2xl font-bold">Training Complete</h2>
-                </>
-              )}
-              {trainingStatus === "failed" && (
-                <>
-                  <AlertCircle className="w-16 h-16 mx-auto text-rose-400" />
-                  <h2 className="text-2xl font-bold">Training Failed</h2>
-                </>
-              )}
+              {trainingStatus === "queued" && <Clock className="w-16 h-16 mx-auto text-amber-400 animate-spin" />}
+              {trainingStatus === "training" && <Sparkles className="w-16 h-16 mx-auto text-cyan-400 animate-spin" />}
+              {trainingStatus === "completed" && <CheckCircle className="w-16 h-16 mx-auto text-emerald-400" />}
+              {trainingStatus === "failed" && <AlertCircle className="w-16 h-16 mx-auto text-rose-400" />}
             </Card>
           </motion.div>
         )}
