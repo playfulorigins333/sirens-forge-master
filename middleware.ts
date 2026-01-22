@@ -25,10 +25,15 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 🔐 Detect Supabase session
-  const hasSession =
-    req.cookies.get("sb-access-token") ||
-    req.cookies.get("sb-refresh-token");
+  // 🔐 Detect Supabase session (v2-compatible)
+  // Supabase v2 uses cookies named: sb-<project-ref>-auth-token
+  const hasSession = req.cookies
+    .getAll()
+    .some(
+      (cookie) =>
+        cookie.name.startsWith("sb-") &&
+        cookie.name.endsWith("-auth-token")
+    );
 
   // 🔒 PRODUCTION DOMAIN RULES
   if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
