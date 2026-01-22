@@ -37,8 +37,11 @@ export function middleware(req: NextRequest) {
   if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
     // 🚫 NOT LOGGED IN
     if (!hasSession) {
-      // ✅ Allow post-login landing routes to avoid auth race
-      if (pathname === "/generate" || pathname === "/train") {
+      // ✅ Allow post-login landing routes (auth race)
+      if (
+        pathname === "/generate" ||
+        pathname.startsWith("/lora/train")
+      ) {
         return NextResponse.next();
       }
 
