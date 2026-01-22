@@ -11,13 +11,12 @@ export function middleware(req: NextRequest) {
   }
 
   // ✅ ALWAYS ALLOW API, NEXT, CHECKOUT, STATIC, AUTH, LOGIN
-  // CRITICAL: prevents Stripe + Supabase auth breakage
   if (
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/checkout") ||
-    pathname.startsWith("/auth") ||   // Supabase callbacks
-    pathname === "/login" ||           // Login page
+    pathname.startsWith("/auth") ||
+    pathname === "/login" ||
     pathname === "/favicon.ico" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml"
@@ -26,7 +25,6 @@ export function middleware(req: NextRequest) {
   }
 
   // 🔐 Detect Supabase session (v2-compatible)
-  // Supabase v2 cookies: sb-<project-ref>-auth-token
   const hasSession = req.cookies
     .getAll()
     .some(
@@ -39,8 +37,8 @@ export function middleware(req: NextRequest) {
   if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
     // 🚫 NOT LOGGED IN
     if (!hasSession) {
-      // ✅ ALLOW post-login landing page to avoid auth race condition
-      if (pathname === "/generate") {
+      // ✅ Allow post-login landing routes to avoid auth race
+      if (pathname === "/generate" || pathname === "/train") {
         return NextResponse.next();
       }
 
@@ -64,9 +62,6 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  /**
-   * ✅ SAFETY MATCHER (LAUNCH LOCK)
-   */
   matcher: [
     "/((?!api/autopost/run|api/autopost/platforms|api|_next|checkout|auth|login|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
