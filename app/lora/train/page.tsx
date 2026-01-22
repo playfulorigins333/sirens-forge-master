@@ -1,5 +1,8 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -116,7 +119,7 @@ export default function LoRATrainerPage() {
   };
 
   /* ────────────────────────────────────────────── */
-  /* START TRAINING (CORRECT FLOW) */
+  /* START TRAINING */
   /* ────────────────────────────────────────────── */
 
   const handleStartTraining = async () => {
@@ -151,8 +154,6 @@ export default function LoRATrainerPage() {
       if (!res.ok) {
         throw new Error(json?.error || "Failed to start training.");
       }
-
-      // polling will take over
     } catch (err: any) {
       setTrainingStatus("failed");
       setErrorMessage(err.message || "Training failed.");
@@ -188,10 +189,7 @@ export default function LoRATrainerPage() {
   }, [loraId]);
 
   useEffect(() => {
-    if (
-      trainingStatus === "queued" ||
-      trainingStatus === "training"
-    ) {
+    if (trainingStatus === "queued" || trainingStatus === "training") {
       pollStatus();
       pollingRef.current = setInterval(pollStatus, POLL_INTERVAL_MS);
     }
@@ -212,16 +210,13 @@ export default function LoRATrainerPage() {
     <div className="min-h-screen bg-black text-white p-10">
       <Card className="max-w-3xl mx-auto bg-gray-900 border-gray-800">
         <CardHeader>
-          <CardTitle className="text-3xl">
-            Train Your Identity
-          </CardTitle>
+          <CardTitle className="text-3xl">Train Your Identity</CardTitle>
           <CardDescription>
             Upload 10–20 images to train this LoRA
           </CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Upload */}
           <div>
             <Label>Training Images</Label>
             <div className="border-2 border-dashed border-gray-700 rounded-xl p-8 text-center">
@@ -242,7 +237,6 @@ export default function LoRATrainerPage() {
             </div>
           </div>
 
-          {/* Grid */}
           {uploadedImages.length > 0 && (
             <div className="grid grid-cols-4 gap-4">
               {uploadedImages.map((img) => (
@@ -262,7 +256,6 @@ export default function LoRATrainerPage() {
             </div>
           )}
 
-          {/* Error */}
           {errorMessage && (
             <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 flex gap-3">
               <AlertCircle />
@@ -270,7 +263,6 @@ export default function LoRATrainerPage() {
             </div>
           )}
 
-          {/* Action */}
           <Button
             disabled={!ready || trainingStatus !== "idle"}
             onClick={handleStartTraining}
@@ -283,7 +275,6 @@ export default function LoRATrainerPage() {
         </CardContent>
       </Card>
 
-      {/* MODAL */}
       <AnimatePresence>
         {trainingStatus !== "idle" && (
           <motion.div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
@@ -304,9 +295,7 @@ export default function LoRATrainerPage() {
               {trainingStatus === "completed" && (
                 <>
                   <CheckCircle className="w-16 h-16 mx-auto text-emerald-400" />
-                  <h2 className="text-2xl font-bold">
-                    Training Complete
-                  </h2>
+                  <h2 className="text-2xl font-bold">Training Complete</h2>
                 </>
               )}
               {trainingStatus === "failed" && (
