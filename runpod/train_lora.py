@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
-OPTION B — STORAGE HANDOFF (REST ONLY)
+OPTION B — STORAGE HANDOFF (REST ONLY) + R2 STORAGE
 
 ✅ sd-scripts compatible dataset structure (SDXL)
 ✅ Per-job dataset folder: /workspace/train_data/sf_<JOB_ID>/
@@ -10,7 +10,7 @@ OPTION B — STORAGE HANDOFF (REST ONLY)
 ✅ SDXL-safe concept enforcement via captions (.txt) NOT --class_tokens
 ✅ Hard-fail on missing dataset / missing artifact / tiny artifact
 ✅ Supabase schema-safe PATCH (auto-strips unknown columns)
-✅ Upload final merged LoRA to Supabase Storage (Build A)
+✅ Cloudflare R2 (S3-compatible) dataset download + artifact upload
 ✅ Terminal-status email notify (Edge Function) — ONLY on completed/failed
 """
 
@@ -23,6 +23,11 @@ import subprocess
 from typing import Dict, Any, List, Tuple, Optional
 
 import requests
+
+# R2 / S3
+import boto3
+from botocore.config import Config as BotoConfig
+from botocore.exceptions import ClientError
 
 
 # ─────────────────────────────────────────────────────────────
@@ -48,14 +53,6 @@ SUPABASE_KEY = require_env("SUPABASE_SERVICE_ROLE_KEY")
 PRETRAINED_MODEL = require_env("PRETRAINED_MODEL")
 VAE_PATH = require_env("VAE_PATH")
 
-# Dataset storage (incoming images)
-STORAGE_BUCKET = os.getenv("LORA_DATASET_BUCKET", "lora-datasets")
-STORAGE_PREFIX = os.getenv("LORA_DATASET_PREFIX_ROOT", "lora_datasets")
-
-# Artifact storage (final LoRAs)
-ARTIFACT_BUCKET = os.getenv("LORA_ARTIFACT_BUCKET", "lora-artifacts")
-ARTIFACT_PREFIX = os.getenv("LORA_ARTIFACT_PREFIX_ROOT", "loras")
-
 LOCAL_TRAIN_ROOT = os.getenv("LORA_LOCAL_TRAIN_ROOT", "/workspace/train_data")
 OUTPUT_ROOT = os.getenv("LORA_OUTPUT_ROOT", "/workspace/output_loras")
 
@@ -77,8 +74,6 @@ CAPTION_EXTENSION = os.getenv("LORA_CAPTION_EXTENSION", ".txt")
 ARTIFACT_MIN_BYTES = 2 * 1024 * 1024  # 2MB
 
 # Edge Function notify (terminal states only)
-# You can set LORA_NOTIFY_ENDPOINT explicitly, otherwise we build from SUPABASE_URL.
-# Example: https://<project>.supabase.co/functions/v1/lora-status-notify
 LORA_NOTIFY_ENDPOINT = os.getenv(
     "LORA_NOTIFY_ENDPOINT",
     f"{SUPABASE_URL}/functions/v1/lora-status-notify",
@@ -95,6 +90,67 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 # ─────────────────────────────────────────────────────────────
+# R2 Config (S3 compatible)
+# ─────────────────────────────────────────────────────────────
+R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
+R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
+R2_ENDPOINT = os.getenv("R2_ENDPOINT")  # e.g. https://<accountid>.r2.cloudflarestorage.com
+AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", "auto")
+
+# If you only set R2_BUCKET, we use it for BOTH datasets and artifacts.
+R2_BUCKET_FALLBACK = os.getenv("R2_BUCKET")
+
+R2_DATASET_BUCKET = os.getenv("R2_DATASET_BUCKET", R2_BUCKET_FALLBACK)
+R2_ARTIFACT_BUCKET = os.getenv("R2_ARTIFACT_BUCKET", R2_BUCKET_FALLBACK)
+
+# Prefix roots inside the bucket
+R2_DATASET_PREFIX_ROOT = os.getenv("R2_DATASET_PREFIX_ROOT", "lora_datasets")
+R2_ARTIFACT_PREFIX_ROOT = os.getenv("R2_ARTIFACT_PREFIX_ROOT", "identity-loras")
+
+# Safety: keep keys clean (no leading slash)
+def _clean_prefix(p: str) -> str:
+    p = (p or "").strip()
+    while p.startswith("/"):
+        p = p[1:]
+    while p.endswith("/"):
+        p = p[:-1]
+    return p
+
+
+R2_DATASET_PREFIX_ROOT = _clean_prefix(R2_DATASET_PREFIX_ROOT)
+R2_ARTIFACT_PREFIX_ROOT = _clean_prefix(R2_ARTIFACT_PREFIX_ROOT)
+
+
+def r2_enabled() -> bool:
+    return bool(R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT and R2_DATASET_BUCKET and R2_ARTIFACT_BUCKET)
+
+
+def make_r2_client():
+    if not r2_enabled():
+        raise RuntimeError(
+            "R2 env missing. Need: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, and R2_BUCKET (or R2_DATASET_BUCKET/R2_ARTIFACT_BUCKET)."
+        )
+
+    # R2 works with AWS SigV4; region can be "auto"
+    session = boto3.session.Session()
+
+    # Boto config: retries + disable some advanced behaviors that can cause surprises
+    cfg = BotoConfig(
+        region_name=AWS_DEFAULT_REGION,
+        retries={"max_attempts": 10, "mode": "standard"},
+        signature_version="s3v4",
+    )
+
+    return session.client(
+        "s3",
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        endpoint_url=R2_ENDPOINT,
+        config=cfg,
+    )
+
+
+# ─────────────────────────────────────────────────────────────
 # Sanity checks
 # ─────────────────────────────────────────────────────────────
 def sanity_checks() -> None:
@@ -108,6 +164,11 @@ def sanity_checks() -> None:
 
     if not CAPTION_EXTENSION.startswith("."):
         raise RuntimeError("LORA_CAPTION_EXTENSION must start with '.'")
+
+    if not r2_enabled():
+        raise RuntimeError(
+            "R2 is not configured. Confirm env vars exist and survived restart."
+        )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -189,66 +250,62 @@ def notify_status(job_id: str, new_status: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────
-# Storage helpers (dataset)
+# R2 helpers (dataset download)
 # ─────────────────────────────────────────────────────────────
-def list_storage_objects(prefix: str) -> List[Dict[str, Any]]:
-    r = requests.post(
-        f"{SUPABASE_URL}/storage/v1/object/list/{STORAGE_BUCKET}",
-        headers=HEADERS,
-        json={"prefix": prefix},
-        timeout=20,
-    )
-    r.raise_for_status()
-    return r.json()
-
-
-def signed_download_url(path: str) -> str:
-    r = requests.post(
-        f"{SUPABASE_URL}/storage/v1/object/sign/{STORAGE_BUCKET}/{path}",
-        headers=HEADERS,
-        json={"expiresIn": 3600},
-        timeout=20,
-    )
-    r.raise_for_status()
-    signed = r.json()["signedURL"]
-    return f"{SUPABASE_URL}/storage/v1{signed}" if signed.startswith("/") else signed
-
-
-# ─────────────────────────────────────────────────────────────
-# Storage helpers (artifact upload)  ✅ Build A
-# ─────────────────────────────────────────────────────────────
-def upload_artifact_to_storage(local_path: str, job_id: str) -> str:
+def r2_list_objects(s3, bucket: str, prefix: str) -> List[str]:
     """
-    Upload ONLY the final merged LoRA to Supabase Storage.
-    Returns the storage path (not a signed URL).
+    Returns list of object keys under prefix.
     """
+    keys: List[str] = []
+    continuation: Optional[str] = None
+
+    while True:
+        kwargs = {"Bucket": bucket, "Prefix": prefix}
+        if continuation:
+            kwargs["ContinuationToken"] = continuation
+
+        resp = s3.list_objects_v2(**kwargs)
+        contents = resp.get("Contents", [])
+        for obj in contents:
+            k = obj.get("Key")
+            if k:
+                keys.append(k)
+
+        if resp.get("IsTruncated"):
+            continuation = resp.get("NextContinuationToken")
+            continue
+
+        break
+
+    return keys
+
+
+def r2_download_file(s3, bucket: str, key: str, local_path: str) -> None:
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    try:
+        s3.download_file(bucket, key, local_path)
+    except ClientError as e:
+        raise RuntimeError(f"R2 download failed: s3://{bucket}/{key} -> {local_path} ({e})")
+
+
+# ─────────────────────────────────────────────────────────────
+# R2 helpers (artifact upload)
+# ─────────────────────────────────────────────────────────────
+def r2_upload_artifact(s3, local_path: str, bucket: str, key: str) -> str:
     if not os.path.exists(local_path):
         raise RuntimeError(f"Artifact not found for upload: {local_path}")
     size = os.path.getsize(local_path)
     if size < ARTIFACT_MIN_BYTES:
         raise RuntimeError(f"Artifact too small for upload: {size} bytes")
 
-    storage_path = f"{ARTIFACT_PREFIX}/{job_id}/final.safetensors".replace("//", "/")
-    url = f"{SUPABASE_URL}/storage/v1/object/{ARTIFACT_BUCKET}/{storage_path}"
+    log(f"☁️ Uploading final LoRA to R2: s3://{bucket}/{key} ({size} bytes)")
+    try:
+        s3.upload_file(local_path, bucket, key)
+    except ClientError as e:
+        raise RuntimeError(f"R2 upload failed: s3://{bucket}/{key} ({e})")
 
-    # Supabase Storage upload headers (service role)
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/octet-stream",
-        # allow overwrite if re-run
-        "x-upsert": "true",
-    }
-
-    log(
-        f"☁️ Uploading final LoRA to Storage: bucket={ARTIFACT_BUCKET} path={storage_path} ({size} bytes)"
-    )
-    with open(local_path, "rb") as f:
-        r = requests.put(url, headers=headers, data=f, timeout=600)
-    r.raise_for_status()
-
-    log("☁️ Upload complete")
-    return storage_path
+    log("☁️ R2 upload complete")
+    return key
 
 
 # ─────────────────────────────────────────────────────────────
@@ -269,33 +326,41 @@ def _write_caption_for_image(image_path: str) -> None:
 
 
 def prepare_dataset(job_id: str) -> Dict[str, Any]:
+    """
+    Downloads dataset images from R2:
+      s3://<R2_DATASET_BUCKET>/<R2_DATASET_PREFIX_ROOT>/<job_id>/*
+    Then builds sd-scripts folder format:
+      /workspace/train_data/sf_<job_id>/<repeat>_<concept>/imgX.jpg + imgX.txt
+    """
+    s3 = make_r2_client()
+
     base = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{job_id}")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
 
-    prefix = f"{STORAGE_PREFIX}/{job_id}"
-    objects = list_storage_objects(prefix)
-    names = [o.get("name") for o in objects if o.get("name")]
+    prefix = f"{R2_DATASET_PREFIX_ROOT}/{job_id}"
+    prefix = prefix.replace("//", "/")
 
-    if not names:
-        raise RuntimeError("No files found in storage for this job")
+    keys = r2_list_objects(s3, R2_DATASET_BUCKET, prefix)
+    if not keys:
+        raise RuntimeError(f"No files found in R2 for this job: s3://{R2_DATASET_BUCKET}/{prefix}")
 
     tmp = os.path.join(base, "_tmp")
     os.makedirs(tmp, exist_ok=True)
 
-    for name in names:
-        local = os.path.basename(name)
-        url = signed_download_url(f"{prefix}/{name}".replace("//", "/"))
-        r = requests.get(url, timeout=180)
-        r.raise_for_status()
-        with open(os.path.join(tmp, local), "wb") as f:
-            f.write(r.content)
+    # Download each object into tmp/
+    for key in keys:
+        filename = os.path.basename(key)
+        if not filename:
+            continue
+        local_path = os.path.join(tmp, filename)
+        r2_download_file(s3, R2_DATASET_BUCKET, key, local_path)
 
     images = [f for f in os.listdir(tmp) if f.lower().endswith(IMAGE_EXTS)]
     count = len(images)
 
     if not (MIN_IMAGES <= count <= MAX_IMAGES):
-        raise RuntimeError(f"Invalid image count: {count}")
+        raise RuntimeError(f"Invalid image count: {count} (expected {MIN_IMAGES}-{MAX_IMAGES})")
 
     repeat, effective = compute_repeat(count)
     concept_dir = os.path.join(base, f"{repeat}_{CONCEPT_TOKEN}")
@@ -309,10 +374,11 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
 
     shutil.rmtree(tmp, ignore_errors=True)
 
+    log(f"📦 R2 dataset: bucket={R2_DATASET_BUCKET} prefix={prefix} files={len(keys)}")
     log(f"📊 Images={count} → repeat={repeat} → samples≈{effective}")
     log(f"🧾 Captions: {CAPTION_EXTENSION} = '{CONCEPT_TOKEN}'")
 
-    return {"base_dir": base, "steps": effective}
+    return {"base_dir": base, "steps": effective, "image_count": count, "repeat": repeat, "r2_prefix": prefix}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -398,10 +464,13 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
 # ─────────────────────────────────────────────────────────────
 def worker_main() -> None:
     sanity_checks()
+
     log("🚀 LoRA worker started (PRODUCTION)")
     log(f"NETWORK_MODULE={NETWORK_MODULE}")
     log(f"CONCEPT_TOKEN={CONCEPT_TOKEN}  CAPTION_EXTENSION={CAPTION_EXTENSION}")
-    log(f"ARTIFACT_BUCKET={ARTIFACT_BUCKET}  ARTIFACT_PREFIX={ARTIFACT_PREFIX}")
+    log(f"R2_ENDPOINT={R2_ENDPOINT}")
+    log(f"R2_DATASET_BUCKET={R2_DATASET_BUCKET}  R2_DATASET_PREFIX_ROOT={R2_DATASET_PREFIX_ROOT}")
+    log(f"R2_ARTIFACT_BUCKET={R2_ARTIFACT_BUCKET}  R2_ARTIFACT_PREFIX_ROOT={R2_ARTIFACT_PREFIX_ROOT}")
     log(f"LORA_NOTIFY_ENDPOINT={LORA_NOTIFY_ENDPOINT}")
 
     last_idle = 0.0
@@ -425,29 +494,39 @@ def worker_main() -> None:
             log(f"📥 Found job {job_id}")
 
             sb_patch_safe(
-                "user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{job_id}"}
+                "user_loras",
+                {"status": "training", "progress": 1},
+                {"id": f"eq.{job_id}"},
             )
 
             ds = prepare_dataset(job_id)
             local_artifact = run_training(job_id, ds)
 
-            # ✅ Build A: upload final artifact to Supabase Storage
-            storage_path = upload_artifact_to_storage(local_artifact, job_id)
+            # Upload final artifact to R2
+            s3 = make_r2_client()
+            r2_key = f"{R2_ARTIFACT_PREFIX_ROOT}/{job_id}/final.safetensors".replace("//", "/")
+            r2_upload_artifact(s3, local_artifact, R2_ARTIFACT_BUCKET, r2_key)
 
-            # ✅ Mark completed + persist storage reference (schema-safe)
+            # Mark completed + persist storage reference (schema-safe)
             sb_patch_safe(
                 "user_loras",
                 {
                     "status": "completed",
                     "progress": 100,
-                    "artifact_storage_path": storage_path,
-                    "artifact_bucket": ARTIFACT_BUCKET,
+                    # R2 references (preferred)
+                    "artifact_r2_bucket": R2_ARTIFACT_BUCKET,
+                    "artifact_r2_key": r2_key,
+                    # local path (debugging)
                     "artifact_local_path": local_artifact,
+                    # dataset debug (optional columns; schema-safe)
+                    "dataset_r2_bucket": R2_DATASET_BUCKET,
+                    "dataset_r2_prefix": ds.get("r2_prefix"),
+                    "image_count": ds.get("image_count"),
                 },
                 {"id": f"eq.{job_id}"},
             )
 
-            # ✅ Notify (terminal state only)
+            # Notify (terminal state only)
             notify_status(job_id, "completed")
 
             log(f"✅ Completed job {job_id}")
@@ -461,7 +540,7 @@ def worker_main() -> None:
                         {"id": f"eq.{job_id}"},
                     )
 
-                    # ✅ Notify (terminal state only)
+                    # Notify (terminal state only)
                     notify_status(job_id, "failed")
 
             except Exception as pe:
