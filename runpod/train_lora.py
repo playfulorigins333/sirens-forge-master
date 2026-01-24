@@ -12,6 +12,11 @@ OPTION B — STORAGE HANDOFF (REST ONLY) + R2 STORAGE
 ✅ Supabase schema-safe PATCH (auto-strips unknown columns)
 ✅ Cloudflare R2 (S3-compatible) dataset download + artifact upload
 ✅ Terminal-status email notify (Edge Function) — ONLY on completed/failed
+
+NOTES (important):
+- R2_ARTIFACT_BUCKET should be your *bucket name* (ex: identity-loras)
+- R2_ARTIFACT_PREFIX_ROOT should be a *folder prefix* inside the bucket (default: loras)
+  (Do NOT set this to your bucket name.)
 """
 
 import os
@@ -105,9 +110,12 @@ R2_ARTIFACT_BUCKET = os.getenv("R2_ARTIFACT_BUCKET", R2_BUCKET_FALLBACK)
 
 # Prefix roots inside the bucket
 R2_DATASET_PREFIX_ROOT = os.getenv("R2_DATASET_PREFIX_ROOT", "lora_datasets")
-R2_ARTIFACT_PREFIX_ROOT = os.getenv("R2_ARTIFACT_PREFIX_ROOT", "identity-loras")
 
-# Safety: keep keys clean (no leading slash)
+# IMPORTANT: This must be a folder prefix INSIDE your artifact bucket (default: "loras")
+# NOT the bucket name.
+R2_ARTIFACT_PREFIX_ROOT = os.getenv("R2_ARTIFACT_PREFIX_ROOT", "loras")
+
+
 def _clean_prefix(p: str) -> str:
     p = (p or "").strip()
     while p.startswith("/"):
@@ -122,19 +130,23 @@ R2_ARTIFACT_PREFIX_ROOT = _clean_prefix(R2_ARTIFACT_PREFIX_ROOT)
 
 
 def r2_enabled() -> bool:
-    return bool(R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT and R2_DATASET_BUCKET and R2_ARTIFACT_BUCKET)
+    return bool(
+        R2_ACCESS_KEY_ID
+        and R2_SECRET_ACCESS_KEY
+        and R2_ENDPOINT
+        and R2_DATASET_BUCKET
+        and R2_ARTIFACT_BUCKET
+    )
 
 
 def make_r2_client():
     if not r2_enabled():
         raise RuntimeError(
-            "R2 env missing. Need: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, and R2_BUCKET (or R2_DATASET_BUCKET/R2_ARTIFACT_BUCKET)."
+            "R2 env missing. Need: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, "
+            "and R2_BUCKET (or R2_DATASET_BUCKET/R2_ARTIFACT_BUCKET)."
         )
 
-    # R2 works with AWS SigV4; region can be "auto"
     session = boto3.session.Session()
-
-    # Boto config: retries + disable some advanced behaviors that can cause surprises
     cfg = BotoConfig(
         region_name=AWS_DEFAULT_REGION,
         retries={"max_attempts": 10, "mode": "standard"},
@@ -166,9 +178,10 @@ def sanity_checks() -> None:
         raise RuntimeError("LORA_CAPTION_EXTENSION must start with '.'")
 
     if not r2_enabled():
-        raise RuntimeError(
-            "R2 is not configured. Confirm env vars exist and survived restart."
-        )
+        raise RuntimeError("R2 is not configured. Confirm env vars exist and survived restart.")
+
+    if not R2_ARTIFACT_PREFIX_ROOT:
+        raise RuntimeError("R2_ARTIFACT_PREFIX_ROOT is empty (should be something like 'loras').")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -229,10 +242,7 @@ def notify_status(job_id: str, new_status: str) -> None:
         log("⚠️ LORA_NOTIFY_ENDPOINT not set — skipping notify")
         return
 
-    payload = {
-        "lora_id": job_id,
-        "new_status": new_status,
-    }
+    payload = {"lora_id": job_id, "new_status": new_status}
 
     headers = {
         "Authorization": f"Bearer {SUPABASE_KEY}",
@@ -245,7 +255,7 @@ def notify_status(job_id: str, new_status: str) -> None:
         r.raise_for_status()
         log(f"📨 Notified Edge Function: status={new_status} job={job_id}")
     except Exception as e:
-        # Never fail the worker because email notify failed
+        # Never fail the worker because notify failed
         log(f"⚠️ Notify failed (non-fatal): {e}")
 
 
@@ -300,7 +310,12 @@ def r2_upload_artifact(s3, local_path: str, bucket: str, key: str) -> str:
 
     log(f"☁️ Uploading final LoRA to R2: s3://{bucket}/{key} ({size} bytes)")
     try:
-        s3.upload_file(local_path, bucket, key)
+        s3.upload_file(
+            local_path,
+            bucket,
+            key,
+            ExtraArgs={"ContentType": "application/octet-stream"},
+        )
     except ClientError as e:
         raise RuntimeError(f"R2 upload failed: s3://{bucket}/{key} ({e})")
 
@@ -338,8 +353,7 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
 
-    prefix = f"{R2_DATASET_PREFIX_ROOT}/{job_id}"
-    prefix = prefix.replace("//", "/")
+    prefix = f"{R2_DATASET_PREFIX_ROOT}/{job_id}".replace("//", "/")
 
     keys = r2_list_objects(s3, R2_DATASET_BUCKET, prefix)
     if not keys:
@@ -378,7 +392,13 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
     log(f"📊 Images={count} → repeat={repeat} → samples≈{effective}")
     log(f"🧾 Captions: {CAPTION_EXTENSION} = '{CONCEPT_TOKEN}'")
 
-    return {"base_dir": base, "steps": effective, "image_count": count, "repeat": repeat, "r2_prefix": prefix}
+    return {
+        "base_dir": base,
+        "steps": effective,
+        "image_count": count,
+        "repeat": repeat,
+        "r2_prefix": prefix,
+    }
 
 
 # ─────────────────────────────────────────────────────────────
@@ -440,9 +460,7 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     log("🔥 Starting training")
     log("CMD: " + " ".join(cmd))
 
-    p = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-    )
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if not p.stdout:
         raise RuntimeError("Training process failed to start")
 
