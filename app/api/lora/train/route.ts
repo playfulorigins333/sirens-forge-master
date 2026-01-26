@@ -1,27 +1,59 @@
 import { NextResponse } from "next/server";
-import { spawn } from "child_process";
-import fs from "fs";
-import path from "path";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const TRAIN_ROOT = "/workspace/train_data";
+/*
+  POST /api/lora/train
+
+  JSON-only route.
+  Expects metadata for a dataset that already exists in storage.
+  Does NOT handle files.
+  Does NOT spawn training locally.
+  RunPod worker is responsible for picking up queued jobs.
+*/
 
 export async function POST(req: Request) {
   try {
-    // ✅ CREATE SUPABASE CLIENT AT RUNTIME ONLY
     const supabaseAdmin = getSupabaseAdmin();
 
-    const form = await req.formData();
-    const lora_id = form.get("lora_id") as string;
+    // 🔒 Expect JSON only
+    const body = await req.json();
+
+    const {
+      lora_id,
+      image_count,
+      storage_bucket,
+      storage_prefix,
+    } = body || {};
 
     if (!lora_id) {
-      return NextResponse.json({ error: "Missing lora_id" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing lora_id" },
+        { status: 400 }
+      );
     }
 
-    // 1️⃣ Guard: block if job already active
+    if (
+      typeof image_count !== "number" ||
+      image_count < 10 ||
+      image_count > 20
+    ) {
+      return NextResponse.json(
+        { error: "Invalid image_count (10–20 required)" },
+        { status: 400 }
+      );
+    }
+
+    if (!storage_bucket || !storage_prefix) {
+      return NextResponse.json(
+        { error: "Missing storage location (bucket/prefix)" },
+        { status: 400 }
+      );
+    }
+
+    // 1️⃣ Verify LoRA exists and is not already active
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from("user_loras")
       .select("id, status")
@@ -29,7 +61,10 @@ export async function POST(req: Request) {
       .single();
 
     if (existingErr || !existing) {
-      return NextResponse.json({ error: "LoRA job not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "LoRA job not found" },
+        { status: 404 }
+      );
     }
 
     if (existing.status === "queued" || existing.status === "training") {
@@ -39,59 +74,31 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2️⃣ Prepare dataset directory
-    const datasetDir = path.join(TRAIN_ROOT, `sf_${lora_id}`, "10_class1");
-    fs.mkdirSync(datasetDir, { recursive: true });
-
-    let imageCount = 0;
-
-    for (const [, value] of form.entries()) {
-      if (!(value instanceof File)) continue;
-      if (!value.type.startsWith("image/")) continue;
-
-      const buffer = Buffer.from(await value.arrayBuffer());
-      const ext = value.name.split(".").pop() || "png";
-      const filename = `${Date.now()}_${Math.random()
-        .toString(36)
-        .slice(2)}.${ext}`;
-
-      fs.writeFileSync(path.join(datasetDir, filename), buffer);
-      imageCount++;
-    }
-
-    if (imageCount < 10 || imageCount > 20) {
-      return NextResponse.json(
-        { error: `Invalid image count: ${imageCount} (10–20 required)` },
-        { status: 400 }
-      );
-    }
-
-    // 3️⃣ Update DB → queued
-    await supabaseAdmin
+    // 2️⃣ Update DB → queued (this is the ONLY responsibility here)
+    const { error: updateErr } = await supabaseAdmin
       .from("user_loras")
       .update({
         status: "queued",
-        image_count: imageCount,
+        image_count,
+        storage_bucket,
+        storage_prefix,
         updated_at: new Date().toISOString(),
       })
       .eq("id", lora_id);
 
-    // 4️⃣ Spawn trainer
-    const child = spawn("python", ["runpod/train_lora.py"], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        LORA_ID: lora_id,
-      },
-      detached: true,
-      stdio: "ignore",
-    });
+    if (updateErr) {
+      console.error("[lora/train] DB update failed:", updateErr);
+      return NextResponse.json(
+        { error: "Failed to queue training job" },
+        { status: 500 }
+      );
+    }
 
-    child.unref();
-
+    // 3️⃣ Done. RunPod worker will pick this up.
     return NextResponse.json({
       status: "queued",
-      images_written: imageCount,
+      lora_id,
+      image_count,
     });
   } catch (err: any) {
     console.error("[lora/train] Fatal error:", err);
