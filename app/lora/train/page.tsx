@@ -394,8 +394,24 @@ export default function LoRATrainerPage() {
 
       setLoraId(createdId);
 
-      // 2) Upload images directly to Supabase Storage (browser → storage)
-      await uploadImagesToSupabaseStorage(createdId, uploadedImages);
+      // 2) Upload images via server (bypasses Supabase Storage RLS)
+const formData = new FormData();
+formData.append("lora_id", createdId);
+
+uploadedImages.forEach((img) => {
+  formData.append("images", img.file);
+});
+
+const uploadRes = await fetch("/api/lora/upload-dataset", {
+  method: "POST",
+  body: formData,
+});
+
+if (!uploadRes.ok) {
+  const err = await uploadRes.json().catch(() => ({}));
+  throw new Error(err?.error || "Server upload failed");
+}
+
 
       // 3) Queue training (metadata only)
       // NOTE: This requires /api/lora/train to support a JSON body mode that reads from storage.
