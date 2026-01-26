@@ -327,7 +327,7 @@ export default function LoRATrainerPage() {
         .from(bucket)
         .upload(objectPath, file, {
           contentType: file.type || "image/jpeg",
-          upsert: false,
+          upsert: true,
         });
 
       if (uploadErr) {
