@@ -321,7 +321,8 @@ export default function LoRATrainerPage() {
       const img = images[i];
       const file = img.file;
 
-      const objectPath = `${basePath}/img_${i + 1}.jpg`;
+      const objectPath = `${basePath}/${Date.now()}_${i + 1}.jpg`;
+
 
       const { error: uploadErr } = await supabaseClient.storage
         .from(bucket)
