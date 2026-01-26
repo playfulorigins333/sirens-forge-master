@@ -1,118 +1,113 @@
+// app/api/lora/start-training/route.ts
+
 import { NextResponse } from "next/server"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
-import fs from "fs"
-import path from "path"
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const TRAIN_ROOT = "/workspace/train_data"
+/* ──────────────────────────────────────────────
+   R2 CONFIG
+────────────────────────────────────────────── */
+const R2 = new S3Client({
+  region: process.env.AWS_DEFAULT_REGION || "auto",
+  endpoint: process.env.R2_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+  },
+})
 
+const R2_BUCKET = process.env.R2_BUCKET!
+const DATASET_PREFIX = "lora_datasets"
+
+/* ──────────────────────────────────────────────
+   POST /api/lora/start-training
+────────────────────────────────────────────── */
 export async function POST(req: Request) {
   console.log("🟢 [start-training] POST hit")
 
-  const supabaseAdmin = getSupabaseAdmin()
+  const supabase = getSupabaseAdmin()
 
   try {
-    let lora_id: string | null = null
-    let images: File[] = []
+    const form = await req.formData()
 
-    const contentType = req.headers.get("content-type") || ""
-
-    /* ──────────────────────────────────────────────
-       1️⃣ ACCEPT BOTH JSON AND FORMDATA
-    ────────────────────────────────────────────── */
-    if (contentType.includes("application/json")) {
-      const body = await req.json()
-      lora_id = body.lora_id ?? null
-    } else {
-      const form = await req.formData()
-      lora_id = form.get("lora_id") as string | null
-
-      for (const [, value] of form.entries()) {
-        if (value instanceof File && value.type.startsWith("image/")) {
-          images.push(value)
-        }
-      }
-    }
-
+    const lora_id = form.get("lora_id") as string | null
     if (!lora_id) {
       return NextResponse.json({ error: "Missing lora_id" }, { status: 400 })
     }
 
+    const images: File[] = []
+    for (const [, v] of form.entries()) {
+      if (v instanceof File && v.type.startsWith("image/")) {
+        images.push(v)
+      }
+    }
+
+    if (images.length < 10 || images.length > 20) {
+      return NextResponse.json(
+        { error: `Invalid image count: ${images.length} (10–20 required)` },
+        { status: 400 }
+      )
+    }
+
     /* ──────────────────────────────────────────────
-       2️⃣ VERIFY LORA EXISTS
+       VERIFY LORA
     ────────────────────────────────────────────── */
-    const { data: lora, error } = await supabaseAdmin
+    const { data: lora } = await supabase
       .from("user_loras")
       .select("id,status")
       .eq("id", lora_id)
       .single()
 
-    if (error || !lora) {
+    if (!lora) {
       return NextResponse.json({ error: "LoRA not found" }, { status: 404 })
     }
 
-    if (lora.status === "queued" || lora.status === "training") {
-      return NextResponse.json({
-        status: lora.status,
-        message: "Already queued or training",
-      })
+    if (["queued", "training"].includes(lora.status)) {
+      return NextResponse.json({ status: lora.status })
     }
 
     /* ──────────────────────────────────────────────
-       3️⃣ WRITE DATASET (ONLY IF IMAGES SENT)
+       UPLOAD IMAGES → R2
     ────────────────────────────────────────────── */
-    let imageCount = 0
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i]
+      const buffer = Buffer.from(await img.arrayBuffer())
 
-    if (images.length > 0) {
-      const datasetDir = path.join(
-        TRAIN_ROOT,
-        `sf_${lora_id}`,
-        "10_class1"
+      const key = `${DATASET_PREFIX}/${lora_id}/img_${i + 1}.jpg`
+
+      await R2.send(
+        new PutObjectCommand({
+          Bucket: R2_BUCKET,
+          Key: key,
+          Body: buffer,
+          ContentType: img.type || "image/jpeg",
+        })
       )
-
-      fs.mkdirSync(datasetDir, { recursive: true })
-
-      for (const file of images) {
-        const buffer = Buffer.from(await file.arrayBuffer())
-        const ext = file.name.split(".").pop() || "png"
-        const filename = `${Date.now()}_${Math.random()
-          .toString(36)
-          .slice(2)}.${ext}`
-
-        fs.writeFileSync(path.join(datasetDir, filename), buffer)
-        imageCount++
-      }
-
-      if (imageCount < 10 || imageCount > 20) {
-        return NextResponse.json(
-          { error: `Invalid image count: ${imageCount} (10–20 required)` },
-          { status: 400 }
-        )
-      }
     }
 
     /* ──────────────────────────────────────────────
-       4️⃣ UPDATE STATUS → QUEUED
+       UPDATE DB → QUEUED
     ────────────────────────────────────────────── */
-    await supabaseAdmin
+    await supabase
       .from("user_loras")
       .update({
         status: "queued",
-        image_count: imageCount || null,
+        image_count: images.length,
         updated_at: new Date().toISOString(),
       })
       .eq("id", lora_id)
 
-    console.log("✅ [start-training] Queued LoRA", lora_id)
+    console.log("✅ [start-training] Images uploaded to R2, queued", lora_id)
 
     return NextResponse.json({
       status: "queued",
-      images_written: imageCount,
+      image_count: images.length,
     })
-  } catch (err: any) {
-    console.error("🔥 [start-training] Fatal error:", err)
+  } catch (err) {
+    console.error("🔥 [start-training] Fatal:", err)
     return NextResponse.json(
       { error: "Failed to start training" },
       { status: 500 }
