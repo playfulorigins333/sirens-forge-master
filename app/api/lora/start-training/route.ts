@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic"
    R2 CONFIG
 ────────────────────────────────────────────── */
 const R2 = new S3Client({
-  region: process.env.AWS_DEFAULT_REGION || "auto",
+  region: process.env.R2_REGION || "auto",
   endpoint: process.env.R2_ENDPOINT,
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID!,
@@ -76,7 +76,8 @@ export async function POST(req: Request) {
       const img = images[i]
       const buffer = Buffer.from(await img.arrayBuffer())
 
-      const key = `${DATASET_PREFIX}/${lora_id}/img_${i + 1}.jpg`
+      const ext = img.name.split(".").pop() || "jpg"
+      const key = `${DATASET_PREFIX}/${lora_id}/img_${i + 1}.${ext}`
 
       await R2.send(
         new PutObjectCommand({
