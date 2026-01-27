@@ -74,27 +74,26 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2️⃣ Update DB → queued (this is the ONLY responsibility here)
-    const { error: updateErr } = await supabaseAdmin
-      .from("user_loras")
-      .update({
-        status: "queued",
-        image_count,
-        storage_bucket,
-        storage_prefix,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", lora_id);
+   // 2️⃣ Update DB → queued (this is the ONLY responsibility here)
+const { error: updateErr } = await supabaseAdmin
+  .from("user_loras")
+  .update({
+    status: "queued",
+    image_count,
+    updated_at: new Date().toISOString(),
+  })
+  .eq("id", lora_id);
 
-    if (updateErr) {
-      console.error("[lora/train] DB update failed:", updateErr);
-      return NextResponse.json(
-        { error: "Failed to queue training job" },
-        { status: 500 }
-      );
-    }
+if (updateErr) {
+  console.error("[lora/train] DB update failed:", updateErr);
+  return NextResponse.json(
+    { error: "Failed to queue training job" },
+    { status: 500 }
+  );
+}
 
-    // 3️⃣ Done. RunPod worker will pick this up.
+// 3️⃣ Done. RunPod worker will pick this up.
+
     return NextResponse.json({
       status: "queued",
       lora_id,
