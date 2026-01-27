@@ -91,24 +91,34 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 # ─────────────────────────────────────────────────────────────
-# R2 Config (S3 compatible)
+# R2 Config (S3 compatible) — PRODUCTION
 # ─────────────────────────────────────────────────────────────
+
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
-R2_ENDPOINT = os.getenv("R2_ENDPOINT")  # e.g. https://<accountid>.r2.cloudflarestorage.com
+R2_ENDPOINT = os.getenv("R2_ENDPOINT")  # https://<accountid>.r2.cloudflarestorage.com
 AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", "auto")
 
-# If you only set R2_BUCKET, we use it for BOTH datasets and artifacts.
-R2_BUCKET_FALLBACK = os.getenv("R2_BUCKET")
+# Single bucket fallback (recommended)
+R2_BUCKET = os.getenv("R2_BUCKET")
 
-R2_DATASET_BUCKET = os.getenv("R2_DATASET_BUCKET", R2_BUCKET_FALLBACK)
-R2_ARTIFACT_BUCKET = os.getenv("R2_ARTIFACT_BUCKET", R2_BUCKET_FALLBACK)
+# Explicit buckets (optional overrides)
+R2_DATASET_BUCKET = os.getenv("R2_DATASET_BUCKET", R2_BUCKET)
+R2_ARTIFACT_BUCKET = os.getenv("R2_ARTIFACT_BUCKET", R2_BUCKET)
 
-# Prefix roots inside the bucket
+# Prefix roots INSIDE the bucket
+# Dataset objects:
+#   s3://<bucket>/lora_datasets/<job_id>/*
+# Final artifacts:
+#   s3://<bucket>/loras/<job_id>/final.safetensors
 R2_DATASET_PREFIX_ROOT = os.getenv("R2_DATASET_PREFIX_ROOT", "lora_datasets")
-R2_ARTIFACT_PREFIX_ROOT = os.getenv("R2_ARTIFACT_PREFIX_ROOT", "identity-loras")
+R2_ARTIFACT_PREFIX_ROOT = os.getenv("R2_ARTIFACT_PREFIX_ROOT", "loras")
 
-# Safety: keep keys clean (no leading slash)
+
+# ─────────────────────────────────────────────────────────────
+# Helpers
+# ─────────────────────────────────────────────────────────────
+
 def _clean_prefix(p: str) -> str:
     p = (p or "").strip()
     while p.startswith("/"):
@@ -123,19 +133,25 @@ R2_ARTIFACT_PREFIX_ROOT = _clean_prefix(R2_ARTIFACT_PREFIX_ROOT)
 
 
 def r2_enabled() -> bool:
-    return bool(R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT and R2_DATASET_BUCKET and R2_ARTIFACT_BUCKET)
+    return bool(
+        R2_ACCESS_KEY_ID
+        and R2_SECRET_ACCESS_KEY
+        and R2_ENDPOINT
+        and R2_DATASET_BUCKET
+        and R2_ARTIFACT_BUCKET
+    )
 
 
 def make_r2_client():
     if not r2_enabled():
         raise RuntimeError(
-            "R2 env missing. Need: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, and R2_BUCKET (or R2_DATASET_BUCKET/R2_ARTIFACT_BUCKET)."
+            "R2 env missing. Required: "
+            "R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET "
+            "(or explicit R2_DATASET_BUCKET / R2_ARTIFACT_BUCKET)."
         )
 
-    # R2 works with AWS SigV4; region can be "auto"
     session = boto3.session.Session()
 
-    # Boto config: retries + disable some advanced behaviors that can cause surprises
     cfg = BotoConfig(
         region_name=AWS_DEFAULT_REGION,
         retries={"max_attempts": 10, "mode": "standard"},
