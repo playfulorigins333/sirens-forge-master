@@ -394,23 +394,50 @@ export default function LoRATrainerPage() {
 
       setLoraId(createdId);
 
-      // 2) Upload images via server (bypasses Supabase Storage RLS)
-const formData = new FormData();
-formData.append("lora_id", createdId);
-
-uploadedImages.forEach((img) => {
-  formData.append("images", img.file);
-});
-
-const uploadRes = await fetch("/api/lora/upload-dataset", {
+     // 2) Request signed upload URLs from server (no uploads yet)
+const urlsRes = await fetch("/api/lora/get-upload-urls", {
   method: "POST",
-  body: formData,
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${token}`,
+  },
+  body: JSON.stringify({
+    lora_id: createdId,
+    image_count: uploadedImages.length,
+  }),
 });
 
-if (!uploadRes.ok) {
-  const err = await uploadRes.json().catch(() => ({}));
-  throw new Error(err?.error || "Server upload failed");
+if (!urlsRes.ok) {
+  const err = await urlsRes.json().catch(() => ({}));
+  throw new Error(err?.error || "Failed to get upload URLs");
 }
+
+const { urls } = await urlsRes.json();
+
+// Hold these for next step
+const signedUploadUrls = urls;
+// 2b) Upload images directly to Supabase Storage using signed URLs
+for (let i = 0; i < signedUploadUrls.length; i++) {
+  const { signedUrl } = signedUploadUrls[i];
+  const file = uploadedImages[i]?.file;
+
+  if (!file) {
+    throw new Error(`Missing file for upload index ${i}`);
+  }
+
+  const uploadResp = await fetch(signedUrl, {
+    method: "PUT",
+    headers: {
+      "Content-Type": file.type || "image/jpeg",
+    },
+    body: file,
+  });
+
+  if (!uploadResp.ok) {
+    throw new Error(`Signed upload failed at index ${i}`);
+  }
+}
+
 
 
       // 3) Queue training (metadata only)
