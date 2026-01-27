@@ -33,29 +33,64 @@ export async function POST(req: Request) {
       );
     }
 
-    const bucket = "lora-datasets";
-    const basePath = `lora_datasets/${lora_id}`;
+ const bucket = "lora-datasets";
+const basePath = `lora_datasets/${lora_id}`;
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const buffer = Buffer.from(await file.arrayBuffer());
+// 🔥 PRODUCTION: clear any existing dataset for this LoRA
+const { data: existingFiles, error: listErr } =
+  await supabaseAdmin.storage
+    .from(bucket)
+    .list(basePath);
 
-      const objectPath = `${basePath}/${Date.now()}_${i + 1}.jpg`;
+if (listErr) {
+  return NextResponse.json(
+    { error: "Failed to list existing dataset files" },
+    { status: 500 }
+  );
+}
 
-      const { error } = await supabaseAdmin.storage
-        .from(bucket)
-        .upload(objectPath, buffer, {
-          contentType: file.type || "image/jpeg",
-          upsert: true,
-        });
+if (existingFiles && existingFiles.length > 0) {
+  const pathsToDelete = existingFiles.map(
+    (f) => `${basePath}/${f.name}`
+  );
 
-      if (error) {
-        return NextResponse.json(
-          { error: `Upload failed: ${error.message}` },
-          { status: 500 }
-        );
-      }
-    }
+  const { error: deleteErr } =
+    await supabaseAdmin.storage
+      .from(bucket)
+      .remove(pathsToDelete);
+
+  if (deleteErr) {
+    return NextResponse.json(
+      { error: "Failed to clear existing dataset" },
+      { status: 500 }
+    );
+  }
+}
+
+// ⬆️ Dataset is now guaranteed clean ⬆️
+
+// Upload fresh images
+for (let i = 0; i < files.length; i++) {
+  const file = files[i];
+  const buffer = Buffer.from(await file.arrayBuffer());
+
+  const objectPath = `${basePath}/${Date.now()}_${i + 1}.jpg`;
+
+  const { error } = await supabaseAdmin.storage
+    .from(bucket)
+    .upload(objectPath, buffer, {
+      contentType: file.type || "image/jpeg",
+      upsert: true,
+    });
+
+  if (error) {
+    return NextResponse.json(
+      { error: `Upload failed: ${error.message}` },
+      { status: 500 }
+    );
+  }
+}
+
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
