@@ -437,40 +437,34 @@ for (let i = 0; i < signedUploadUrls.length; i++) {
     throw new Error(`Signed upload failed at index ${i}`);
   }
 }
+// 3) Queue training (metadata only)
+const queueRes = await fetch("/api/lora/train", {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    lora_id: createdId,
+    image_count: uploadedImages.length,
+    storage_bucket: "lora-datasets",
+    storage_prefix: `lora_datasets/${createdId}`,
+  }),
+});
 
+const queueJson = await queueRes.json().catch(() => ({} as any));
 
+if (!queueRes.ok) {
+  setTrainingStatus("failed");
+  setErrorMessage(
+    queueJson?.error || "Failed to queue training job"
+  );
+  return;
+}
 
-      // 3) Queue training (metadata only)
-      // NOTE: This requires /api/lora/train to support a JSON body mode that reads from storage.
-      // If it still expects multipart images, it will fail here — that is expected until that route is updated.
-      const queueRes = await fetch("/api/lora/train", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          lora_id: createdId,
-          identityName: identityName.trim(),
-          description: (description?.trim() || "") || null,
-          image_count: uploadedImages.length,
-          storage_bucket: "lora-datasets",
-          storage_prefix: `lora_datasets/${createdId}`,
-        }),
-      });
+// Keep status queued; polling effect will take over
 
-      const queueJson = await queueRes.json().catch(() => ({} as any));
-
-      if (!queueRes.ok) {
-        setTrainingStatus("failed");
-        setErrorMessage(
-          queueJson?.error ||
-            "Failed to queue training. (Likely /api/lora/train still expects multipart images.)"
-        );
-        return;
-      }
-
-      // Keep status queued; polling effect will take over.
+      
     } catch (err: any) {
       console.error("Start training error:", err);
       setTrainingStatus("failed");
