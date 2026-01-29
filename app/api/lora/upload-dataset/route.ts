@@ -1,14 +1,21 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Service-role Supabase client (bypasses RLS by design)
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// R2 client (S3-compatible)
+const r2 = new S3Client({
+  region: process.env.AWS_DEFAULT_REGION || "auto",
+  endpoint: process.env.R2_ENDPOINT!,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+  },
+});
+
+const BUCKET = process.env.R2_BUCKET!; // identity-loras
+const DATASET_PREFIX_ROOT = "lora_datasets";
 
 export async function POST(req: Request) {
   try {
@@ -16,10 +23,7 @@ export async function POST(req: Request) {
 
     const lora_id = form.get("lora_id") as string | null;
     if (!lora_id) {
-      return NextResponse.json(
-        { error: "Missing lora_id" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing lora_id" }, { status: 400 });
     }
 
     const files = form.getAll("images").filter(
@@ -33,64 +37,45 @@ export async function POST(req: Request) {
       );
     }
 
- const bucket = "lora-datasets";
-const basePath = `lora_datasets/${lora_id}`;
+    const basePrefix = `${DATASET_PREFIX_ROOT}/${lora_id}`;
 
-// 🔥 PRODUCTION: clear any existing dataset for this LoRA
-const { data: existingFiles, error: listErr } =
-  await supabaseAdmin.storage
-    .from(bucket)
-    .list(basePath);
-
-if (listErr) {
-  return NextResponse.json(
-    { error: "Failed to list existing dataset files" },
-    { status: 500 }
-  );
-}
-
-if (existingFiles && existingFiles.length > 0) {
-  const pathsToDelete = existingFiles.map(
-    (f) => `${basePath}/${f.name}`
-  );
-
-  const { error: deleteErr } =
-    await supabaseAdmin.storage
-      .from(bucket)
-      .remove(pathsToDelete);
-
-  if (deleteErr) {
-    return NextResponse.json(
-      { error: "Failed to clear existing dataset" },
-      { status: 500 }
+    // 🔥 PRODUCTION: clear existing dataset in R2
+    const listResp = await r2.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: basePrefix,
+      })
     );
-  }
-}
 
-// ⬆️ Dataset is now guaranteed clean ⬆️
+    if (listResp.Contents) {
+      for (const obj of listResp.Contents) {
+        if (obj.Key) {
+          await r2.send(
+            new DeleteObjectCommand({
+              Bucket: BUCKET,
+              Key: obj.Key,
+            })
+          );
+        }
+      }
+    }
 
-// Upload fresh images
-for (let i = 0; i < files.length; i++) {
-  const file = files[i];
-  const buffer = Buffer.from(await file.arrayBuffer());
+    // Upload fresh images
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const buffer = Buffer.from(await file.arrayBuffer());
 
-  const objectPath = `${basePath}/${Date.now()}_${i + 1}.jpg`;
+      const key = `${basePrefix}/${Date.now()}_${i + 1}.jpg`;
 
-  const { error } = await supabaseAdmin.storage
-    .from(bucket)
-    .upload(objectPath, buffer, {
-      contentType: file.type || "image/jpeg",
-      upsert: true,
-    });
-
-  if (error) {
-    return NextResponse.json(
-      { error: `Upload failed: ${error.message}` },
-      { status: 500 }
-    );
-  }
-}
-
+      await r2.send(
+        new PutObjectCommand({
+          Bucket: BUCKET,
+          Key: key,
+          Body: buffer,
+          ContentType: file.type || "image/jpeg",
+        })
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
