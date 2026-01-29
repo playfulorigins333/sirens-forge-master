@@ -168,7 +168,7 @@ export default function LoRATrainerPage() {
         .from("user_loras")
         .select("id,status,progress,error_message,updated_at")
         .eq("id", id)
-        .single();
+        .maybeSingle();
 
       if (error) {
         setErrorMessage(error.message || "Failed to poll training status.");
@@ -321,14 +321,13 @@ export default function LoRATrainerPage() {
       const img = images[i];
       const file = img.file;
 
-      const objectPath = `${basePath}/${Date.now()}_${i + 1}.jpg`;
-
+      const objectPath = `${basePath}/img_${i + 1}.jpg`;
 
       const { error: uploadErr } = await supabaseClient.storage
         .from(bucket)
         .upload(objectPath, file, {
           contentType: file.type || "image/jpeg",
-          upsert: true,
+          upsert: false,
         });
 
       if (uploadErr) {
@@ -394,77 +393,40 @@ export default function LoRATrainerPage() {
 
       setLoraId(createdId);
 
-     // 2) Request signed upload URLs from server (no uploads yet)
-const urlsRes = await fetch("/api/lora/get-upload-urls", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
-  },
-  body: JSON.stringify({
-    lora_id: createdId,
-    image_count: uploadedImages.length,
-  }),
-});
+      // 2) Upload images directly to Supabase Storage (browser → storage)
+      await uploadImagesToSupabaseStorage(createdId, uploadedImages);
 
-if (!urlsRes.ok) {
-  const err = await urlsRes.json().catch(() => ({}));
-  throw new Error(err?.error || "Failed to get upload URLs");
-}
+      // 3) Queue training (metadata only)
+      // NOTE: This requires /api/lora/train to support a JSON body mode that reads from storage.
+      // If it still expects multipart images, it will fail here — that is expected until that route is updated.
+      const queueRes = await fetch("/api/lora/train", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          lora_id: createdId,
+          identityName: identityName.trim(),
+          description: (description?.trim() || "") || null,
+          image_count: uploadedImages.length,
+          storage_bucket: "lora-datasets",
+          storage_prefix: `lora_datasets/${createdId}`,
+        }),
+      });
 
-const { urls } = await urlsRes.json();
+      const queueJson = await queueRes.json().catch(() => ({} as any));
 
-// Hold these for next step
-const signedUploadUrls = urls;
-// 2b) Upload images directly to Supabase Storage using signed URLs
-for (let i = 0; i < signedUploadUrls.length; i++) {
-  const { signedUrl } = signedUploadUrls[i];
-  const file = uploadedImages[i]?.file;
+      if (!queueRes.ok) {
+        setTrainingStatus("failed");
+        setErrorMessage(
+          queueJson?.error ||
+            "Failed to queue training. (Likely /api/lora/train still expects multipart images.)"
+        );
+        return;
+      }
 
-  if (!file) {
-    throw new Error(`Missing file for upload index ${i}`);
-  }
-
-  const uploadResp = await fetch(signedUrl, {
-    method: "PUT",
-    headers: {
-      "Content-Type": file.type || "image/jpeg",
-    },
-    body: file,
-  });
-
-  if (!uploadResp.ok) {
-    throw new Error(`Signed upload failed at index ${i}`);
-  }
-}
-// 3) Queue training (metadata only)
-const queueRes = await fetch("/api/lora/train", {
-  method: "POST",
-  headers: {
-    Authorization: `Bearer ${token}`,
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    lora_id: createdId,
-    image_count: uploadedImages.length,
-    storage_bucket: "lora-datasets",
-    storage_prefix: `lora_datasets/${createdId}`,
-  }),
-});
-
-const queueJson = await queueRes.json().catch(() => ({} as any));
-
-if (!queueRes.ok) {
-  setTrainingStatus("failed");
-  setErrorMessage(
-    queueJson?.error || "Failed to queue training job"
-  );
-  return;
-}
-
-// Keep status queued; polling effect will take over
-
-      
+      // Keep status queued; polling effect will take over.
     } catch (err: any) {
       console.error("Start training error:", err);
       setTrainingStatus("failed");
