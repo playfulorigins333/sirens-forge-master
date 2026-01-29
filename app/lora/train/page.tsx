@@ -309,6 +309,50 @@ export default function LoRATrainerPage() {
     }
   };
 
+  const uploadImagesToR2 = async (
+    loraIdForPath: string,
+    images: UploadedImage[]
+  ): Promise<void> => {
+    const res = await fetch("/api/lora/get-upload-urls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        lora_id: loraIdForPath,
+        image_count: images.length,
+      }),
+    });
+
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({} as any));
+      throw new Error(j?.error || "Failed to get R2 upload URLs");
+    }
+
+    const { urls } = (await res.json()) as {
+      urls: { url: string; key: string }[];
+    };
+
+    if (!Array.isArray(urls) || urls.length !== images.length) {
+      throw new Error("R2 upload URL count mismatch");
+    }
+
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      const putUrl = urls[i].url;
+
+      const putRes = await fetch(putUrl, {
+        method: "PUT",
+        headers: {
+          "Content-Type": img.file.type || "image/jpeg",
+        },
+        body: img.file,
+      });
+
+      if (!putRes.ok) {
+        throw new Error(`R2 upload failed on image ${i + 1}`);
+      }
+    }
+  };
+
   const uploadImagesToSupabaseStorage = async (
     loraIdForPath: string,
     images: UploadedImage[]
@@ -394,7 +438,7 @@ export default function LoRATrainerPage() {
       setLoraId(createdId);
 
       // 2) Upload images directly to Supabase Storage (browser → storage)
-      await uploadImagesToSupabaseStorage(createdId, uploadedImages);
+      await uploadImagesToR2(createdId, uploadedImages);
 
       // 3) Queue training (metadata only)
       // NOTE: This requires /api/lora/train to support a JSON body mode that reads from storage.
