@@ -11,8 +11,8 @@ export async function POST(req: Request) {
     const userId = await requireUserId({ request: req });
     const supabaseAdmin = getSupabaseAdmin();
 
-    const body = await req.json().catch(() => ({}));
-    const { identityName, description } = body || {};
+    // Body is intentionally read but NOT persisted
+    await req.json().catch(() => ({}));
 
     // 1️⃣ Check for existing active draft FOR THIS USER
     const { data: existingDraft, error: draftErr } = await supabaseAdmin
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2️⃣ Create new draft WITH user_id
+    // 2️⃣ Create new draft (ONLY valid columns)
     const now = new Date().toISOString();
     const { data: inserted, error: insertErr } = await supabaseAdmin
       .from("user_loras")
@@ -44,8 +44,6 @@ export async function POST(req: Request) {
         user_id: userId,
         status: "draft",
         image_count: 0,
-        identity_name: identityName ?? null,
-        description: description ?? null,
         created_at: now,
         updated_at: now,
       })
