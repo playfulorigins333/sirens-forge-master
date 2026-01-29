@@ -404,6 +404,7 @@ export default function LoRATrainerPage() {
       // 1) Create draft row
       const createDraftRes = await fetch("/api/lora/create", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -438,6 +439,7 @@ export default function LoRATrainerPage() {
       // 3) Queue training (metadata only)
       const queueRes = await fetch("/api/lora/train", {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
