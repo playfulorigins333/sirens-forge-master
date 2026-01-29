@@ -2,7 +2,7 @@ cat > /workspace/sirens-forge-master/runpod/train_lora.py <<'PY'
 #!/usr/bin/env python3
 """
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
-OPTION B — STORAGE HANDOFF (REST ONLY) + R2 STORAGE
+OPTION B — REST DB ONLY + R2 STORAGE (S3-compatible)
 
 ✅ sd-scripts compatible dataset structure (SDXL)
 ✅ Per-job dataset folder: /workspace/train_data/sf_<JOB_ID>/
@@ -11,12 +11,12 @@ OPTION B — STORAGE HANDOFF (REST ONLY) + R2 STORAGE
 ✅ SDXL-safe concept enforcement via captions (.txt) NOT --class_tokens
 ✅ Hard-fail on missing dataset / missing artifact / tiny artifact
 ✅ Supabase schema-safe PATCH (auto-strips unknown columns)
-✅ Cloudflare R2 (S3-compatible) dataset download + artifact upload
+✅ Cloudflare R2 dataset download + artifact upload
 ✅ Terminal-status email notify (Edge Function) — ONLY on completed/failed
 
-🚫 IMPORTANT:
-This worker does NOT use Supabase Storage for artifacts.
-If you see any log line like "Uploading final LoRA to Storage", you are NOT running this file.
+IMPORTANT:
+- This worker does NOT upload artifacts to Supabase Storage.
+- Artifacts go to R2 (S3-compatible).
 """
 
 import os
@@ -29,7 +29,6 @@ from typing import Dict, Any, List, Tuple, Optional
 
 import requests
 
-# R2 / S3
 import boto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
@@ -95,25 +94,18 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 # ─────────────────────────────────────────────────────────────
-# R2 Config (S3 compatible) — PRODUCTION
+# R2 Config (S3 compatible)
 # ─────────────────────────────────────────────────────────────
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 R2_ENDPOINT = os.getenv("R2_ENDPOINT")  # https://<accountid>.r2.cloudflarestorage.com
 AWS_DEFAULT_REGION = os.getenv("AWS_DEFAULT_REGION", "auto")
 
-# Single bucket fallback (recommended)
 R2_BUCKET = os.getenv("R2_BUCKET")
 
-# Explicit buckets (optional overrides)
 R2_DATASET_BUCKET = os.getenv("R2_DATASET_BUCKET", R2_BUCKET)
 R2_ARTIFACT_BUCKET = os.getenv("R2_ARTIFACT_BUCKET", R2_BUCKET)
 
-# Prefix roots INSIDE the bucket
-# Dataset objects:
-#   s3://<bucket>/lora_datasets/<job_id>/*
-# Final artifacts:
-#   s3://<bucket>/loras/<job_id>/final.safetensors
 R2_DATASET_PREFIX_ROOT = os.getenv("R2_DATASET_PREFIX_ROOT", "lora_datasets")
 R2_ARTIFACT_PREFIX_ROOT = os.getenv("R2_ARTIFACT_PREFIX_ROOT", "loras")
 
@@ -150,7 +142,6 @@ def make_r2_client():
         )
 
     session = boto3.session.Session()
-
     cfg = BotoConfig(
         region_name=AWS_DEFAULT_REGION,
         retries={"max_attempts": 10, "mode": "standard"},
@@ -169,58 +160,7 @@ def make_r2_client():
 # ─────────────────────────────────────────────────────────────
 # Sanity checks
 # ─────────────────────────────────────────────────────────────
-def _guard_no_supabase_storage_code() -> None:
-    """
-    Hard guard against accidentally reintroducing legacy Supabase Storage upload code.
-
-    IMPORTANT:
-    - This must NOT false-positive on docstrings/comments.
-    - It should only trip if the forbidden path appears in executable code lines.
-    """
-    forbidden = "storage/v1/object"
-
-    in_triple = False
-    triple_delim: Optional[str] = None
-
-    with open(__file__, "r", encoding="utf-8") as f:
-        for raw in f:
-            line = raw.rstrip("\n")
-
-            # Track triple-quoted blocks (docstrings / multiline strings)
-            if not in_triple:
-                if '"""' in line or "'''" in line:
-                    # Enter triple-quote mode if it starts a block (odd count)
-                    if line.count('"""') % 2 == 1:
-                        in_triple = True
-                        triple_delim = '"""'
-                    elif line.count("'''") % 2 == 1:
-                        in_triple = True
-                        triple_delim = "'''"
-            else:
-                # Exit triple-quote mode if delimiter appears (odd count)
-                if triple_delim and (line.count(triple_delim) % 2 == 1):
-                    in_triple = False
-                    triple_delim = None
-                continue
-
-            # Ignore full-line comments and empty lines
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-
-            # Ignore inline comments: only scan the code portion before '#'
-            code_part = stripped.split("#", 1)[0].strip()
-            if forbidden in code_part:
-                raise RuntimeError(
-                    "This worker must not contain executable Supabase Storage code "
-                    f"(found '{forbidden}' outside comments/docstrings)."
-                )
-
-
 def sanity_checks() -> None:
-    # Guard against legacy code paths
-    _guard_no_supabase_storage_code()
-
     for p, name in [
         (PRETRAINED_MODEL, "PRETRAINED_MODEL"),
         (VAE_PATH, "VAE_PATH"),
@@ -251,17 +191,14 @@ def sb_get(table: str, params: Dict[str, Any]):
 
 
 def _extract_missing_column(postgrest_text: str) -> Optional[str]:
-    """
-    PostgREST / Supabase can return different formats for missing columns.
-    We try a few common patterns.
-    """
     try:
         j = json.loads(postgrest_text)
-        msg = (j.get("message") or "") if isinstance(j, dict) else ""
-        # Pattern 1: "Could not find the 'col' column ..."
+        if isinstance(j, dict):
+            msg = (j.get("message") or "")
+        else:
+            msg = ""
         if "Could not find the '" in msg and "' column" in msg:
             return msg.split("Could not find the '")[1].split("'")[0]
-        # Pattern 2: "column \"col\" of relation \"user_loras\" does not exist"
         if "does not exist" in msg and "column" in msg and '"' in msg:
             parts = msg.split('"')
             if len(parts) >= 2:
@@ -272,9 +209,6 @@ def _extract_missing_column(postgrest_text: str) -> Optional[str]:
 
 
 def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
-    """
-    PATCH but automatically strips unknown columns if Supabase returns 400.
-    """
     working = dict(payload)
     for _ in range(8):
         r = requests.patch(
@@ -404,7 +338,6 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
     os.makedirs(base, exist_ok=True)
 
     prefix = f"{R2_DATASET_PREFIX_ROOT}/{job_id}".replace("//", "/")
-
     keys = r2_list_objects(s3, R2_DATASET_BUCKET, prefix)
     if not keys:
         raise RuntimeError(f"No files found in R2 for this job: s3://{R2_DATASET_BUCKET}/{prefix}")
@@ -412,7 +345,6 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
     tmp = os.path.join(base, "_tmp")
     os.makedirs(tmp, exist_ok=True)
 
-    # Download each object into tmp/
     for key in keys:
         filename = os.path.basename(key)
         if not filename:
@@ -532,7 +464,7 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
 def worker_main() -> None:
     sanity_checks()
 
-    log("🚀 LoRA worker started (PRODUCTION) — R2 ONLY (NO Supabase Storage)")
+    log("🚀 LoRA worker started (PRODUCTION) — R2 ONLY")
     log(f"NETWORK_MODULE={NETWORK_MODULE}")
     log(f"CONCEPT_TOKEN={CONCEPT_TOKEN}  CAPTION_EXTENSION={CAPTION_EXTENSION}")
     log(f"R2_ENDPOINT={R2_ENDPOINT}")
@@ -545,10 +477,7 @@ def worker_main() -> None:
     while True:
         job_id: Optional[str] = None
         try:
-            jobs = sb_get(
-                "user_loras",
-                {"status": "eq.queued", "order": "created_at.asc", "limit": 1},
-            )
+            jobs = sb_get("user_loras", {"status": "eq.queued", "order": "created_at.asc", "limit": 1})
 
             if not jobs:
                 if time.time() - last_idle >= IDLE_LOG_SECONDS:
@@ -560,21 +489,15 @@ def worker_main() -> None:
             job_id = jobs[0]["id"]
             log(f"📥 Found job {job_id}")
 
-            sb_patch_safe(
-                "user_loras",
-                {"status": "training", "progress": 1},
-                {"id": f"eq.{job_id}"},
-            )
+            sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{job_id}"})
 
             ds = prepare_dataset(job_id)
             local_artifact = run_training(job_id, ds)
 
-            # Upload final artifact to R2
             s3 = make_r2_client()
             r2_key = f"{R2_ARTIFACT_PREFIX_ROOT}/{job_id}/final.safetensors".replace("//", "/")
             r2_upload_artifact(s3, local_artifact, R2_ARTIFACT_BUCKET, r2_key)
 
-            # Mark completed + persist storage reference (schema-safe)
             sb_patch_safe(
                 "user_loras",
                 {
