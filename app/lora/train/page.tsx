@@ -430,12 +430,12 @@ export default function LoRATrainerPage() {
 
       setLoraId(createdId);
 
-      // 2) Upload images directly to Supabase Storage (browser → storage)
-      await uploadImagesToSupabaseStorage(createdId, uploadedImages);
+      // 2) Upload images directly to R2 (browser → R2 via presigned PUT URLs)
+      // This is REQUIRED because the training worker reads datasets from R2:
+      // s3://identity-loras/lora_datasets/<lora_id>/...
+      await uploadImagesToR2(createdId, uploadedImages);
 
       // 3) Queue training (metadata only)
-      // NOTE: This requires /api/lora/train to support a JSON body mode that reads from storage.
-      // If it still expects multipart images, it will fail here — that is expected until that route is updated.
       const queueRes = await fetch("/api/lora/train", {
         method: "POST",
         headers: {
@@ -446,8 +446,6 @@ export default function LoRATrainerPage() {
           identityName: identityName.trim(),
           description: (description?.trim() || "") || null,
           image_count: uploadedImages.length,
-          storage_bucket: "lora-datasets",
-          storage_prefix: `lora_datasets/${createdId}`,
         }),
       });
 
@@ -457,7 +455,7 @@ export default function LoRATrainerPage() {
         setTrainingStatus("failed");
         setErrorMessage(
           queueJson?.error ||
-            "Failed to queue training. (Likely /api/lora/train still expects multipart images.)"
+  "Failed to queue training."
         );
         return;
       }
