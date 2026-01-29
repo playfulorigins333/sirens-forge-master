@@ -14,14 +14,21 @@ OPTION B — REST DB ONLY + R2 STORAGE (S3-compatible)
 ✅ Terminal-status email notify (Edge Function) — ONLY on completed/failed
 
 IMPORTANT:
-- This worker does NOT upload artifacts to Supabase Storage.
+- This worker does NOT upload datasets to Supabase Storage.
+- Datasets must exist in R2 under: lora_datasets/<lora_id>/...
 - Artifacts go to R2 (S3-compatible).
+
+HARDENING (critical):
+- Sanitizes job_id/lora_id to remove hidden control chars (e.g. backspace \b / \x08)
+- Canonicalizes UUIDs before using them in PATCH filters or R2 prefixes
 """
 
 import os
 import sys
 import time
 import json
+import re
+import uuid
 import shutil
 import subprocess
 from typing import Dict, Any, List, Tuple, Optional
@@ -45,6 +52,60 @@ def require_env(name: str) -> str:
     if not v:
         raise RuntimeError(f"Missing env: {name}")
     return v
+
+
+# ─────────────────────────────────────────────────────────────
+# UUID hardening
+# ─────────────────────────────────────────────────────────────
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x1F\x7F]")  # includes \b (\x08), \n, \r, etc.
+UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def sanitize_uuid(raw: Any, field: str) -> str:
+    """
+    Remove hidden control chars and canonicalize UUID.
+
+    This is THE fix for the disappearing 'b' problem:
+    if raw contains backspace (\x08), it will be stripped before use.
+    """
+    if raw is None:
+        raise ValueError(f"{field} is None")
+
+    s = str(raw)
+
+    # Strip all ASCII control chars (backspace etc.)
+    no_ctl = CONTROL_CHARS_RE.sub("", s)
+
+    # Strip whitespace
+    clean = no_ctl.strip()
+
+    # Sometimes raw might accidentally be wrapped
+    if clean.lower().startswith("id="):
+        clean = clean[3:].strip()
+
+    try:
+        u = uuid.UUID(clean)
+        out = str(u)
+    except Exception:
+        debug = {
+            "field": field,
+            "raw_repr": repr(s),
+            "raw_utf8_hex": s.encode("utf-8", "backslashreplace").hex(),
+            "no_ctl_repr": repr(no_ctl),
+            "clean_repr": repr(clean),
+        }
+        raise ValueError(f"Invalid UUID for {field}. Debug: {json.dumps(debug, ensure_ascii=False)}")
+
+    if not UUID_RE.match(out):
+        raise ValueError(f"Canonical UUID format failed for {field}: {out!r}")
+
+    if out != clean:
+        # This is useful proof when debugging corruption.
+        log(f"🧼 UUID sanitized {field}: {clean!r} -> {out!r}")
+
+    return out
 
 
 # ─────────────────────────────────────────────────────────────
@@ -208,6 +269,11 @@ def _extract_missing_column(postgrest_text: str) -> Optional[str]:
 
 
 def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
+    """
+    Safe PATCH:
+    - params should be dict like {"id": "eq.<uuid>"}
+    - Will strip unknown columns if PostgREST complains.
+    """
     working = dict(payload)
     for _ in range(8):
         r = requests.patch(
@@ -329,14 +395,19 @@ def _write_caption_for_image(image_path: str) -> None:
         f.write(CONCEPT_TOKEN)
 
 
-def prepare_dataset(job_id: str) -> Dict[str, Any]:
+def prepare_dataset(lora_id: str) -> Dict[str, Any]:
+    """
+    R2 dataset contract:
+      s3://<R2_DATASET_BUCKET>/lora_datasets/<lora_id>/...
+    """
     s3 = make_r2_client()
 
-    base = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{job_id}")
+    base = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{lora_id}")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
 
-    prefix = f"{R2_DATASET_PREFIX_ROOT}/{job_id}".replace("//", "/")
+    # IMPORTANT: trailing slash so we don't accidentally match other IDs with same prefix
+    prefix = f"{R2_DATASET_PREFIX_ROOT}/{lora_id}/".replace("//", "/")
     keys = r2_list_objects(s3, R2_DATASET_BUCKET, prefix)
     if not keys:
         raise RuntimeError(f"No files found in R2 for this job: s3://{R2_DATASET_BUCKET}/{prefix}")
@@ -385,11 +456,11 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────
 # Training
 # ─────────────────────────────────────────────────────────────
-def run_training(job_id: str, ds: Dict[str, Any]) -> str:
-    out = os.path.join(OUTPUT_ROOT, f"sf_{job_id}")
+def run_training(lora_id: str, ds: Dict[str, Any]) -> str:
+    out = os.path.join(OUTPUT_ROOT, f"sf_{lora_id}")
     os.makedirs(out, exist_ok=True)
 
-    name = f"sf_{job_id}"
+    name = f"sf_{lora_id}"
     artifact = os.path.join(out, f"{name}.safetensors")
 
     cmd = [
@@ -474,7 +545,7 @@ def worker_main() -> None:
     last_idle = 0.0
 
     while True:
-        job_id: Optional[str] = None
+        lora_id: Optional[str] = None
         try:
             jobs = sb_get("user_loras", {"status": "eq.queued", "order": "created_at.asc", "limit": 1})
 
@@ -485,16 +556,24 @@ def worker_main() -> None:
                 time.sleep(POLL_SECONDS)
                 continue
 
-            job_id = jobs[0]["id"]
-            log(f"📥 Found job {job_id}")
+            raw_id = jobs[0].get("id")
 
-            sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{job_id}"})
+            # Log raw repr so we can prove/control-char stripping if it exists
+            log(f"📥 Raw job id repr: {repr(str(raw_id))}")
 
-            ds = prepare_dataset(job_id)
-            local_artifact = run_training(job_id, ds)
+            # Sanitize immediately (THIS PREVENTS THE MISSING 'b' BUG)
+            lora_id = sanitize_uuid(raw_id, "user_loras.id")
+
+            log(f"📥 Found job {lora_id}")
+
+            # IMPORTANT: all future uses must use the sanitized UUID
+            sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{lora_id}"})
+
+            ds = prepare_dataset(lora_id)
+            local_artifact = run_training(lora_id, ds)
 
             s3 = make_r2_client()
-            r2_key = f"{R2_ARTIFACT_PREFIX_ROOT}/{job_id}/final.safetensors".replace("//", "/")
+            r2_key = f"{R2_ARTIFACT_PREFIX_ROOT}/{lora_id}/final.safetensors".replace("//", "/")
             r2_upload_artifact(s3, local_artifact, R2_ARTIFACT_BUCKET, r2_key)
 
             sb_patch_safe(
@@ -509,21 +588,21 @@ def worker_main() -> None:
                     "dataset_r2_prefix": ds.get("r2_prefix"),
                     "image_count": ds.get("image_count"),
                 },
-                {"id": f"eq.{job_id}"},
+                {"id": f"eq.{lora_id}"},
             )
 
-            notify_status(job_id, "completed")
-            log(f"✅ Completed job {job_id}")
+            notify_status(lora_id, "completed")
+            log(f"✅ Completed job {lora_id}")
 
         except Exception as e:
             try:
-                if job_id:
+                if lora_id:
                     sb_patch_safe(
                         "user_loras",
                         {"status": "failed", "progress": 0, "error_message": str(e)},
-                        {"id": f"eq.{job_id}"},
+                        {"id": f"eq.{lora_id}"},
                     )
-                    notify_status(job_id, "failed")
+                    notify_status(lora_id, "failed")
             except Exception as pe:
                 log(f"⚠️ Failed to patch failure status: {pe}")
 
