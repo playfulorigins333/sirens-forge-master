@@ -1,10 +1,52 @@
 import { NextResponse } from "next/server";
-import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
+import { randomUUID } from "crypto";
+
+/**
+ * HARDENED LoRA dataset uploader (R2 only)
+ *
+ * Contract (MUST MATCH WORKER):
+ *   s3://identity-loras/lora_datasets/<lora_id>/...
+ *
+ * Key protections:
+ * - Strip ALL ASCII control characters from lora_id
+ * - Canonicalize UUID before using it in R2 keys
+ * - Always use trailing slash in prefix
+ */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// R2 client (S3-compatible)
+/* ────────────────────────────────────────────── */
+/* UUID hardening                                 */
+/* ────────────────────────────────────────────── */
+
+const CONTROL_CHARS = /[\x00-\x1F\x7F]/g;
+const UUID_RE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function sanitizeUUID(raw: string): string {
+  const noCtl = raw.replace(CONTROL_CHARS, "").trim();
+
+  if (!UUID_RE.test(noCtl)) {
+    throw new Error(`Invalid lora_id UUID: ${JSON.stringify({
+      raw,
+      noCtl,
+    })}`);
+  }
+
+  return noCtl.toLowerCase();
+}
+
+/* ────────────────────────────────────────────── */
+/* R2 client                                     */
+/* ────────────────────────────────────────────── */
+
 const r2 = new S3Client({
   region: process.env.AWS_DEFAULT_REGION || "auto",
   endpoint: process.env.R2_ENDPOINT!,
@@ -17,18 +59,28 @@ const r2 = new S3Client({
 const BUCKET = process.env.R2_BUCKET!; // identity-loras
 const DATASET_PREFIX_ROOT = "lora_datasets";
 
+/* ────────────────────────────────────────────── */
+/* POST                                          */
+/* ────────────────────────────────────────────── */
+
 export async function POST(req: Request) {
   try {
     const form = await req.formData();
 
-    const lora_id = form.get("lora_id") as string | null;
-    if (!lora_id) {
-      return NextResponse.json({ error: "Missing lora_id" }, { status: 400 });
+    const rawId = form.get("lora_id");
+    if (typeof rawId !== "string") {
+      return NextResponse.json(
+        { error: "Missing lora_id" },
+        { status: 400 }
+      );
     }
 
-    const files = form.getAll("images").filter(
-      (f): f is File => f instanceof File
-    );
+    // 🔒 HARD FIX — sanitize UUID
+    const lora_id = sanitizeUUID(rawId);
+
+    const files = form
+      .getAll("images")
+      .filter((f): f is File => f instanceof File);
 
     if (files.length < 10 || files.length > 20) {
       return NextResponse.json(
@@ -37,9 +89,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const basePrefix = `${DATASET_PREFIX_ROOT}/${lora_id}`;
+    // 🔒 MUST MATCH WORKER EXACTLY
+    const basePrefix = `${DATASET_PREFIX_ROOT}/${lora_id}/`;
 
-    // 🔥 PRODUCTION: clear existing dataset in R2
+    /* ────────────────────────────────────────── */
+    /* Clear existing dataset                    */
+    /* ────────────────────────────────────────── */
+
     const listResp = await r2.send(
       new ListObjectsV2Command({
         Bucket: BUCKET,
@@ -60,12 +116,15 @@ export async function POST(req: Request) {
       }
     }
 
-    // Upload fresh images
+    /* ────────────────────────────────────────── */
+    /* Upload images                             */
+    /* ────────────────────────────────────────── */
+
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const buffer = Buffer.from(await file.arrayBuffer());
 
-      const key = `${basePrefix}/${Date.now()}_${i + 1}.jpg`;
+      const key = `${basePrefix}${Date.now()}_${i + 1}.jpg`;
 
       await r2.send(
         new PutObjectCommand({
@@ -77,8 +136,12 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({ success: true });
-  } catch (err: any) {
+    return NextResponse.json({
+      success: true,
+      lora_id,
+      r2_prefix: basePrefix,
+    });
+  } catch (err) {
     console.error("[upload-dataset] Fatal:", err);
     return NextResponse.json(
       { error: "Server upload failed" },

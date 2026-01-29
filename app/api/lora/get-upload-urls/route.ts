@@ -1,20 +1,66 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import {
+  S3Client,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+/**
+ * Generates presigned PUT URLs for uploading LoRA datasets directly to R2.
+ *
+ * CONTRACT (matches worker exactly):
+ *   Bucket: identity-loras
+ *   Key:    lora_datasets/<lora_id>/<timestamp>_<index>.jpg
+ *
+ * Returns:
+ *   { urls: { url, key }[] }
+ */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Service-role client (required for signing URLs)
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+/* ────────────────────────────────────────────── */
+/* UUID hardening (same rules as worker/uploader) */
+/* ────────────────────────────────────────────── */
+
+const CONTROL_CHARS = /[\x00-\x1F\x7F]/g;
+const UUID_RE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function sanitizeUUID(raw: string): string {
+  const clean = raw.replace(CONTROL_CHARS, "").trim();
+  if (!UUID_RE.test(clean)) {
+    throw new Error(`Invalid lora_id UUID: ${clean}`);
+  }
+  return clean.toLowerCase();
+}
+
+/* ────────────────────────────────────────────── */
+/* R2 client                                     */
+/* ────────────────────────────────────────────── */
+
+const r2 = new S3Client({
+  region: process.env.AWS_DEFAULT_REGION || "auto",
+  endpoint: process.env.R2_ENDPOINT!,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+  },
+});
+
+const BUCKET = process.env.R2_BUCKET!; // identity-loras
+const DATASET_PREFIX_ROOT = "lora_datasets";
+
+/* ────────────────────────────────────────────── */
+/* POST                                          */
+/* ────────────────────────────────────────────── */
 
 export async function POST(req: Request) {
   try {
-    const { lora_id, image_count } = await req.json();
+    const body = await req.json();
+    const { lora_id: rawId, image_count } = body ?? {};
 
-    if (!lora_id || !image_count) {
+    if (typeof rawId !== "string" || typeof image_count !== "number") {
       return NextResponse.json(
         { error: "Missing lora_id or image_count" },
         { status: 400 }
@@ -28,41 +74,39 @@ export async function POST(req: Request) {
       );
     }
 
-    const bucket = "lora-datasets";
-    const basePath = `lora_datasets/${lora_id}`;
+    // 🔒 HARD FIX — sanitize UUID
+    const lora_id = sanitizeUUID(rawId);
 
-    const urls: {
-      index: number;
-      path: string;
-      signedUrl: string;
-    }[] = [];
+    const basePrefix = `${DATASET_PREFIX_ROOT}/${lora_id}/`;
+
+    const urls: { url: string; key: string }[] = [];
 
     for (let i = 0; i < image_count; i++) {
-      const path = `${basePath}/${Date.now()}_${i + 1}.jpg`;
+      const key = `${basePrefix}${Date.now()}_${i + 1}.jpg`;
 
-      const { data, error } = await supabaseAdmin.storage
-        .from(bucket)
-        .createSignedUploadUrl(path);
-
-      if (error || !data) {
-        return NextResponse.json(
-          { error: error?.message || "Failed to create signed URL" },
-          { status: 500 }
-        );
-      }
-
-      urls.push({
-        index: i,
-        path,
-        signedUrl: data.signedUrl,
+      const command = new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: key,
+        ContentType: "image/jpeg",
       });
+
+      const url = await getSignedUrl(r2, command, {
+        expiresIn: 60 * 10, // 10 minutes
+      });
+
+      urls.push({ url, key });
     }
 
-    return NextResponse.json({ urls });
-  } catch (err: any) {
+    return NextResponse.json({
+      lora_id,
+      bucket: BUCKET,
+      prefix: basePrefix,
+      urls,
+    });
+  } catch (err) {
     console.error("[get-upload-urls] Fatal:", err);
     return NextResponse.json(
-      { error: "Failed to generate upload URLs" },
+      { error: "Failed to generate R2 upload URLs" },
       { status: 500 }
     );
   }
