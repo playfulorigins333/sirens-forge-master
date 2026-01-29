@@ -438,7 +438,7 @@ export default function LoRATrainerPage() {
       setLoraId(createdId);
 
       // 2) Upload images directly to Supabase Storage (browser → storage)
-      await uploadImagesToR2(createdId, uploadedImages);
+      await uploadImagesToSupabaseStorage(createdId, uploadedImages);
 
       // 3) Queue training (metadata only)
       // NOTE: This requires /api/lora/train to support a JSON body mode that reads from storage.
