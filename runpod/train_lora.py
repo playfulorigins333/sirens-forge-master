@@ -1,4 +1,3 @@
-cat > /workspace/sirens-forge-master/runpod/train_lora.py <<'PY'
 #!/usr/bin/env python3
 """
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
@@ -13,6 +12,10 @@ OPTION B — STORAGE HANDOFF (REST ONLY) + R2 STORAGE
 ✅ Supabase schema-safe PATCH (auto-strips unknown columns)
 ✅ Cloudflare R2 (S3-compatible) dataset download + artifact upload
 ✅ Terminal-status email notify (Edge Function) — ONLY on completed/failed
+
+🚫 IMPORTANT:
+This worker does NOT use Supabase Storage for artifacts.
+If you see any log line like "Uploading final LoRA to Storage", you are NOT running this file.
 """
 
 import os
@@ -93,7 +96,6 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 # ─────────────────────────────────────────────────────────────
 # R2 Config (S3 compatible) — PRODUCTION
 # ─────────────────────────────────────────────────────────────
-
 R2_ACCESS_KEY_ID = os.getenv("R2_ACCESS_KEY_ID")
 R2_SECRET_ACCESS_KEY = os.getenv("R2_SECRET_ACCESS_KEY")
 R2_ENDPOINT = os.getenv("R2_ENDPOINT")  # https://<accountid>.r2.cloudflarestorage.com
@@ -114,10 +116,6 @@ R2_ARTIFACT_BUCKET = os.getenv("R2_ARTIFACT_BUCKET", R2_BUCKET)
 R2_DATASET_PREFIX_ROOT = os.getenv("R2_DATASET_PREFIX_ROOT", "lora_datasets")
 R2_ARTIFACT_PREFIX_ROOT = os.getenv("R2_ARTIFACT_PREFIX_ROOT", "loras")
 
-
-# ─────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────
 
 def _clean_prefix(p: str) -> str:
     p = (p or "").strip()
@@ -171,6 +169,11 @@ def make_r2_client():
 # Sanity checks
 # ─────────────────────────────────────────────────────────────
 def sanity_checks() -> None:
+    # Hard guard against accidental legacy Storage usage
+    # (If your worker logs show /storage/v1/object, you are not running this file.)
+    if "storage/v1/object" in open(__file__, "r", encoding="utf-8").read():
+        raise RuntimeError("This worker must not contain Supabase Storage code. Found 'storage/v1/object' in file.")
+
     for p, name in [
         (PRETRAINED_MODEL, "PRETRAINED_MODEL"),
         (VAE_PATH, "VAE_PATH"),
@@ -183,9 +186,7 @@ def sanity_checks() -> None:
         raise RuntimeError("LORA_CAPTION_EXTENSION must start with '.'")
 
     if not r2_enabled():
-        raise RuntimeError(
-            "R2 is not configured. Confirm env vars exist and survived restart."
-        )
+        raise RuntimeError("R2 is not configured. Confirm env vars exist and survived restart.")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -202,9 +203,34 @@ def sb_get(table: str, params: Dict[str, Any]):
     return r.json() if r.text else None
 
 
+def _extract_missing_column(postgrest_text: str) -> Optional[str]:
+    """
+    PostgREST / Supabase can return different formats for missing columns.
+    We try a few common patterns.
+    """
+    try:
+        j = json.loads(postgrest_text)
+        msg = (j.get("message") or "") if isinstance(j, dict) else ""
+        # Pattern 1: "Could not find the 'col' column ..."
+        if "Could not find the '" in msg and "' column" in msg:
+            return msg.split("Could not find the '")[1].split("'")[0]
+        # Pattern 2: "column \"col\" of relation \"user_loras\" does not exist"
+        if "does not exist" in msg and "column" in msg and "\"" in msg:
+            # crude but effective
+            parts = msg.split('"')
+            if len(parts) >= 2:
+                return parts[1]
+    except Exception:
+        pass
+    return None
+
+
 def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
+    """
+    PATCH but automatically strips unknown columns if Supabase returns 400.
+    """
     working = dict(payload)
-    for _ in range(6):
+    for _ in range(8):
         r = requests.patch(
             f"{SUPABASE_URL}/rest/v1/{table}",
             headers=HEADERS,
@@ -219,38 +245,26 @@ def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
         if r.status_code != 400:
             r.raise_for_status()
 
-        try:
-            msg = json.loads(r.text).get("message", "")
-            if "Could not find the '" in msg:
-                col = msg.split("Could not find the '")[1].split("'")[0]
-                log(f"⚠️ Supabase missing column '{col}' — stripping")
-                working.pop(col, None)
-                continue
-        except Exception:
-            pass
+        missing = _extract_missing_column(r.text)
+        if missing:
+            log(f"⚠️ Supabase missing column '{missing}' — stripping")
+            working.pop(missing, None)
+            continue
 
         r.raise_for_status()
 
-    raise RuntimeError("Supabase PATCH failed repeatedly")
+    raise RuntimeError("Supabase PATCH failed repeatedly (unknown 400 cause)")
 
 
 # ─────────────────────────────────────────────────────────────
 # Edge Function notify (terminal status only)
 # ─────────────────────────────────────────────────────────────
 def notify_status(job_id: str, new_status: str) -> None:
-    """
-    Notify via Supabase Edge Function.
-    IMPORTANT: Call ONLY on terminal states (completed/failed) to avoid spam.
-    """
     if not LORA_NOTIFY_ENDPOINT:
         log("⚠️ LORA_NOTIFY_ENDPOINT not set — skipping notify")
         return
 
-    payload = {
-        "lora_id": job_id,
-        "new_status": new_status,
-    }
-
+    payload = {"lora_id": job_id, "new_status": new_status}
     headers = {
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "apikey": SUPABASE_KEY,
@@ -262,7 +276,6 @@ def notify_status(job_id: str, new_status: str) -> None:
         r.raise_for_status()
         log(f"📨 Notified Edge Function: status={new_status} job={job_id}")
     except Exception as e:
-        # Never fail the worker because email notify failed
         log(f"⚠️ Notify failed (non-fatal): {e}")
 
 
@@ -270,9 +283,6 @@ def notify_status(job_id: str, new_status: str) -> None:
 # R2 helpers (dataset download)
 # ─────────────────────────────────────────────────────────────
 def r2_list_objects(s3, bucket: str, prefix: str) -> List[str]:
-    """
-    Returns list of object keys under prefix.
-    """
     keys: List[str] = []
     continuation: Optional[str] = None
 
@@ -282,8 +292,7 @@ def r2_list_objects(s3, bucket: str, prefix: str) -> List[str]:
             kwargs["ContinuationToken"] = continuation
 
         resp = s3.list_objects_v2(**kwargs)
-        contents = resp.get("Contents", [])
-        for obj in contents:
+        for obj in resp.get("Contents", []):
             k = obj.get("Key")
             if k:
                 keys.append(k)
@@ -291,7 +300,6 @@ def r2_list_objects(s3, bucket: str, prefix: str) -> List[str]:
         if resp.get("IsTruncated"):
             continuation = resp.get("NextContinuationToken")
             continue
-
         break
 
     return keys
@@ -343,20 +351,13 @@ def _write_caption_for_image(image_path: str) -> None:
 
 
 def prepare_dataset(job_id: str) -> Dict[str, Any]:
-    """
-    Downloads dataset images from R2:
-      s3://<R2_DATASET_BUCKET>/<R2_DATASET_PREFIX_ROOT>/<job_id>/*
-    Then builds sd-scripts folder format:
-      /workspace/train_data/sf_<job_id>/<repeat>_<concept>/imgX.jpg + imgX.txt
-    """
     s3 = make_r2_client()
 
     base = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{job_id}")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
 
-    prefix = f"{R2_DATASET_PREFIX_ROOT}/{job_id}"
-    prefix = prefix.replace("//", "/")
+    prefix = f"{R2_DATASET_PREFIX_ROOT}/{job_id}".replace("//", "/")
 
     keys = r2_list_objects(s3, R2_DATASET_BUCKET, prefix)
     if not keys:
@@ -395,7 +396,13 @@ def prepare_dataset(job_id: str) -> Dict[str, Any]:
     log(f"📊 Images={count} → repeat={repeat} → samples≈{effective}")
     log(f"🧾 Captions: {CAPTION_EXTENSION} = '{CONCEPT_TOKEN}'")
 
-    return {"base_dir": base, "steps": effective, "image_count": count, "repeat": repeat, "r2_prefix": prefix}
+    return {
+        "base_dir": base,
+        "steps": effective,
+        "image_count": count,
+        "repeat": repeat,
+        "r2_prefix": prefix,
+    }
 
 
 # ─────────────────────────────────────────────────────────────
@@ -446,7 +453,6 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
         "32",
         "--mixed_precision",
         "fp16",
-        # ✅ Memory stability (already proven)
         "--gradient_checkpointing",
         "--save_model_as",
         "safetensors",
@@ -457,9 +463,7 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
     log("🔥 Starting training")
     log("CMD: " + " ".join(cmd))
 
-    p = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-    )
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if not p.stdout:
         raise RuntimeError("Training process failed to start")
 
@@ -482,7 +486,7 @@ def run_training(job_id: str, ds: Dict[str, Any]) -> str:
 def worker_main() -> None:
     sanity_checks()
 
-    log("🚀 LoRA worker started (PRODUCTION)")
+    log("🚀 LoRA worker started (PRODUCTION) — R2 ONLY (NO Supabase Storage)")
     log(f"NETWORK_MODULE={NETWORK_MODULE}")
     log(f"CONCEPT_TOKEN={CONCEPT_TOKEN}  CAPTION_EXTENSION={CAPTION_EXTENSION}")
     log(f"R2_ENDPOINT={R2_ENDPOINT}")
@@ -530,12 +534,9 @@ def worker_main() -> None:
                 {
                     "status": "completed",
                     "progress": 100,
-                    # R2 references (preferred) — will be stripped if columns don't exist
                     "artifact_r2_bucket": R2_ARTIFACT_BUCKET,
                     "artifact_r2_key": r2_key,
-                    # local path (debugging)
                     "artifact_local_path": local_artifact,
-                    # dataset debug (optional columns; schema-safe)
                     "dataset_r2_bucket": R2_DATASET_BUCKET,
                     "dataset_r2_prefix": ds.get("r2_prefix"),
                     "image_count": ds.get("image_count"),
@@ -543,9 +544,7 @@ def worker_main() -> None:
                 {"id": f"eq.{job_id}"},
             )
 
-            # Notify (terminal state only)
             notify_status(job_id, "completed")
-
             log(f"✅ Completed job {job_id}")
 
         except Exception as e:
@@ -556,10 +555,7 @@ def worker_main() -> None:
                         {"status": "failed", "progress": 0, "error_message": str(e)},
                         {"id": f"eq.{job_id}"},
                     )
-
-                    # Notify (terminal state only)
                     notify_status(job_id, "failed")
-
             except Exception as pe:
                 log(f"⚠️ Failed to patch failure status: {pe}")
 
@@ -569,4 +565,3 @@ def worker_main() -> None:
 
 if __name__ == "__main__":
     worker_main()
-PY
