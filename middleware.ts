@@ -10,13 +10,14 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // ✅ ALWAYS ALLOW API, NEXT, CHECKOUT, STATIC, AUTH, LOGIN
+  // ✅ ALWAYS ALLOW API + INTERNAL + SUPABASE REST
   if (
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/checkout") ||
     pathname.startsWith("/auth") ||
-    pathname === "/login" ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/rest/v1") || // 🔥 SUPABASE REST (CRITICAL)
     pathname === "/favicon.ico" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml"
@@ -24,7 +25,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // 🔐 Detect Supabase session (v2-compatible)
+  // 🔒 Detect Supabase session (v2-compatible)
   const hasSession = req.cookies
     .getAll()
     .some(
@@ -37,10 +38,10 @@ export function middleware(req: NextRequest) {
   if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
     // 🚫 NOT LOGGED IN
     if (!hasSession) {
-      // ✅ Allow post-login landing routes (auth race)
+      // ✅ Allow LoRA training + generation pages
       if (
         pathname === "/generate" ||
-        pathname.startsWith("/lora/train")
+        pathname.startsWith("/lora")
       ) {
         return NextResponse.next();
       }
