@@ -341,9 +341,6 @@ export default function LoRATrainerPage() {
 
       const putRes = await fetch(putUrl, {
         method: "PUT",
-        headers: {
-          "Content-Type": img.file.type || "image/jpeg",
-        },
         body: img.file,
       });
 
