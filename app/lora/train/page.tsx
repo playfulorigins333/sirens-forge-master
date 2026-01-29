@@ -443,7 +443,7 @@ export default function LoRATrainerPage() {
       // 3) Queue training (metadata only)
       // NOTE: This requires /api/lora/train to support a JSON body mode that reads from storage.
       // If it still expects multipart images, it will fail here — that is expected until that route is updated.
-      const queueRes = await fetch("/api/lora/train", {
+      const queueRes = await fetch("/api/lora/start-training", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
