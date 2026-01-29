@@ -1,4 +1,3 @@
-cat > /workspace/sirens-forge-master/runpod/train_lora.py <<'PY'
 #!/usr/bin/env python3
 """
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
@@ -534,4 +533,3 @@ def worker_main() -> None:
 
 if __name__ == "__main__":
     worker_main()
-PY
