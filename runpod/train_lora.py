@@ -35,6 +35,8 @@ import shutil
 import subprocess
 from typing import Dict, Any, List, Tuple, Optional
 
+from datetime import datetime, timezone, timedelta  # ✅ ADDED (stale-job reclaim)
+
 import requests
 
 import boto3
@@ -160,6 +162,9 @@ CONCEPT_TOKEN = os.getenv("LORA_CONCEPT_TOKEN", "concept")
 CAPTION_EXTENSION = os.getenv("LORA_CAPTION_EXTENSION", ".txt")
 
 ARTIFACT_MIN_BYTES = 2 * 1024 * 1024  # 2MB
+
+# ✅ NEW: stale "training" reclaim window (fixes stuck jobs when no queued exist)
+STALE_TRAINING_MINUTES = int(os.getenv("STALE_TRAINING_MINUTES", "15"))
 
 # Edge Function notify (terminal states only)
 LORA_NOTIFY_ENDPOINT = os.getenv(
@@ -586,6 +591,7 @@ def worker_main() -> None:
     log(f"R2_DATASET_BUCKET={R2_DATASET_BUCKET}  R2_DATASET_PREFIX_ROOT={R2_DATASET_PREFIX_ROOT}")
     log(f"R2_ARTIFACT_BUCKET={R2_ARTIFACT_BUCKET}  R2_ARTIFACT_PREFIX_ROOT={R2_ARTIFACT_PREFIX_ROOT}")
     log(f"LORA_NOTIFY_ENDPOINT={LORA_NOTIFY_ENDPOINT}")
+    log(f"STALE_TRAINING_MINUTES={STALE_TRAINING_MINUTES}")  # ✅ ADDED
 
     last_idle = 0.0
 
@@ -595,7 +601,17 @@ def worker_main() -> None:
         uploaded_r2_key: Optional[str] = None
 
         try:
-            jobs = sb_get("user_loras", {"status": "eq.queued", "order": "created_at.asc", "limit": 1})
+            # ✅ FIX: Pick queued first; if none exist, reclaim "stuck training" older than STALE_TRAINING_MINUTES.
+            stale_before = (datetime.now(timezone.utc) - timedelta(minutes=STALE_TRAINING_MINUTES)).isoformat()
+
+            jobs = sb_get(
+                "user_loras",
+                {
+                    "or": f"(status.eq.queued,and(status.eq.training,updated_at.lt.{stale_before}))",
+                    "order": "updated_at.asc",
+                    "limit": 1,
+                },
+            )
 
             if not jobs:
                 if time.time() - last_idle >= IDLE_LOG_SECONDS:
@@ -605,13 +621,17 @@ def worker_main() -> None:
                 continue
 
             raw_id = jobs[0].get("id")
+            raw_status = jobs[0].get("status")
 
             # Log raw repr so we can prove/control-char stripping if it exists
             log(f"📥 Raw job id repr: {repr(str(raw_id))}")
 
             # Sanitize immediately
             lora_id = sanitize_uuid(raw_id, "user_loras.id")
-            log(f"📥 Found job {lora_id}")
+            log(f"📥 Found job {lora_id} (status={raw_status})")
+
+            if raw_status == "training":
+                log(f"♻️ Reclaiming stale training job (updated_at < {stale_before}) → {lora_id}")
 
             # Mark training (sanitized filter params happen inside sb_patch_safe)
             sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{lora_id}"})
