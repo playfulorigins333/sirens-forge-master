@@ -21,6 +21,8 @@ IMPORTANT:
 HARDENING (critical):
 - Sanitizes job_id/lora_id to remove hidden control chars (e.g. backspace \b / \x08)
 - Canonicalizes UUIDs before using them in PATCH filters or R2 prefixes
+- ALSO sanitizes REST filter params inside sb_patch_safe() (prevents URL corruption anywhere)
+- If artifact upload succeeds but Supabase patch fails, DO NOT mark job failed (artifact is the truth)
 """
 
 import os
@@ -102,10 +104,32 @@ def sanitize_uuid(raw: Any, field: str) -> str:
         raise ValueError(f"Canonical UUID format failed for {field}: {out!r}")
 
     if out != clean:
-        # This is useful proof when debugging corruption.
+        # Useful proof when debugging corruption.
         log(f"🧼 UUID sanitized {field}: {clean!r} -> {out!r}")
 
     return out
+
+
+def sanitize_eq_filter(value: Any, field: str) -> str:
+    """
+    Sanitizes REST filter strings like:
+      'eq.<uuid>'
+    Returns canonical 'eq.<uuid>'.
+
+    Also strips control chars from the whole string to prevent terminal/backspace corruption.
+    """
+    if value is None:
+        raise ValueError(f"{field} filter is None")
+
+    s = CONTROL_CHARS_RE.sub("", str(value)).strip()
+
+    if s.lower().startswith("eq."):
+        raw_uuid = s[3:].strip()
+        u = sanitize_uuid(raw_uuid, f"{field} (eq filter)")
+        return f"eq.{u}"
+
+    # Not an eq filter; just return control-char stripped
+    return s
 
 
 # ─────────────────────────────────────────────────────────────
@@ -257,6 +281,8 @@ def _extract_missing_column(postgrest_text: str) -> Optional[str]:
             msg = (j.get("message") or "")
         else:
             msg = ""
+
+        # Common PostgREST missing-column messages
         if "Could not find the '" in msg and "' column" in msg:
             return msg.split("Could not find the '")[1].split("'")[0]
         if "does not exist" in msg and "column" in msg and '"' in msg:
@@ -268,25 +294,43 @@ def _extract_missing_column(postgrest_text: str) -> Optional[str]:
     return None
 
 
+def _sanitize_params(params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sanitizes filter params before sending to Supabase REST.
+    Especially important for {"id": "eq.<uuid>"} to prevent control-char corruption.
+    """
+    out: Dict[str, Any] = {}
+    for k, v in (params or {}).items():
+        if k == "id":
+            out[k] = sanitize_eq_filter(v, "user_loras.id")
+        else:
+            out[k] = CONTROL_CHARS_RE.sub("", str(v)).strip() if v is not None else v
+    return out
+
+
 def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
     """
     Safe PATCH:
     - params should be dict like {"id": "eq.<uuid>"}
     - Will strip unknown columns if PostgREST complains.
+    - ALSO sanitizes params so hidden control chars cannot corrupt URLs/filters.
     """
     working = dict(payload)
-    for _ in range(8):
+    safe_params = _sanitize_params(params)
+
+    for _ in range(12):
         r = requests.patch(
             f"{SUPABASE_URL}/rest/v1/{table}",
             headers=HEADERS,
             json=working,
-            params=params,
+            params=safe_params,
             timeout=20,
         )
 
         if 200 <= r.status_code < 300:
             return r.json() if r.text else None
 
+        # If not 400, let requests raise with full context
         if r.status_code != 400:
             r.raise_for_status()
 
@@ -296,9 +340,10 @@ def sb_patch_safe(table: str, payload: Dict[str, Any], params: Dict[str, Any]):
             working.pop(missing, None)
             continue
 
-        r.raise_for_status()
+        # 400 but not a missing-column case: include response body for debugging
+        raise RuntimeError(f"Supabase PATCH 400 (not missing-column). Body: {r.text}")
 
-    raise RuntimeError("Supabase PATCH failed repeatedly (unknown 400 cause)")
+    raise RuntimeError("Supabase PATCH failed repeatedly (too many retries)")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -546,6 +591,9 @@ def worker_main() -> None:
 
     while True:
         lora_id: Optional[str] = None
+        artifact_uploaded: bool = False
+        uploaded_r2_key: Optional[str] = None
+
         try:
             jobs = sb_get("user_loras", {"status": "eq.queued", "order": "created_at.asc", "limit": 1})
 
@@ -561,40 +609,80 @@ def worker_main() -> None:
             # Log raw repr so we can prove/control-char stripping if it exists
             log(f"📥 Raw job id repr: {repr(str(raw_id))}")
 
-            # Sanitize immediately (THIS PREVENTS THE MISSING 'b' BUG)
+            # Sanitize immediately
             lora_id = sanitize_uuid(raw_id, "user_loras.id")
-
             log(f"📥 Found job {lora_id}")
 
-            # IMPORTANT: all future uses must use the sanitized UUID
+            # Mark training (sanitized filter params happen inside sb_patch_safe)
             sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{lora_id}"})
 
             ds = prepare_dataset(lora_id)
             local_artifact = run_training(lora_id, ds)
 
             s3 = make_r2_client()
-            r2_key = f"{R2_ARTIFACT_PREFIX_ROOT}/{lora_id}/final.safetensors".replace("//", "/")
-            r2_upload_artifact(s3, local_artifact, R2_ARTIFACT_BUCKET, r2_key)
+            uploaded_r2_key = f"{R2_ARTIFACT_PREFIX_ROOT}/{lora_id}/final.safetensors".replace("//", "/")
+            r2_upload_artifact(s3, local_artifact, R2_ARTIFACT_BUCKET, uploaded_r2_key)
+            artifact_uploaded = True
 
-            sb_patch_safe(
-                "user_loras",
-                {
+            # IMPORTANT: do NOT send columns your schema doesn't have.
+            # artifact_local_path was missing; removing it avoids unnecessary PATCH failures.
+            completed_payload = {
+                "status": "completed",
+                "progress": 100,
+                "artifact_r2_bucket": R2_ARTIFACT_BUCKET,
+                "artifact_r2_key": uploaded_r2_key,
+                "dataset_r2_bucket": R2_DATASET_BUCKET,
+                "dataset_r2_prefix": ds.get("r2_prefix"),
+                "image_count": ds.get("image_count"),
+            }
+
+            try:
+                sb_patch_safe("user_loras", completed_payload, {"id": f"eq.{lora_id}"})
+            except Exception as patch_err:
+                # Artifact is already safely in R2. Do NOT mark job failed.
+                log(f"⚠️ Completed artifact is safe in R2 but Supabase update failed: {patch_err}")
+                # Best-effort minimal status update (strip unknown columns automatically)
+                minimal_payload = {
                     "status": "completed",
                     "progress": 100,
                     "artifact_r2_bucket": R2_ARTIFACT_BUCKET,
-                    "artifact_r2_key": r2_key,
-                    "artifact_local_path": local_artifact,
-                    "dataset_r2_bucket": R2_DATASET_BUCKET,
-                    "dataset_r2_prefix": ds.get("r2_prefix"),
-                    "image_count": ds.get("image_count"),
-                },
-                {"id": f"eq.{lora_id}"},
-            )
+                    "artifact_r2_key": uploaded_r2_key,
+                }
+                try:
+                    sb_patch_safe("user_loras", minimal_payload, {"id": f"eq.{lora_id}"})
+                except Exception as patch_err_2:
+                    log(f"⚠️ Minimal Supabase update also failed (artifact still safe): {patch_err_2}")
 
             notify_status(lora_id, "completed")
             log(f"✅ Completed job {lora_id}")
 
         except Exception as e:
+            # If we already uploaded the artifact, DO NOT overwrite success with "failed".
+            if artifact_uploaded and lora_id and uploaded_r2_key:
+                log(f"⚠️ Job encountered an error AFTER artifact upload. Leaving as completed. Error: {e}")
+                try:
+                    sb_patch_safe(
+                        "user_loras",
+                        {
+                            "status": "completed",
+                            "progress": 100,
+                            "artifact_r2_bucket": R2_ARTIFACT_BUCKET,
+                            "artifact_r2_key": uploaded_r2_key,
+                        },
+                        {"id": f"eq.{lora_id}"},
+                    )
+                except Exception as pe2:
+                    log(f"⚠️ Could not finalize completed status (artifact safe): {pe2}")
+
+                try:
+                    notify_status(lora_id, "completed")
+                except Exception:
+                    pass
+
+                time.sleep(POLL_SECONDS)
+                continue
+
+            # Normal failure path (artifact was not uploaded)
             try:
                 if lora_id:
                     sb_patch_safe(
