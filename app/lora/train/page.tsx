@@ -391,12 +391,6 @@ export default function LoRATrainerPage() {
     setTrainingStatus("queued");
 
     try {
-      const token = await getAccessToken();
-      if (!token) {
-        setTrainingStatus("failed");
-        setErrorMessage("You must be logged in to start training.");
-        return;
-      }
 
       /**
        * ✅ NEW LOCKED FLOW (Option A):
@@ -411,7 +405,6 @@ export default function LoRATrainerPage() {
       const createDraftRes = await fetch("/api/lora/create", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -443,10 +436,9 @@ export default function LoRATrainerPage() {
       // 3) Queue training (metadata only)
       // NOTE: This requires /api/lora/train to support a JSON body mode that reads from storage.
       // If it still expects multipart images, it will fail here — that is expected until that route is updated.
-      const queueRes = await fetch("/api/lora/start-training", {
+      const queueRes = await fetch("/api/lora/train", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
