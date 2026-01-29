@@ -1,3 +1,4 @@
+cat > /workspace/sirens-forge-master/runpod/train_lora.py <<'PY'
 #!/usr/bin/env python3
 """
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
@@ -168,11 +169,57 @@ def make_r2_client():
 # ─────────────────────────────────────────────────────────────
 # Sanity checks
 # ─────────────────────────────────────────────────────────────
+def _guard_no_supabase_storage_code() -> None:
+    """
+    Hard guard against accidentally reintroducing legacy Supabase Storage upload code.
+
+    IMPORTANT:
+    - This must NOT false-positive on docstrings/comments.
+    - It should only trip if the forbidden path appears in executable code lines.
+    """
+    forbidden = "storage/v1/object"
+
+    in_triple = False
+    triple_delim: Optional[str] = None
+
+    with open(__file__, "r", encoding="utf-8") as f:
+        for raw in f:
+            line = raw.rstrip("\n")
+
+            # Track triple-quoted blocks (docstrings / multiline strings)
+            if not in_triple:
+                if '"""' in line or "'''" in line:
+                    # Enter triple-quote mode if it starts a block (odd count)
+                    if line.count('"""') % 2 == 1:
+                        in_triple = True
+                        triple_delim = '"""'
+                    elif line.count("'''") % 2 == 1:
+                        in_triple = True
+                        triple_delim = "'''"
+            else:
+                # Exit triple-quote mode if delimiter appears (odd count)
+                if triple_delim and (line.count(triple_delim) % 2 == 1):
+                    in_triple = False
+                    triple_delim = None
+                continue
+
+            # Ignore full-line comments and empty lines
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+
+            # Ignore inline comments: only scan the code portion before '#'
+            code_part = stripped.split("#", 1)[0].strip()
+            if forbidden in code_part:
+                raise RuntimeError(
+                    "This worker must not contain executable Supabase Storage code "
+                    f"(found '{forbidden}' outside comments/docstrings)."
+                )
+
+
 def sanity_checks() -> None:
-    # Hard guard against accidental legacy Storage usage
-    # (If your worker logs show /storage/v1/object, you are not running this file.)
-    if "storage/v1/object" in open(__file__, "r", encoding="utf-8").read():
-        raise RuntimeError("This worker must not contain Supabase Storage code. Found 'storage/v1/object' in file.")
+    # Guard against legacy code paths
+    _guard_no_supabase_storage_code()
 
     for p, name in [
         (PRETRAINED_MODEL, "PRETRAINED_MODEL"),
@@ -215,8 +262,7 @@ def _extract_missing_column(postgrest_text: str) -> Optional[str]:
         if "Could not find the '" in msg and "' column" in msg:
             return msg.split("Could not find the '")[1].split("'")[0]
         # Pattern 2: "column \"col\" of relation \"user_loras\" does not exist"
-        if "does not exist" in msg and "column" in msg and "\"" in msg:
-            # crude but effective
+        if "does not exist" in msg and "column" in msg and '"' in msg:
             parts = msg.split('"')
             if len(parts) >= 2:
                 return parts[1]
@@ -565,3 +611,4 @@ def worker_main() -> None:
 
 if __name__ == "__main__":
     worker_main()
+PY
