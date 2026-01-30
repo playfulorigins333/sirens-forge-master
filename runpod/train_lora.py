@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
@@ -380,6 +379,37 @@ def r2_upload_artifact(s3, local_path: str, bucket: str, key: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
+# Post-training cleanup (prevents disk quota issues)
+# ─────────────────────────────────────────────────────────────
+def cleanup_job_dirs(lora_id: Optional[str]) -> None:
+    """
+    Best-effort cleanup of local training + output folders.
+
+    Why:
+    - sd-scripts saves multiple checkpoints AND the final LoRA.
+    - Without cleanup, /workspace can slowly fill and eventually hit "Disk quota exceeded".
+    - Final artifact is uploaded to R2 (loras/<lora_id>/final.safetensors) so local copies are disposable.
+
+    This runs:
+    - after success
+    - after failure (if lora_id is known)
+    """
+    if not lora_id:
+        return
+
+    train_dir = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{lora_id}")
+    out_dir = os.path.join(OUTPUT_ROOT, f"sf_{lora_id}")
+
+    for p in [train_dir, out_dir]:
+        try:
+            if os.path.exists(p):
+                shutil.rmtree(p, ignore_errors=True)
+                log(f"🧹 Cleaned local dir: {p}")
+        except Exception as e:
+            log(f"⚠️ Cleanup failed for {p}: {e}")
+
+
+# ─────────────────────────────────────────────────────────────
 # Repeat logic
 # ─────────────────────────────────────────────────────────────
 def compute_repeat(image_count: int) -> Tuple[int, int]:
@@ -606,9 +636,14 @@ def worker_main() -> None:
             notify_status(lora_id, "completed")
             log(f"✅ Completed job {lora_id}")
 
+            # 🧹 NEW: cleanup local data after a successful job
+            cleanup_job_dirs(lora_id)
+
         except Exception as e:
             if artifact_uploaded and lora_id and uploaded_r2_key:
                 log(f"⚠️ Error AFTER artifact upload. Leaving as completed. Error: {e}")
+                # 🧹 still cleanup (artifact is in R2 already)
+                cleanup_job_dirs(lora_id)
                 time.sleep(POLL_SECONDS)
                 continue
 
@@ -624,9 +659,12 @@ def worker_main() -> None:
                 log(f"⚠️ Failed to patch failure status: {pe}")
 
             log(f"❌ Job failed: {e}")
+
+            # 🧹 NEW: cleanup local data after a failed job (if we know which one)
+            cleanup_job_dirs(lora_id)
+
             time.sleep(POLL_SECONDS)
 
 
 if __name__ == "__main__":
     worker_main()
-
