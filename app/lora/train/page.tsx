@@ -205,7 +205,6 @@ export default function LoRATrainerPage() {
   }, []);
 
   useEffect(() => {
-    if (!mounted) return;
 
     clearPolling();
 
