@@ -1340,7 +1340,7 @@ export default function LoRATrainerPage() {
                       }}
                       className="w-full py-6 bg-zinc-800 text-gray-400 opacity-60 cursor-not-allowed border-0 hover:bg-zinc-800"
                     >
-                      Cancel Training
+                      This may take a few minutes — we’ll let you know when it’s ready ✨
                     </Button>
                   )}
                 </div>
