@@ -179,20 +179,20 @@ export default function LoRATrainerPage() {
       const row = (json?.lora || null) as LoraRow | null;
       if (!row) return;
 
-      const next = mapDbStatusToUi(String(row.status || "idle"));
-      setTrainingStatus(next);
+      const nextRaw = mapDbStatusToUi(String(row.status || "idle"));
+      setTrainingStatus((prev) => (prev !== "idle" && nextRaw === "idle" ? prev : nextRaw));
 
       if (typeof row.progress === "number") {
         const clamped = Math.max(0, Math.min(100, row.progress));
         setTrainingProgress(clamped);
       }
 
-      if (next === "failed") {
+      if (nextRaw === "failed") {
         setErrorMessage(row.error_message || "Training failed.");
         clearPolling();
       }
 
-      if (next === "completed") {
+      if (nextRaw === "completed") {
         setErrorMessage(null);
         setTrainingProgress(100);
         setShowConfetti(true);
