@@ -1217,31 +1217,9 @@ export default function LoRATrainerPage() {
                           LoRA Job: <span className="font-mono">{loraId}</span>
                         </p>
                       )}
-                      <div className="pt-6 space-y-4">
-                        <div className="relative h-3 bg-gray-800 rounded-full overflow-hidden">
-                          <motion.div
-                            initial={{ width: 0 }}
-                            animate={{ width: `${trainingProgress}%` }}
-                            className="h-full bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-full relative"
-                          >
-                            <motion.div
-                              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/50 to-transparent"
-                              animate={{ x: ["-100%", "200%"] }}
-                              transition={{
-                                duration: 1.5,
-                                repeat: Infinity,
-                                ease: "linear",
-                              }}
-                            />
-                          </motion.div>
-                        </div>
-                        <motion.p
-                          className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent"
-                          animate={{ scale: [1, 1.05, 1] }}
-                          transition={{ duration: 1, repeat: Infinity }}
-                        >
-                          {Math.round(trainingProgress)}%
-                        </motion.p>
+                      <div className="pt-6 flex flex-col items-center justify-center gap-4">
+                        <div className="w-12 h-12 border-4 border-gray-700 border-t-cyan-400 rounded-full animate-spin" />
+                        <p className="text-lg text-gray-300">Training in progress…</p>
                       </div>
                     </>
                   )}
@@ -1308,7 +1286,8 @@ export default function LoRATrainerPage() {
                         transition={{ delay: 0.7 }}
                       >
                         <Button
-                          variant="outline"
+                          variant="secondary"
+                      disabled
                           onClick={() => {
                             clearPolling();
                             setTrainingStatus("idle");
@@ -1321,7 +1300,7 @@ export default function LoRATrainerPage() {
                             setUploadedImages([]);
                             setLoraId(null);
                           }}
-                          className="w-full py-6 border-gray-700 hover:bg-gray-800"
+                          className="w-full py-6 bg-zinc-800 text-gray-100 hover:bg-zinc-700 border-0"
                         >
                           <Crown className="w-5 h-5 mr-2" />
                           Forge Another Identity
@@ -1340,9 +1319,9 @@ export default function LoRATrainerPage() {
                         Try Again
                       </Button>
                       <Button
-                        variant="outline"
+                        variant="secondary"
                         onClick={() => setTrainingStatus("idle")}
-                        className="w-full py-6 border-gray-700"
+                        className="w-full py-6 bg-zinc-800 text-gray-100 hover:bg-zinc-700 border-0"
                       >
                         Upload Different Images
                       </Button>
@@ -1351,14 +1330,15 @@ export default function LoRATrainerPage() {
 
                   {(trainingStatus === "queued" || trainingStatus === "training") && (
                     <Button
-                      variant="outline"
+                      variant="secondary"
+                      disabled
                       onClick={() => {
                         clearPolling();
                         setTrainingStatus("idle");
                         setTrainingProgress(0);
                         setLoraId(null);
                       }}
-                      className="w-full py-6 border-gray-700 hover:bg-gray-800"
+                      className="w-full py-6 bg-zinc-800 text-gray-400 opacity-60 cursor-not-allowed border-0 hover:bg-zinc-800"
                     >
                       Cancel Training
                     </Button>
