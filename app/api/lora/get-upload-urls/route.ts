@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import {
   S3Client,
   PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -12,8 +14,9 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
  *   Bucket: identity-loras
  *   Key:    lora_datasets/<lora_id>/<timestamp>_<index>.jpg
  *
- * Returns:
- *   { urls: { url, key }[] }
+ * SAFETY GUARANTEE:
+ * - ALWAYS clears existing dataset prefix before issuing URLs
+ * - Prevents duplicate / accumulated images across retries
  */
 
 export const runtime = "nodejs";
@@ -74,10 +77,39 @@ export async function POST(req: Request) {
       );
     }
 
-    // 🔒 HARD FIX — sanitize UUID
+    // 🔒 Canonicalize UUID
     const lora_id = sanitizeUUID(rawId);
 
+    // 🔒 MUST MATCH TRAINER EXACTLY
     const basePrefix = `${DATASET_PREFIX_ROOT}/${lora_id}/`;
+
+    /* ────────────────────────────────────────── */
+    /* HARD RESET: clear existing dataset prefix */
+    /* ────────────────────────────────────────── */
+
+    const listResp = await r2.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: basePrefix,
+      })
+    );
+
+    if (listResp.Contents) {
+      for (const obj of listResp.Contents) {
+        if (obj.Key) {
+          await r2.send(
+            new DeleteObjectCommand({
+              Bucket: BUCKET,
+              Key: obj.Key,
+            })
+          );
+        }
+      }
+    }
+
+    /* ────────────────────────────────────────── */
+    /* Generate presigned PUT URLs               */
+    /* ────────────────────────────────────────── */
 
     const urls: { url: string; key: string }[] = [];
 
