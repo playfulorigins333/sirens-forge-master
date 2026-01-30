@@ -205,6 +205,7 @@ export default function LoRATrainerPage() {
   }, []);
 
   useEffect(() => {
+    if (!mounted) return;
 
     clearPolling();
 
@@ -385,7 +386,7 @@ export default function LoRATrainerPage() {
 
     setErrorMessage(null);
     setTrainingProgress(0);
-    setTrainingStatus("queued");
+    setTrainingStatus("training");
 
     try {
 
