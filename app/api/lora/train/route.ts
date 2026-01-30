@@ -12,23 +12,11 @@ export async function POST(req: Request) {
     const supabaseAdmin = getSupabaseAdmin();
 
     const body = await req.json().catch(() => ({}));
-    const {
-      lora_id,
-      dataset_bucket,
-      dataset_prefix,
-    } = body || {};
+    const { lora_id } = body || {};
 
-    // 🔴 HARD VALIDATION — THIS WAS MISSING
     if (!lora_id) {
       return NextResponse.json(
         { error: "Missing lora_id" },
-        { status: 400 }
-      );
-    }
-
-    if (!dataset_bucket || !dataset_prefix) {
-      return NextResponse.json(
-        { error: "Missing storage location (bucket/prefix)" },
         { status: 400 }
       );
     }
@@ -54,7 +42,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Persist dataset location + queue job
+    // ✅ SINGLE SOURCE OF TRUTH (matches trainer expectations)
+    const dataset_bucket = process.env.R2_DATASET_BUCKET || "identity-loras";
+    const dataset_prefix = `lora_datasets/${lora_id}`;
+
     const now = new Date().toISOString();
     const { error: updateErr } = await supabaseAdmin
       .from("user_loras")
