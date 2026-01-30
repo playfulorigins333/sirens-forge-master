@@ -1,3 +1,4 @@
+// app/api/lora/get-upload-urls/route.ts
 import { NextResponse } from "next/server";
 import {
   S3Client,
@@ -14,9 +15,9 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
  *   Bucket: identity-loras
  *   Key:    lora_datasets/<lora_id>/<timestamp>_<index>.jpg
  *
- * SAFETY GUARANTEE:
- * - ALWAYS clears existing dataset prefix before issuing URLs
- * - Prevents duplicate / accumulated images across retries
+ * HARD FIX:
+ * - Clear existing objects under lora_datasets/<lora_id>/ BEFORE returning URLs
+ *   (prevents old leftovers causing 55+ images and worker hard-failing)
  */
 
 export const runtime = "nodejs";
@@ -77,14 +78,12 @@ export async function POST(req: Request) {
       );
     }
 
-    // 🔒 Canonicalize UUID
     const lora_id = sanitizeUUID(rawId);
 
-    // 🔒 MUST MATCH TRAINER EXACTLY
     const basePrefix = `${DATASET_PREFIX_ROOT}/${lora_id}/`;
 
     /* ────────────────────────────────────────── */
-    /* HARD RESET: clear existing dataset prefix */
+    /* Clear existing dataset                    */
     /* ────────────────────────────────────────── */
 
     const listResp = await r2.send(
@@ -108,7 +107,7 @@ export async function POST(req: Request) {
     }
 
     /* ────────────────────────────────────────── */
-    /* Generate presigned PUT URLs               */
+    /* Create signed PUT URLs                    */
     /* ────────────────────────────────────────── */
 
     const urls: { url: string; key: string }[] = [];

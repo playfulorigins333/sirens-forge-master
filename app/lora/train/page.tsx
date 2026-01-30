@@ -164,18 +164,19 @@ export default function LoRATrainerPage() {
 
   const pollLoraStatusOnce = useCallback(async (id: string) => {
     try {
-      const { data, error } = await supabaseClient
-        .from("user_loras")
-        .select("id,status,progress,error_message,updated_at")
-        .eq("id", id)
-        .maybeSingle();
+      const res = await fetch(
+        `/api/lora/status?lora_id=${encodeURIComponent(id)}`,
+        { cache: "no-store" }
+      );
 
-      if (error) {
-        setErrorMessage(error.message || "Failed to poll training status.");
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setErrorMessage(json?.error || "Failed to poll training status.");
         return;
       }
 
-      const row = data as unknown as LoraRow | null;
+      const row = (json?.lora || null) as LoraRow | null;
       if (!row) return;
 
       const next = mapDbStatusToUi(String(row.status || "idle"));
