@@ -1,33 +1,24 @@
+// app/api/lora/train/route.ts
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { requireUserId } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/*
-  POST /api/lora/train
-
-  JSON-only route.
-  Expects metadata for a dataset that already exists in storage.
-  Does NOT handle files.
-  Does NOT spawn training locally.
-  RunPod worker is responsible for picking up queued jobs.
-*/
-
 export async function POST(req: Request) {
   try {
+    const userId = await requireUserId({ request: req });
     const supabaseAdmin = getSupabaseAdmin();
 
-    // 🔒 Expect JSON only
-    const body = await req.json();
-
+    const body = await req.json().catch(() => ({}));
     const {
       lora_id,
-      image_count,
-      storage_bucket,
-      storage_prefix,
+      dataset_bucket,
+      dataset_prefix,
     } = body || {};
 
+    // 🔴 HARD VALIDATION — THIS WAS MISSING
     if (!lora_id) {
       return NextResponse.json(
         { error: "Missing lora_id" },
@@ -35,72 +26,71 @@ export async function POST(req: Request) {
       );
     }
 
-    if (
-      typeof image_count !== "number" ||
-      image_count < 10 ||
-      image_count > 20
-    ) {
-      return NextResponse.json(
-        { error: "Invalid image_count (10–20 required)" },
-        { status: 400 }
-      );
-    }
-
-    if (!storage_bucket || !storage_prefix) {
+    if (!dataset_bucket || !dataset_prefix) {
       return NextResponse.json(
         { error: "Missing storage location (bucket/prefix)" },
         { status: 400 }
       );
     }
 
-    // 1️⃣ Verify LoRA exists and is not already active
-    const { data: existing, error: existingErr } = await supabaseAdmin
+    // 🔐 Verify ownership
+    const { data: lora, error: fetchErr } = await supabaseAdmin
       .from("user_loras")
-      .select("id, status")
+      .select("id, user_id, status")
       .eq("id", lora_id)
       .single();
 
-    if (existingErr || !existing) {
+    if (fetchErr || !lora) {
       return NextResponse.json(
-        { error: "LoRA job not found" },
+        { error: "LoRA not found" },
         { status: 404 }
       );
     }
 
-    if (existing.status === "queued" || existing.status === "training") {
-      return NextResponse.json({
-        status: existing.status,
-        message: "Job already active",
-      });
+    if (lora.user_id !== userId) {
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 }
+      );
     }
 
-   // 2️⃣ Update DB → queued (this is the ONLY responsibility here)
-const { error: updateErr } = await supabaseAdmin
-  .from("user_loras")
-  .update({
-    status: "queued",
-    image_count,
-    updated_at: new Date().toISOString(),
-  })
-  .eq("id", lora_id);
+    // ✅ Persist dataset location + queue job
+    const now = new Date().toISOString();
+    const { error: updateErr } = await supabaseAdmin
+      .from("user_loras")
+      .update({
+        status: "queued",
+        dataset_bucket,
+        dataset_prefix,
+        updated_at: now,
+      })
+      .eq("id", lora_id);
 
-if (updateErr) {
-  console.error("[lora/train] DB update failed:", updateErr);
-  return NextResponse.json(
-    { error: "Failed to queue training job" },
-    { status: 500 }
-  );
-}
-
-// 3️⃣ Done. RunPod worker will pick this up.
+    if (updateErr) {
+      console.error("[lora/train] Update failed:", updateErr);
+      return NextResponse.json(
+        { error: "Failed to queue training job" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
-      status: "queued",
+      ok: true,
       lora_id,
-      image_count,
+      status: "queued",
+      dataset_bucket,
+      dataset_prefix,
     });
   } catch (err: any) {
-    console.error("[lora/train] Fatal error:", err);
+    const msg = String(err?.message || err);
+    if (msg.toLowerCase().includes("unauthorized")) {
+      return NextResponse.json(
+        { error: "Not authenticated" },
+        { status: 401 }
+      );
+    }
+
+    console.error("[lora/train] Fatal:", err);
     return NextResponse.json(
       { error: "Failed to start training" },
       { status: 500 }
