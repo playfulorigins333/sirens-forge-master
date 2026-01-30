@@ -42,17 +42,18 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ SINGLE SOURCE OF TRUTH (matches trainer expectations)
-    const dataset_bucket = process.env.R2_DATASET_BUCKET || "identity-loras";
-    const dataset_prefix = `lora_datasets/${lora_id}`;
+    // ✅ MUST match trainer expectations + DB schema
+    const dataset_r2_bucket =
+      process.env.R2_DATASET_BUCKET || "identity-loras";
+    const dataset_r2_prefix = `lora_datasets/${lora_id}`;
 
     const now = new Date().toISOString();
     const { error: updateErr } = await supabaseAdmin
       .from("user_loras")
       .update({
         status: "queued",
-        dataset_bucket,
-        dataset_prefix,
+        dataset_r2_bucket,
+        dataset_r2_prefix,
         updated_at: now,
       })
       .eq("id", lora_id);
@@ -69,8 +70,8 @@ export async function POST(req: Request) {
       ok: true,
       lora_id,
       status: "queued",
-      dataset_bucket,
-      dataset_prefix,
+      dataset_r2_bucket,
+      dataset_r2_prefix,
     });
   } catch (err: any) {
     const msg = String(err?.message || err);
