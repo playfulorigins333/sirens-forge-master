@@ -1298,7 +1298,8 @@ export default function GeneratePage() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-gray-100 flex flex-col">
+    <div className="min-h-screen bg-black text-white flex flex-col">
+
   <GeneratorHeader />
 
   <main className="flex-1 flex flex-col md:flex-row">
