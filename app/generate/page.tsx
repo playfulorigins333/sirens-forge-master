@@ -1299,29 +1299,35 @@ export default function GeneratePage() {
 
   return (
     <div className="min-h-screen bg-black text-gray-100 flex flex-col">
-      <GeneratorHeader />
+  <GeneratorHeader />
 
-      <main className="flex-1 flex flex-col md:flex-row">
-        <div className="flex-1 px-4 md:px-6 py-4 md:py-6 space-y-4 max-w-6xl mx-auto w-full">
-          <ModeTabs activeMode={mode} onChange={setMode} />
+  <main className="flex-1 flex flex-col md:flex-row">
+    <div className="flex-1 px-4 md:px-6 py-4 md:py-6 space-y-4 max-w-6xl mx-auto w-full">
+      <ModeTabs activeMode={mode} onChange={setMode} />
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            <div className="space-y-4 xl:col-span-1">
-              <PromptSection
-                prompt={prompt}
-                negativePrompt={negativePrompt}
-                onPromptChange={setPrompt}
-                onNegativePromptChange={setNegativePrompt}
-              />
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        {/* LEFT COLUMN — Prompt + Ultra help */}
+        <div className="space-y-4 xl:col-span-1">
+          <PromptSection
+            prompt={prompt}
+            negativePrompt={negativePrompt}
+            onPromptChange={setPrompt}
+            onNegativePromptChange={setNegativePrompt}
+          />
+
+          <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
+            <div className="font-semibold text-gray-100">Ultra add-on</div>
+            <div className="mt-1">
+              Type{" "}
+              <span className="font-mono text-gray-100">(d1ldo)</span>{" "}
+              anywhere in your prompt to enable the dildo-play add-on.
+              Helpful words: small dildo, medium dildo, big dildo,
+              back, on side, doggystyle, ass, close-up, masturbation,
+              vaginal.
             </div>
-<div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
-  <div className="font-semibold text-gray-100">Ultra add-on</div>
-  <div className="mt-1">
-    Type <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt
-    to enable the dildo-play add-on. Helpful words: small dildo, medium dildo,
-    big dildo, back, on side, doggystyle, ass, close-up, masturbation, vaginal.
-  </div>
-</div>
+          </div>
+        </div>
+
 
             <div className="space-y-4 xl:col-span-1">
               <ModelStyleSection
