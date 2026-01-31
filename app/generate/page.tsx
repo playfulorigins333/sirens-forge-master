@@ -1306,7 +1306,11 @@ export default function GeneratePage() {
     <div className="flex-1 px-4 md:px-6 py-4 md:py-6 space-y-4 max-w-6xl mx-auto w-full">
       <ModeTabs activeMode={mode} onChange={setMode} />
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 text-white 
+  [&_.text-gray-300]:text-white/80
+  [&_.text-gray-400]:text-white/70
+  [&_.text-gray-500]:text-white/60">
+
         {/* LEFT COLUMN — Prompt + Ultra help */}
         <div className="space-y-4 xl:col-span-1">
           <PromptSection
