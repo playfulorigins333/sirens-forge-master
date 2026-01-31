@@ -23,6 +23,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
 
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -446,13 +447,11 @@ function PromptSection(props: {
         </div>
 
         <Button
-          variant="ghost"
-          size="sm"
           type="button"
           onClick={() => setShowNegative((v) => !v)}
-          className="w-full justify-between text-xs text-gray-100 hover:text-white"
+          className="w-full justify-between text-xs bg-gray-950 border border-gray-800 text-gray-100 hover:bg-gray-900 hover:text-white"
         >
-          <span>Refine / avoid styles (negative prompt)</span>
+          <span>Refine & filter (negative prompt) ✨</span>
           {showNegative ? (
             <ChevronUp className="w-4 h-4" />
           ) : (
@@ -646,14 +645,8 @@ function ModelStyleSection(props: {
 function LoraIdentitySection(props: {
   value: LoraSelection;
   onChange: (next: LoraSelection) => void;
+  options: { id: string; label: string }[];
 }) {
-  // NOTE: replace this with a backend-driven list when ready.
-  const availableLoras = [
-    { id: "none", label: "None (no identity LoRA)" },
-    { id: "identity_lora_1", label: "Identity LoRA #1" },
-    { id: "identity_lora_2", label: "Identity LoRA #2" },
-  ];
-
   const v = props.value;
 
   const set = (patch: Partial<LoraSelection>) =>
@@ -736,6 +729,13 @@ function LoraIdentitySection(props: {
               <p className="font-semibold mb-1 text-gray-200">
                 Choose an identity LoRA
               </p>
+              {props.options.length === 0 && (
+                <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
+                  No trained LoRAs yet. Create one on{" "}
+                  <span className="text-gray-100 font-semibold">/lora/train</span>{" "}
+                  then come back to select it here.
+                </div>
+              )}
               <Select
                 value={v.selected[0] || "none"}
                 onValueChange={(val) =>
@@ -747,10 +747,10 @@ function LoraIdentitySection(props: {
                 }
               >
                 <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
-                  <SelectValue placeholder="Select a LoRA" />
+                  <SelectValue placeholder="Select your trained LoRA" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-                  {availableLoras.map((l) => (
+                  {props.options.map((l) => (
                     <SelectItem key={l.id} value={l.id}>
                       {l.label}
                     </SelectItem>
@@ -799,7 +799,7 @@ function LoraIdentitySection(props: {
             </p>
 
             <div className="space-y-2">
-              {availableLoras
+              {props.options
                 .filter((l) => l.id !== "none")
                 .map((l) => (
                   <label
@@ -1393,7 +1393,11 @@ export default function GeneratePage() {
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
-  const [negativePrompt, setNegativePrompt] = useState("");
+  const [negativePrompt, setNegativePrompt] = useState(
+    "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
+  );
+  const [identityOptions, setIdentityOptions] = useState<{id: string; name: string | null}[]>([]);
+  const [selectedIdentity, setSelectedIdentity] = useState<string | "none">("none");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
   const [contentMode, setContentMode] = useState<ContentMode>("sfw");
   const [stylePreset, setStylePreset] =
@@ -1436,6 +1440,19 @@ export default function GeneratePage() {
   // - Optionally set output type (no auto-run)
   // ------------------------------------------------------------
   useEffect(() => {
+    const loadIdentities = async () => {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      const { data } = await supabase
+        .from("user_loras")
+        .select("id, name")
+        .eq("status", "completed")
+        .order("created_at", { ascending: false });
+      setIdentityOptions(data ?? []);
+    };
+    loadIdentities();
+
     const handler = (e: Event) => {
       const ce = e as CustomEvent<any>;
       const detail = (ce as any)?.detail ?? {};
@@ -1466,7 +1483,16 @@ export default function GeneratePage() {
     };
   }, []);
 
-  const handleGenerate = async () => {
+  
+  const identitySelectOptions: { id: string; label: string }[] = [
+    { id: "none", label: "None (no identity LoRA)" },
+    ...identityOptions.map((l) => ({
+      id: l.id,
+      label: l.name && l.name.trim().length > 0 ? l.name : l.id,
+    })),
+  ];
+
+const handleGenerate = async () => {
     setErrorMessage(null);
     setIsGenerating(true);
 
@@ -1673,6 +1699,27 @@ export default function GeneratePage() {
                 onContentModeChange={setContentMode}
                 onStylePresetChange={setStylePreset}
               />
+
+              <LoraIdentitySection
+                value={loraSelection}
+                onChange={(next) => {
+                  setLoraSelection(next);
+                  const first = next.selected[0] || "none";
+                  setSelectedIdentity(first as any);
+                }}
+                options={identitySelectOptions}
+              />
+
+              <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
+                <div className="font-semibold text-gray-100">Ultra add-on</div>
+                <div className="mt-1">
+                  Type <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play
+                  add-on. Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
+                  masturbation, vaginal.
+                </div>
+              </div>
+
+
               <AdvancedSettings
                 resolution={resolution}
                 guidance={guidance}
