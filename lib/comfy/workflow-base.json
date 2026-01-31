@@ -1,74 +1,164 @@
 {
-  "0": {
-    "class_type": "CheckpointLoaderSimple",
+  "3": {
+    "inputs": {
+      "seed": 0,
+      "steps": 20,
+      "cfg": 7,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 1,
+      "model": [
+        "14",
+        0
+      ],
+      "positive": [
+        "6",
+        0
+      ],
+      "negative": [
+        "7",
+        0
+      ],
+      "latent_image": [
+        "5",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "4": {
     "inputs": {
       "ckpt_name": "bigLust_v16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
     }
   },
-
-  "1": {
-    "class_type": "LoraLoader",
-    "inputs": {
-      "model": ["0", 0],
-      "clip": ["0", 1],
-      "loras": []
-    }
-  },
-
-  "2": {
-    "class_type": "CLIPTextEncode",
-    "inputs": {
-      "clip": ["1", 1],
-      "text": "{prompt}"
-    }
-  },
-
-  "3": {
-    "class_type": "CLIPTextEncode",
-    "inputs": {
-      "clip": ["1", 1],
-      "text": "{negative_prompt}"
-    }
-  },
-
-  "4": {
-    "class_type": "EmptyLatentImage",
+  "5": {
     "inputs": {
       "width": 1024,
       "height": 1024,
       "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent Image"
     }
   },
-
-  "5": {
-    "class_type": "KSampler",
-    "inputs": {
-      "model": ["1", 0],
-      "positive": ["2", 0],
-      "negative": ["3", 0],
-      "latent_image": ["4", 0],
-      "seed": "{seed}",
-      "steps": "{steps}",
-      "cfg": "{cfg}",
-      "sampler_name": "euler",
-      "scheduler": "normal",
-      "denoise": 1.0
-    }
-  },
-
   "6": {
-    "class_type": "VAEDecode",
     "inputs": {
-      "samples": ["5", 0],
-      "vae": ["0", 2]
+      "text": "solo adult woman, neutral standing pose, plain studio background, soft even lighting, realistic skin texture, photorealistic\n",
+      "clip": [
+        "14",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "{prompt}"
     }
   },
-
   "7": {
-    "class_type": "SaveImage",
     "inputs": {
-      "filename_prefix": "sirensforge",
-      "images": ["6", 0]
+      "text": "extra fingers, extra limbs, deformed face, bad anatomy\n",
+      "clip": [
+        "14",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "{negative_prompt}"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "4",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "sf_base",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "12": {
+    "inputs": {
+      "lora_name": "body_feminine.safetensors",
+      "strength_model": 0,
+      "strength_clip": 0,
+      "model": [
+        "4",
+        0
+      ],
+      "clip": [
+        "4",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "13": {
+    "inputs": {
+      "lora_name": "identity_sf_a39a3057.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "12",
+        0
+      ],
+      "clip": [
+        "12",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
+    }
+  },
+  "14": {
+    "inputs": {
+      "lora_name": "body_nsfw_dildo_play.safetensors",
+      "strength_model": 1,
+      "strength_clip": 1,
+      "model": [
+        "13",
+        0
+      ],
+      "clip": [
+        "13",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA"
     }
   }
 }

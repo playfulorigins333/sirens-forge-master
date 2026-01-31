@@ -57,6 +57,11 @@ export function resolveLoraStack(
 ): ResolvedLoraStack {
   const loras: ResolvedLora[] = [];
 
+  // 🚫 LAUNCH GUARD — Fem / Masc only
+  if (bodyMode === "body_mtf" || bodyMode === "body_ftm") {
+    throw new Error(`Unsupported body mode for launch: ${bodyMode}`);
+  }
+
   // 1️⃣ Body modifier (optional)
   if (bodyMode !== "none") {
     const bodyPath = BODY_LORA_PATHS[bodyMode];

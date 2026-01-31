@@ -53,7 +53,7 @@ type GenerationMode =
   | "image_to_video"
   | "text_to_video";
 
-type BaseModel = "feminine" | "masculine" | "mtf" | "ftm";
+type BaseModel = "feminine" | "masculine";
 type ContentMode = "sfw" | "nsfw" | "ultra";
 type StylePreset =
   | "photorealistic"
@@ -288,7 +288,7 @@ function GeneratorHeader() {
             SirensForge Generator
           </h1>
           <p className="text-xs md:text-sm text-gray-300 mt-1">
-            Text &amp; Image → Images &amp; Video • SDXL + LoRA Identity
+            Text → Image • SDXL + LoRA Identity
           </p>
         </div>
 
@@ -339,13 +339,9 @@ function ModeTabs(props: {
   activeMode: GenerationMode;
   onChange: (mode: GenerationMode) => void;
 }) {
-  const modes: { id: GenerationMode; label: string; icon: React.ElementType }[] =
-    [
-      { id: "text_to_image", label: "Text → Image", icon: FileText },
-      { id: "image_to_image", label: "Image → Image", icon: ImageIcon },
-      { id: "image_to_video", label: "Image → Video", icon: VideoIcon },
-      { id: "text_to_video", label: "Text → Video", icon: Wand2 },
-    ];
+    const modes: { id: GenerationMode; label: string; icon: React.ElementType }[] = [
+    { id: "text_to_image", label: "Text → Image", icon: FileText },
+  ];
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -355,7 +351,7 @@ function ModeTabs(props: {
         return (
           <motion.button
             key={mode.id}
-            onClick={() => props.onChange(mode.id)}
+            onClick={undefined}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             className={`relative p-3 rounded-xl border-2 transition-all ${
@@ -501,9 +497,7 @@ function ModelStyleSection(props: {
   const baseModels: { id: BaseModel; label: string }[] = [
     { id: "feminine", label: "Feminine" },
     { id: "masculine", label: "Masculine" },
-    { id: "mtf", label: "MTF" },
-    { id: "ftm", label: "FTM" },
-  ];
+      ];
 
   const stylePresets: StylePreset[] = [
     "photorealistic",
@@ -929,7 +923,7 @@ function AdvancedSettings(props: {
                   </SelectContent>
                 </Select>
                 <p className="text-[10px] text-gray-400 mt-1">
-                  SDXL max 1024x1792. Video modes use higher limits.
+                  SDXL max 1024x1792.
                 </p>
               </div>
 
@@ -1269,7 +1263,7 @@ function HistorySidebar(props: {
   onRerun: (item: GeneratedItem) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | "images" | "videos">("all");
+  const [filter, setFilter] = useState<"all" | "images">("all");
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
   const filtered = [...props.history]
@@ -1277,10 +1271,8 @@ function HistorySidebar(props: {
       const matchesQuery = item.prompt
         .toLowerCase()
         .includes(query.toLowerCase());
-      const matchesFilter =
-        filter === "all" ||
-        (filter === "images" && item.kind === "image") ||
-        (filter === "videos" && item.kind === "video");
+            const matchesFilter =
+        filter === "all" || (filter === "images" && item.kind === "image");
       return matchesQuery && matchesFilter;
     })
     .sort((a, b) => {
@@ -1310,7 +1302,7 @@ function HistorySidebar(props: {
           <Select
             value={filter}
             onValueChange={(v) =>
-              setFilter(v as "all" | "images" | "videos")
+              setFilter(v as "all" | "images")
             }
           >
             <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
@@ -1319,8 +1311,7 @@ function HistorySidebar(props: {
             <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
               <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="all">All</SelectItem>
               <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="images">Images</SelectItem>
-              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="videos">Videos</SelectItem>
-            </SelectContent>
+</SelectContent>
           </Select>
 
           <Select
@@ -1400,7 +1391,7 @@ export default function GeneratePage() {
 
   // Core state
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
-  const [outputType, setOutputType] = useState<"IMAGE" | "VIDEO" | "STORY">("IMAGE");
+  const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
@@ -1429,76 +1420,57 @@ export default function GeneratePage() {
   const [items, setItems] = useState<GeneratedItem[]>([]);
   const [history, setHistory] = useState<GeneratedItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
+
+
+  const canGenerate = !isGenerating && Boolean(prompt?.trim()) && Boolean(baseModel);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Subscription modal state
   const [showSubModal, setShowSubModal] = useState(false);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
 
+  // ------------------------------------------------------------
+  // Siren's Mind → Generator injection (LOCKED)
+  // - Listen for global event
+  // - Inject prompt into existing prompt state
+  // - Optionally set output type (no auto-run)
+  // ------------------------------------------------------------
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<any>;
+      const detail = (ce as any)?.detail ?? {};
 
+      const incomingPrompt =
+        typeof detail.prompt === "string" ? detail.prompt : "";
+      const incomingNegative =
+        typeof detail.negative_prompt === "string" ? detail.negative_prompt : "";
 
-// ------------------------------------------------------------
-// Siren's Mind → Generator injection (LOCKED)
-// - Listen for global event
-// - Inject prompt into existing prompt state
-// - Optionally route mode for IMAGE/VIDEO (no auto-run)
-// ------------------------------------------------------------
-useEffect(() => {
-  const handler = (e: Event) => {
-    const ce = e as CustomEvent<any>;
-    const detail = (ce as any)?.detail ?? {};
-    const incomingPrompt = typeof detail.prompt === "string" ? detail.prompt : "";
+      if (incomingPrompt) setPrompt(incomingPrompt);
+      if (incomingNegative) setNegativePrompt(incomingNegative);
 
-    if (incomingPrompt) {
-      setPrompt(incomingPrompt);
-    }
-
-    const otRaw = typeof detail.output_type === "string" ? detail.output_type : "";
-    const ot = otRaw.trim().toUpperCase();
-
-    // Route internally (no UI changes beyond existing mode state)
-    if (ot === "IMAGE") {
-      setOutputType("IMAGE");
-      setMode("text_to_image");
-    } else if (ot === "VIDEO") {
-      setOutputType("VIDEO");
-      setMode("text_to_video");
-    } else if (ot === "STORY") {
-      setOutputType("STORY");
-      // Keep current mode; prompt is injected into the same editor area.
-    }
-  };
-
-  window.addEventListener("sirensmind:sendToGenerator", handler as EventListener);
-  return () => window.removeEventListener("sirensmind:sendToGenerator", handler as EventListener);
-}, []);
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(
-    null
-  );
-
-  const canGenerate = prompt.trim().length > 0 && !isGenerating;
-
-  const handleGenerate = async () => {
-    if (!canGenerate) return;
-
-    setIsGenerating(true);
-    setErrorMessage(null);
-
-    try {
-      // STORY: text-only execution (no media call)
-      if (outputType === "STORY") {
-        try {
-          if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(prompt);
-            setErrorMessage("Story copied to clipboard.");
-          } else {
-            setErrorMessage("Story ready in the prompt box.");
-          }
-        } catch {
-          setErrorMessage("Story ready in the prompt box.");
-        }
-        return;
+      const otRaw = typeof detail.output_type === "string" ? detail.output_type : "";
+      const ot = otRaw.trim().toUpperCase();
+      if (ot === "STORY") {
+        setOutputType("STORY");
+      } else if (ot === "IMAGE") {
+        setOutputType("IMAGE");
       }
 
+      // Always keep launch mode (txt2img) selected in UI
+      setMode("text_to_image");
+    };
+
+    window.addEventListener("siren_mind_generate", handler as EventListener);
+    return () => {
+      window.removeEventListener("siren_mind_generate", handler as EventListener);
+    };
+  }, []);
+
+  const handleGenerate = async () => {
+    setErrorMessage(null);
+    setIsGenerating(true);
+
+    try {
       // Build payload to match /api/generate GenerationRequestPayload
 
       const payload = {
@@ -1650,9 +1622,7 @@ useEffect(() => {
       console.error("Generation error:", err);
 
       const fallback =
-        outputType === "VIDEO"
-          ? "Something went wrong generating your video. Check backend logs."
-          : outputType === "IMAGE"
+        outputType === "IMAGE"
           ? "Something went wrong generating your image. Check backend logs."
           : "Something went wrong generating your story. Check backend logs.";
 
