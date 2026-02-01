@@ -1282,21 +1282,21 @@ const handleGenerate = async () => {
       // Build payload to match /api/generate GenerationRequestPayload
 
       const payload = {
-    user_lora: selectedLoraId ? { id: selectedLoraId, strength: 0.85 } : null,
-        mode,
-        prompt,
-        negativePrompt,
-        baseModel,        stylePreset,
-        qualityPreset,
-        consistencyPreset,
-        resolution,
-        guidance,
-        steps,
-        seed: lockSeed ? seed : null,
-        lockSeed,
-        batchSize,
-        loraSelection,
-        imageInput: null as any, // reserved for future image-to-image / img2vid
+        tier: "og",
+        mode: "txt2img",
+        params: {
+          prompt,
+          negative_prompt: negativePrompt,
+          body_mode: baseModel,
+          width: 1024,
+          height: 1536,
+          steps,
+          cfg: guidance,
+          seed: lockSeed ? seed : null,
+          user_lora: selectedLoraId
+            ? { id: selectedLoraId, strength: 0.85 }
+            : null,
+        },
       };
 
       const res = await fetch("/api/generate", {
