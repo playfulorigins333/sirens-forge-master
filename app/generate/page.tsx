@@ -6,20 +6,24 @@ import {
   Sparkles,
   Crown,
   Star,
+  Image as ImageIcon,
   Video as VideoIcon,
   FileText,
+  Wand2,
   ChevronDown,
   ChevronUp,
+  Shield,
+  Upload,
+  X,
+  Check,
   Clock,
   Search,
   Play,
   Maximize2,
   AlertTriangle,
 } from "lucide-react";
-
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
-
+import { supabase } from "@/lib/supabase";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,7 +54,7 @@ type GenerationMode =
   | "text_to_video";
 
 type BaseModel = "feminine" | "masculine";
-
+type ContentMode = "sfw" | "nsfw" | "ultra";
 type StylePreset =
   | "photorealistic"
   | "cinematic"
@@ -62,6 +66,7 @@ type StylePreset =
 type QualityPreset = "fast" | "balanced" | "quality" | "ultra";
 type ConsistencyPreset = "low" | "medium" | "high" | "perfect";
 
+
 type LoraMode = "single" | "advanced";
 
 interface LoraSelection {
@@ -70,6 +75,7 @@ interface LoraSelection {
   createNew: boolean;
   newName: string;
 }
+
 
 type MediaKind = "image" | "video";
 
@@ -85,6 +91,10 @@ interface GeneratedItem {
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function inferKindFromOutput(output: any): MediaKind {
   if (output.kind === "video" || output.kind === "image") {
@@ -329,8 +339,9 @@ function ModeTabs(props: {
   activeMode: GenerationMode;
   onChange: (mode: GenerationMode) => void;
 }) {
-  const modes: { id: GenerationMode; label: string; icon: React.ElementType }[] =
-    [{ id: "text_to_image", label: "Text → Image", icon: FileText }];
+    const modes: { id: GenerationMode; label: string; icon: React.ElementType }[] = [
+    { id: "text_to_image", label: "Text → Image", icon: FileText },
+  ];
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -457,9 +468,7 @@ function PromptSection(props: {
             >
               <Textarea
                 value={props.negativePrompt}
-                onChange={(e) =>
-                  props.onNegativePromptChange(e.target.value)
-                }
+                onChange={(e) => props.onNegativePromptChange(e.target.value)}
                 placeholder="What to avoid (e.g. bad anatomy, extra limbs, blurry, etc.)"
                 className="min-h-24 bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 resize-none text-sm mt-2"
               />
@@ -472,19 +481,21 @@ function PromptSection(props: {
 }
 
 // -----------------------------------------------------------------------------
-// Model & Style Section (Base model + style preset)
+// Model & Style Section (Base model + SFW/NSFW/ULTRA + style preset)
 // -----------------------------------------------------------------------------
 
 function ModelStyleSection(props: {
   baseModel: BaseModel;
+  contentMode: ContentMode;
   stylePreset: StylePreset;
   onBaseModelChange: (model: BaseModel) => void;
+  onContentModeChange: (mode: ContentMode) => void;
   onStylePresetChange: (preset: StylePreset) => void;
 }) {
   const baseModels: { id: BaseModel; label: string }[] = [
     { id: "feminine", label: "Feminine" },
     { id: "masculine", label: "Masculine" },
-  ];
+      ];
 
   const stylePresets: StylePreset[] = [
     "photorealistic",
@@ -500,10 +511,10 @@ function ModelStyleSection(props: {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          SDXL core model (bigLust_v16) with body-specific LoRA shaping.
+          SDXL core model (bigLust_v16) with body-specific LoRA shaping +
+          content modes.
         </CardDescription>
       </CardHeader>
-
       <CardContent className="space-y-5">
         {/* Base model */}
         <div>
@@ -531,7 +542,71 @@ function ModelStyleSection(props: {
           </div>
         </div>
 
+        
+        {/* Content mode */}
+        <div>
+          <p className="text-xs font-semibold mb-2 text-gray-200">
+            Content Mode
+          </p>
+          <div className="space-y-2 text-xs">
+            {/* SFW */}
+            <label
+              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
+                props.contentMode === "sfw"
+                  ? "border-emerald-500 bg-emerald-500/10 text-gray-100"
+                  : "border-gray-800 hover:border-gray-700 text-gray-200"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="contentMode"
+                  checked={props.contentMode === "sfw"}
+                  onChange={() => props.onContentModeChange("sfw")}
+                />
+                <div>
+                  <div className="font-semibold">SFW</div>
+                  <div className="text-[10px] text-gray-300">
+                    Safe-for-work content, social-friendly.
+                  </div>
+                </div>
+              </div>
+              <Shield className="w-4 h-4 text-emerald-400" />
+            </label>
+
+            {/* NSFW */}
+            <label
+              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
+                props.contentMode === "ultra"
+                  ? "border-rose-500 bg-rose-500/10 text-gray-100"
+                  : "border-gray-800 hover:border-gray-700 text-gray-200"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  name="contentMode"
+                  checked={props.contentMode === "ultra"}
+                  onChange={() => props.onContentModeChange("ultra")}
+                />
+                <div>
+                  <div className="font-semibold flex items-center gap-2">
+                    NSFW
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500 text-white">
+                      18+
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-gray-300">
+                    Adult content within policy.
+                  </div>
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+
         {/* Style preset */}
+
         <div>
           <p className="text-xs font-semibold mb-2 text-gray-200">
             Style Preset
@@ -562,62 +637,208 @@ function ModelStyleSection(props: {
 }
 
 // -----------------------------------------------------------------------------
-// Identity LoRA Section (FINAL LAUNCH VERSION)
+// -----------------------------------------------------------------------------
+// LoRA Identity Section (Option A default; Option B available)
 // -----------------------------------------------------------------------------
 
 function LoraIdentitySection(props: {
   value: LoraSelection;
   onChange: (next: LoraSelection) => void;
   options: { id: string; label: string }[];
-  onTrainNew: () => void;
 }) {
+  const v = props.value;
+
+  const set = (patch: Partial<LoraSelection>) =>
+    props.onChange({ ...v, ...patch });
+
+  const toggleSelected = (id: string) => {
+    const next = v.selected.includes(id)
+      ? v.selected.filter((x) => x !== id)
+      : [...v.selected, id];
+    set({ selected: next.filter((x) => x !== "none") });
+  };
+
   return (
     <Card className="border-gray-800 bg-gray-900/80">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm md:text-base">Identity LoRA</CardTitle>
+        <CardTitle className="text-sm md:text-base">
+          Identity LoRA (Training Mode)
+        </CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Select an Identity LoRA you’ve trained, or start a new one.
+          Legacy identity locks are removed. Identity consistency is now driven
+          by LoRA selection/training. Option A is the safest, lowest-friction
+          path. Option B is available for power creators.
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-3 text-xs">
-        {props.options.length === 1 && (
-          <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
-            No Identity LoRAs yet. Start training to create one.
+      <CardContent className="space-y-4 text-xs">
+        {/* Mode */}
+        <div className="space-y-2">
+          <label
+            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
+              v.mode === "single"
+                ? "border-purple-500 bg-purple-500/10"
+                : "border-gray-800 hover:border-gray-700"
+            }`}
+          >
+            <input
+              type="radio"
+              name="loraMode"
+              checked={v.mode === "single"}
+              onChange={() => set({ mode: "single" })}
+            />
+            <div>
+              <div className="font-semibold text-gray-100">
+                Option A — Select 1 LoRA (recommended)
+              </div>
+              <div className="text-[10px] text-gray-300">
+                Safest default for creators. Lowest friction, simplest routing.
+              </div>
+            </div>
+          </label>
+
+          <label
+            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
+              v.mode === "advanced"
+                ? "border-gray-600 bg-gray-950"
+                : "border-gray-800 hover:border-gray-700"
+            }`}
+          >
+            <input
+              type="radio"
+              name="loraMode"
+              checked={v.mode === "advanced"}
+              onChange={() => set({ mode: "advanced" })}
+            />
+            <div>
+              <div className="font-semibold text-gray-100">
+                Option B — Multi-LoRA / Create New (advanced)
+              </div>
+              <div className="text-[10px] text-gray-300">
+                For power users who want multiple LoRAs or to start a new one.
+              </div>
+            </div>
+          </label>
+        </div>
+
+        {/* Option A UI */}
+        {v.mode === "single" && (
+          <div className="space-y-3">
+            <div>
+              <p className="font-semibold mb-1 text-gray-200">
+                Choose an identity LoRA
+              </p>
+              {props.options.length === 0 && (
+                <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
+                  No trained LoRAs yet. Create one on{" "}
+                  <span className="text-gray-100 font-semibold">/lora/train</span>{" "}
+                  then come back to select it here.
+                </div>
+              )}
+              <Select
+                value={v.selected[0] || "none"}
+                onValueChange={(val) =>
+                  set({
+                    selected: val === "none" ? [] : [val],
+                    createNew: false,
+                    newName: "",
+                  })
+                }
+              >
+                <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
+                  <SelectValue placeholder="Select your trained LoRA" />
+                </SelectTrigger>
+                <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
+                  {props.options.map((l) => (
+                    <SelectItem key={l.id} value={l.id}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={v.createNew}
+                onChange={(e) =>
+                  set({
+                    createNew: e.target.checked,
+                    newName: e.target.checked ? v.newName : "",
+                    selected: e.target.checked ? [] : v.selected,
+                  })
+                }
+              />
+              <span className="text-gray-300">Create a new identity LoRA</span>
+            </label>
+
+            {v.createNew && (
+              <div>
+                <p className="font-semibold mb-1 text-gray-200">New LoRA name</p>
+                <Input
+                  value={v.newName}
+                  onChange={(e) => set({ newName: e.target.value })}
+                  placeholder="e.g. client_jane_v1"
+                  className="bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Backend will start training when you submit the training flow.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
-        <Select
-          value={props.value.selected[0] || "none"}
-          onValueChange={(val) =>
-            props.onChange({
-              mode: "single",
-              selected: val === "none" ? [] : [val],
-              createNew: false,
-              newName: "",
-            })
-          }
-        >
-          <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
-            <SelectValue placeholder="Select Identity LoRA" />
-          </SelectTrigger>
-          <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-            {props.options.map((l) => (
-              <SelectItem key={l.id} value={l.id}>
-                {l.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/* Option B UI */}
+        {v.mode === "advanced" && (
+          <div className="space-y-3">
+            <p className="font-semibold text-gray-200">
+              Select multiple LoRAs to blend
+            </p>
 
-        <Button
-          type="button"
-          variant="outline"
-          onClick={props.onTrainNew}
-          className="w-full h-8 text-xs border-gray-700 bg-gray-950 text-gray-200 hover:bg-gray-900"
-        >
-          ➕ Start new training
-        </Button>
+            <div className="space-y-2">
+              {props.options
+                .filter((l) => l.id !== "none")
+                .map((l) => (
+                  <label
+                    key={l.id}
+                    className="flex items-center gap-2 p-2 rounded-lg border border-gray-800 bg-gray-950"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={v.selected.includes(l.id)}
+                      onChange={() => toggleSelected(l.id)}
+                    />
+                    <span className="text-gray-200">{l.label}</span>
+                  </label>
+                ))}
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={v.createNew}
+                onChange={(e) =>
+                  set({
+                    createNew: e.target.checked,
+                    newName: e.target.checked ? v.newName : "",
+                  })
+                }
+              />
+              <span className="text-gray-300">Also create a new LoRA</span>
+            </label>
+
+            {v.createNew && (
+              <Input
+                value={v.newName}
+                onChange={(e) => set({ newName: e.target.value })}
+                placeholder="e.g. new_identity_v1"
+                className="bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
+              />
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -1049,7 +1270,7 @@ function HistorySidebar(props: {
       const matchesQuery = item.prompt
         .toLowerCase()
         .includes(query.toLowerCase());
-      const matchesFilter =
+            const matchesFilter =
         filter === "all" || (filter === "images" && item.kind === "image");
       return matchesQuery && matchesFilter;
     })
@@ -1077,23 +1298,31 @@ function HistorySidebar(props: {
         </div>
 
         <div className="flex gap-2">
-          <Select value={filter} onValueChange={(v) => setFilter(v as any)}>
+          <Select
+            value={filter}
+            onValueChange={(v) =>
+              setFilter(v as "all" | "images")
+            }
+          >
             <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-              <SelectItem value="all">All</SelectItem>
-              <SelectItem value="images">Images</SelectItem>
-            </SelectContent>
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="all">All</SelectItem>
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="images">Images</SelectItem>
+</SelectContent>
           </Select>
 
-          <Select value={sort} onValueChange={(v) => setSort(v as any)}>
+          <Select
+            value={sort}
+            onValueChange={(v) => setSort(v as "newest" | "oldest")}
+          >
             <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-              <SelectItem value="newest">Newest</SelectItem>
-              <SelectItem value="oldest">Oldest</SelectItem>
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="newest">Newest</SelectItem>
+              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="oldest">Oldest</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1161,19 +1390,20 @@ export default function GeneratePage() {
 
   // Core state
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
+  const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState(
     "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
   );
-  const [identityOptions, setIdentityOptions] = useState<
-    { id: string; name: string | null }[]
-  >([]);
+  const [identityOptions, setIdentityOptions] = useState<{id: string; name: string | null}[]>([]);
+  const [selectedIdentity, setSelectedIdentity] = useState<string | "none">("none");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
+  const [contentMode, setContentMode] = useState<ContentMode>("sfw");
   const [stylePreset, setStylePreset] =
     useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
   const [consistencyPreset] = useState<ConsistencyPreset>("medium");
-
+  // LoRA identity (UI + payload)
   const [loraSelection, setLoraSelection] = useState<LoraSelection>({
     mode: "single",
     selected: [],
@@ -1194,36 +1424,63 @@ export default function GeneratePage() {
   const [history, setHistory] = useState<GeneratedItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const canGenerate =
-    !isGenerating && Boolean(prompt?.trim()) && Boolean(baseModel);
 
+  const canGenerate = !isGenerating && Boolean(prompt?.trim()) && Boolean(baseModel);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Subscription modal state
   const [showSubModal, setShowSubModal] = useState(false);
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(
-    null
-  );
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
 
+  // ------------------------------------------------------------
+  // Siren's Mind → Generator injection (LOCKED)
+  // - Listen for global event
+  // - Inject prompt into existing prompt state
+  // - Optionally set output type (no auto-run)
+  // ------------------------------------------------------------
   useEffect(() => {
     const loadIdentities = async () => {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-
       const { data } = await supabase
         .from("user_loras")
         .select("id, name")
         .eq("status", "completed")
         .order("created_at", { ascending: false });
-
       setIdentityOptions(data ?? []);
     };
-
     loadIdentities();
+
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<any>;
+      const detail = (ce as any)?.detail ?? {};
+
+      const incomingPrompt =
+        typeof detail.prompt === "string" ? detail.prompt : "";
+      const incomingNegative =
+        typeof detail.negative_prompt === "string" ? detail.negative_prompt : "";
+
+      if (incomingPrompt) setPrompt(incomingPrompt);
+      if (incomingNegative) setNegativePrompt(incomingNegative);
+
+      const otRaw = typeof detail.output_type === "string" ? detail.output_type : "";
+      const ot = otRaw.trim().toUpperCase();
+      if (ot === "STORY") {
+        setOutputType("STORY");
+      } else if (ot === "IMAGE") {
+        setOutputType("IMAGE");
+      }
+
+      // Always keep launch mode (txt2img) selected in UI
+      setMode("text_to_image");
+    };
+
+    window.addEventListener("siren_mind_generate", handler as EventListener);
+    return () => {
+      window.removeEventListener("siren_mind_generate", handler as EventListener);
+    };
   }, []);
 
-  const identitySelectOptions = [
+  
+  const identitySelectOptions: { id: string; label: string }[] = [
     { id: "none", label: "None (no identity LoRA)" },
     ...identityOptions.map((l) => ({
       id: l.id,
@@ -1231,17 +1488,19 @@ export default function GeneratePage() {
     })),
   ];
 
-  const handleGenerate = async () => {
+const handleGenerate = async () => {
     setErrorMessage(null);
     setIsGenerating(true);
 
     try {
+      // Build payload to match /api/generate GenerationRequestPayload
+
       const payload = {
         mode,
         prompt,
         negativePrompt,
         baseModel,
-        contentMode: "ultra",
+        contentMode,
         stylePreset,
         qualityPreset,
         consistencyPreset,
@@ -1252,102 +1511,210 @@ export default function GeneratePage() {
         lockSeed,
         batchSize,
         loraSelection,
-        imageInput: null as any,
+        imageInput: null as any, // reserved for future image-to-image / img2vid
       };
 
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
 
+      // 🔐 Subscription / gating handling (Step 5)
       if (res.status === 402 || res.status === 403) {
-        const data = await res.json().catch(() => ({}));
-        setSubscriptionError(
-          data?.error || "Subscription required to generate."
-        );
+        let reason = "You need an active SirensForge subscription with generator access.";
+        try {
+          const data = await res.json();
+          if (typeof data?.error === "string") {
+            reason = data.error;
+          } else if (typeof data?.message === "string") {
+            reason = data.message;
+          } else if (typeof data?.code === "string") {
+            reason = data.code;
+          }
+        } catch {
+          // ignore parse errors; keep default reason
+        }
+
+        setSubscriptionError(reason);
         setShowSubModal(true);
         setIsGenerating(false);
         return;
       }
 
       if (!res.ok) {
-        throw new Error(`Generate failed (${res.status})`);
+        throw new Error(`Generate failed with status ${res.status}`);
       }
 
       const data = await res.json();
-      const outputs = data.outputs || [];
+
+      // If backend ever returns outputs directly:
+      const immediateOutputs: any[] =
+        (Array.isArray(data.outputs) && data.outputs) ||
+        (Array.isArray(data.output) && data.output) ||
+        [];
+
+      if (immediateOutputs.length) {
+        const now = new Date().toISOString();
+        const generated: GeneratedItem[] = immediateOutputs.map(
+          (output: any) => ({
+            id: `${now}-${Math.random().toString(36).slice(2)}`,
+            kind: inferKindFromOutput(output),
+            url: output.url,
+            prompt,
+            settings: payload,
+            createdAt: output.createdAt || now,
+          })
+        );
+
+        setItems((prev) => [...generated, ...prev].slice(0, 12));
+        setHistory((prev) => [...generated, ...prev]);
+        return;
+      }
+
+      const jobId: string | undefined =
+        data.job_id || data.id || data.jobId || undefined;
+
+      if (!jobId) {
+        throw new Error("No job_id or outputs returned from /api/generate");
+      }
+
+      // Poll /api/status until completed
+      const timeoutMs = 90_000;
+      const intervalMs = 1500;
+      const start = Date.now();
+
+      let finalStatus: any = null;
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (Date.now() - start > timeoutMs) {
+          throw new Error("Generation timed out. Try again.");
+        }
+
+        const statusRes = await fetch(
+          `/api/status?job_id=${encodeURIComponent(jobId)}`
+        );
+        if (!statusRes.ok) {
+          throw new Error(`Status check failed: ${statusRes.status}`);
+        }
+
+        const statusData = await statusRes.json();
+        const status = String(statusData.status || "").toUpperCase();
+
+        if (
+          status === "COMPLETED" &&
+          (Array.isArray(statusData.outputs) ||
+            Array.isArray(statusData.output))
+        ) {
+          finalStatus = statusData;
+          break;
+        }
+
+        if (status === "FAILED") {
+          throw new Error(
+            statusData.error || "Generation failed on the backend."
+          );
+        }
+
+        await sleep(intervalMs);
+      }
+
+      const outputs: any[] =
+        (Array.isArray(finalStatus.outputs) && finalStatus.outputs) ||
+        (Array.isArray(finalStatus.output) && finalStatus.output) ||
+        [];
 
       const now = new Date().toISOString();
-      const generated = outputs.map((o: any) => ({
-        id: `${now}-${Math.random().toString(36).slice(2)}`,
-        kind: inferKindFromOutput(o),
-        url: o.url,
+
+      const generated: GeneratedItem[] = outputs.map((output: any) => ({
+        id: `${jobId}-${Math.random().toString(36).slice(2)}`,
+        kind: inferKindFromOutput(output),
+        url: output.url,
         prompt,
         settings: payload,
-        createdAt: o.createdAt || now,
+        createdAt: output.createdAt || now,
       }));
 
-      setItems((p) => [...generated, ...p].slice(0, 12));
-      setHistory((p) => [...generated, ...p]);
+      setItems((prev) => [...generated, ...prev].slice(0, 12));
+      setHistory((prev) => [...generated, ...prev]);
     } catch (err: any) {
-      setErrorMessage(err?.message || "Generation failed.");
+      console.error("Generation error:", err);
+
+      const fallback =
+        outputType === "IMAGE"
+          ? "Something went wrong generating your image. Check backend logs."
+          : "Something went wrong generating your story. Check backend logs.";
+
+      setErrorMessage(err?.message || fallback);
     } finally {
       setIsGenerating(false);
     }
   };
 
+  const handleHistorySelect = (item: GeneratedItem) => {
+    setPrompt(item.prompt);
+    // later: restore full settings from item.settings if you want
+  };
+
+  const handleHistoryRerun = (item: GeneratedItem) => {
+    setPrompt(item.prompt);
+    handleGenerate();
+  };
+
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col">
+    <div className="min-h-screen bg-black text-gray-100 flex flex-col">
+      <GeneratorHeader />
 
-  <GeneratorHeader />
+      <main className="flex-1 flex flex-col md:flex-row">
+        {/* Left + center */}
+        <div className="flex-1 px-4 md:px-6 py-4 md:py-6 space-y-4 max-w-6xl mx-auto w-full">
+          {/* Mode tabs */}
+          <ModeTabs activeMode={mode} onChange={setMode} />
 
-  <main className="flex-1 flex flex-col md:flex-row">
-    <div className="flex-1 px-4 md:px-6 py-4 md:py-6 space-y-4 max-w-6xl mx-auto w-full">
-      <ModeTabs activeMode={mode} onChange={setMode} />
-
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 text-white 
-  [&_.text-gray-300]:text-white/80
-  [&_.text-gray-400]:text-white/70
-  [&_.text-gray-500]:text-white/60">
-
-        {/* LEFT COLUMN — Prompt + Ultra help */}
-        <div className="space-y-4 xl:col-span-1">
-          <PromptSection
-            prompt={prompt}
-            negativePrompt={negativePrompt}
-            onPromptChange={setPrompt}
-            onNegativePromptChange={setNegativePrompt}
-          />
-
-          <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
-            <div className="font-semibold text-gray-100">Ultra add-on</div>
-            <div className="mt-1">
-              Type{" "}
-              <span className="font-mono text-gray-100">(d1ldo)</span>{" "}
-              anywhere in your prompt to enable the dildo-play add-on.
-              Helpful words: small dildo, medium dildo, big dildo,
-              back, on side, doggystyle, ass, close-up, masturbation,
-              vaginal.
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+            {/* Left column: prompt */}
+            <div className="space-y-4 xl:col-span-1">
+              <PromptSection
+                prompt={prompt}
+                negativePrompt={negativePrompt}
+                onPromptChange={setPrompt}
+                onNegativePromptChange={setNegativePrompt}
+              />
             </div>
-          </div>
-        </div>
 
-
+            {/* Middle column: model/style + advanced + generate */}
             <div className="space-y-4 xl:col-span-1">
               <ModelStyleSection
                 baseModel={baseModel}
+                contentMode={contentMode}
                 stylePreset={stylePreset}
                 onBaseModelChange={setBaseModel}
+                onContentModeChange={setContentMode}
                 onStylePresetChange={setStylePreset}
               />
 
               <LoraIdentitySection
                 value={loraSelection}
-                onChange={setLoraSelection}
+                onChange={(next) => {
+                  setLoraSelection(next);
+                  const first = next.selected[0] || "none";
+                  setSelectedIdentity(first as any);
+                }}
                 options={identitySelectOptions}
-                onTrainNew={() => router.push("/lora/train")}
               />
+
+              <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
+                <div className="font-semibold text-gray-100">Ultra add-on</div>
+                <div className="mt-1">
+                  Type <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play
+                  add-on. Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
+                  masturbation, vaginal.
+                </div>
+              </div>
+
 
               <AdvancedSettings
                 resolution={resolution}
@@ -1363,7 +1730,6 @@ export default function GeneratePage() {
                 onLockSeedChange={setLockSeed}
                 onBatchSizeChange={setBatchSize}
               />
-
               <GenerateButton
                 isGenerating={isGenerating}
                 batchSize={batchSize}
@@ -1372,12 +1738,12 @@ export default function GeneratePage() {
                 disabled={!canGenerate}
                 onClick={handleGenerate}
               />
-
               {errorMessage && (
                 <p className="text-[11px] text-red-400">{errorMessage}</p>
               )}
             </div>
 
+            {/* Right column: output */}
             <div className="space-y-4 xl:col-span-1">
               <Card className="border-gray-800 bg-gray-900/80 h-full">
                 <CardContent className="p-4 h-full">
@@ -1388,18 +1754,17 @@ export default function GeneratePage() {
           </div>
         </div>
 
+        {/* History sidebar */}
         <div className="w-full md:w-80 lg:w-96 border-t md:border-t-0 md:border-l border-gray-900">
           <HistorySidebar
             history={history}
-            onSelect={(item) => setPrompt(item.prompt)}
-            onRerun={(item) => {
-              setPrompt(item.prompt);
-              handleGenerate();
-            }}
+            onSelect={handleHistorySelect}
+            onRerun={handleHistoryRerun}
           />
         </div>
       </main>
 
+      {/* Subscription gating modal */}
       <SubscriptionModal
         open={showSubModal}
         message={subscriptionError}
