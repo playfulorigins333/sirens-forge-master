@@ -595,12 +595,10 @@ function LoraIdentitySection(props: {
     <Card className="border-gray-800 bg-gray-900/80">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">
-          Identity LoRA (Training Mode)
+          Identity LoRA
         </CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Legacy identity locks are removed. Identity consistency is now driven
-          by LoRA selection/training. Option A is the safest, lowest-friction
-          path. Option B is available for power creators.
+          Select one trained identity LoRA to control identity consistency.
         </CardDescription>
       </CardHeader>
 
