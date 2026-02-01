@@ -23,7 +23,8 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
+
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,7 +55,6 @@ type GenerationMode =
   | "text_to_video";
 
 type BaseModel = "feminine" | "masculine";
-type ContentMode = "sfw" | "nsfw" | "ultra";
 type StylePreset =
   | "photorealistic"
   | "cinematic"
@@ -486,10 +486,8 @@ function PromptSection(props: {
 
 function ModelStyleSection(props: {
   baseModel: BaseModel;
-  contentMode: ContentMode;
   stylePreset: StylePreset;
   onBaseModelChange: (model: BaseModel) => void;
-  onContentModeChange: (mode: ContentMode) => void;
   onStylePresetChange: (preset: StylePreset) => void;
 }) {
   const baseModels: { id: BaseModel; label: string }[] = [
@@ -543,68 +541,6 @@ function ModelStyleSection(props: {
         </div>
 
         
-        {/* Content mode */}
-        <div>
-          <p className="text-xs font-semibold mb-2 text-gray-200">
-            Content Mode
-          </p>
-          <div className="space-y-2 text-xs">
-            {/* SFW */}
-            <label
-              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-                props.contentMode === "sfw"
-                  ? "border-emerald-500 bg-emerald-500/10 text-gray-100"
-                  : "border-gray-800 hover:border-gray-700 text-gray-200"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="contentMode"
-                  checked={props.contentMode === "sfw"}
-                  onChange={() => props.onContentModeChange("sfw")}
-                />
-                <div>
-                  <div className="font-semibold">SFW</div>
-                  <div className="text-[10px] text-gray-300">
-                    Safe-for-work content, social-friendly.
-                  </div>
-                </div>
-              </div>
-              <Shield className="w-4 h-4 text-emerald-400" />
-            </label>
-
-            {/* NSFW */}
-            <label
-              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-                props.contentMode === "ultra"
-                  ? "border-rose-500 bg-rose-500/10 text-gray-100"
-                  : "border-gray-800 hover:border-gray-700 text-gray-200"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="contentMode"
-                  checked={props.contentMode === "ultra"}
-                  onChange={() => props.onContentModeChange("ultra")}
-                />
-                <div>
-                  <div className="font-semibold flex items-center gap-2">
-                    NSFW
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500 text-white">
-                      18+
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-gray-300">
-                    Adult content within policy.
-                  </div>
-                </div>
-              </div>
-            </label>
-          </div>
-        </div>
-
         {/* Style preset */}
 
         <div>
@@ -1398,7 +1334,6 @@ export default function GeneratePage() {
   const [identityOptions, setIdentityOptions] = useState<{id: string; name: string | null}[]>([]);
   const [selectedIdentity, setSelectedIdentity] = useState<string | "none">("none");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
-  const [contentMode, setContentMode] = useState<ContentMode>("sfw");
   const [stylePreset, setStylePreset] =
     useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
@@ -1440,6 +1375,9 @@ export default function GeneratePage() {
   // ------------------------------------------------------------
   useEffect(() => {
     const loadIdentities = async () => {
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+      const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+      const supabase = createClient(supabaseUrl, supabaseKey);
       const { data } = await supabase
         .from("user_loras")
         .select("id, name")
@@ -1500,7 +1438,6 @@ const handleGenerate = async () => {
         prompt,
         negativePrompt,
         baseModel,
-        contentMode,
         stylePreset,
         qualityPreset,
         consistencyPreset,
@@ -1689,23 +1626,54 @@ const handleGenerate = async () => {
             <div className="space-y-4 xl:col-span-1">
               <ModelStyleSection
                 baseModel={baseModel}
-                contentMode={contentMode}
                 stylePreset={stylePreset}
                 onBaseModelChange={setBaseModel}
-                onContentModeChange={setContentMode}
                 onStylePresetChange={setStylePreset}
               />
 
-              <LoraIdentitySection
-                value={loraSelection}
-                onChange={(next) => {
-                  setLoraSelection(next);
-                  const first = next.selected[0] || "none";
-                  setSelectedIdentity(first as any);
-                }}
-                options={identitySelectOptions}
-              />
+    
+              <Card className="border-gray-800 bg-gray-900/80">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm md:text-base">
+                    Identity LoRA
+                  </CardTitle>
+                  <CardDescription className="text-xs text-gray-300">
+                    Select one trained identity LoRA. For new identities, use the trainer.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3 text-xs">
+                  <Select
+                    value={loraSelection.selected[0] || "none"}
+                    onValueChange={(val) =>
+                      setLoraSelection({
+                        ...loraSelection,
+                        selected: val === "none" ? [] : [val],
+                      })
+                    }
+                  >
+                    <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
+                      <SelectValue placeholder="Select identity LoRA" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
+                      {identitySelectOptions.map((l) => (
+                        <SelectItem key={l.id} value={l.id}>
+                          {l.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => router.push("/lora/train")}
+                    className="w-full text-xs"
+                  >
+                    Create new identity LoRA
+                  </Button>
+                </CardContent>
+              </Card>
+    
               <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
                 <div className="font-semibold text-gray-100">Ultra add-on</div>
                 <div className="mt-1">
