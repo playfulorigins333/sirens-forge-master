@@ -581,15 +581,14 @@ function LoraIdentitySection(props: {
 }) {
   const v = props.value;
 
-  const set = (patch: Partial<LoraSelection>) =>
-    props.onChange({ ...v, ...patch });
-
-  const toggleSelected = (id: string) => {
-    const next = v.selected.includes(id)
-      ? v.selected.filter((x) => x !== id)
-      : [...v.selected, id];
-    set({ selected: next.filter((x) => x !== "none") });
-  };
+  const setSelected = (id: string) =>
+    props.onChange({
+      ...v,
+      mode: "single",
+      selected: id === "none" ? [] : [id],
+      createNew: false,
+      newName: "",
+    });
 
   return (
     <Card className="border-gray-800 bg-gray-900/80">
@@ -602,174 +601,30 @@ function LoraIdentitySection(props: {
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-4 text-xs">
-        {/* Mode */}
-        <div className="space-y-2">
-          <label
-            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-              v.mode === "single"
-                ? "border-purple-500 bg-purple-500/10"
-                : "border-gray-800 hover:border-gray-700"
-            }`}
-          >
-            <input
-              type="radio"
-              name="loraMode"
-              checked={v.mode === "single"}
-              onChange={() => set({ mode: "single" })}
-            />
-            <div>
-              <div className="font-semibold text-gray-100">
-                Option A — Select 1 LoRA (recommended)
-              </div>
-              <div className="text-[10px] text-gray-300">
-                Safest default for creators. Lowest friction, simplest routing.
-              </div>
-            </div>
-          </label>
-
-          <label
-            className={`flex items-center gap-2 p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-              v.mode === "advanced"
-                ? "border-gray-600 bg-gray-950"
-                : "border-gray-800 hover:border-gray-700"
-            }`}
-          >
-            <input
-              type="radio"
-              name="loraMode"
-              checked={v.mode === "advanced"}
-              onChange={() => set({ mode: "advanced" })}
-            />
-            <div>
-              <div className="font-semibold text-gray-100">
-                Option B — Multi-LoRA / Create New (advanced)
-              </div>
-              <div className="text-[10px] text-gray-300">
-                For power users who want multiple LoRAs or to start a new one.
-              </div>
-            </div>
-          </label>
-        </div>
-
-        {/* Option A UI */}
-        {v.mode === "single" && (
-          <div className="space-y-3">
-            <div>
-              <p className="font-semibold mb-1 text-gray-200">
-                Choose an identity LoRA
-              </p>
-              {props.options.length === 0 && (
-                <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
-                  No trained LoRAs yet. Create one on{" "}
-                  <span className="text-gray-100 font-semibold">/lora/train</span>{" "}
-                  then come back to select it here.
-                </div>
-              )}
-              <Select
-                value={v.selected[0] || "none"}
-                onValueChange={(val) =>
-                  set({
-                    selected: val === "none" ? [] : [val],
-                    createNew: false,
-                    newName: "",
-                  })
-                }
-              >
-                <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
-                  <SelectValue placeholder="Select your trained LoRA" />
-                </SelectTrigger>
-                <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-                  {props.options.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={v.createNew}
-                onChange={(e) =>
-                  set({
-                    createNew: e.target.checked,
-                    newName: e.target.checked ? v.newName : "",
-                    selected: e.target.checked ? [] : v.selected,
-                  })
-                }
-              />
-              <span className="text-gray-300">Create a new identity LoRA</span>
-            </label>
-
-            {v.createNew && (
-              <div>
-                <p className="font-semibold mb-1 text-gray-200">New LoRA name</p>
-                <Input
-                  value={v.newName}
-                  onChange={(e) => set({ newName: e.target.value })}
-                  placeholder="e.g. client_jane_v1"
-                  className="bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
-                />
-                <p className="text-[10px] text-gray-400 mt-1">
-                  Backend will start training when you submit the training flow.
-                </p>
-              </div>
-            )}
+      <CardContent className="space-y-3 text-xs">
+        {props.options.length === 0 && (
+          <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
+            No trained LoRAs yet. Create one on{" "}
+            <span className="text-gray-100 font-semibold">/lora/train</span>{" "}
+            then come back to select it here.
           </div>
         )}
 
-        {/* Option B UI */}
-        {v.mode === "advanced" && (
-          <div className="space-y-3">
-            <p className="font-semibold text-gray-200">
-              Select multiple LoRAs to blend
-            </p>
-
-            <div className="space-y-2">
-              {props.options
-                .filter((l) => l.id !== "none")
-                .map((l) => (
-                  <label
-                    key={l.id}
-                    className="flex items-center gap-2 p-2 rounded-lg border border-gray-800 bg-gray-950"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={v.selected.includes(l.id)}
-                      onChange={() => toggleSelected(l.id)}
-                    />
-                    <span className="text-gray-200">{l.label}</span>
-                  </label>
-                ))}
-            </div>
-
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={v.createNew}
-                onChange={(e) =>
-                  set({
-                    createNew: e.target.checked,
-                    newName: e.target.checked ? v.newName : "",
-                  })
-                }
-              />
-              <span className="text-gray-300">Also create a new LoRA</span>
-            </label>
-
-            {v.createNew && (
-              <Input
-                value={v.newName}
-                onChange={(e) => set({ newName: e.target.value })}
-                placeholder="e.g. new_identity_v1"
-                className="bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
-              />
-            )}
-          </div>
-        )}
+        <Select
+          value={v.selected[0] || "none"}
+          onValueChange={setSelected}
+        >
+          <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
+            <SelectValue placeholder="Select identity LoRA" />
+          </SelectTrigger>
+          <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
+            {props.options.map((l) => (
+              <SelectItem key={l.id} value={l.id}>
+                {l.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </CardContent>
     </Card>
   );
