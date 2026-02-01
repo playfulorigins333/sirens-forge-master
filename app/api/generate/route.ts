@@ -112,6 +112,31 @@ function errJson(
 }
 
 // ------------------------------------------------------------
+// Debug: extract any .safetensors strings from workflow JSON
+// ------------------------------------------------------------
+function extractSafetensorsPaths(obj: any): string[] {
+  const out = new Set<string>();
+
+  const walk = (v: any) => {
+    if (v == null) return;
+    if (typeof v === "string") {
+      if (v.toLowerCase().includes(".safetensors")) out.add(v);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const item of v) walk(item);
+      return;
+    }
+    if (typeof v === "object") {
+      for (const k of Object.keys(v)) walk(v[k]);
+    }
+  };
+
+  walk(obj);
+  return Array.from(out);
+}
+
+// ------------------------------------------------------------
 // POST /api/generate
 // ------------------------------------------------------------
 export async function POST(req: Request) {
@@ -224,6 +249,9 @@ export async function POST(req: Request) {
       fluxLock: null,
     });
 
+    // DEBUG PROOF (SAFE)
+    const workflowSafetensors = extractSafetensorsPaths(workflow);
+
     // COMFY EXECUTION (IMAGE ONLY)
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), COMFY_TIMEOUT_MS);
@@ -252,6 +280,14 @@ export async function POST(req: Request) {
       return errJson("comfyui_failed", 502, detail || undefined, {
         requestId,
         comfy_status: res.status,
+        debug: {
+          resolved: {
+            body_mode: request.params.body_mode,
+            user_lora: request.params.user_lora ?? null,
+            loraStack,
+          },
+          workflowSafetensors,
+        },
       });
     }
 
@@ -263,6 +299,14 @@ export async function POST(req: Request) {
       return errJson("comfyui_bad_response", 502, undefined, {
         requestId,
         snippet: raw.slice(0, 2000),
+        debug: {
+          resolved: {
+            body_mode: request.params.body_mode,
+            user_lora: request.params.user_lora ?? null,
+            loraStack,
+          },
+          workflowSafetensors,
+        },
       });
     }
 
@@ -272,6 +316,14 @@ export async function POST(req: Request) {
       mode: request.mode,
       seed,
       result,
+      debug: {
+        resolved: {
+          body_mode: request.params.body_mode,
+          user_lora: request.params.user_lora ?? null,
+          loraStack,
+        },
+        workflowSafetensors,
+      },
     });
   } catch (err: any) {
     const message = err?.message || "internal_error";
