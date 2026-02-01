@@ -1466,6 +1466,15 @@ const handleGenerate = async () => {
                 onPromptChange={setPrompt}
                 onNegativePromptChange={setNegativePrompt}
               />
+
+              <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
+                <div className="font-semibold text-gray-100">Ultra add-on</div>
+                <div className="mt-1">
+                  Type <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play
+                  add-on. Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
+                  masturbation, vaginal.
+                </div>
+              </div>
             </div>
 
             {/* Middle column: model/style + advanced + generate */}
@@ -1487,14 +1496,6 @@ const handleGenerate = async () => {
                 options={identitySelectOptions}
               />
 
-              <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
-                <div className="font-semibold text-gray-100">Ultra add-on</div>
-                <div className="mt-1">
-                  Type <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play
-                  add-on. Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
-                  masturbation, vaginal.
-                </div>
-              </div>
 
 
               <AdvancedSettings
