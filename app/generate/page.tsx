@@ -1274,6 +1274,10 @@ export default function GeneratePage() {
   ];
 
 const handleGenerate = async () => {
+    const bodyModeMap: Record<string, string> = {
+      feminine: "body_feminine",
+      masculine: "body_masculine",
+    };
     const selectedLoraId = loraSelection.selected[0] ?? null;
     setErrorMessage(null);
     setIsGenerating(true);
@@ -1287,12 +1291,12 @@ const handleGenerate = async () => {
         params: {
           prompt,
           negative_prompt: negativePrompt,
-          body_mode: baseModel,
+          body_mode: bodyModeMap[baseModel],
           width: 1024,
           height: 1536,
           steps,
           cfg: guidance,
-          seed: lockSeed ? seed : null,
+          seed: lockSeed ? seed : Math.floor(Math.random() * 1_000_000_000),
           user_lora: selectedLoraId
             ? { id: selectedLoraId, strength: 0.85 }
             : null,
