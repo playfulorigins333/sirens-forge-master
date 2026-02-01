@@ -1274,6 +1274,7 @@ export default function GeneratePage() {
   ];
 
 const handleGenerate = async () => {
+    const selectedLoraId = loraSelection.selected[0] ?? null;
     setErrorMessage(null);
     setIsGenerating(true);
 
@@ -1281,6 +1282,7 @@ const handleGenerate = async () => {
       // Build payload to match /api/generate GenerationRequestPayload
 
       const payload = {
+    user_lora: selectedLoraId ? { id: selectedLoraId, strength: 0.85 } : null,
         mode,
         prompt,
         negativePrompt,
