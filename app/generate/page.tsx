@@ -54,7 +54,6 @@ type GenerationMode =
   | "text_to_video";
 
 type BaseModel = "feminine" | "masculine";
-type ContentMode = "sfw" | "nsfw" | "ultra";
 type StylePreset =
   | "photorealistic"
   | "cinematic"
@@ -485,12 +484,8 @@ function PromptSection(props: {
 // -----------------------------------------------------------------------------
 
 function ModelStyleSection(props: {
-  baseModel: BaseModel;
-  contentMode: ContentMode;
-  stylePreset: StylePreset;
-  onBaseModelChange: (model: BaseModel) => void;
-  onContentModeChange: (mode: ContentMode) => void;
-  onStylePresetChange: (preset: StylePreset) => void;
+  baseModel: BaseModel;  stylePreset: StylePreset;
+  onBaseModelChange: (model: BaseModel) => void;  onStylePresetChange: (preset: StylePreset) => void;
 }) {
   const baseModels: { id: BaseModel; label: string }[] = [
     { id: "feminine", label: "Feminine" },
@@ -543,68 +538,6 @@ function ModelStyleSection(props: {
         </div>
 
         
-        {/* Content mode */}
-        <div>
-          <p className="text-xs font-semibold mb-2 text-gray-200">
-            Content Mode
-          </p>
-          <div className="space-y-2 text-xs">
-            {/* SFW */}
-            <label
-              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-                props.contentMode === "sfw"
-                  ? "border-emerald-500 bg-emerald-500/10 text-gray-100"
-                  : "border-gray-800 hover:border-gray-700 text-gray-200"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="contentMode"
-                  checked={props.contentMode === "sfw"}
-                  onChange={() => props.onContentModeChange("sfw")}
-                />
-                <div>
-                  <div className="font-semibold">SFW</div>
-                  <div className="text-[10px] text-gray-300">
-                    Safe-for-work content, social-friendly.
-                  </div>
-                </div>
-              </div>
-              <Shield className="w-4 h-4 text-emerald-400" />
-            </label>
-
-            {/* NSFW */}
-            <label
-              className={`flex items-center justify-between p-2.5 rounded-lg border-2 cursor-pointer transition-all ${
-                props.contentMode === "ultra"
-                  ? "border-rose-500 bg-rose-500/10 text-gray-100"
-                  : "border-gray-800 hover:border-gray-700 text-gray-200"
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="contentMode"
-                  checked={props.contentMode === "ultra"}
-                  onChange={() => props.onContentModeChange("ultra")}
-                />
-                <div>
-                  <div className="font-semibold flex items-center gap-2">
-                    NSFW
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500 text-white">
-                      18+
-                    </span>
-                  </div>
-                  <div className="text-[10px] text-gray-300">
-                    Adult content within policy.
-                  </div>
-                </div>
-              </div>
-            </label>
-          </div>
-        </div>
-
         {/* Style preset */}
 
         <div>
@@ -1398,7 +1331,6 @@ export default function GeneratePage() {
   const [identityOptions, setIdentityOptions] = useState<{id: string; name: string | null}[]>([]);
   const [selectedIdentity, setSelectedIdentity] = useState<string | "none">("none");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
-  const [contentMode, setContentMode] = useState<ContentMode>("sfw");
   const [stylePreset, setStylePreset] =
     useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
@@ -1499,9 +1431,7 @@ const handleGenerate = async () => {
         mode,
         prompt,
         negativePrompt,
-        baseModel,
-        contentMode,
-        stylePreset,
+        baseModel,        stylePreset,
         qualityPreset,
         consistencyPreset,
         resolution,
@@ -1689,10 +1619,8 @@ const handleGenerate = async () => {
             <div className="space-y-4 xl:col-span-1">
               <ModelStyleSection
                 baseModel={baseModel}
-                contentMode={contentMode}
                 stylePreset={stylePreset}
                 onBaseModelChange={setBaseModel}
-                onContentModeChange={setContentMode}
                 onStylePresetChange={setStylePreset}
               />
 
