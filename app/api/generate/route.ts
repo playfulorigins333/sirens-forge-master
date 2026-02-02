@@ -1,5 +1,5 @@
-// STAGE 2 RE-ENABLE — auth + subscription + request parsing
-console.log("🔥 /api/generate route module loaded (stage 2)");
+// STAGE 3 RE-ENABLE — auth + subscription + request parsing + LoRA resolution
+console.log("🔥 /api/generate route module loaded (stage 3)");
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
@@ -9,6 +9,7 @@ import {
   parseGenerationRequest,
   type GenerationRequest,
 } from "@/lib/generation/contract";
+import { resolveLoraStack } from "@/lib/generation/lora-resolver";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -52,10 +53,10 @@ export function OPTIONS() {
 }
 
 // ------------------------------------------------------------
-// POST /api/generate — STAGE 2
+// POST /api/generate — STAGE 3
 // ------------------------------------------------------------
 export async function POST(req: Request) {
-  console.log("🟢 POST /api/generate STAGE 2 invoked");
+  console.log("🟢 POST /api/generate STAGE 3 invoked");
 
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -99,21 +100,22 @@ export async function POST(req: Request) {
     );
   }
 
-  // ---- Request parsing (NEW in stage 2) ----
+  // ---- Request parsing ----
   const raw = await req.json();
   const parsed: GenerationRequest = parseGenerationRequest(raw);
 
-  // ---- TEMP SUCCESS ----
+  // ---- LoRA resolution (NEW in stage 3) ----
+  const loraStack = await resolveLoraStack(
+    parsed.params.body_mode,
+    parsed.params.user_lora
+  );
+
+  // ---- TEMP SUCCESS (do not inspect structure yet) ----
   return NextResponse.json({
     success: true,
-    stage: 2,
-    message: "Auth + subscription + request parsing passed",
+    stage: 3,
+    message: "Auth + subscription + parsing + LoRA resolution passed",
     requestId,
-    parsedSummary: {
-      mode: parsed.mode,
-      hasUserLora: Boolean(parsed.params.user_lora),
-      width: parsed.params.width,
-      height: parsed.params.height,
-    },
+    hasLoraStack: Boolean(loraStack),
   });
 }
