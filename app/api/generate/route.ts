@@ -125,7 +125,8 @@ export async function POST(req: Request) {
       return errJson("unsupported_mode", 400, undefined, { requestId });
     }
 
-    const loraStack = resolveLoraStack(
+    // 🔒 FIX: await the async resolver
+    const loraStack = await resolveLoraStack(
       request.params.body_mode,
       request.params.user_lora
     );
@@ -144,7 +145,6 @@ export async function POST(req: Request) {
     });
 
     // ---------------- GATEWAY FETCH ----------------
-    // ✅ MUST POST TO /generate
     const base = GATEWAY_BASE.replace(/\/$/, "");
     const targetUrl = `${base}/generate`;
 

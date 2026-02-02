@@ -66,9 +66,9 @@ export function buildWorkflow({
     wf[id] = {
       class_type: "LoraLoader",
       inputs: {
-        lora_name: l.path.includes("/workspace/cache/loras/")
-          ? `sirensforge_cache/${l.path.split("/").pop()}`
-          : l.path.split("/").pop(),
+        // 🔒 FINAL CONTRACT:
+        // Resolver already returned the exact ComfyUI filename.
+        lora_name: l.path,
         strength_model: l.strength,
         strength_clip: l.strength,
         model: currentModel,
