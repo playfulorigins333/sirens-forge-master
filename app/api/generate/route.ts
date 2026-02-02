@@ -65,17 +65,20 @@ function errJson(
 
 // ------------------------------------------------------------
 // OPTIONS /api/generate
-// Required for browser CORS preflight
+// MUST use NextResponse (middleware compatibility)
 // ------------------------------------------------------------
 export async function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    },
-  });
+  return NextResponse.json(
+    {},
+    {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      },
+    }
+  );
 }
 
 // ------------------------------------------------------------
@@ -140,13 +143,11 @@ export async function POST(req: Request) {
       return errJson("unsupported_mode", 400, undefined, { requestId });
     }
 
-    // ---------------- LoRA RESOLUTION ----------------
     const loraStack = await resolveLoraStack(
       request.params.body_mode,
       request.params.user_lora
     );
 
-    // ---------------- WORKFLOW BUILD ----------------
     const workflow = buildWorkflow({
       prompt: request.params.prompt,
       negative: request.params.negative_prompt || "",
