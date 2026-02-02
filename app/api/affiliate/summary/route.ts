@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
+import { supabaseServer } from "@/lib/supabaseServer"
 
 export async function GET(req: Request) {
   try {
-    // 1️⃣ Get the logged-in user
-    const { data: { user }, error: userErr } = await supabase.auth.getUser()
-    if (userErr || !user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    const supabase = await supabaseServer()
+
+    // 1️⃣ Get the logged-in user (from cookies)
+    const {
+      data: { user },
+      error: userErr,
+    } = await supabase.auth.getUser()
+
+    if (userErr || !user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
     const userId = user.id
 
@@ -35,17 +43,20 @@ export async function GET(req: Request) {
     if (commissionErr) throw commissionErr
 
     // Calculate earnings
-    const totalEarnings = commissions.reduce((acc, c) => acc + Number(c.commission_amount || 0), 0)
+    const totalEarnings = commissions.reduce(
+      (acc, c) => acc + Number(c.commission_amount || 0),
+      0
+    )
 
     const pendingEarnings = commissions
-      .filter(c => c.status === "pending")
+      .filter((c) => c.status === "pending")
       .reduce((acc, c) => acc + Number(c.commission_amount || 0), 0)
 
     const paidEarnings = commissions
-      .filter(c => c.status === "paid")
+      .filter((c) => c.status === "paid")
       .reduce((acc, c) => acc + Number(c.commission_amount || 0), 0)
 
-    // 5️⃣ Pull total clicks from referral_codes metadata (if you're tracking)
+    // 5️⃣ Pull total clicks from referral_codes metadata
     const { data: codeData } = await supabase
       .from("referral_codes")
       .select("total_uses")
@@ -54,7 +65,7 @@ export async function GET(req: Request) {
 
     const clicks = codeData?.total_uses || 0
 
-    // 6️⃣ Build the API response object
+    // 6️⃣ Build API response
     return NextResponse.json({
       referral_code: profile.referral_code,
       tier: profile.tier,

@@ -2,7 +2,7 @@
 
 import React, { useState } from "react"
 import { useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabase"
+import { supabaseBrowser } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -11,6 +11,7 @@ import { Sparkles, Eye, EyeOff, Crown, Star } from "lucide-react"
 import { motion } from "framer-motion"
 
 export default function LoginPage() {
+  const supabase = supabaseBrowser()
   const router = useRouter()
 
   const [email, setEmail] = useState("")

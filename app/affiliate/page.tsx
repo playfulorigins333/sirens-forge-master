@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { supabase } from "@/lib/supabase"
+import { supabaseBrowser } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -19,6 +19,8 @@ import {
 import { motion } from "framer-motion"
 
 export default function AffiliateDashboard() {
+  const supabase = supabaseBrowser()
+
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState(false)
   const [profile, setProfile] = useState<any>(null)
