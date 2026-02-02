@@ -4,8 +4,6 @@
 
 import type { ResolvedLoraStack } from "@/lib/generation/lora-resolver";
 
-const baseWorkflow = require("./workflow-base.json");
-
 type FluxLock = { type?: string; strength?: string } | null;
 
 interface BuildWorkflowArgs {
@@ -38,6 +36,11 @@ export function buildWorkflow({
   dnaImageNames = [],
   fluxLock = null,
 }: BuildWorkflowArgs) {
+  // 🔒 IMPORTANT:
+  // Load workflow JSON at CALL TIME, not import time (serverless-safe)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const baseWorkflow = require("./workflow-base.json");
+
   const wf: any = JSON.parse(JSON.stringify(baseWorkflow));
   const nodeIds = Object.keys(wf);
 
@@ -87,8 +90,9 @@ export function buildWorkflow({
     const node = wf[id];
     if (node?.class_type === "CLIPTextEncode") {
       if (node.inputs?.text === "{prompt}") node.inputs.text = prompt;
-      if (node.inputs?.text === "{negative_prompt}")
+      if (node.inputs?.text === "{negative_prompt}") {
         node.inputs.text = negative;
+      }
       node.inputs.clip = currentClip;
     }
   }
