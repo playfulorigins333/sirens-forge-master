@@ -1,9 +1,14 @@
-// STAGE 1 RE-ENABLE — auth + subscription only
-console.log("🔥 /api/generate route module loaded (stage 1)");
+// STAGE 2 RE-ENABLE — auth + subscription + request parsing
+console.log("🔥 /api/generate route module loaded (stage 2)");
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
+
+import {
+  parseGenerationRequest,
+  type GenerationRequest,
+} from "@/lib/generation/contract";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,14 +52,14 @@ export function OPTIONS() {
 }
 
 // ------------------------------------------------------------
-// POST /api/generate — STAGE 1
+// POST /api/generate — STAGE 2
 // ------------------------------------------------------------
-export async function POST() {
-  console.log("🟢 POST /api/generate STAGE 1 invoked");
+export async function POST(req: Request) {
+  console.log("🟢 POST /api/generate STAGE 2 invoked");
 
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  // ---- Auth client ----
+  // ---- Auth ----
   const supabaseAuth = createServerClient(
     SUPABASE_URL,
     SUPABASE_ANON_KEY,
@@ -73,7 +78,7 @@ export async function POST() {
     );
   }
 
-  // ---- Subscription check ----
+  // ---- Subscription ----
   const supabaseAdmin = createServerClient(
     SUPABASE_URL,
     SUPABASE_SERVICE_ROLE_KEY,
@@ -94,11 +99,21 @@ export async function POST() {
     );
   }
 
+  // ---- Request parsing (NEW in stage 2) ----
+  const raw = await req.json();
+  const parsed: GenerationRequest = parseGenerationRequest(raw);
+
   // ---- TEMP SUCCESS ----
   return NextResponse.json({
     success: true,
-    stage: 1,
-    message: "Auth + subscription passed",
+    stage: 2,
+    message: "Auth + subscription + request parsing passed",
     requestId,
+    parsedSummary: {
+      mode: parsed.mode,
+      hasUserLora: Boolean(parsed.params.user_lora),
+      width: parsed.params.width,
+      height: parsed.params.height,
+    },
   });
 }
