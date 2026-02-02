@@ -1,4 +1,6 @@
 // lib/generation/lora-resolver.ts
+// PRODUCTION-LOCKED — Identity-first LoRA resolution
+// UI does NOT control strengths. Engine guarantees consistency.
 
 import type { BodyMode, UserLora } from "./contract";
 
@@ -22,6 +24,13 @@ const BIGLUST_BASE_PATH =
   "/workspace/sirensforge/models/base/bigLust_v16.safetensors";
 
 /**
+ * 🔒 LOCKED STRENGTHS (PRODUCTION)
+ * These are engine decisions, not UX decisions.
+ */
+const BODY_LORA_STRENGTH = 0.75;
+const IDENTITY_LORA_STRENGTH = 1.0;
+
+/**
  * Body LoRA paths (already symlinked into ComfyUI)
  */
 const BODY_LORA_PATHS: Record<Exclude<BodyMode, "none">, string> = {
@@ -37,19 +46,20 @@ const BODY_LORA_PATHS: Record<Exclude<BodyMode, "none">, string> = {
 
 /**
  * User-trained LoRAs are loaded from the shared cache.
- * This SAME path will be used for image + video.
+ * Strength is LOCKED for identity dominance.
  */
 function resolveUserLora(userLora?: UserLora): ResolvedLora | null {
   if (!userLora) return null;
 
   return {
     path: `/workspace/cache/loras/${userLora.id}.safetensors`,
-    strength: userLora.strength ?? 0.85,
+    strength: IDENTITY_LORA_STRENGTH,
   };
 }
 
 /**
  * MAIN RESOLVER — SINGLE SOURCE OF TRUTH
+ * Order matters: Body → Identity
  */
 export function resolveLoraStack(
   bodyMode: BodyMode,
@@ -62,16 +72,16 @@ export function resolveLoraStack(
     throw new Error(`Unsupported body mode for launch: ${bodyMode}`);
   }
 
-  // 1️⃣ Body modifier (optional)
+  // 1️⃣ Body modifier (supportive only)
   if (bodyMode !== "none") {
     const bodyPath = BODY_LORA_PATHS[bodyMode];
     loras.push({
       path: bodyPath,
-      strength: 1.0,
+      strength: BODY_LORA_STRENGTH,
     });
   }
 
-  // 2️⃣ Optional SINGLE user LoRA
+  // 2️⃣ Identity LoRA (dominant, always last)
   const resolvedUser = resolveUserLora(userLora);
   if (resolvedUser) {
     loras.push(resolvedUser);
