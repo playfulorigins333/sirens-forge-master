@@ -1,4 +1,5 @@
 // FORCE REDEPLOY — no logic change
+console.log("🔥 /api/generate route module loaded");
 
 // ------------------------------------------------------------
 // /app/api/generate/route.ts
@@ -67,7 +68,6 @@ function errJson(
 
 // ------------------------------------------------------------
 // OPTIONS /api/generate
-// 🔒 MUST return NO BODY for 204
 // ------------------------------------------------------------
 export function OPTIONS() {
   return new NextResponse(null, {
@@ -84,6 +84,8 @@ export function OPTIONS() {
 // POST /api/generate
 // ------------------------------------------------------------
 export async function POST(req: Request) {
+  console.log("🔥 POST /api/generate invoked");
+
   const requestId = crypto.randomUUID();
 
   try {
