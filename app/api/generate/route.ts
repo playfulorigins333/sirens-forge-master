@@ -15,6 +15,7 @@ import { resolveLoraStack } from "@/lib/generation/lora-resolver";
 import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 // ------------------------------------------------------------
 // ENV
