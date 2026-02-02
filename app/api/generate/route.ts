@@ -1,5 +1,5 @@
-// STAGE 3 RE-ENABLE — auth + subscription + request parsing + LoRA resolution
-console.log("🔥 /api/generate route module loaded (stage 3)");
+// STAGE 3 RE-ENABLE — guarded LoRA resolution
+console.log("🔥 /api/generate route module loaded (stage 3 guarded)");
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
@@ -53,10 +53,10 @@ export function OPTIONS() {
 }
 
 // ------------------------------------------------------------
-// POST /api/generate — STAGE 3
+// POST /api/generate — STAGE 3 (GUARDED)
 // ------------------------------------------------------------
 export async function POST(req: Request) {
-  console.log("🟢 POST /api/generate STAGE 3 invoked");
+  console.log("🟢 POST /api/generate STAGE 3 (guarded) invoked");
 
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -104,17 +104,33 @@ export async function POST(req: Request) {
   const raw = await req.json();
   const parsed: GenerationRequest = parseGenerationRequest(raw);
 
-  // ---- LoRA resolution (NEW in stage 3) ----
-  const loraStack = await resolveLoraStack(
-    parsed.params.body_mode,
-    parsed.params.user_lora
-  );
+  // ---- LoRA resolution (GUARDED) ----
+  let loraStack: unknown;
+  try {
+    loraStack = await resolveLoraStack(
+      parsed.params.body_mode,
+      parsed.params.user_lora
+    );
+  } catch (err: any) {
+    console.error("❌ resolveLoraStack failed", err);
 
-  // ---- TEMP SUCCESS (do not inspect structure yet) ----
+    return NextResponse.json(
+      {
+        success: false,
+        stage: 3,
+        error: "resolve_lora_stack_failed",
+        message: err?.message || String(err),
+        requestId,
+      },
+      { status: 500 }
+    );
+  }
+
+  // ---- TEMP SUCCESS ----
   return NextResponse.json({
     success: true,
     stage: 3,
-    message: "Auth + subscription + parsing + LoRA resolution passed",
+    message: "LoRA resolution succeeded",
     requestId,
     hasLoraStack: Boolean(loraStack),
   });
