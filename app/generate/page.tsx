@@ -1232,15 +1232,35 @@ export default function GeneratePage() {
   // - Optionally set output type (no auto-run)
   // ------------------------------------------------------------
   useEffect(() => {
+    let cancelled = false;
+
     const loadIdentities = async () => {
+      // IMPORTANT: In App Router client components, auth/session hydration can lag the first render.
+      // If we query before a session exists, RLS will evaluate auth.uid() as NULL and return [].
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) return;
+
       const { data } = await supabase
         .from("user_loras")
         .select("id, name")
         .eq("status", "completed")
         .order("created_at", { ascending: false });
-      setIdentityOptions(data ?? []);
+
+      if (!cancelled) setIdentityOptions(data ?? []);
     };
+
+    // Try once on mount (works if session is already hydrated)
     loadIdentities();
+
+    // If not hydrated yet, retry as soon as auth becomes available
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (session) loadIdentities();
+      }
+    );
 
     const handler = (e: Event) => {
       const ce = e as CustomEvent<any>;
@@ -1268,9 +1288,12 @@ export default function GeneratePage() {
 
     window.addEventListener("siren_mind_generate", handler as EventListener);
     return () => {
+      cancelled = true;
+      authListener?.subscription?.unsubscribe();
       window.removeEventListener("siren_mind_generate", handler as EventListener);
     };
   }, []);
+;
 
   
   const identitySelectOptions: { id: string; label: string }[] = [
