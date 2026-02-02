@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
 // /app/api/status/route.ts
-// FULL FILE — PRODUCTION STATUS POLLING (COMFYUI GATEWAY)
+// FULL FILE — PRODUCTION STATUS POLLING (NGINX GATEWAY SAFE)
 // ------------------------------------------------------------
 
 import { NextResponse } from "next/server";
@@ -8,7 +8,9 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// This must be the FastAPI gateway base (9100), NOT ComfyUI directly
+// IMPORTANT:
+// This env var already points to /gateway
+// Example: https://<pod>-3000.proxy.runpod.net/gateway
 const GATEWAY_BASE = process.env.RUNPOD_COMFY_WEBHOOK || "";
 
 const TIMEOUT_MS = 30_000;
@@ -32,17 +34,18 @@ export async function GET(req: Request) {
     return errJson("missing_job_id", 400);
   }
 
+  // ✅ DO NOT add /gateway here
+  // nginx already handled it
+  const targetUrl = `${GATEWAY_BASE.replace(/\/$/, "")}/status/${encodeURIComponent(job_id)}`;
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   try {
-    const res = await fetch(
-      `${GATEWAY_BASE}/status/${encodeURIComponent(job_id)}`,
-      {
-        method: "GET",
-        signal: controller.signal,
-      }
-    );
+    const res = await fetch(targetUrl, {
+      method: "GET",
+      signal: controller.signal,
+    });
 
     if (!res.ok) {
       return errJson("status_failed", 502, await res.text());
@@ -50,15 +53,13 @@ export async function GET(req: Request) {
 
     const data = await res.json();
 
-    // IMPORTANT:
-    // If gateway returns relative image URLs (e.g. /view?...),
-    // rewrite them to absolute URLs so the browser can load them.
+    // Rewrite relative image URLs to absolute
     if (Array.isArray(data?.outputs)) {
       data.outputs = data.outputs.map((o: any) => {
         if (typeof o?.url === "string" && o.url.startsWith("/")) {
           return {
             ...o,
-            url: `${GATEWAY_BASE}${o.url}`,
+            url: `${GATEWAY_BASE.replace(/\/$/, "")}${o.url}`,
           };
         }
         return o;
