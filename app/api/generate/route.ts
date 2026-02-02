@@ -86,7 +86,8 @@ export function OPTIONS() {
 export async function POST(req: Request) {
   console.log("🔥 POST /api/generate invoked");
 
-  const requestId = crypto.randomUUID();
+  // SAFE request id (no crypto dependency)
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   try {
     if (
