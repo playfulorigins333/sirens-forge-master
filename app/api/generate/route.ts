@@ -1,5 +1,5 @@
-// STAGE 3 RE-ENABLE — guarded LoRA resolution
-console.log("🔥 /api/generate route module loaded (stage 3 guarded)");
+// STAGE 3A — auth + subscription + parsing ONLY (no LoRA import)
+console.log("🔥 /api/generate route module loaded (stage 3A)");
 
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
@@ -9,7 +9,6 @@ import {
   parseGenerationRequest,
   type GenerationRequest,
 } from "@/lib/generation/contract";
-import { resolveLoraStack } from "@/lib/generation/lora-resolver";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -53,10 +52,10 @@ export function OPTIONS() {
 }
 
 // ------------------------------------------------------------
-// POST /api/generate — STAGE 3 (GUARDED)
+// POST /api/generate — STAGE 3A
 // ------------------------------------------------------------
 export async function POST(req: Request) {
-  console.log("🟢 POST /api/generate STAGE 3 (guarded) invoked");
+  console.log("🟢 POST /api/generate STAGE 3A invoked");
 
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
@@ -104,34 +103,16 @@ export async function POST(req: Request) {
   const raw = await req.json();
   const parsed: GenerationRequest = parseGenerationRequest(raw);
 
-  // ---- LoRA resolution (GUARDED) ----
-  let loraStack: unknown;
-  try {
-    loraStack = await resolveLoraStack(
-      parsed.params.body_mode,
-      parsed.params.user_lora
-    );
-  } catch (err: any) {
-    console.error("❌ resolveLoraStack failed", err);
-
-    return NextResponse.json(
-      {
-        success: false,
-        stage: 3,
-        error: "resolve_lora_stack_failed",
-        message: err?.message || String(err),
-        requestId,
-      },
-      { status: 500 }
-    );
-  }
-
   // ---- TEMP SUCCESS ----
   return NextResponse.json({
     success: true,
-    stage: 3,
-    message: "LoRA resolution succeeded",
+    stage: "3A",
+    message: "Parsing OK, no LoRA module loaded",
     requestId,
-    hasLoraStack: Boolean(loraStack),
+    summary: {
+      mode: parsed.mode,
+      bodyMode: parsed.params.body_mode,
+      hasUserLora: Boolean(parsed.params.user_lora),
+    },
   });
 }
