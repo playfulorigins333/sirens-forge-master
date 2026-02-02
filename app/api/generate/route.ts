@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
 // /app/api/generate/route.ts
-// FULL FILE — PRODUCTION, GATEWAY-SAFE
+// FULL FILE — PRODUCTION, GATEWAY-CORRECT
 // ------------------------------------------------------------
 
 import { NextResponse } from "next/server";
@@ -26,8 +26,7 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 // IMPORTANT:
-// This already points to /gateway
-// Example: https://<pod>-3000.proxy.runpod.net/gateway
+// Base gateway URL (no trailing slash required)
 const GATEWAY_BASE = process.env.RUNPOD_COMFY_WEBHOOK || "";
 
 const IMAGE_MODES: GenerationRequest["mode"][] = ["txt2img", "img2img"];
@@ -145,8 +144,9 @@ export async function POST(req: Request) {
     });
 
     // ---------------- GATEWAY FETCH ----------------
-    // DO NOT append /generate
-    const targetUrl = GATEWAY_BASE.replace(/\/$/, "");
+    // ✅ MUST POST TO /generate
+    const base = GATEWAY_BASE.replace(/\/$/, "");
+    const targetUrl = `${base}/generate`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), COMFY_TIMEOUT_MS);
