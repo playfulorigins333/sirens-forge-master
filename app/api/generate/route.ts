@@ -65,20 +65,17 @@ function errJson(
 
 // ------------------------------------------------------------
 // OPTIONS /api/generate
-// MUST use NextResponse (middleware compatibility)
+// 🔒 MUST return NO BODY for 204
 // ------------------------------------------------------------
-export async function OPTIONS() {
-  return NextResponse.json(
-    {},
-    {
-      status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
-    }
-  );
+export function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    },
+  });
 }
 
 // ------------------------------------------------------------
