@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
 // /app/api/generate/route.ts
-// FULL FILE — PRODUCTION, CONTRACT-DRIVEN, JOB_ID RETURNED
+// FULL FILE — PRODUCTION, GATEWAY-SAFE
 // ------------------------------------------------------------
 
 import { NextResponse } from "next/server";
@@ -25,18 +25,19 @@ const SUPABASE_URL =
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
-// IMPORTANT: This must be the 9100 FastAPI base, NOT /prompt.
+// IMPORTANT:
+// This already points to /gateway
+// Example: https://<pod>-3000.proxy.runpod.net/gateway
 const GATEWAY_BASE = process.env.RUNPOD_COMFY_WEBHOOK || "";
 
 const IMAGE_MODES: GenerationRequest["mode"][] = ["txt2img", "img2img"];
-const GATEWAY_TIMEOUT_MS = 120_000;
+const COMFY_TIMEOUT_MS = 120_000;
 
 // ------------------------------------------------------------
-// Cookie adapter (async, Next-safe)
+// Cookie adapter
 // ------------------------------------------------------------
 async function getCookieAdapter() {
   const store = await cookies();
-
   return {
     get: (name: string) => store.get(name)?.value,
     set: (name: string, value: string, options: any) => {
@@ -65,7 +66,6 @@ function errJson(
 
 // ------------------------------------------------------------
 // POST /api/generate
-// MUST return: { job_id } for the UI polling contract.
 // ------------------------------------------------------------
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
@@ -85,9 +85,11 @@ export async function POST(req: Request) {
     }
 
     // ---------------- AUTH ----------------
-    const supabaseAuth = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      cookies: await getCookieAdapter(),
-    });
+    const supabaseAuth = createServerClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY,
+      { cookies: await getCookieAdapter() }
+    );
 
     const {
       data: { user },
@@ -143,12 +145,15 @@ export async function POST(req: Request) {
     });
 
     // ---------------- GATEWAY FETCH ----------------
+    // DO NOT append /generate
+    const targetUrl = GATEWAY_BASE.replace(/\/$/, "");
+
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), GATEWAY_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), COMFY_TIMEOUT_MS);
 
     let res: Response;
     try {
-      res = await fetch(`${GATEWAY_BASE}/generate`, {
+      res = await fetch(targetUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workflow, stream: false }),
@@ -162,26 +167,13 @@ export async function POST(req: Request) {
       return errJson("comfyui_failed", 502, await res.text(), { requestId });
     }
 
-    const data = await res.json();
-    const job_id = data?.job_id;
-
-    if (!job_id) {
-      return errJson(
-        "comfyui_failed",
-        502,
-        `Gateway did not return job_id: ${JSON.stringify(data)}`,
-        { requestId }
-      );
-    }
-
-    // IMPORTANT: return job_id for UI
     return NextResponse.json({
       success: true,
       requestId,
-      job_id,
+      result: await res.json(),
     });
   } catch (e: any) {
-    return errJson("internal_error", 500, e?.message || "Unknown error", {
+    return errJson("internal_error", 500, e?.message || "fetch failed", {
       requestId,
     });
   }
