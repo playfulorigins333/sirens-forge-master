@@ -141,11 +141,24 @@ export async function POST(req: Request) {
       fluxLock: null,
     });
 
-    const res = await fetch(COMFY_ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workflow, stream: false }),
-    });
+    // ---------------- COMFYUI FETCH (TIMEOUT-SAFE) ----------------
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      COMFY_TIMEOUT_MS
+    );
+
+    let res: Response;
+    try {
+      res = await fetch(COMFY_ENDPOINT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workflow, stream: false }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!res.ok) {
       return errJson("comfyui_failed", 502, await res.text(), { requestId });
