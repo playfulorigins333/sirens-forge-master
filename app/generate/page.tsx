@@ -633,27 +633,7 @@ function LoraIdentitySection(props: {
             ))}
           </SelectContent>
         </Select>
-      
-  {/* CTA: Create / Train Identity LoRA */}
-  {identityLoras.length === 0 ? (
-    <Button
-      className="w-full"
-      onClick={() => router.push("/lora/train")}
-    >
-      Create an Identity LoRA
-    </Button>
-  ) : (
-    <Button
-      variant="outline"
-      size="sm"
-      className="w-full"
-      onClick={() => router.push("/lora/train")}
-    >
-      + Train a new Identity LoRA
-    </Button>
-  )}
-
-</CardContent>
+      </CardContent>
     </Card>
   );
 }
