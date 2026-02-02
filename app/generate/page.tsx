@@ -23,7 +23,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { createBrowserClient } from "@supabase/ssr";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +42,14 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+
+// -----------------------------------------------------------------------------
+// Supabase (client)
+// -----------------------------------------------------------------------------
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+);
 
 // -----------------------------------------------------------------------------
 // Types
