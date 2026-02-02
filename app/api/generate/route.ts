@@ -1,3 +1,5 @@
+// FORCE REDEPLOY — no logic change
+
 // ------------------------------------------------------------
 // /app/api/generate/route.ts
 // FULL FILE — PRODUCTION, GATEWAY-CORRECT
