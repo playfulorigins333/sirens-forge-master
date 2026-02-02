@@ -1,6 +1,6 @@
 // ------------------------------------------------------------
 // /app/api/generate/route.ts
-// FULL FILE — PRODUCTION, CONTRACT-DRIVEN, DETERMINISTIC
+// FULL FILE — PRODUCTION, CONTRACT-DRIVEN, JOB_ID RETURNED
 // ------------------------------------------------------------
 
 import { NextResponse } from "next/server";
@@ -24,10 +24,12 @@ const SUPABASE_URL =
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const COMFY_ENDPOINT = process.env.RUNPOD_COMFY_WEBHOOK || "";
+
+// IMPORTANT: This must be the 9100 FastAPI base, NOT /prompt.
+const GATEWAY_BASE = process.env.RUNPOD_COMFY_WEBHOOK || "";
 
 const IMAGE_MODES: GenerationRequest["mode"][] = ["txt2img", "img2img"];
-const COMFY_TIMEOUT_MS = 120_000;
+const GATEWAY_TIMEOUT_MS = 120_000;
 
 // ------------------------------------------------------------
 // Cookie adapter (async, Next-safe)
@@ -63,6 +65,7 @@ function errJson(
 
 // ------------------------------------------------------------
 // POST /api/generate
+// MUST return: { job_id } for the UI polling contract.
 // ------------------------------------------------------------
 export async function POST(req: Request) {
   const requestId = crypto.randomUUID();
@@ -72,7 +75,7 @@ export async function POST(req: Request) {
       !SUPABASE_URL ||
       !SUPABASE_ANON_KEY ||
       !SUPABASE_SERVICE_ROLE_KEY ||
-      !COMFY_ENDPOINT
+      !GATEWAY_BASE
     ) {
       return errJson("server_not_configured", 500, undefined, { requestId });
     }
@@ -82,11 +85,9 @@ export async function POST(req: Request) {
     }
 
     // ---------------- AUTH ----------------
-    const supabaseAuth = createServerClient(
-      SUPABASE_URL,
-      SUPABASE_ANON_KEY,
-      { cookies: await getCookieAdapter() }
-    );
+    const supabaseAuth = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      cookies: await getCookieAdapter(),
+    });
 
     const {
       data: { user },
@@ -141,16 +142,13 @@ export async function POST(req: Request) {
       fluxLock: null,
     });
 
-    // ---------------- COMFYUI FETCH (TIMEOUT-SAFE) ----------------
+    // ---------------- GATEWAY FETCH ----------------
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      COMFY_TIMEOUT_MS
-    );
+    const timeout = setTimeout(() => controller.abort(), GATEWAY_TIMEOUT_MS);
 
     let res: Response;
     try {
-      res = await fetch(COMFY_ENDPOINT, {
+      res = await fetch(`${GATEWAY_BASE}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ workflow, stream: false }),
@@ -164,12 +162,27 @@ export async function POST(req: Request) {
       return errJson("comfyui_failed", 502, await res.text(), { requestId });
     }
 
+    const data = await res.json();
+    const job_id = data?.job_id;
+
+    if (!job_id) {
+      return errJson(
+        "comfyui_failed",
+        502,
+        `Gateway did not return job_id: ${JSON.stringify(data)}`,
+        { requestId }
+      );
+    }
+
+    // IMPORTANT: return job_id for UI
     return NextResponse.json({
       success: true,
       requestId,
-      result: await res.json(),
+      job_id,
     });
   } catch (e: any) {
-    return errJson("internal_error", 500, e.message, { requestId });
+    return errJson("internal_error", 500, e?.message || "Unknown error", {
+      requestId,
+    });
   }
 }
