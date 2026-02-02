@@ -1,10 +1,9 @@
 // lib/comfy/buildWorkflow.ts
-// LAUNCH-SAFE — Deterministic workflow builder
-// Uses explicit LoRA stack (BigLust + optional body + optional user)
+// PRODUCTION-LOCKED — Deterministic identity-first workflow builder
+// Base → Body → Identity (strict, sequential LoRA application)
 
 import type { ResolvedLoraStack } from "@/lib/generation/lora-resolver";
 
-// Node-safe JSON load (avoids TS resolveJsonModule issues)
 const baseWorkflow = require("./workflow-base.json");
 
 type FluxLock = { type?: string; strength?: string } | null;
@@ -18,15 +17,13 @@ interface BuildWorkflowArgs {
   width: number;
   height: number;
 
-  // ✅ LOCKED: explicit ordered LoRA stack
+  // Ordered LoRA stack (base already loaded via checkpoint)
   loraStack: ResolvedLoraStack;
 
-  // DNA / FaceID (future-ready)
   dnaImageNames?: string[];
   fluxLock?: FluxLock;
 }
 
-// Change ONLY if your node name differs
 const FACEID_NODE_CLASS = "IPAdapterFaceID";
 
 export function buildWorkflow({
@@ -41,30 +38,47 @@ export function buildWorkflow({
   dnaImageNames = [],
   fluxLock = null,
 }: BuildWorkflowArgs) {
-  // Deep clone base workflow
   const wf: any = JSON.parse(JSON.stringify(baseWorkflow));
   const nodeIds = Object.keys(wf);
 
-  const maxId = nodeIds.reduce((m, id) => Math.max(m, parseInt(id, 10)), 0);
-  let nextId = Number.isFinite(maxId) ? maxId + 1 : 100;
+  let nextId =
+    Math.max(...nodeIds.map((id) => parseInt(id, 10))) + 1;
 
   // ------------------------------------------------------------
-  // REQUIRED: LoraLoader
+  // Find base model + clip source
   // ------------------------------------------------------------
-  const loraNodeId = nodeIds.find((id) => wf[id]?.class_type === "LoraLoader");
-  if (!loraNodeId) {
-    throw new Error("No LoraLoader node found in workflow-base.json");
+  const baseModelNodeId = nodeIds.find(
+    (id) => wf[id]?.class_type === "CheckpointLoaderSimple"
+  );
+  if (!baseModelNodeId) {
+    throw new Error("CheckpointLoaderSimple not found");
   }
 
+  let currentModel: [string, number] = [baseModelNodeId, 0];
+  let currentClip: [string, number] = [baseModelNodeId, 1];
+
   // ------------------------------------------------------------
-  // APPLY EXPLICIT LoRA STACK (ORDERED, DETERMINISTIC)
+  // APPLY LoRAs SEQUENTIALLY (BODY → IDENTITY)
   // ------------------------------------------------------------
-  wf[loraNodeId].inputs.loras = loraStack.loras.map((l) => ({
-    lora_name: l.path.includes("/workspace/cache/loras/")
-      ? `sirensforge_cache/${l.path.split("/").pop()}`
-      : l.path.split("/").pop(),
-    strength: l.strength,
-  }));
+  for (const l of loraStack.loras) {
+    const id = String(nextId++);
+
+    wf[id] = {
+      class_type: "LoraLoader",
+      inputs: {
+        lora_name: l.path.includes("/workspace/cache/loras/")
+          ? `sirensforge_cache/${l.path.split("/").pop()}`
+          : l.path.split("/").pop(),
+        strength_model: l.strength,
+        strength_clip: l.strength,
+        model: currentModel,
+        clip: currentClip,
+      },
+    };
+
+    currentModel = [id, 0];
+    currentClip = [id, 1];
+  }
 
   // ------------------------------------------------------------
   // PROMPT / NEGATIVE
@@ -73,7 +87,9 @@ export function buildWorkflow({
     const node = wf[id];
     if (node?.class_type === "CLIPTextEncode") {
       if (node.inputs?.text === "{prompt}") node.inputs.text = prompt;
-      if (node.inputs?.text === "{negative_prompt}") node.inputs.text = negative;
+      if (node.inputs?.text === "{negative_prompt}")
+        node.inputs.text = negative;
+      node.inputs.clip = currentClip;
     }
   }
 
@@ -83,6 +99,7 @@ export function buildWorkflow({
   for (const id of Object.keys(wf)) {
     const node = wf[id];
     if (node?.class_type === "KSampler") {
+      node.inputs.model = currentModel;
       node.inputs.seed = seed;
       node.inputs.steps = steps;
       node.inputs.cfg = cfg;
@@ -95,7 +112,7 @@ export function buildWorkflow({
   }
 
   // ------------------------------------------------------------
-  // DNA / FACE ID (future-ready, inactive at launch)
+  // DNA / FACE ID (future-ready)
   // ------------------------------------------------------------
   if (dnaImageNames.length >= 3) {
     const loadIds: string[] = [];
@@ -131,7 +148,7 @@ export function buildWorkflow({
     wf[faceNodeId] = {
       class_type: FACEID_NODE_CLASS,
       inputs: {
-        model: [loraNodeId, 0],
+        model: currentModel,
         image: [batchId, 0],
         weight: strength,
       },
