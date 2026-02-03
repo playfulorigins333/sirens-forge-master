@@ -1,77 +1,59 @@
 // app/api/generate_v2/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
-function mustEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
+const RUNPOD_BASE = process.env.RUNPOD_BASE_URL;
+
+if (!RUNPOD_BASE) {
+  throw new Error("Missing RUNPOD_BASE_URL env var");
 }
 
 export async function POST(req: NextRequest) {
   try {
-    // ✅ MUST await cookies()
-    const cookieStore = await cookies();
+    const payload = await req.json();
 
-    const supabase = createServerClient(
-      mustEnv("NEXT_PUBLIC_SUPABASE_URL"),
-      mustEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-          set(name: string, value: string, options: any) {
-            cookieStore.set({ name, value, ...options });
-          },
-          remove(name: string, options: any) {
-            cookieStore.set({ name, value: "", ...options, maxAge: 0 });
-          },
-        },
-      }
-    );
-
-    // 🔐 Validate session
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-
-    if (error || !user) {
+    if (!payload || typeof payload !== "object") {
       return NextResponse.json(
-        { error: "UNAUTHENTICATED" },
-        { status: 401 }
-      );
-    }
-
-    // 📦 Parse payload
-    const body = await req.json();
-
-    if (!body || !body.prompt) {
-      return NextResponse.json(
-        { error: "Missing prompt" },
+        { error: "Invalid payload" },
         { status: 400 }
       );
     }
 
-    // ✅ HEALTH CHECK RESPONSE (for now)
-    return NextResponse.json({
-      ok: true,
-      user_id: user.id,
-      message: "generate_v2 authenticated and healthy",
-      received: body,
-    });
-  } catch (err: any) {
-    console.error("generate_v2 fatal:", err);
+    const targetUrl =
+      RUNPOD_BASE.replace(/\/$/, "") + "/gateway/generate";
 
-    return NextResponse.json(
-      {
-        error: "INTERNAL_ERROR",
-        detail: err?.message ?? "unknown",
+    const upstream = await fetch(targetUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify(payload),
+    });
+
+    const text = await upstream.text();
+
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+
+    return new NextResponse(
+      typeof data === "string" ? data : JSON.stringify(data),
+      {
+        status: upstream.status,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+  } catch (err: any) {
+    console.error("[generate_v2] fatal error:", err);
+    return NextResponse.json(
+      { error: "INTERNAL_ERROR" },
       { status: 500 }
     );
   }
