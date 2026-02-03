@@ -4,21 +4,21 @@ import { createServerClient } from "@supabase/ssr";
 
 export async function POST(req: Request) {
   try {
-    /* ---------------------------------------------
-     * 1️⃣ ENV — do NOT crash build
-     * --------------------------------------------- */
-    const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
+    /* ------------------------------------------------
+     * ENV (do not crash build)
+     * ------------------------------------------------ */
+    const RUNPOD_COMFY_WEBHOOK = process.env.RUNPOD_COMFY_WEBHOOK;
 
-    if (!RUNPOD_BASE_URL) {
+    if (!RUNPOD_COMFY_WEBHOOK) {
       return NextResponse.json(
-        { error: "RUNPOD_BASE_URL_MISSING" },
+        { error: "RUNPOD_COMFY_WEBHOOK_MISSING" },
         { status: 500 }
       );
     }
 
-    /* ---------------------------------------------
-     * 2️⃣ COOKIES (App Router SAFE)
-     * --------------------------------------------- */
+    /* ------------------------------------------------
+     * COOKIES (App Router safe)
+     * ------------------------------------------------ */
     const cookieStore = await cookies();
 
     const supabase = createServerClient(
@@ -45,9 +45,9 @@ export async function POST(req: Request) {
       );
     }
 
-    /* ---------------------------------------------
-     * 3️⃣ REQUEST BODY
-     * --------------------------------------------- */
+    /* ------------------------------------------------
+     * REQUEST BODY
+     * ------------------------------------------------ */
     const body = await req.json();
 
     if (!body || typeof body !== "object") {
@@ -57,11 +57,11 @@ export async function POST(req: Request) {
       );
     }
 
-    /* ---------------------------------------------
-     * 4️⃣ FORWARD → FASTAPI
-     * --------------------------------------------- */
+    /* ------------------------------------------------
+     * FORWARD → FASTAPI GATEWAY
+     * ------------------------------------------------ */
     const targetUrl =
-      RUNPOD_BASE_URL.replace(/\/$/, "") + "/gateway/generate";
+      RUNPOD_COMFY_WEBHOOK.replace(/\/$/, "") + "/generate";
 
     const upstream = await fetch(targetUrl, {
       method: "POST",
@@ -87,9 +87,6 @@ export async function POST(req: Request) {
       );
     }
 
-    /* ---------------------------------------------
-     * 5️⃣ RETURN RESULT
-     * --------------------------------------------- */
     return new NextResponse(text, {
       status: 200,
       headers: {
