@@ -1,10 +1,14 @@
 // app/api/generate/route.ts
-// PHASE 1 — ROUTING CANARY (NO IMPORTS, NO LOGIC)
+// PHASE 2 — Single import isolation test
+
+import "server-only";
+
+// 👇 ONLY NEW LINE vs Phase 1
+import { parseGenerationRequest } from "@/lib/generation/contract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// REQUIRED: OPTIONS (preflight / method contract)
 export async function OPTIONS() {
   return new Response(null, {
     status: 204,
@@ -16,13 +20,12 @@ export async function OPTIONS() {
   });
 }
 
-// REQUIRED: POST
 export async function POST() {
   return new Response(
     JSON.stringify({
       ok: true,
-      phase: 1,
-      message: "POST /api/generate routing works",
+      phase: 2,
+      message: "Import test passed",
     }),
     {
       status: 200,
@@ -31,7 +34,6 @@ export async function POST() {
   );
 }
 
-// Guard
 export async function GET() {
   return new Response(
     JSON.stringify({ ok: false, error: "method_not_allowed" }),
