@@ -4,14 +4,18 @@ import { NextRequest, NextResponse } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const RUNPOD_BASE = process.env.RUNPOD_BASE_URL;
-
-if (!RUNPOD_BASE) {
-  throw new Error("Missing RUNPOD_BASE_URL env var");
-}
-
 export async function POST(req: NextRequest) {
   try {
+    // 🔑 Read env vars AT RUNTIME, not at build time
+    const RUNPOD_BASE = process.env.RUNPOD_COMFY_WEBHOOK;
+
+    if (!RUNPOD_BASE) {
+      return NextResponse.json(
+        { error: "Missing RUNPOD_COMFY_WEBHOOK env var" },
+        { status: 500 }
+      );
+    }
+
     const payload = await req.json();
 
     if (!payload || typeof payload !== "object") {
