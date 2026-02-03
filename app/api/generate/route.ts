@@ -30,7 +30,7 @@ const IMAGE_MODES: GenerationRequest["mode"][] = ["txt2img", "img2img"];
 const COMFY_TIMEOUT_MS = 120_000;
 
 // ------------------------------------------------------------
-// Cookie adapter
+// Cookie adapter (ASYNC — TS + App Router correct)
 // ------------------------------------------------------------
 async function getCookieAdapter() {
   const store = await cookies();
