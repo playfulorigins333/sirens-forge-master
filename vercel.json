@@ -1,5 +1,10 @@
 {
   "version": 2,
+  "functions": {
+    "app/api/**": {
+      "runtime": "nodejs18.x"
+    }
+  },
   "crons": [
     {
       "path": "/api/autopost/run",
