@@ -2,10 +2,14 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
+import { parseGenerationRequest } from "@/lib/generation/contract";
+import { resolveLoraStack } from "@/lib/generation/lora-resolver";
+import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
+
 export async function POST(req: Request) {
   try {
     /* ------------------------------------------------
-     * ENV (do not crash build)
+     * ENV
      * ------------------------------------------------ */
     const RUNPOD_COMFY_WEBHOOK = process.env.RUNPOD_COMFY_WEBHOOK;
 
@@ -17,7 +21,7 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * COOKIES (App Router safe)
+     * AUTH (SSR-safe)
      * ------------------------------------------------ */
     const cookieStore = await cookies();
 
@@ -46,19 +50,37 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * REQUEST BODY
+     * PARSE REQUEST (UI → CONTRACT)
      * ------------------------------------------------ */
-    const body = await req.json();
-
-    if (!body || typeof body !== "object") {
-      return NextResponse.json(
-        { error: "INVALID_REQUEST_BODY" },
-        { status: 400 }
-      );
-    }
+    const raw = await req.json();
+    const request = parseGenerationRequest(raw);
 
     /* ------------------------------------------------
-     * FORWARD → FASTAPI GATEWAY
+     * RESOLVE LORAS
+     * ------------------------------------------------ */
+    const loraStack = await resolveLoraStack(
+      request.params.body_mode,
+      request.params.user_lora
+    );
+
+    /* ------------------------------------------------
+     * BUILD WORKFLOW (IDENTITY-FIRST)
+     * ------------------------------------------------ */
+    const workflow = buildWorkflow({
+      prompt: request.params.prompt,
+      negative: request.params.negative_prompt || "",
+      seed: request.params.seed ?? 0,
+      steps: request.params.steps,
+      cfg: request.params.cfg,
+      width: request.params.width,
+      height: request.params.height,
+      loraStack,
+      dnaImageNames: [],
+      fluxLock: null,
+    });
+
+    /* ------------------------------------------------
+     * FORWARD → FASTAPI (EXPECTED SHAPE)
      * ------------------------------------------------ */
     const targetUrl =
       RUNPOD_COMFY_WEBHOOK.replace(/\/$/, "") + "/generate";
@@ -69,7 +91,7 @@ export async function POST(req: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        ...body,
+        workflow,
         user_id: user.id,
       }),
     });
@@ -89,9 +111,7 @@ export async function POST(req: Request) {
 
     return new NextResponse(text, {
       status: 200,
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
     });
   } catch (err: any) {
     console.error("generate_v2 fatal error:", err);
