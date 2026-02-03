@@ -1,74 +1,107 @@
-// app/api/generate_v2/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
 
-export const runtime = "nodejs";
-
-/**
- * POST /api/generate_v2
- *
- * Minimal, production-safe proxy:
- * - No auth logic here (handled by middleware + layout)
- * - No cookie mutation
- * - No env access at module scope
- * - Always returns JSON
- */
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    // Parse request body safely
-    let body: any;
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json(
-        { error: "INVALID_JSON" },
-        { status: 400 }
-      );
-    }
+    /* ---------------------------------------------
+     * 1️⃣ ENV — do NOT crash build
+     * --------------------------------------------- */
+    const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
 
-    // Read env vars at RUNTIME, not build time
-    const base = process.env.RUNPOD_BASE_URL;
-    if (!base) {
+    if (!RUNPOD_BASE_URL) {
       return NextResponse.json(
         { error: "RUNPOD_BASE_URL_MISSING" },
         { status: 500 }
       );
     }
 
-    const target = `${base.replace(/\/$/, "")}/gateway/generate`;
+    /* ---------------------------------------------
+     * 2️⃣ COOKIES (App Router SAFE)
+     * --------------------------------------------- */
+    const cookieStore = await cookies();
 
-    // Forward request to FastAPI gateway
-    const upstream = await fetch(target, {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value;
+          },
+        },
+      }
+    );
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "UNAUTHENTICATED" },
+        { status: 401 }
+      );
+    }
+
+    /* ---------------------------------------------
+     * 3️⃣ REQUEST BODY
+     * --------------------------------------------- */
+    const body = await req.json();
+
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { error: "INVALID_REQUEST_BODY" },
+        { status: 400 }
+      );
+    }
+
+    /* ---------------------------------------------
+     * 4️⃣ FORWARD → FASTAPI
+     * --------------------------------------------- */
+    const targetUrl =
+      RUNPOD_BASE_URL.replace(/\/$/, "") + "/gateway/generate";
+
+    const upstream = await fetch(targetUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        ...body,
+        user_id: user.id,
+      }),
     });
 
-    // Read upstream response safely
     const text = await upstream.text();
-    let data: any = null;
 
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
+    if (!upstream.ok) {
       return NextResponse.json(
         {
-          error: "UPSTREAM_INVALID_JSON",
-          raw: text,
+          error: "UPSTREAM_ERROR",
+          status: upstream.status,
+          body: text,
         },
-        { status: 502 }
+        { status: upstream.status }
       );
     }
 
-    return NextResponse.json(data, {
-      status: upstream.status,
+    /* ---------------------------------------------
+     * 5️⃣ RETURN RESULT
+     * --------------------------------------------- */
+    return new NextResponse(text, {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+      },
     });
   } catch (err: any) {
+    console.error("generate_v2 fatal error:", err);
     return NextResponse.json(
       {
-        error: "UNHANDLED_EXCEPTION",
-        message: err?.message ?? String(err),
+        error: "INTERNAL_ERROR",
+        message: err?.message ?? "Unknown error",
       },
       { status: 500 }
     );
