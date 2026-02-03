@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "app/api/**": {
-      "runtime": "nodejs"
+      "runtime": "@vercel/node@3"
     }
   },
   "crons": [
