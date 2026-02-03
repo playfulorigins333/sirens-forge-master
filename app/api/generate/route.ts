@@ -1,17 +1,26 @@
 // app/api/generate/route.ts
-// FINAL CANARY — zero imports, POST only
+// SHIM — forward to generate_v2 to bypass poisoned lambda
 
 export const runtime = "nodejs";
 
-export async function POST() {
-  return new Response(
-    JSON.stringify({
-      ok: true,
-      message: "POST /api/generate reached",
-    }),
+export async function POST(req: Request) {
+  const body = await req.text();
+
+  const res = await fetch(
+    new URL("/api/generate_v2", req.url),
     {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body,
     }
   );
+
+  return new Response(await res.text(), {
+    status: res.status,
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
 }
