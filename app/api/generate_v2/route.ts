@@ -2,62 +2,74 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
+/**
+ * POST /api/generate_v2
+ *
+ * Minimal, production-safe proxy:
+ * - No auth logic here (handled by middleware + layout)
+ * - No cookie mutation
+ * - No env access at module scope
+ * - Always returns JSON
+ */
 export async function POST(req: NextRequest) {
   try {
-    // 🔑 Read env vars AT RUNTIME, not at build time
-    const RUNPOD_BASE = process.env.RUNPOD_COMFY_WEBHOOK;
-
-    if (!RUNPOD_BASE) {
+    // Parse request body safely
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
       return NextResponse.json(
-        { error: "Missing RUNPOD_COMFY_WEBHOOK env var" },
-        { status: 500 }
-      );
-    }
-
-    const payload = await req.json();
-
-    if (!payload || typeof payload !== "object") {
-      return NextResponse.json(
-        { error: "Invalid payload" },
+        { error: "INVALID_JSON" },
         { status: 400 }
       );
     }
 
-    const targetUrl =
-      RUNPOD_BASE.replace(/\/$/, "") + "/gateway/generate";
+    // Read env vars at RUNTIME, not build time
+    const base = process.env.RUNPOD_BASE_URL;
+    if (!base) {
+      return NextResponse.json(
+        { error: "RUNPOD_BASE_URL_MISSING" },
+        { status: 500 }
+      );
+    }
 
-    const upstream = await fetch(targetUrl, {
+    const target = `${base.replace(/\/$/, "")}/gateway/generate`;
+
+    // Forward request to FastAPI gateway
+    const upstream = await fetch(target, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
 
+    // Read upstream response safely
     const text = await upstream.text();
+    let data: any = null;
 
-    let data: any;
     try {
-      data = JSON.parse(text);
+      data = text ? JSON.parse(text) : null;
     } catch {
-      data = text;
+      return NextResponse.json(
+        {
+          error: "UPSTREAM_INVALID_JSON",
+          raw: text,
+        },
+        { status: 502 }
+      );
     }
 
-    return new NextResponse(
-      typeof data === "string" ? data : JSON.stringify(data),
-      {
-        status: upstream.status,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
+    return NextResponse.json(data, {
+      status: upstream.status,
+    });
   } catch (err: any) {
-    console.error("[generate_v2] fatal error:", err);
     return NextResponse.json(
-      { error: "INTERNAL_ERROR" },
+      {
+        error: "UNHANDLED_EXCEPTION",
+        message: err?.message ?? String(err),
+      },
       { status: 500 }
     );
   }
