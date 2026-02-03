@@ -1,5 +1,5 @@
 // app/api/generate/route.ts
-// PHASE 3 — Auth-only isolation test
+// PHASE 4 — Add resolveLoraStack import (no execution)
 
 import "server-only";
 
@@ -8,6 +8,7 @@ import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
 import { parseGenerationRequest } from "@/lib/generation/contract";
+import { resolveLoraStack } from "@/lib/generation/lora-resolver"; // 👈 NEW IN PHASE 4
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,11 +28,10 @@ export async function OPTIONS() {
 }
 
 // ------------------------------------------------------------
-// POST — AUTH ONLY
+// POST — AUTH ONLY (still no generation logic)
 // ------------------------------------------------------------
 export async function POST(req: NextRequest) {
   try {
-    // Body parse (ensures req.json() is safe here)
     await req.json();
 
     const store = await cookies();
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
             }));
           },
           setAll() {
-            // no-op for this phase
+            // no-op
           },
         },
       }
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       return new Response(
         JSON.stringify({
           ok: false,
-          phase: 3,
+          phase: 4,
           error: "not_authenticated",
         }),
         {
@@ -76,8 +76,8 @@ export async function POST(req: NextRequest) {
     return new Response(
       JSON.stringify({
         ok: true,
-        phase: 3,
-        user_id: user.id,
+        phase: 4,
+        message: "resolveLoraStack import did not break routing",
       }),
       {
         status: 200,
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     return new Response(
       JSON.stringify({
         ok: false,
-        phase: 3,
+        phase: 4,
         error: err?.message || "unknown error",
       }),
       {
