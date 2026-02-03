@@ -14,17 +14,17 @@ export async function POST(req: Request) {
     /* ------------------------------------------------
      * ENV
      * ------------------------------------------------ */
-    const RUNPOD_COMFY_WEBHOOK = process.env.RUNPOD_COMFY_WEBHOOK;
+    const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
 
-    if (!RUNPOD_COMFY_WEBHOOK) {
+    if (!RUNPOD_BASE_URL) {
       return NextResponse.json(
-        { error: "RUNPOD_COMFY_WEBHOOK_MISSING" },
+        { error: "RUNPOD_BASE_URL_MISSING" },
         { status: 500 }
       );
     }
 
     /* ------------------------------------------------
-     * AUTH (SSR SAFE)
+     * AUTH
      * ------------------------------------------------ */
     const cookieStore = await cookies();
 
@@ -53,10 +53,22 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * PARSE UI REQUEST
+     * PARSE REQUEST (SAFE)
      * ------------------------------------------------ */
     const raw = await req.json();
-    const request = parseGenerationRequest(raw);
+
+    let request;
+    try {
+      request = parseGenerationRequest(raw);
+    } catch (err: any) {
+      return NextResponse.json(
+        {
+          error: "INVALID_REQUEST",
+          message: err?.message ?? "Invalid generation payload",
+        },
+        { status: 400 }
+      );
+    }
 
     /* ------------------------------------------------
      * RESOLVE LORAS
@@ -85,8 +97,7 @@ export async function POST(req: Request) {
     /* ------------------------------------------------
      * FORWARD TO FASTAPI
      * ------------------------------------------------ */
-    const targetUrl =
-      RUNPOD_COMFY_WEBHOOK.replace(/\/$/, "") + "/generate";
+    const targetUrl = `${RUNPOD_BASE_URL}/gateway/generate`;
 
     const upstream = await fetch(targetUrl, {
       method: "POST",
