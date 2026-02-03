@@ -1,5 +1,5 @@
 // app/api/generate/route.ts
-// PRODUCTION — Submit generation job via FastAPI gateway
+// PRODUCTION — Defer heavy imports to prevent App Router 405 at module load
 
 import "server-only";
 
@@ -11,8 +11,6 @@ import {
   parseGenerationRequest,
   type GenerationRequest,
 } from "@/lib/generation/contract";
-import { resolveLoraStack } from "@/lib/generation/lora-resolver";
-import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,21 +22,9 @@ const SUPABASE_URL =
   process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-
-// IMPORTANT: this is the RunPod proxy base (port 3000)
 const RUNPOD_BASE = process.env.RUNPOD_COMFY_WEBHOOK || "";
 
 const IMAGE_MODES: GenerationRequest["mode"][] = ["txt2img", "img2img"];
-
-// ------------------------------------------------------------
-// Helpers
-// ------------------------------------------------------------
-function json(
-  status: number,
-  body: Record<string, any>
-): NextResponse {
-  return NextResponse.json(body, { status });
-}
 
 // ------------------------------------------------------------
 // OPTIONS
@@ -58,25 +44,27 @@ export async function OPTIONS() {
 // POST /api/generate
 // ------------------------------------------------------------
 export async function POST(req: NextRequest) {
-  const requestId = crypto.randomUUID();
+  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   try {
     // ---------- ENV GUARD ----------
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
-      return json(500, {
-        success: false,
-        error: "env_missing",
-        requestId,
-      });
+      return NextResponse.json(
+        { success: false, error: "env_missing", requestId },
+        { status: 500 }
+      );
     }
 
     if (!RUNPOD_BASE) {
-      return json(500, {
-        success: false,
-        error: "env_missing",
-        detail: "RUNPOD_COMFY_WEBHOOK not set",
-        requestId,
-      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "env_missing",
+          detail: "RUNPOD_COMFY_WEBHOOK not set",
+          requestId,
+        },
+        { status: 500 }
+      );
     }
 
     // ---------- BODY ----------
@@ -84,31 +72,32 @@ export async function POST(req: NextRequest) {
     try {
       raw = await req.json();
     } catch {
-      return json(400, {
-        success: false,
-        error: "invalid_json",
-        requestId,
-      });
+      return NextResponse.json(
+        { success: false, error: "invalid_json", requestId },
+        { status: 400 }
+      );
     }
 
     let request: GenerationRequest;
     try {
       request = parseGenerationRequest(raw);
     } catch (e: any) {
-      return json(400, {
-        success: false,
-        error: "invalid_request",
-        detail: e?.message,
-        requestId,
-      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "invalid_request",
+          detail: e?.message,
+          requestId,
+        },
+        { status: 400 }
+      );
     }
 
     if (!IMAGE_MODES.includes(request.mode)) {
-      return json(400, {
-        success: false,
-        error: "unsupported_mode",
-        requestId,
-      });
+      return NextResponse.json(
+        { success: false, error: "unsupported_mode", requestId },
+        { status: 400 }
+      );
     }
 
     // ---------- AUTH ----------
@@ -136,11 +125,10 @@ export async function POST(req: NextRequest) {
     } = await supabaseAuth.auth.getUser();
 
     if (authErr || !user) {
-      return json(401, {
-        success: false,
-        error: "not_authenticated",
-        requestId,
-      });
+      return NextResponse.json(
+        { success: false, error: "not_authenticated", requestId },
+        { status: 401 }
+      );
     }
 
     // ---------- SUBSCRIPTION ----------
@@ -168,14 +156,21 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!sub) {
-      return json(402, {
-        success: false,
-        error: "subscription_required",
-        requestId,
-      });
+      return NextResponse.json(
+        { success: false, error: "subscription_required", requestId },
+        { status: 402 }
+      );
     }
 
-    // ---------- BUILD WORKFLOW ----------
+    // ---------- DEFERRED IMPORTS (CRITICAL) ----------
+    const { resolveLoraStack } = await import(
+      "@/lib/generation/lora-resolver"
+    );
+    const { buildWorkflow } = await import(
+      "@/lib/comfy/buildWorkflow"
+    );
+
+    // ---------- WORKFLOW ----------
     const loraStack = await resolveLoraStack(
       request.params.body_mode,
       request.params.user_lora
@@ -203,34 +198,35 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({ workflow }),
     });
 
-    let payload: any;
-    try {
-      payload = await res.json();
-    } catch {
-      payload = null;
-    }
+    const payload = await res.json().catch(() => null);
 
     if (!res.ok || !payload?.job_id) {
-      return json(502, {
-        success: false,
-        error: "gateway_failed",
-        upstream: payload,
-        requestId,
-      });
+      return NextResponse.json(
+        {
+          success: false,
+          error: "gateway_failed",
+          upstream: payload,
+          requestId,
+        },
+        { status: 502 }
+      );
     }
 
     // ✅ SUCCESS
-    return json(200, {
+    return NextResponse.json({
       success: true,
       job_id: payload.job_id,
       requestId,
     });
   } catch (err: any) {
-    return json(500, {
-      success: false,
-      error: "internal_error",
-      detail: err?.message,
-      requestId,
-    });
+    return NextResponse.json(
+      {
+        success: false,
+        error: "internal_error",
+        detail: err?.message,
+        requestId,
+      },
+      { status: 500 }
+    );
   }
 }
