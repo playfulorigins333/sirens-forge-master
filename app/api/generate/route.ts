@@ -1,4 +1,5 @@
-// STAGE 4 — FULL GENERATION PATH RESTORED
+// app/api/generate/route.ts
+// STAGE 4 — FULL GENERATION PATH RESTORED (with cookie adapter fix)
 console.log("🔥 /api/generate route module loaded (stage 4)");
 
 import { NextResponse } from "next/server";
@@ -30,17 +31,33 @@ const IMAGE_MODES: GenerationRequest["mode"][] = ["txt2img", "img2img"];
 const COMFY_TIMEOUT_MS = 120_000;
 
 // ------------------------------------------------------------
-// Cookie adapter (ASYNC — TS + App Router correct)
+// Cookie adapter (supports both sync + async cookies() typing)
 // ------------------------------------------------------------
 async function getCookieAdapter() {
-  const store = await cookies();
+  // Next can type cookies() as ReadonlyRequestCookies OR Promise<ReadonlyRequestCookies>
+  const maybeStore: any = cookies();
+  const store: any =
+    maybeStore && typeof maybeStore.then === "function"
+      ? await maybeStore
+      : maybeStore;
+
   return {
-    get: (name: string) => store.get(name)?.value,
+    get: (name: string) => store?.get?.(name)?.value,
     set: (name: string, value: string, options: any) => {
-      store.set({ name, value, ...options });
+      // Some runtimes expose .set, some require store.set({ ... })
+      try {
+        store?.set?.({ name, value, ...options });
+      } catch {
+        // fallback (very defensive)
+        store?.set?.(name, value, options);
+      }
     },
     remove: (name: string, options: any) => {
-      store.set({ name, value: "", ...options });
+      try {
+        store?.set?.({ name, value: "", ...options });
+      } catch {
+        store?.set?.(name, "", options);
+      }
     },
   };
 }
@@ -83,12 +100,28 @@ export async function POST(req: Request) {
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   try {
+    // ---- Hard env guard (prevents Vercel /500 fallback) ----
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
+      return errJson(
+        "env_missing",
+        500,
+        "Missing SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY",
+        { requestId }
+      );
+    }
+    if (!GATEWAY_BASE) {
+      return errJson(
+        "env_missing",
+        500,
+        "Missing RUNPOD_COMFY_WEBHOOK",
+        { requestId }
+      );
+    }
+
     // ---------------- AUTH ----------------
-    const supabaseAuth = createServerClient(
-      SUPABASE_URL,
-      SUPABASE_ANON_KEY,
-      { cookies: await getCookieAdapter() }
-    );
+    const supabaseAuth = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      cookies: await getCookieAdapter(),
+    });
 
     const {
       data: { user },
@@ -184,11 +217,8 @@ export async function POST(req: Request) {
     });
   } catch (err: any) {
     console.error("❌ generate internal error", err);
-    return errJson(
-      "internal_error",
-      500,
-      err?.message || "unknown error",
-      { requestId }
-    );
+    return errJson("internal_error", 500, err?.message || "unknown error", {
+      requestId,
+    });
   }
 }
