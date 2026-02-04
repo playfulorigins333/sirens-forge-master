@@ -1186,6 +1186,8 @@ export default function GeneratePage() {
     "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
   );
   const [identityOptions, setIdentityOptions] = useState<{id: string; name: string | null}[]>([]);
+  // NOTE: selectedIdentity is legacy UI-only state.
+// Generation uses loraSelection.selected[0] exclusively.
   const [selectedIdentity, setSelectedIdentity] = useState<string | "none">("none");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
   const [stylePreset, setStylePreset] =
@@ -1320,27 +1322,28 @@ export default function GeneratePage() {
         ? seed
         : Math.floor(Math.random() * 1_000_000_000);
 
-      const workflowInputs = {
-        prompt,
-        negative_prompt: negativePrompt,
-        body_mode: bodyModeMap[baseModel],
-        width: parsedWidth,
-        height: parsedHeight,
-        steps,
-        cfg: guidance,
-        seed: seedValue,
-        identity_lora: selectedLoraId ? selectedLoraId : null,
-      };
+    const [parsedWidth, parsedHeight] = resolution.split("x").map(Number);
 
-      const payload = {
-        workflow: {
-          type: "sirens_generate_v1",
-          engine: "comfyui",
-          template: "sirens_image_v3_production",
-          mode: "txt2img",
-          inputs: workflowInputs,
-        },
-      };
+const workflowInputs = {
+  prompt,
+  negative_prompt: negativePrompt,
+  body_mode: bodyModeMap[baseModel],
+  width: parsedWidth,
+  height: parsedHeight,
+  steps,
+  cfg: guidance,
+  seed: seedValue,
+  identity_lora: selectedLoraId ? selectedLoraId : null,
+};
+const payload = {
+  workflow: {
+    type: "sirens_generate_v1",
+    engine: "comfyui",
+    template: "sirens_image_v3_production",
+    mode: "txt2img",
+    inputs: workflowInputs,
+  },
+};
 
       const runCount = Math.max(1, batchSize || 1);
       const generatedAll: GeneratedItem[] = [];
@@ -1355,14 +1358,15 @@ export default function GeneratePage() {
           seed: runSeed,
         };
 
-        const runPayload = {
-          ...payload,
-          workflow: {
-            ...payload.workflow,
-            inputs: runWorkflowInputs,
-          },
-        };
-
+      const runPayload = {
+  workflow: {
+    type: "sirens_generate_v1",
+    engine: "comfyui",
+    template: "sirens_image_v3_production",
+    mode: "txt2img",
+    inputs: runWorkflowInputs,
+  },
+};
         const res = await fetch(
           "https://sirens-forge-api-production.up.railway.app/generate",
           {
