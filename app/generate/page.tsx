@@ -99,10 +99,6 @@ interface GeneratedItem {
 // Helpers
 // -----------------------------------------------------------------------------
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function inferKindFromOutput(output: any): MediaKind {
   if (output.kind === "video" || output.kind === "image") {
     return output.kind;
@@ -358,7 +354,7 @@ function ModeTabs(props: {
         return (
           <motion.button
             key={mode.id}
-            onClick={undefined}
+            onClick={() => props.onChange(mode.id)}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             className={`relative p-3 rounded-xl border-2 transition-all ${
@@ -602,7 +598,7 @@ function LoraIdentitySection(props: {
     <Card className="border-gray-800 bg-gray-900/80">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">
-          Identity LoRA
+Identity LoRA
         </CardTitle>
         <CardDescription className="text-xs text-gray-300">
           Select one trained identity LoRA to control identity consistency.
@@ -802,7 +798,7 @@ function AdvancedSettings(props: {
               </div>
 
               {/* Batch size */}
-              <div>
+<div>
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-gray-200">Batch Size</p>
                   <span className="text-[11px] text-purple-300 font-semibold">
@@ -1002,7 +998,7 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
             >
               {selected.kind === "image" ? (
                 <img
-                  src={selected.url}
+src={selected.url}
                   alt={selected.prompt}
                   className="w-full h-auto"
                 />
@@ -1203,7 +1199,6 @@ export default function GeneratePage() {
     createNew: false,
     newName: "",
   });
-
   // Advanced
   const [resolution, setResolution] = useState("1024x1024");
   const [guidance, setGuidance] = useState(7.5);
@@ -1217,26 +1212,23 @@ export default function GeneratePage() {
   const [history, setHistory] = useState<GeneratedItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
 
-
-  const canGenerate = !isGenerating && Boolean(prompt?.trim()) && Boolean(baseModel);
+  const canGenerate =
+    !isGenerating && Boolean(prompt?.trim()) && Boolean(baseModel);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Subscription modal state
   const [showSubModal, setShowSubModal] = useState(false);
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(
+    null
+  );
 
   // ------------------------------------------------------------
   // Siren's Mind → Generator injection (LOCKED)
-  // - Listen for global event
-  // - Inject prompt into existing prompt state
-  // - Optionally set output type (no auto-run)
   // ------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
 
     const loadIdentities = async () => {
-      // IMPORTANT: In App Router client components, auth/session hydration can lag the first render.
-      // If we query before a session exists, RLS will evaluate auth.uid() as NULL and return [].
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -1252,10 +1244,8 @@ export default function GeneratePage() {
       if (!cancelled) setIdentityOptions(data ?? []);
     };
 
-    // Try once on mount (works if session is already hydrated)
     loadIdentities();
 
-    // If not hydrated yet, retry as soon as auth becomes available
     const { data: authListener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         if (session) loadIdentities();
@@ -1269,12 +1259,15 @@ export default function GeneratePage() {
       const incomingPrompt =
         typeof detail.prompt === "string" ? detail.prompt : "";
       const incomingNegative =
-        typeof detail.negative_prompt === "string" ? detail.negative_prompt : "";
+        typeof detail.negative_prompt === "string"
+          ? detail.negative_prompt
+          : "";
 
       if (incomingPrompt) setPrompt(incomingPrompt);
       if (incomingNegative) setNegativePrompt(incomingNegative);
 
-      const otRaw = typeof detail.output_type === "string" ? detail.output_type : "";
+      const otRaw =
+        typeof detail.output_type === "string" ? detail.output_type : "";
       const ot = otRaw.trim().toUpperCase();
       if (ot === "STORY") {
         setOutputType("STORY");
@@ -1282,20 +1275,23 @@ export default function GeneratePage() {
         setOutputType("IMAGE");
       }
 
-      // Always keep launch mode (txt2img) selected in UI
       setMode("text_to_image");
     };
 
-    window.addEventListener("siren_mind_generate", handler as EventListener);
+    window.addEventListener(
+      "siren_mind_generate",
+      handler as EventListener
+    );
     return () => {
       cancelled = true;
       authListener?.subscription?.unsubscribe();
-      window.removeEventListener("siren_mind_generate", handler as EventListener);
+      window.removeEventListener(
+        "siren_mind_generate",
+        handler as EventListener
+      );
     };
   }, []);
-;
 
-  
   const identitySelectOptions: { id: string; label: string }[] = [
     { id: "none", label: "None (no identity LoRA)" },
     ...identityOptions.map((l) => ({
@@ -1304,162 +1300,131 @@ export default function GeneratePage() {
     })),
   ];
 
-const handleGenerate = async () => {
+  const handleGenerate = async () => {
     const bodyModeMap: Record<string, string> = {
       feminine: "body_feminine",
       masculine: "body_masculine",
     };
+
     const selectedLoraId = loraSelection.selected[0] ?? null;
     setErrorMessage(null);
     setIsGenerating(true);
 
+    // ✅ Parse resolution from UI state (source of truth)
+    const [parsedWidth, parsedHeight] = resolution
+      .split("x")
+      .map((v) => parseInt(v, 10));
+
     try {
-      // Build payload to match /api/generate GenerationRequestPayload
+      const seedValue = lockSeed
+        ? seed
+        : Math.floor(Math.random() * 1_000_000_000);
+
+      const workflowInputs = {
+        prompt,
+        negative_prompt: negativePrompt,
+        body_mode: bodyModeMap[baseModel],
+        width: parsedWidth,
+        height: parsedHeight,
+        steps,
+        cfg: guidance,
+        seed: seedValue,
+        identity_lora: selectedLoraId ? selectedLoraId : null,
+      };
 
       const payload = {
-        tier: "og",
-        mode: "txt2img",
-        params: {
-          prompt,
-          negative_prompt: negativePrompt,
-          body_mode: bodyModeMap[baseModel],
-          width: 1024,
-          height: 1536,
-          steps,
-          cfg: guidance,
-          seed: lockSeed ? seed : Math.floor(Math.random() * 1_000_000_000),
-          user_lora: selectedLoraId
-            ? { id: selectedLoraId, strength: 0.85 }
-            : null,
+        workflow: {
+          type: "sirens_generate_v1",
+          engine: "comfyui",
+          template: "sirens_image_v3_production",
+          mode: "txt2img",
+          inputs: workflowInputs,
         },
       };
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
+      const runCount = Math.max(1, batchSize || 1);
+      const generatedAll: GeneratedItem[] = [];
 
-      // 🔐 Subscription / gating handling (Step 5)
-      if (res.status === 402 || res.status === 403) {
-        let reason = "You need an active SirensForge subscription with generator access.";
-        try {
-          const data = await res.json();
-          if (typeof data?.error === "string") {
-            reason = data.error;
-          } else if (typeof data?.message === "string") {
-            reason = data.message;
-          } else if (typeof data?.code === "string") {
-            reason = data.code;
+      for (let i = 0; i < runCount; i++) {
+        const runSeed = lockSeed
+          ? seedValue + i
+          : Math.floor(Math.random() * 1_000_000_000);
+
+        const runWorkflowInputs = {
+          ...workflowInputs,
+          seed: runSeed,
+        };
+
+        const runPayload = {
+          ...payload,
+          workflow: {
+            ...payload.workflow,
+            inputs: runWorkflowInputs,
+          },
+        };
+
+        const res = await fetch(
+          "https://sirens-forge-api-production.up.railway.app/generate",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(runPayload),
           }
-        } catch {
-          // ignore parse errors; keep default reason
-        }
-
-        setSubscriptionError(reason);
-        setShowSubModal(true);
-        setIsGenerating(false);
-        return;
-      }
-
-      if (!res.ok) {
-        throw new Error(`Generate failed with status ${res.status}`);
-      }
-
-      const data = await res.json();
-
-      // If backend ever returns outputs directly:
-      const immediateOutputs: any[] =
-        (Array.isArray(data.outputs) && data.outputs) ||
-        (Array.isArray(data.output) && data.output) ||
-        [];
-
-      if (immediateOutputs.length) {
-        const now = new Date().toISOString();
-        const generated: GeneratedItem[] = immediateOutputs.map(
-          (output: any) => ({
-            id: `${now}-${Math.random().toString(36).slice(2)}`,
-            kind: inferKindFromOutput(output),
-            url: output.url,
-            prompt,
-            settings: payload,
-            createdAt: output.createdAt || now,
-          })
         );
 
-        setItems((prev) => [...generated, ...prev].slice(0, 12));
-        setHistory((prev) => [...generated, ...prev]);
-        return;
-      }
-
-      const jobId: string | undefined =
-        data.job_id || data.id || data.jobId || undefined;
-
-      if (!jobId) {
-        throw new Error("No job_id or outputs returned from /api/generate");
-      }
-
-      // Poll /api/status until completed
-      const timeoutMs = 90_000;
-      const intervalMs = 1500;
-      const start = Date.now();
-
-      let finalStatus: any = null;
-
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        if (Date.now() - start > timeoutMs) {
-          throw new Error("Generation timed out. Try again.");
+        if (res.status === 402 || res.status === 403) {
+          let reason =
+            "You need an active SirensForge subscription with generator access.";
+          try {
+            const data = await res.json();
+            if (typeof data?.error === "string") reason = data.error;
+            else if (typeof data?.message === "string")
+              reason = data.message;
+            else if (typeof data?.code === "string") reason = data.code;
+          } catch {}
+          setSubscriptionError(reason);
+          setShowSubModal(true);
+          setIsGenerating(false);
+          return;
         }
 
-        const statusRes = await fetch(
-          `/api/status?job_id=${encodeURIComponent(jobId)}`
-        );
-        if (!statusRes.ok) {
-          throw new Error(`Status check failed: ${statusRes.status}`);
-        }
-
-        const statusData = await statusRes.json();
-        const status = String(statusData.status || "").toUpperCase();
-
-        if (
-          status === "COMPLETED" &&
-          (Array.isArray(statusData.outputs) ||
-            Array.isArray(statusData.output))
-        ) {
-          finalStatus = statusData;
-          break;
-        }
-
-        if (status === "FAILED") {
+        if (!res.ok) {
           throw new Error(
-            statusData.error || "Generation failed on the backend."
+            `Generate failed with status ${res.status}`
           );
         }
 
-        await sleep(intervalMs);
-      }
+        const data = await res.json();
+        const outputs = (data as any).outputs;
 
-      const outputs: any[] =
-        (Array.isArray(finalStatus.outputs) && finalStatus.outputs) ||
-        (Array.isArray(finalStatus.output) && finalStatus.output) ||
-        [];
+        if (!Array.isArray(outputs) || outputs.length === 0) {
+          throw new Error(
+            "Railway /generate did not return outputs[] immediately."
+          );
+        }
 
       const now = new Date().toISOString();
 
       const generated: GeneratedItem[] = outputs.map((output: any) => ({
-        id: `${jobId}-${Math.random().toString(36).slice(2)}`,
+        id: `${now}-${Math.random().toString(36).slice(2)}`,
         kind: inferKindFromOutput(output),
         url: output.url,
         prompt,
-        settings: payload,
+        settings: runPayload,
         createdAt: output.createdAt || now,
       }));
 
-      setItems((prev) => [...generated, ...prev].slice(0, 12));
-      setHistory((prev) => [...generated, ...prev]);
+      generatedAll.push(...generated);
+      }
+
+      if (!generatedAll.length) {
+        throw new Error("Railway /generate returned no outputs.");
+      }
+
+      setItems((prev) => [...generatedAll, ...prev].slice(0, 12));
+      setHistory((prev) => [...generatedAll, ...prev]);
     } catch (err: any) {
       console.error("Generation error:", err);
 
