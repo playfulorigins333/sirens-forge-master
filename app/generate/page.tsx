@@ -1400,25 +1400,30 @@ const payload = {
           );
         }
 
-        const data = await res.json();
-        const outputs = (data as any).outputs;
+       const data = await res.json();
 
-        if (!Array.isArray(outputs) || outputs.length === 0) {
-          throw new Error(
-            "Railway /generate did not return outputs[] immediately."
-          );
-        }
+// Railway returns images[] instead of outputs[]
+if (!Array.isArray(data?.images) || data.images.length === 0) {
+  throw new Error("Railway /generate did not return images[].");
+}
 
-      const now = new Date().toISOString();
+// Use a mutable variable ONCE (no redeclare)
+let outputs = data.images;
 
-      const generated: GeneratedItem[] = outputs.map((output: any) => ({
-        id: `${now}-${Math.random().toString(36).slice(2)}`,
-        kind: inferKindFromOutput(output),
-        url: output.url,
-        prompt,
-        settings: runPayload,
-        createdAt: output.createdAt || now,
-      }));
+const now = new Date().toISOString();
+
+const generated: GeneratedItem[] = outputs.map((output: any) => ({
+  id: `${now}-${Math.random().toString(36).slice(2)}`,
+  kind: inferKindFromOutput(output),
+
+  // Railway returns string URLs instead of {url}
+  url: typeof output === "string" ? output : output.url,
+
+  prompt,
+  settings: runPayload,
+  createdAt: now,
+}));
+
 
       generatedAll.push(...generated);
       }
