@@ -1,7 +1,7 @@
 {
   "3": {
     "inputs": {
-      "seed": 0,
+      "seed": 950744672972907,
       "steps": 20,
       "cfg": 7,
       "sampler_name": "dpmpp_2m",
@@ -159,6 +159,18 @@
     "class_type": "LoraLoader",
     "_meta": {
       "title": "Load LoRA"
+    }
+  },
+  "15": {
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImageWebsocket",
+    "_meta": {
+      "title": "SaveImageWebsocket"
     }
   }
 }
