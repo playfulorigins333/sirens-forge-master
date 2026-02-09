@@ -1,4 +1,4 @@
-cat > /workspace/sirens-forge-clean/runpod/train_lora.py <<'PY'
+
 #!/usr/bin/env python3
 """
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
