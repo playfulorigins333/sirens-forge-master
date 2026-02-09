@@ -1,12 +1,11 @@
 // lib/comfy/buildWorkflow.ts
-// PRODUCTION-LOCKED — Deterministic identity-first workflow builder
-// Base → Body → Identity (strict, sequential LoRA application)
+// PRODUCTION — Dynamic ComfyUI workflow builder
 
-import type { ResolvedLoraStack } from "@/lib/generation/lora-resolver";
+import fs from "fs";
+import path from "path";
+import { ResolvedLoraStack } from "@/lib/generation/lora-resolver";
 
-type FluxLock = { type?: string; strength?: string } | null;
-
-interface BuildWorkflowArgs {
+type BuildWorkflowInput = {
   prompt: string;
   negative: string;
   seed: number;
@@ -14,157 +13,98 @@ interface BuildWorkflowArgs {
   cfg: number;
   width: number;
   height: number;
-
-  // Ordered LoRA stack (base already loaded via checkpoint)
   loraStack: ResolvedLoraStack;
+  dnaImageNames: string[];
+  fluxLock: any;
+};
 
-  dnaImageNames?: string[];
-  fluxLock?: FluxLock;
-}
-
-const FACEID_NODE_CLASS = "IPAdapterFaceID";
-
-export function buildWorkflow({
-  prompt,
-  negative,
-  seed,
-  steps,
-  cfg,
-  width,
-  height,
-  loraStack,
-  dnaImageNames = [],
-  fluxLock = null,
-}: BuildWorkflowArgs) {
-  // 🔒 IMPORTANT:
-  // Load workflow JSON at CALL TIME, not import time (serverless-safe)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const baseWorkflow = require("./workflow-base.json");
-
-  const wf: any = JSON.parse(JSON.stringify(baseWorkflow));
-  const nodeIds = Object.keys(wf);
-
-  let nextId =
-    Math.max(...nodeIds.map((id) => parseInt(id, 10))) + 1;
-
-  // ------------------------------------------------------------
-  // Find base model + clip source
-  // ------------------------------------------------------------
-  const baseModelNodeId = nodeIds.find(
-    (id) => wf[id]?.class_type === "CheckpointLoaderSimple"
+export function buildWorkflow(input: BuildWorkflowInput) {
+  const workflowPath = path.join(
+    process.cwd(),
+    "lib/comfy/workflow-base.json"
   );
-  if (!baseModelNodeId) {
-    throw new Error("CheckpointLoaderSimple not found");
+
+  const workflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
+
+  const {
+    prompt,
+    negative,
+    seed,
+    steps,
+    cfg,
+    width,
+    height,
+    loraStack,
+  } = input;
+
+  /* ------------------------------------------------
+   * NODE SHORTCUTS
+   * ------------------------------------------------ */
+  const KSampler = workflow["3"];
+  const CheckpointLoader = workflow["4"];
+  const EmptyLatent = workflow["5"];
+  const PositivePrompt = workflow["6"];
+  const NegativePrompt = workflow["7"];
+  const BodyLoraNode = workflow["12"];
+  const IdentityLoraNode = workflow["13"];
+
+  /* ------------------------------------------------
+   * PROMPTS
+   * ------------------------------------------------ */
+  PositivePrompt.inputs.text = prompt;
+  NegativePrompt.inputs.text = negative;
+
+  /* ------------------------------------------------
+   * SAMPLER SETTINGS
+   * ------------------------------------------------ */
+  KSampler.inputs.seed = seed || Math.floor(Math.random() * 999999999);
+  KSampler.inputs.steps = steps;
+  KSampler.inputs.cfg = cfg;
+
+  /* ------------------------------------------------
+   * RESOLUTION
+   * ------------------------------------------------ */
+  EmptyLatent.inputs.width = width;
+  EmptyLatent.inputs.height = height;
+
+  /* ------------------------------------------------
+   * BASE MODEL
+   * ------------------------------------------------ */
+  const baseModelFile = path.basename(loraStack.base_model.path);
+  CheckpointLoader.inputs.ckpt_name = baseModelFile;
+
+  /* ------------------------------------------------
+   * LoRA INJECTION SYSTEM 🔥
+   * ------------------------------------------------ */
+  const bodyLora = loraStack.loras.find(l =>
+    l.path.startsWith("body_")
+  );
+
+  const identityLora = loraStack.loras.find(l =>
+    l.path.startsWith("identity_")
+  );
+
+  /* ---------------------------
+   * BODY LoRA
+   * --------------------------- */
+  if (bodyLora) {
+    BodyLoraNode.inputs.lora_name = bodyLora.path;
+    BodyLoraNode.inputs.strength_model = bodyLora.strength;
+    BodyLoraNode.inputs.strength_clip = bodyLora.strength * 0.5;
+  } else {
+    delete workflow["12"]; // remove node if not used
   }
 
-  let currentModel: [string, number] = [baseModelNodeId, 0];
-  let currentClip: [string, number] = [baseModelNodeId, 1];
-
-  // ------------------------------------------------------------
-  // APPLY LoRAs SEQUENTIALLY (BODY → IDENTITY)
-  // ------------------------------------------------------------
-  for (const l of loraStack.loras) {
-    const id = String(nextId++);
-
-    wf[id] = {
-      class_type: "LoraLoader",
-      inputs: {
-        // 🔒 FINAL CONTRACT:
-        // Resolver already returned the exact ComfyUI filename.
-        lora_name: l.path,
-        strength_model: l.strength,
-        strength_clip: l.strength,
-        model: currentModel,
-        clip: currentClip,
-      },
-    };
-
-    currentModel = [id, 0];
-    currentClip = [id, 1];
+  /* ---------------------------
+   * IDENTITY LoRA
+   * --------------------------- */
+  if (identityLora) {
+    IdentityLoraNode.inputs.lora_name = identityLora.path;
+    IdentityLoraNode.inputs.strength_model = identityLora.strength;
+    IdentityLoraNode.inputs.strength_clip = identityLora.strength;
+  } else {
+    delete workflow["13"]; // remove node if user selected "None"
   }
 
-  // ------------------------------------------------------------
-  // PROMPT / NEGATIVE
-  // ------------------------------------------------------------
-  for (const id of Object.keys(wf)) {
-    const node = wf[id];
-    if (node?.class_type === "CLIPTextEncode") {
-      if (node.inputs?.text === "{prompt}") node.inputs.text = prompt;
-      if (node.inputs?.text === "{negative_prompt}") {
-        node.inputs.text = negative;
-      }
-      node.inputs.clip = currentClip;
-    }
-  }
-
-  // ------------------------------------------------------------
-  // SAMPLER + LATENT
-  // ------------------------------------------------------------
-  for (const id of Object.keys(wf)) {
-    const node = wf[id];
-    if (node?.class_type === "KSampler") {
-      node.inputs.model = currentModel;
-      node.inputs.seed = seed;
-      node.inputs.steps = steps;
-      node.inputs.cfg = cfg;
-    }
-    if (node?.class_type === "EmptyLatentImage") {
-      node.inputs.width = width;
-      node.inputs.height = height;
-      node.inputs.batch_size = 1;
-    }
-  }
-
-  // ------------------------------------------------------------
-  // DNA / FACE ID (future-ready)
-  // ------------------------------------------------------------
-  if (dnaImageNames.length >= 3) {
-    const loadIds: string[] = [];
-
-    for (const name of dnaImageNames.slice(0, 8)) {
-      const id = String(nextId++);
-      wf[id] = {
-        class_type: "LoadImage",
-        inputs: { image: name },
-      };
-      loadIds.push(id);
-    }
-
-    const batchId = String(nextId++);
-    const batchInputs: any = {};
-    loadIds.forEach((id, i) => {
-      batchInputs[`image${i + 1}`] = [id, 0];
-    });
-
-    wf[batchId] = {
-      class_type: "ImageBatch",
-      inputs: batchInputs,
-    };
-
-    const strength =
-      fluxLock?.strength === "subtle"
-        ? 0.55
-        : fluxLock?.strength === "strong"
-        ? 0.9
-        : 0.75;
-
-    const faceNodeId = String(nextId++);
-    wf[faceNodeId] = {
-      class_type: FACEID_NODE_CLASS,
-      inputs: {
-        model: currentModel,
-        image: [batchId, 0],
-        weight: strength,
-      },
-    };
-
-    for (const id of Object.keys(wf)) {
-      const node = wf[id];
-      if (node?.class_type === "KSampler") {
-        node.inputs.model = [faceNodeId, 0];
-      }
-    }
-  }
-
-  return wf;
+  return workflow;
 }
