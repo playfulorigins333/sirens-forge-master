@@ -73,7 +73,6 @@ type StylePreset =
 type QualityPreset = "fast" | "balanced" | "quality" | "ultra";
 type ConsistencyPreset = "low" | "medium" | "high" | "perfect";
 
-
 type LoraMode = "single" | "advanced";
 
 interface LoraSelection {
@@ -82,7 +81,6 @@ interface LoraSelection {
   createNew: boolean;
   newName: string;
 }
-
 
 type MediaKind = "image" | "video";
 
@@ -100,15 +98,21 @@ interface GeneratedItem {
 // -----------------------------------------------------------------------------
 
 function inferKindFromOutput(output: any): MediaKind {
-  if (output.kind === "video" || output.kind === "image") {
+  // Support both string URLs and object outputs
+  if (typeof output === "string") {
+    const url = output.toLowerCase();
+    if (url.endsWith(".mp4") || url.endsWith(".webm") || url.includes("video")) {
+      return "video";
+    }
+    return "image";
+  }
+
+  if (output?.kind === "video" || output?.kind === "image") {
     return output.kind;
   }
-  const url = (output.url || "").toLowerCase();
-  if (
-    url.endsWith(".mp4") ||
-    url.endsWith(".webm") ||
-    url.includes("video")
-  ) {
+
+  const url = String(output?.url || "").toLowerCase();
+  if (url.endsWith(".mp4") || url.endsWith(".webm") || url.includes("video")) {
     return "video";
   }
   return "image";
@@ -209,13 +213,8 @@ function SubscriptionModal({
               <div className="text-[11px] text-gray-300">
                 <p>
                   Smash the competition at launch by locking in{" "}
-                  <span className="text-purple-300 font-semibold">
-                    OG
-                  </span>{" "}
-                  or{" "}
-                  <span className="text-pink-300 font-semibold">
-                    Early Bird
-                  </span>{" "}
+                  <span className="text-purple-300 font-semibold">OG</span> or{" "}
+                  <span className="text-pink-300 font-semibold">Early Bird</span>{" "}
                   access before seats are gone.
                 </p>
               </div>
@@ -312,9 +311,7 @@ function GeneratorHeader() {
                 : "bg-gray-800 text-gray-300 border border-gray-700"
             }`}
           >
-            {subscriptionStatus === "active"
-              ? "✅ Active Subscription"
-              : "⚠️ Inactive"}
+            {subscriptionStatus === "active" ? "✅ Active Subscription" : "⚠️ Inactive"}
           </div>
 
           <div className="flex items-center gap-3">
@@ -342,7 +339,7 @@ function ModeTabs(props: {
   activeMode: GenerationMode;
   onChange: (mode: GenerationMode) => void;
 }) {
-    const modes: { id: GenerationMode; label: string; icon: React.ElementType }[] = [
+  const modes: { id: GenerationMode; label: string; icon: React.ElementType }[] = [
     { id: "text_to_image", label: "Text → Image", icon: FileText },
   ];
 
@@ -454,11 +451,7 @@ function PromptSection(props: {
           className="w-full justify-between text-xs bg-gray-950 border border-gray-800 text-gray-100 hover:bg-gray-900 hover:text-white"
         >
           <span>Refine & filter (negative prompt) ✨</span>
-          {showNegative ? (
-            <ChevronUp className="w-4 h-4" />
-          ) : (
-            <ChevronDown className="w-4 h-4" />
-          )}
+          {showNegative ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </Button>
 
         <AnimatePresence>
@@ -488,13 +481,15 @@ function PromptSection(props: {
 // -----------------------------------------------------------------------------
 
 function ModelStyleSection(props: {
-  baseModel: BaseModel;  stylePreset: StylePreset;
-  onBaseModelChange: (model: BaseModel) => void;  onStylePresetChange: (preset: StylePreset) => void;
+  baseModel: BaseModel;
+  stylePreset: StylePreset;
+  onBaseModelChange: (model: BaseModel) => void;
+  onStylePresetChange: (preset: StylePreset) => void;
 }) {
   const baseModels: { id: BaseModel; label: string }[] = [
     { id: "feminine", label: "Feminine" },
     { id: "masculine", label: "Masculine" },
-      ];
+  ];
 
   const stylePresets: StylePreset[] = [
     "photorealistic",
@@ -541,13 +536,9 @@ function ModelStyleSection(props: {
           </div>
         </div>
 
-        
         {/* Style preset */}
-
         <div>
-          <p className="text-xs font-semibold mb-2 text-gray-200">
-            Style Preset
-          </p>
+          <p className="text-xs font-semibold mb-2 text-gray-200">Style Preset</p>
           <div className="flex flex-wrap gap-2">
             {stylePresets.map((preset) => {
               const isActive = props.stylePreset === preset;
@@ -574,7 +565,6 @@ function ModelStyleSection(props: {
 }
 
 // -----------------------------------------------------------------------------
-// -----------------------------------------------------------------------------
 // LoRA Identity Section (Option A default; Option B available)
 // -----------------------------------------------------------------------------
 
@@ -597,9 +587,7 @@ function LoraIdentitySection(props: {
   return (
     <Card className="border-gray-800 bg-gray-900/80">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm md:text-base">
-Identity LoRA
-        </CardTitle>
+        <CardTitle className="text-sm md:text-base">Identity LoRA</CardTitle>
         <CardDescription className="text-xs text-gray-300">
           Select one trained identity LoRA to control identity consistency.
         </CardDescription>
@@ -614,10 +602,7 @@ Identity LoRA
           </div>
         )}
 
-        <Select
-          value={v.selected[0] || "none"}
-          onValueChange={setSelected}
-        >
+        <Select value={v.selected[0] || "none"} onValueChange={setSelected}>
           <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
             <SelectValue placeholder="Select identity LoRA" />
           </SelectTrigger>
@@ -654,13 +639,7 @@ function AdvancedSettings(props: {
 }) {
   const [open, setOpen] = useState(false);
 
-  const resolutions = [
-    "1024x1024",
-    "832x1216",
-    "1024x1536",
-    "1216x832",
-    "1536x1024",
-  ];
+  const resolutions = ["1024x1024", "832x1216", "1024x1536", "1216x832", "1536x1024"];
 
   const randomizeSeed = () => {
     props.onSeedChange(Math.floor(Math.random() * 1_000_000));
@@ -675,14 +654,8 @@ function AdvancedSettings(props: {
           onClick={() => setOpen((v) => !v)}
           className="w-full justify-between px-0 hover:bg-transparent text-gray-100 hover:text-white"
         >
-          <CardTitle className="text-sm md:text-base">
-            Advanced Settings
-          </CardTitle>
-          {open ? (
-            <ChevronUp className="w-5 h-5" />
-          ) : (
-            <ChevronDown className="w-5 h-5" />
-          )}
+          <CardTitle className="text-sm md:text-base">Advanced Settings</CardTitle>
+          {open ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
         </Button>
       </CardHeader>
       <AnimatePresence>
@@ -696,10 +669,7 @@ function AdvancedSettings(props: {
               {/* Resolution */}
               <div>
                 <p className="font-semibold mb-1 text-gray-200">Resolution</p>
-                <Select
-                  value={props.resolution}
-                  onValueChange={props.onResolutionChange}
-                >
+                <Select value={props.resolution} onValueChange={props.onResolutionChange}>
                   <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
                     <SelectValue />
                   </SelectTrigger>
@@ -711,17 +681,13 @@ function AdvancedSettings(props: {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-[10px] text-gray-400 mt-1">
-                  SDXL max 1024x1792.
-                </p>
+                <p className="text-[10px] text-gray-400 mt-1">SDXL max 1024x1792.</p>
               </div>
 
               {/* CFG */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <p className="font-semibold text-gray-200">
-                    CFG / Guidance Scale
-                  </p>
+                  <p className="font-semibold text-gray-200">CFG / Guidance Scale</p>
                   <span className="text-[11px] text-purple-300 font-semibold">
                     {props.guidance.toFixed(1)}
                   </span>
@@ -732,9 +698,7 @@ function AdvancedSettings(props: {
                   max={12}
                   step={0.5}
                   value={props.guidance}
-                  onChange={(e) =>
-                    props.onGuidanceChange(parseFloat(e.target.value))
-                  }
+                  onChange={(e) => props.onGuidanceChange(parseFloat(e.target.value))}
                   className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
                 />
               </div>
@@ -743,9 +707,7 @@ function AdvancedSettings(props: {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-gray-200">Steps</p>
-                  <span className="text-[11px] text-purple-300 font-semibold">
-                    {props.steps}
-                  </span>
+                  <span className="text-[11px] text-purple-300 font-semibold">{props.steps}</span>
                 </div>
                 <input
                   type="range"
@@ -753,9 +715,7 @@ function AdvancedSettings(props: {
                   max={75}
                   step={1}
                   value={props.steps}
-                  onChange={(e) =>
-                    props.onStepsChange(parseInt(e.target.value, 10) || 20)
-                  }
+                  onChange={(e) => props.onStepsChange(parseInt(e.target.value, 10) || 20)}
                   className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
                 />
               </div>
@@ -767,9 +727,7 @@ function AdvancedSettings(props: {
                   <Input
                     type="number"
                     value={props.seed}
-                    onChange={(e) =>
-                      props.onSeedChange(parseInt(e.target.value, 10) || 0)
-                    }
+                    onChange={(e) => props.onSeedChange(parseInt(e.target.value, 10) || 0)}
                     className="bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-8 text-xs"
                   />
                   <Button
@@ -786,24 +744,18 @@ function AdvancedSettings(props: {
                   <input
                     type="checkbox"
                     checked={props.lockSeed}
-                    onChange={(e) =>
-                      props.onLockSeedChange(e.target.checked)
-                    }
+                    onChange={(e) => props.onLockSeedChange(e.target.checked)}
                     className="w-4 h-4 rounded border-gray-700 bg-gray-950 accent-purple-500"
                   />
-                  <span className="text-xs text-gray-300">
-                    Lock seed for reproducible outputs.
-                  </span>
+                  <span className="text-xs text-gray-300">Lock seed for reproducible outputs.</span>
                 </label>
               </div>
 
               {/* Batch size */}
-<div>
+              <div>
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-gray-200">Batch Size</p>
-                  <span className="text-[11px] text-purple-300 font-semibold">
-                    {props.batchSize}
-                  </span>
+                  <span className="text-[11px] text-purple-300 font-semibold">{props.batchSize}</span>
                 </div>
                 <input
                   type="range"
@@ -812,9 +764,7 @@ function AdvancedSettings(props: {
                   step={1}
                   value={props.batchSize}
                   onChange={(e) =>
-                    props.onBatchSizeChange(
-                      Math.max(1, parseInt(e.target.value, 10) || 1)
-                    )
+                    props.onBatchSizeChange(Math.max(1, parseInt(e.target.value, 10) || 1))
                   }
                   className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
                 />
@@ -896,10 +846,7 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
         <h2 className="text-lg font-semibold text-gray-100">Generating…</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="aspect-square rounded-xl bg-gray-800 animate-pulse"
-            />
+            <div key={i} className="aspect-square rounded-xl bg-gray-800 animate-pulse" />
           ))}
         </div>
       </div>
@@ -925,9 +872,7 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
   return (
     <>
       <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-gray-100">
-          Latest Generation
-        </h2>
+        <h2 className="text-lg font-semibold text-gray-100">Latest Generation</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {props.items.map((item, index) => (
             <motion.div
@@ -938,19 +883,9 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
               className="relative group aspect-square rounded-xl overflow-hidden bg-gray-950 border border-gray-800"
             >
               {item.kind === "image" ? (
-                <img
-                  src={item.url}
-                  alt={item.prompt}
-                  className="w-full h-full object-cover"
-                />
+                <img src={item.url} alt={item.prompt} className="w-full h-full object-cover" />
               ) : (
-                <video
-                  src={item.url}
-                  className="w-full h-full object-cover"
-                  controls={false}
-                  muted
-                  loop
-                />
+                <video src={item.url} className="w-full h-full object-cover" controls={false} muted loop />
               )}
 
               <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
@@ -997,20 +932,9 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
               className="max-w-4xl w-full bg-gray-950 rounded-xl overflow-hidden border border-gray-800"
             >
               {selected.kind === "image" ? (
-                <img
-src={selected.url}
-                  alt={selected.prompt}
-                  className="w-full h-auto"
-                />
+                <img src={selected.url} alt={selected.prompt} className="w-full h-auto" />
               ) : (
-                <video
-                  src={selected.url}
-                  className="w-full h-auto"
-                  controls
-                  autoPlay
-                  muted
-                  loop
-                />
+                <video src={selected.url} className="w-full h-auto" controls autoPlay muted loop />
               )}
               <div className="p-4 space-y-2 text-xs">
                 <p className="text-gray-300">{selected.prompt}</p>
@@ -1028,12 +952,7 @@ src={selected.url}
 
 function DownloadIcon() {
   return (
-    <svg
-      className="w-4 h-4"
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      focusable="false"
-    >
+    <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path
         d="M5 20h14v-2H5v2zm7-3 5-5h-3V4h-4v8H7l5 5z"
         fill="currentColor"
@@ -1057,11 +976,8 @@ function HistorySidebar(props: {
 
   const filtered = [...props.history]
     .filter((item) => {
-      const matchesQuery = item.prompt
-        .toLowerCase()
-        .includes(query.toLowerCase());
-            const matchesFilter =
-        filter === "all" || (filter === "images" && item.kind === "image");
+      const matchesQuery = item.prompt.toLowerCase().includes(query.toLowerCase());
+      const matchesFilter = filter === "all" || (filter === "images" && item.kind === "image");
       return matchesQuery && matchesFilter;
     })
     .sort((a, b) => {
@@ -1072,9 +988,7 @@ function HistorySidebar(props: {
 
   return (
     <div className="h-full overflow-y-auto p-3 md:p-4 space-y-3 border-l border-gray-900 bg-gray-950/70">
-      <h3 className="text-sm md:text-base font-bold text-gray-100">
-        Session History
-      </h3>
+      <h3 className="text-sm md:text-base font-bold text-gray-100">Session History</h3>
 
       <div className="space-y-2 text-xs">
         <div className="relative">
@@ -1088,31 +1002,43 @@ function HistorySidebar(props: {
         </div>
 
         <div className="flex gap-2">
-          <Select
-            value={filter}
-            onValueChange={(v) =>
-              setFilter(v as "all" | "images")
-            }
-          >
+          <Select value={filter} onValueChange={(v) => setFilter(v as "all" | "images")}>
             <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="all">All</SelectItem>
-              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="images">Images</SelectItem>
-</SelectContent>
+              <SelectItem
+                className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"
+                value="all"
+              >
+                All
+              </SelectItem>
+              <SelectItem
+                className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"
+                value="images"
+              >
+                Images
+              </SelectItem>
+            </SelectContent>
           </Select>
 
-          <Select
-            value={sort}
-            onValueChange={(v) => setSort(v as "newest" | "oldest")}
-          >
+          <Select value={sort} onValueChange={(v) => setSort(v as "newest" | "oldest")}>
             <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="newest">Newest</SelectItem>
-              <SelectItem className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"value="oldest">Oldest</SelectItem>
+              <SelectItem
+                className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"
+                value="newest"
+              >
+                Newest
+              </SelectItem>
+              <SelectItem
+                className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"
+                value="oldest"
+              >
+                Oldest
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1128,20 +1054,14 @@ function HistorySidebar(props: {
             onClick={() => props.onSelect(item)}
           >
             {item.kind === "image" ? (
-              <img
-                src={item.url}
-                alt={item.prompt}
-                className="w-12 h-12 rounded object-cover"
-              />
+              <img src={item.url} alt={item.prompt} className="w-12 h-12 rounded object-cover" />
             ) : (
               <div className="w-12 h-12 rounded bg-gray-800 flex items-center justify-center">
                 <VideoIcon className="w-5 h-5 text-purple-300" />
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-[11px] font-medium text-gray-100 line-clamp-2">
-                {item.prompt}
-              </p>
+              <p className="text-[11px] font-medium text-gray-100 line-clamp-2">{item.prompt}</p>
               <p className="text-[10px] text-gray-400 mt-1">
                 {new Date(item.createdAt).toLocaleTimeString()}
               </p>
@@ -1185,13 +1105,14 @@ export default function GeneratePage() {
   const [negativePrompt, setNegativePrompt] = useState(
     "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
   );
-  const [identityOptions, setIdentityOptions] = useState<{id: string; name: string | null}[]>([]);
+  const [identityOptions, setIdentityOptions] = useState<
+    { id: string; name: string | null }[]
+  >([]);
   // NOTE: selectedIdentity is legacy UI-only state.
-// Generation uses loraSelection.selected[0] exclusively.
+  // Generation uses loraSelection.selected[0] exclusively.
   const [selectedIdentity, setSelectedIdentity] = useState<string | "none">("none");
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
-  const [stylePreset, setStylePreset] =
-    useState<StylePreset>("photorealistic");
+  const [stylePreset, setStylePreset] = useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
   const [consistencyPreset] = useState<ConsistencyPreset>("medium");
   // LoRA identity (UI + payload)
@@ -1214,15 +1135,12 @@ export default function GeneratePage() {
   const [history, setHistory] = useState<GeneratedItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const canGenerate =
-    !isGenerating && Boolean(prompt?.trim()) && Boolean(baseModel);
+  const canGenerate = !isGenerating && Boolean(prompt?.trim()) && Boolean(baseModel);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Subscription modal state
   const [showSubModal, setShowSubModal] = useState(false);
-  const [subscriptionError, setSubscriptionError] = useState<string | null>(
-    null
-  );
+  const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
 
   // ------------------------------------------------------------
   // Siren's Mind → Generator injection (LOCKED)
@@ -1248,28 +1166,22 @@ export default function GeneratePage() {
 
     loadIdentities();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (session) loadIdentities();
-      }
-    );
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) loadIdentities();
+    });
 
     const handler = (e: Event) => {
       const ce = e as CustomEvent<any>;
       const detail = (ce as any)?.detail ?? {};
 
-      const incomingPrompt =
-        typeof detail.prompt === "string" ? detail.prompt : "";
+      const incomingPrompt = typeof detail.prompt === "string" ? detail.prompt : "";
       const incomingNegative =
-        typeof detail.negative_prompt === "string"
-          ? detail.negative_prompt
-          : "";
+        typeof detail.negative_prompt === "string" ? detail.negative_prompt : "";
 
       if (incomingPrompt) setPrompt(incomingPrompt);
       if (incomingNegative) setNegativePrompt(incomingNegative);
 
-      const otRaw =
-        typeof detail.output_type === "string" ? detail.output_type : "";
+      const otRaw = typeof detail.output_type === "string" ? detail.output_type : "";
       const ot = otRaw.trim().toUpperCase();
       if (ot === "STORY") {
         setOutputType("STORY");
@@ -1280,17 +1192,11 @@ export default function GeneratePage() {
       setMode("text_to_image");
     };
 
-    window.addEventListener(
-      "siren_mind_generate",
-      handler as EventListener
-    );
+    window.addEventListener("siren_mind_generate", handler as EventListener);
     return () => {
       cancelled = true;
       authListener?.subscription?.unsubscribe();
-      window.removeEventListener(
-        "siren_mind_generate",
-        handler as EventListener
-      );
+      window.removeEventListener("siren_mind_generate", handler as EventListener);
     };
   }, []);
 
@@ -1309,83 +1215,66 @@ export default function GeneratePage() {
     };
 
     const selectedLoraId = loraSelection.selected[0] ?? null;
+
     setErrorMessage(null);
     setIsGenerating(true);
 
-    // ✅ Parse resolution from UI state (source of truth)
+    // ✅ Parse resolution from UI state (source of truth) — ONCE (no redeclare)
     const [parsedWidth, parsedHeight] = resolution
       .split("x")
       .map((v) => parseInt(v, 10));
 
     try {
-      const seedValue = lockSeed
-        ? seed
-        : Math.floor(Math.random() * 1_000_000_000);
+      const seedValue = lockSeed ? seed : Math.floor(Math.random() * 1_000_000_000);
 
-    const [parsedWidth, parsedHeight] = resolution.split("x").map(Number);
-
-const workflowInputs = {
-  prompt,
-  negative_prompt: negativePrompt,
-  body_mode: bodyModeMap[baseModel],
-  width: parsedWidth,
-  height: parsedHeight,
-  steps,
-  cfg: guidance,
-  seed: seedValue,
-  identity_lora: selectedLoraId ? selectedLoraId : null,
-};
-const payload = {
-  workflow: {
-    type: "sirens_generate_v1",
-    engine: "comfyui",
-    template: "sirens_image_v3_production",
-    mode: "txt2img",
-    inputs: workflowInputs,
-  },
-};
+      const workflowInputs = {
+        prompt,
+        negative_prompt: negativePrompt,
+        body_mode: bodyModeMap[baseModel],
+        width: parsedWidth,
+        height: parsedHeight,
+        steps,
+        cfg: guidance,
+        seed: seedValue,
+        identity_lora: selectedLoraId ? selectedLoraId : null,
+      };
 
       const runCount = Math.max(1, batchSize || 1);
       const generatedAll: GeneratedItem[] = [];
 
       for (let i = 0; i < runCount; i++) {
-        const runSeed = lockSeed
-          ? seedValue + i
-          : Math.floor(Math.random() * 1_000_000_000);
+        const runSeed = lockSeed ? seedValue + i : Math.floor(Math.random() * 1_000_000_000);
 
         const runWorkflowInputs = {
           ...workflowInputs,
           seed: runSeed,
         };
 
-      const runPayload = {
-  workflow: {
-    type: "sirens_generate_v1",
-    engine: "comfyui",
-    template: "sirens_image_v3_production",
-    mode: "txt2img",
-    inputs: runWorkflowInputs,
-  },
-};
-        const res = await fetch(
-          "https://sirens-forge-api-production.up.railway.app/generate",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(runPayload),
-          }
-        );
+        const runPayload = {
+          workflow: {
+            type: "sirens_generate_v1",
+            engine: "comfyui",
+            template: "sirens_image_v3_production",
+            mode: "txt2img",
+            inputs: runWorkflowInputs,
+          },
+        };
+
+        // ✅ IMPORTANT: Call your Next.js API route (not Railway directly)
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(runPayload),
+        });
 
         if (res.status === 402 || res.status === 403) {
-          let reason =
-            "You need an active SirensForge subscription with generator access.";
+          let reason = "You need an active SirensForge subscription with generator access.";
           try {
             const data = await res.json();
             if (typeof data?.error === "string") reason = data.error;
-            else if (typeof data?.message === "string")
-              reason = data.message;
+            else if (typeof data?.message === "string") reason = data.message;
             else if (typeof data?.code === "string") reason = data.code;
           } catch {}
           setSubscriptionError(reason);
@@ -1395,41 +1284,33 @@ const payload = {
         }
 
         if (!res.ok) {
-          throw new Error(
-            `Generate failed with status ${res.status}`
-          );
+          throw new Error(`Generate failed with status ${res.status}`);
         }
 
-       const data = await res.json();
+        const data = await res.json();
 
-// Railway returns images[] instead of outputs[]
-if (!Array.isArray(data?.images) || data.images.length === 0) {
-  throw new Error("Railway /generate did not return images[].");
-}
+        // Our API returns images[] (strings or objects)
+        if (!Array.isArray(data?.images) || data.images.length === 0) {
+          throw new Error("/api/generate did not return images[].");
+        }
 
-// Use a mutable variable ONCE (no redeclare)
-let outputs = data.images;
+        const outputs = data.images;
+        const now = new Date().toISOString();
 
-const now = new Date().toISOString();
+        const generated: GeneratedItem[] = outputs.map((output: any) => ({
+          id: `${now}-${Math.random().toString(36).slice(2)}`,
+          kind: inferKindFromOutput(output),
+          url: typeof output === "string" ? output : output?.url,
+          prompt,
+          settings: runPayload,
+          createdAt: now,
+        }));
 
-const generated: GeneratedItem[] = outputs.map((output: any) => ({
-  id: `${now}-${Math.random().toString(36).slice(2)}`,
-  kind: inferKindFromOutput(output),
-
-  // Railway returns string URLs instead of {url}
-  url: typeof output === "string" ? output : output.url,
-
-  prompt,
-  settings: runPayload,
-  createdAt: now,
-}));
-
-
-      generatedAll.push(...generated);
+        generatedAll.push(...generated);
       }
 
       if (!generatedAll.length) {
-        throw new Error("Railway /generate returned no outputs.");
+        throw new Error("/api/generate returned no outputs.");
       }
 
       setItems((prev) => [...generatedAll, ...prev].slice(0, 12));
@@ -1481,8 +1362,9 @@ const generated: GeneratedItem[] = outputs.map((output: any) => ({
               <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
                 <div className="font-semibold text-gray-100">Ultra add-on</div>
                 <div className="mt-1">
-                  Type <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play
-                  add-on. Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
+                  Type{" "}
+                  <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
+                  Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
                   masturbation, vaginal.
                 </div>
               </div>
@@ -1507,8 +1389,6 @@ const generated: GeneratedItem[] = outputs.map((output: any) => ({
                 options={identitySelectOptions}
               />
 
-
-
               <AdvancedSettings
                 resolution={resolution}
                 guidance={guidance}
@@ -1531,9 +1411,7 @@ const generated: GeneratedItem[] = outputs.map((output: any) => ({
                 disabled={!canGenerate}
                 onClick={handleGenerate}
               />
-              {errorMessage && (
-                <p className="text-[11px] text-red-400">{errorMessage}</p>
-              )}
+              {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
             </div>
 
             {/* Right column: output */}
@@ -1549,11 +1427,7 @@ const generated: GeneratedItem[] = outputs.map((output: any) => ({
 
         {/* History sidebar */}
         <div className="w-full md:w-80 lg:w-96 border-t md:border-t-0 md:border-l border-gray-900">
-          <HistorySidebar
-            history={history}
-            onSelect={handleHistorySelect}
-            onRerun={handleHistoryRerun}
-          />
+          <HistorySidebar history={history} onSelect={handleHistorySelect} onRerun={handleHistoryRerun} />
         </div>
       </main>
 
