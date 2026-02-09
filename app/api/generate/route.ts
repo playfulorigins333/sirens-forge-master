@@ -114,7 +114,7 @@ export async function POST(req: Request) {
     );
 
     /* ------------------------------------------------
-     * BUILD WORKFLOW
+     * BUILD WORKFLOW (FRONTEND NOW OWNS WORKFLOW)
      * ------------------------------------------------ */
     const workflow = buildWorkflow({
       prompt: finalPrompt,
@@ -130,17 +130,15 @@ export async function POST(req: Request) {
     });
 
     /* ------------------------------------------------
-     * FORWARD TO FASTAPI
+     * FORWARD RAW WORKFLOW TO RAILWAY PROXY
+     * (CRITICAL FIX — DO NOT WRAP IN { workflow: ... })
      * ------------------------------------------------ */
     const targetUrl = `${RUNPOD_BASE_URL}/gateway/generate`;
 
     const upstream = await fetch(targetUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workflow,
-        user_id: user.id,
-      }),
+      body: JSON.stringify(workflow), // ⭐ SEND RAW GRAPH ⭐
     });
 
     const text = await upstream.text();
