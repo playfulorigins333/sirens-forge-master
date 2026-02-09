@@ -3,30 +3,43 @@ import { z } from "zod";
 
 /**
  * SirensForge Generation Contract (LOCKED)
- * - BigLust base is always the underlying checkpoint (pod-side).
- * - Exactly ONE body LoRA may be applied at a time (body_*).
- * - Exactly ONE user LoRA may be applied at a time (optional).
- * - Same user LoRA identifier is used for BOTH image + video (path resolved server-side from cache).
- * - Backend enforces tier caps for video params.
+ *
+ * Reality check (current production):
+ * - App is subscription-gated: if user has no active sub, they don't use the app.
+ * - Frontend sends a "flat" payload to /api/generate (Next.js route),
+ *   and the server builds the Comfy workflow.
+ *
+ * This contract remains useful for:
+ * - Normalizing inputs
+ * - Keeping launch rules (1 body LoRA + optional 1 identity LoRA)
+ * - Providing a single internal shape even if callers send legacy payloads
  */
 
-/** Tiers used for routing + caps (do NOT rename without updating auth/subscription logic) */
-export const TierSchema = z.enum(["token", "subscriber", "og"]);
+/**
+ * Internal tiers used for routing/caps.
+ * Since you're subscription-only right now, we default to "subscriber".
+ * (OG remains distinct.)
+ */
+export const TierSchema = z.enum(["subscriber", "og"]).default("subscriber");
 export type Tier = z.infer<typeof TierSchema>;
 
-/** Supported generation modes (Phase 1: contract only; Phase 2: routing) */
-export const GenModeSchema = z.enum(["txt2img", "img2img", "txt2vid", "img2vid"]);
+/** Supported generation modes */
+export const GenModeSchema = z
+  .enum(["txt2img", "img2img", "txt2vid", "img2vid"])
+  .default("txt2img");
 export type GenMode = z.infer<typeof GenModeSchema>;
 
-/** Body LoRA selector (one of 4; optional = no body modifier) */
-export const BodyModeSchema = z.enum(["none", "body_feminine", "body_masculine", "body_mtf", "body_ftm"]);
+/** Body LoRA selector (launch: feminine/masculine; keep mtf/ftm for later without breaking) */
+export const BodyModeSchema = z
+  .enum(["none", "body_feminine", "body_masculine", "body_mtf", "body_ftm"])
+  .default("none");
 export type BodyMode = z.infer<typeof BodyModeSchema>;
 
 export const UserLoraSchema = z
   .object({
-    /** Server will resolve this to: /workspace/cache/loras/<id>.safetensors (or similar mapping) */
+    /** Server will resolve this id to a cached LoRA file path */
     id: z.string().min(1),
-    /** 0.0–1.2 typical. Backend may clamp later, but contract validates sane bounds. */
+    /** 0.0–1.5 typical. Backend may clamp further. */
     strength: z.number().min(0).max(1.5).default(0.85),
   })
   .strict();
@@ -46,7 +59,7 @@ export const BaseGenParamsSchema = z
     height: z.number().int().min(256).max(2048).default(1536),
 
     /** Body modifier (optional) */
-    body_mode: BodyModeSchema.default("none"),
+    body_mode: BodyModeSchema,
 
     /**
      * Optional SINGLE user LoRA.
@@ -61,10 +74,6 @@ export type BaseGenParams = z.infer<typeof BaseGenParamsSchema>;
 /** Image inputs for img2img / img2vid */
 export const InitImageSchema = z
   .object({
-    /**
-     * Must be a URL your backend can fetch (Supabase Storage signed URL, etc.)
-     * Do NOT accept raw file upload in this contract object.
-     */
     url: z.string().url(),
   })
   .strict();
@@ -84,26 +93,118 @@ export const VideoParamsSchema = z
 
 export type VideoParams = z.infer<typeof VideoParamsSchema>;
 
-/** Full request payload */
-export const GenerationRequestSchema = z
+/**
+ * Legacy payload (old contract) shape:
+ * {
+ *   tier: "subscriber"|"og"
+ *   mode: "txt2img"|...
+ *   params: { prompt, negative_prompt, body_mode, ... user_lora? }
+ *   init_image?
+ *   video?
+ * }
+ */
+const LegacyGenerationRequestSchema = z
   .object({
-    /**
-     * IMPORTANT:
-     * Tier is included so the generation pod can enforce caps and route models
-     * without any UI dependency or client guessing.
-     */
     tier: TierSchema,
-
     mode: GenModeSchema,
-
     params: BaseGenParamsSchema,
-
-    /** Required when mode uses an init image */
     init_image: InitImageSchema.optional(),
-
-    /** Required when mode is a video mode */
     video: VideoParamsSchema.optional(),
   })
+  .strict();
+
+/**
+ * Flat payload (current UI → /api/generate) shape:
+ * {
+ *   prompt,
+ *   negative_prompt,
+ *   body_mode,
+ *   width,height,steps,cfg,seed,
+ *   identity_lora?   // (id string)
+ *   // (optionally future: mode, init_image, video)
+ * }
+ */
+const FlatPayloadSchema = z
+  .object({
+    prompt: z.string().min(1),
+    negative_prompt: z.string().optional(),
+    body_mode: z.string().optional(), // normalized via preprocess to BodyModeSchema
+    width: z.number().optional(),
+    height: z.number().optional(),
+    steps: z.number().optional(),
+    cfg: z.number().optional(),
+    seed: z.number().optional(),
+    identity_lora: z.string().optional(),
+    // optional forward-compat
+    mode: z.string().optional(),
+    tier: z.string().optional(),
+    init_image: InitImageSchema.optional(),
+    video: VideoParamsSchema.optional(),
+  })
+  .passthrough();
+
+/**
+ * Full request payload (supports BOTH legacy and flat callers).
+ * We preprocess flat inputs into the legacy/internal shape so the rest of the app
+ * can rely on { tier, mode, params, ... }.
+ *
+ * IMPORTANT:
+ * - `.strict()` is NOT available on the ZodPipe/ZodEffects returned by `z.preprocess(...)`.
+ *   Strictness is enforced by the legacy schema we pipe into (LegacyGenerationRequestSchema).
+ */
+export const GenerationRequestSchema = z
+  .preprocess((input) => {
+    if (!input || typeof input !== "object") return input;
+
+    const obj: any = input;
+
+    // If caller already sent legacy shape, keep it.
+    if (obj.params && typeof obj.params === "object") return obj;
+
+    // Otherwise, attempt to normalize a flat payload.
+    const rawMode = String(obj.mode ?? "txt2img");
+    const modeMap: Record<string, GenMode> = {
+      txt2img: "txt2img",
+      img2img: "img2img",
+      txt2vid: "txt2vid",
+      img2vid: "img2vid",
+      // UI labels
+      text_to_image: "txt2img",
+      image_to_image: "img2img",
+      text_to_video: "txt2vid",
+      image_to_video: "img2vid",
+    };
+
+    const mode: GenMode = modeMap[rawMode] ?? "txt2img";
+
+    const tierRaw = String(obj.tier ?? "subscriber");
+    const tier: Tier = tierRaw === "og" ? "og" : "subscriber";
+
+    // identity_lora (flat) → user_lora (internal)
+    const user_lora = obj.identity_lora
+      ? { id: String(obj.identity_lora), strength: 0.85 }
+      : undefined;
+
+    const normalized = {
+      tier,
+      mode,
+      params: {
+        prompt: obj.prompt,
+        negative_prompt: obj.negative_prompt ?? "",
+        seed: obj.seed,
+        steps: obj.steps,
+        cfg: obj.cfg,
+        width: obj.width,
+        height: obj.height,
+        body_mode: obj.body_mode ?? "none",
+        user_lora,
+      },
+      init_image: obj.init_image,
+      video: obj.video,
+    };
+
+    return normalized;
+  }, LegacyGenerationRequestSchema)
   .superRefine((req, ctx) => {
     const isImgInit = req.mode === "img2img" || req.mode === "img2vid";
     const isVideo = req.mode === "txt2vid" || req.mode === "img2vid";
@@ -149,7 +250,7 @@ export const GenerationRequestSchema = z
       });
     }
 
-    // Tier-based caps for video modes (LOCKED)
+    // Tier-based caps for video modes (still supported; subscriber default)
     if (isVideo && req.video) {
       const caps = getTierVideoCaps(req.tier);
 
@@ -177,8 +278,7 @@ export const GenerationRequestSchema = z
         });
       }
     }
-  })
-  .strict();
+  });
 
 export type GenerationRequest = z.infer<typeof GenerationRequestSchema>;
 
@@ -186,20 +286,14 @@ export type GenerationRequest = z.infer<typeof GenerationRequestSchema>;
 export const GenerationResponseSchema = z
   .object({
     ok: z.boolean(),
-    /** e.g., "queued", "running", "complete", "failed" */
     status: z.enum(["queued", "running", "complete", "failed"]),
-    /** present when queued/running */
     job_id: z.string().optional(),
-    /** present when complete */
     output: z
       .object({
-        /** image/video artifact URL (signed) */
         url: z.string().url(),
-        /** "image" | "video" */
         kind: z.enum(["image", "video"]),
       })
       .optional(),
-    /** present when failed */
     error: z
       .object({
         code: z.string(),
@@ -212,25 +306,9 @@ export const GenerationResponseSchema = z
 export type GenerationResponse = z.infer<typeof GenerationResponseSchema>;
 
 /**
- * LOCKED VIDEO CAPS (Backend Enforces)
- * Token Users → SDXL I2V (5–10 sec), default 24 fps, motion 0.45
- * Subscribers → Flux Cinematic (10–15 sec), default 30 fps, motion 0.65
- * OG Founders → Sora 1.0 (20–25 sec), default 30 fps, motion 0.8
+ * VIDEO CAPS (kept for forward-compat; subscriber default)
  */
 export function getTierVideoCaps(tier: Tier) {
-  if (tier === "token") {
-    return {
-      minDuration: 5,
-      maxDuration: 10,
-      minFps: 12,
-      maxFps: 24,
-      minMotion: 0.2,
-      maxMotion: 0.6,
-      defaultFps: 24,
-      defaultMotion: 0.45,
-    };
-  }
-
   if (tier === "subscriber") {
     return {
       minDuration: 10,
@@ -259,5 +337,11 @@ export function getTierVideoCaps(tier: Tier) {
 
 /** Safe parser for API routes */
 export function parseGenerationRequest(input: unknown): GenerationRequest {
+  // If the caller sends the flat payload, GenerationRequestSchema will normalize it.
   return GenerationRequestSchema.parse(input);
+}
+
+/** Optional: helper for validating ONLY the flat payload (useful in UI/tests) */
+export function parseFlatPayload(input: unknown) {
+  return FlatPayloadSchema.parse(input);
 }
