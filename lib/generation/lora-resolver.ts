@@ -5,6 +5,15 @@ import type { BodyMode, UserLora } from "./contract";
 import path from "path";
 import fs from "fs/promises";
 import { ensureUserLoraCached } from "./ensureUserLoraCached";
+import { createClient } from "@supabase/supabase-js";
+
+/**
+ * 🔒 SUPABASE (server-side only)
+ */
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 /**
  * 🔒 EXPORTED TYPES (REQUIRED BY buildWorkflow)
@@ -19,6 +28,7 @@ export type ResolvedLoraStack = {
     path: string;
   };
   loras: ResolvedLora[];
+  trigger_token: string | null; // ⭐ NEW
 };
 
 /**
@@ -33,7 +43,7 @@ const IDENTITY_LORA_STRENGTH = 1.0;
 const COMFY_LORA_DIR = "/workspace/ComfyUI/models/loras";
 
 /**
- * Body LoRAs (already present)
+ * Body LoRAs (launch modes only)
  */
 const BODY_LORA_NAMES: Record<Exclude<BodyMode, "none">, string> = {
   body_feminine: "body_feminine.safetensors",
@@ -69,6 +79,25 @@ async function resolveUserLora(
 }
 
 /**
+ * Fetch trigger token from Supabase
+ */
+async function fetchTriggerToken(
+  userLora?: UserLora
+): Promise<string | null> {
+  if (!userLora) return null;
+
+  const { data, error } = await supabase
+    .from("user_loras")
+    .select("trigger_token")
+    .eq("id", userLora.id)
+    .single();
+
+  if (error || !data?.trigger_token) return null;
+
+  return data.trigger_token;
+}
+
+/**
  * MAIN RESOLVER — ASYNC
  */
 export async function resolveLoraStack(
@@ -93,10 +122,14 @@ export async function resolveLoraStack(
     loras.push(identity);
   }
 
+  // ⭐ NEW — fetch token
+  const trigger_token = await fetchTriggerToken(userLora);
+
   return {
     base_model: {
       path: BIGLUST_BASE_PATH,
     },
     loras,
+    trigger_token, // ⭐ NEW
   };
 }
