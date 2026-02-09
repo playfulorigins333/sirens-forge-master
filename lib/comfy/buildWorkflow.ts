@@ -1,5 +1,5 @@
 // lib/comfy/buildWorkflow.ts
-// PRODUCTION — Dynamic ComfyUI workflow builder (FINAL)
+// PRODUCTION — Dynamic ComfyUI workflow builder (FINAL — FIXED FOR API WORKFLOW)
 
 import fs from "fs";
 import path from "path";
@@ -19,9 +19,12 @@ type BuildWorkflowInput = {
 };
 
 export function buildWorkflow(input: BuildWorkflowInput) {
+
+  // ⭐⭐⭐ THIS WAS THE BUG ⭐⭐⭐
+  // We must load the NEW Comfy API workflow you exported
   const workflowPath = path.join(
     process.cwd(),
-    "lib/comfy/workflow-base.json"
+    "lib/comfy/workflows/sirens_image_v3_production.json"
   );
 
   const workflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
@@ -38,7 +41,7 @@ export function buildWorkflow(input: BuildWorkflowInput) {
   } = input;
 
   /* ------------------------------------------------
-   * NODE SHORTCUTS
+   * NODE SHORTCUTS (these IDs come from your exported workflow)
    * ------------------------------------------------ */
   const KSampler = workflow["3"];
   const CheckpointLoader = workflow["4"];
@@ -55,7 +58,7 @@ export function buildWorkflow(input: BuildWorkflowInput) {
   /* ------------------------------------------------
    * SAMPLER SETTINGS
    * ------------------------------------------------ */
-  KSampler.inputs.seed = seed || Math.floor(Math.random() * 999999999);
+  KSampler.inputs.seed = seed ?? Math.floor(Math.random() * 999999999);
   KSampler.inputs.steps = steps;
   KSampler.inputs.cfg = cfg;
 
@@ -80,10 +83,8 @@ export function buildWorkflow(input: BuildWorkflowInput) {
   /* ------------------------------------------------
    * BUILD MODEL CHAIN 🔥
    * ------------------------------------------------ */
-
-  // Start chain from checkpoint
-  let lastModelNode = ["4", 0];
-  let lastClipNode  = ["4", 1];
+  let lastModelNode: any = ["4", 0];
+  let lastClipNode: any  = ["4", 1];
 
   /* ---------------- BODY LoRA ---------------- */
   if (bodyLora) {
@@ -104,13 +105,13 @@ export function buildWorkflow(input: BuildWorkflowInput) {
     delete workflow["12"];
   }
 
-  /* ---------------- IDENTITY LoRA (LAST) ---------------- */
+  /* ---------------- IDENTITY LoRA ---------------- */
   if (identityLora) {
     workflow["13"] = {
       class_type: "LoraLoader",
       inputs: {
         lora_name: identityLora.path,
-        strength_model: 1.15,   // 🔥 locked for identity stability
+        strength_model: 1.15,
         strength_clip: 1.0,
         model: lastModelNode,
         clip: lastClipNode
@@ -124,7 +125,7 @@ export function buildWorkflow(input: BuildWorkflowInput) {
   }
 
   /* ------------------------------------------------
-   * CONNECT SAMPLER TO FINAL MODEL IN CHAIN
+   * CONNECT FINAL MODEL TO SAMPLER + CLIP
    * ------------------------------------------------ */
   KSampler.inputs.model = lastModelNode;
   PositivePrompt.inputs.clip = lastClipNode;
