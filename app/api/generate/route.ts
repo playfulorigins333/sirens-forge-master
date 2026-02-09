@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-import { parseGenerationRequest } from "@/lib/generation/contract";
 import { resolveLoraStack } from "@/lib/generation/lora-resolver";
 import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
@@ -28,7 +27,6 @@ function injectTriggerToken(prompt: string, token: string) {
 export async function POST(req: Request) {
   try {
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
-
     if (!RUNPOD_BASE_URL) {
       return NextResponse.json(
         { error: "RUNPOD_BASE_URL_MISSING" },
@@ -37,7 +35,7 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * AUTH
+     * AUTH (subscription gating)
      * ------------------------------------------------ */
     const cookieStore = await cookies();
 
@@ -63,21 +61,36 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * PARSE REQUEST
+     * ⭐ NEW — READ FLAT PAYLOAD FROM FRONTEND
      * ------------------------------------------------ */
-    const raw = await req.json();
-    const request = parseGenerationRequest(raw);
+    const body = await req.json();
+
+    const {
+      prompt,
+      negative_prompt,
+      body_mode,
+      width,
+      height,
+      steps,
+      cfg,
+      seed,
+      identity_lora,
+    } = body;
+
+    if (!prompt) {
+      return NextResponse.json({ error: "PROMPT_REQUIRED" }, { status: 400 });
+    }
 
     /* ------------------------------------------------
      * Inject trigger token if identity LoRA selected
      * ------------------------------------------------ */
-    let finalPrompt = request.params.prompt;
+    let finalPrompt = prompt;
 
-    if (request.params.user_lora?.id) {
+    if (identity_lora) {
       const { data } = await supabase
         .from("user_loras")
         .select("trigger_token")
-        .eq("id", request.params.user_lora.id)
+        .eq("id", identity_lora)
         .single();
 
       if (data?.trigger_token) {
@@ -88,29 +101,26 @@ export async function POST(req: Request) {
     /* ------------------------------------------------
      * Resolve LoRA stack
      * ------------------------------------------------ */
-    const loraStack = await resolveLoraStack(
-      request.params.body_mode,
-      request.params.user_lora
-    );
+    const loraStack = await resolveLoraStack(body_mode, identity_lora);
 
     /* ------------------------------------------------
-     * Build the REAL Comfy workflow graph
+     * Build Comfy workflow graph
      * ------------------------------------------------ */
     const workflowGraph = buildWorkflow({
       prompt: finalPrompt,
-      negative: request.params.negative_prompt || "",
-      seed: request.params.seed ?? 0,
-      steps: request.params.steps,
-      cfg: request.params.cfg,
-      width: request.params.width,
-      height: request.params.height,
+      negative: negative_prompt || "",
+      seed: seed ?? 0,
+      steps,
+      cfg,
+      width,
+      height,
       loraStack,
       dnaImageNames: [],
       fluxLock: null,
     });
 
     /* ------------------------------------------------
-     * 🚨 CRITICAL FIX — Wrap workflow for Railway gateway
+     * Wrap workflow for Railway gateway
      * ------------------------------------------------ */
     const payload = {
       workflow: {
@@ -119,9 +129,9 @@ export async function POST(req: Request) {
         template: "sirens_image_v3_production",
         mode: "txt2img",
         inputs: {
-          workflow_json: workflowGraph
-        }
-      }
+          workflow_json: workflowGraph,
+        },
+      },
     };
 
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
