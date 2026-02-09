@@ -1,3 +1,4 @@
+cat > /workspace/sirens-forge-clean/runpod/train_lora.py <<'PY'
 #!/usr/bin/env python3
 """
 SirensForge - Always-on LoRA Training Worker (PRODUCTION)
@@ -15,6 +16,11 @@ R2 STORAGE (S3-compatible) + Supabase REST
 ✅ Supabase schema-safe PATCH (auto-strips unknown columns)
 ✅ Cloudflare R2 dataset download + artifact upload
 ✅ Terminal-status email notify (Edge Function) — ONLY on completed/failed
+
+NEW (Identity Lock Upgrade):
+✅ Auto-caption each image with BLIP
+✅ Inject a stable per-LoRA TRIGGER TOKEN into every caption
+✅ This trains an "identity token" like Galaxy does
 
 IMPORTANT:
 - Datasets must exist in R2 under: lora_datasets/<lora_id>/...
@@ -36,6 +42,13 @@ import requests
 import boto3
 from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
+
+# Captioning (BLIP)
+from PIL import Image
+
+_BLIP_READY = False
+_BLIP_PROCESSOR = None
+_BLIP_MODEL = None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -132,8 +145,17 @@ MIN_IMAGES = 10
 MAX_IMAGES = 20
 TARGET_SAMPLES = 1200
 
+# Old concept token default is NOT enough for identity lock; we keep it as fallback only.
 CONCEPT_TOKEN = os.getenv("LORA_CONCEPT_TOKEN", "concept")
 CAPTION_EXTENSION = os.getenv("LORA_CAPTION_EXTENSION", ".txt")
+
+# Captioning controls
+USE_BLIP_CAPTIONS = os.getenv("LORA_USE_BLIP_CAPTIONS", "1").strip() == "1"
+BLIP_MODEL_ID = os.getenv("LORA_BLIP_MODEL_ID", "Salesforce/blip-image-captioning-base")
+# What to inject into captions. "woman" works well for your current use case.
+TRIGGER_SUFFIX = os.getenv("LORA_TRIGGER_SUFFIX", "woman").strip() or "person"
+# Optional extra prefix to bias training; keep short to avoid overfitting.
+CAPTION_STYLE_PREFIX = os.getenv("LORA_CAPTION_STYLE_PREFIX", "").strip()
 
 ARTIFACT_MIN_BYTES = 2 * 1024 * 1024  # 2MB
 
@@ -382,18 +404,6 @@ def r2_upload_artifact(s3, local_path: str, bucket: str, key: str) -> str:
 # Post-training cleanup (prevents disk quota issues)
 # ─────────────────────────────────────────────────────────────
 def cleanup_job_dirs(lora_id: Optional[str]) -> None:
-    """
-    Best-effort cleanup of local training + output folders.
-
-    Why:
-    - sd-scripts saves multiple checkpoints AND the final LoRA.
-    - Without cleanup, /workspace can slowly fill and eventually hit "Disk quota exceeded".
-    - Final artifact is uploaded to R2 (loras/<lora_id>/final.safetensors) so local copies are disposable.
-
-    This runs:
-    - after success
-    - after failure (if lora_id is known)
-    """
     if not lora_id:
         return
 
@@ -418,14 +428,102 @@ def compute_repeat(image_count: int) -> Tuple[int, int]:
 
 
 # ─────────────────────────────────────────────────────────────
-# Dataset builder
+# Trigger token + captions
 # ─────────────────────────────────────────────────────────────
-def _write_caption_for_image(image_path: str) -> None:
+def build_trigger_token(lora_id: str) -> str:
+    """
+    Stable token you can safely put in prompts.
+    Example: sf3a93a30f (first 8 hex of uuid, no hyphens)
+    """
+    short = lora_id.replace("-", "")[:8].lower()
+    return f"sf{short}"
+
+
+def _ensure_blip_loaded() -> None:
+    global _BLIP_READY, _BLIP_PROCESSOR, _BLIP_MODEL
+    if _BLIP_READY:
+        return
+
+    try:
+        from transformers import BlipProcessor, BlipForConditionalGeneration  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "BLIP deps missing. Install: pip install transformers accelerate pillow"
+        ) from e
+
+    log(f"🧠 Loading BLIP caption model: {BLIP_MODEL_ID}")
+    _BLIP_PROCESSOR = BlipProcessor.from_pretrained(BLIP_MODEL_ID)
+    _BLIP_MODEL = BlipForConditionalGeneration.from_pretrained(BLIP_MODEL_ID)
+
+    # Prefer GPU if available; otherwise CPU works (slower).
+    import torch  # type: ignore
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _BLIP_MODEL = _BLIP_MODEL.to(device)
+    _BLIP_MODEL.eval()
+
+    _BLIP_READY = True
+    log(f"🧠 BLIP ready on device={device}")
+
+
+def blip_caption(image_path: str) -> str:
+    """
+    Returns a short caption for the image.
+    """
+    _ensure_blip_loaded()
+    import torch  # type: ignore
+
+    img = Image.open(image_path).convert("RGB")
+    inputs = _BLIP_PROCESSOR(images=img, return_tensors="pt")
+
+    device = next(_BLIP_MODEL.parameters()).device
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        out = _BLIP_MODEL.generate(
+            **inputs,
+            max_length=30,
+            num_beams=5,
+        )
+
+    caption = _BLIP_PROCESSOR.decode(out[0], skip_special_tokens=True).strip()
+    caption = re.sub(r"\s+", " ", caption)
+    return caption
+
+
+def write_caption(image_path: str, caption_text: str) -> None:
     root, _ = os.path.splitext(image_path)
     with open(root + CAPTION_EXTENSION, "w", encoding="utf-8") as f:
-        f.write(CONCEPT_TOKEN)
+        f.write(caption_text)
 
 
+def build_caption(trigger_token: str, image_path: str) -> str:
+    """
+    Build the final caption saved to <image>.txt
+    Format:
+      <trigger> <suffix>, <optional style prefix>, <blip caption>
+    """
+    base_prefix = f"{trigger_token} {TRIGGER_SUFFIX}".strip()
+
+    if not USE_BLIP_CAPTIONS:
+        # Fallback: old behavior (not ideal for identity lock, but safe)
+        if CAPTION_STYLE_PREFIX:
+            return f"{base_prefix}, {CAPTION_STYLE_PREFIX}".strip(", ")
+        return base_prefix
+
+    cap = blip_caption(image_path)
+
+    parts = [base_prefix]
+    if CAPTION_STYLE_PREFIX:
+        parts.append(CAPTION_STYLE_PREFIX)
+    if cap:
+        parts.append(cap)
+
+    return ", ".join([p.strip() for p in parts if p.strip()])
+
+
+# ─────────────────────────────────────────────────────────────
+# Dataset builder
+# ─────────────────────────────────────────────────────────────
 def prepare_dataset(lora_id: str) -> Dict[str, Any]:
     s3 = make_r2_client()
 
@@ -455,19 +553,46 @@ def prepare_dataset(lora_id: str) -> Dict[str, Any]:
         raise RuntimeError(f"Invalid image count: {count} (expected {MIN_IMAGES}-{MAX_IMAGES})")
 
     repeat, effective = compute_repeat(count)
-    concept_dir = os.path.join(base, f"{repeat}_{CONCEPT_TOKEN}")
+
+    trigger_token = build_trigger_token(lora_id)
+    # Dataset folder naming should not include spaces.
+    concept_dir = os.path.join(base, f"{repeat}_{trigger_token}")
     os.makedirs(concept_dir, exist_ok=True)
 
+    # Write per-image captions
+    captions_written = 0
     for img in images:
         src = os.path.join(tmp, img)
         dst = os.path.join(concept_dir, img)
         shutil.move(src, dst)
-        _write_caption_for_image(dst)
+
+        cap = build_caption(trigger_token, dst)
+        write_caption(dst, cap)
+        captions_written += 1
 
     shutil.rmtree(tmp, ignore_errors=True)
 
+    # Persist debug metadata
+    meta = {
+        "lora_id": lora_id,
+        "trigger_token": trigger_token,
+        "use_blip": USE_BLIP_CAPTIONS,
+        "blip_model": BLIP_MODEL_ID if USE_BLIP_CAPTIONS else None,
+        "trigger_suffix": TRIGGER_SUFFIX,
+        "caption_style_prefix": CAPTION_STYLE_PREFIX,
+        "image_count": count,
+        "repeat": repeat,
+        "effective_samples": effective,
+        "r2_bucket": R2_DATASET_BUCKET,
+        "r2_prefix": prefix,
+    }
+    with open(os.path.join(base, "dataset_meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
     log(f"📦 R2 dataset: bucket={R2_DATASET_BUCKET} prefix={prefix} files={len(keys)}")
     log(f"📊 Images={count} → repeat={repeat} → samples≈{effective}")
+    log(f"🏷️ Trigger token: {trigger_token}  (THIS is what you will prompt with)")
+    log(f"📝 Captions written: {captions_written}  (BLIP={USE_BLIP_CAPTIONS})")
 
     return {
         "base_dir": base,
@@ -475,6 +600,7 @@ def prepare_dataset(lora_id: str) -> Dict[str, Any]:
         "image_count": count,
         "repeat": repeat,
         "r2_prefix": prefix,
+        "trigger_token": trigger_token,
     }
 
 
@@ -562,6 +688,7 @@ def worker_main() -> None:
     log("🚀 LoRA worker started (PRODUCTION) — QUEUED ONLY + user_id NOT NULL")
     log(f"R2_DATASET_BUCKET={R2_DATASET_BUCKET}  R2_DATASET_PREFIX_ROOT={R2_DATASET_PREFIX_ROOT}")
     log(f"R2_ARTIFACT_BUCKET={R2_ARTIFACT_BUCKET}  R2_ARTIFACT_PREFIX_ROOT={R2_ARTIFACT_PREFIX_ROOT}")
+    log(f"📝 Captioning: BLIP={USE_BLIP_CAPTIONS} model={BLIP_MODEL_ID if USE_BLIP_CAPTIONS else 'OFF'}")
 
     last_idle = 0.0
 
@@ -571,7 +698,6 @@ def worker_main() -> None:
         uploaded_r2_key: Optional[str] = None
 
         try:
-            # ✅ ONLY pick queued jobs with user_id present (prevents lora_status_events null user_id trigger failure)
             jobs = sb_get(
                 "user_loras",
                 {
@@ -613,6 +739,8 @@ def worker_main() -> None:
                 "dataset_r2_bucket": R2_DATASET_BUCKET,
                 "dataset_r2_prefix": ds.get("r2_prefix"),
                 "image_count": ds.get("image_count"),
+                # Optional: store trigger_token if column exists; sb_patch_safe will strip if not.
+                "trigger_token": ds.get("trigger_token"),
             }
 
             try:
@@ -636,13 +764,11 @@ def worker_main() -> None:
             notify_status(lora_id, "completed")
             log(f"✅ Completed job {lora_id}")
 
-            # 🧹 NEW: cleanup local data after a successful job
             cleanup_job_dirs(lora_id)
 
         except Exception as e:
             if artifact_uploaded and lora_id and uploaded_r2_key:
                 log(f"⚠️ Error AFTER artifact upload. Leaving as completed. Error: {e}")
-                # 🧹 still cleanup (artifact is in R2 already)
                 cleanup_job_dirs(lora_id)
                 time.sleep(POLL_SECONDS)
                 continue
@@ -660,7 +786,6 @@ def worker_main() -> None:
 
             log(f"❌ Job failed: {e}")
 
-            # 🧹 NEW: cleanup local data after a failed job (if we know which one)
             cleanup_job_dirs(lora_id)
 
             time.sleep(POLL_SECONDS)
@@ -668,3 +793,4 @@ def worker_main() -> None:
 
 if __name__ == "__main__":
     worker_main()
+PY
