@@ -61,7 +61,7 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * ⭐ NEW — READ FLAT PAYLOAD FROM FRONTEND
+     * READ FLAT PAYLOAD FROM FRONTEND
      * ------------------------------------------------ */
     const body = await req.json();
 
@@ -120,7 +120,7 @@ export async function POST(req: Request) {
     });
 
     /* ------------------------------------------------
-     * Wrap workflow for Railway gateway
+     * 🚨 CRITICAL FIX — SEND identity_lora TO RAILWAY
      * ------------------------------------------------ */
     const payload = {
       workflow: {
@@ -129,6 +129,7 @@ export async function POST(req: Request) {
         template: "sirens_image_v3_production",
         mode: "txt2img",
         inputs: {
+          identity_lora: identity_lora ?? null,   // ⭐ FIX
           workflow_json: workflowGraph,
         },
       },
