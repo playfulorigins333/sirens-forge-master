@@ -28,7 +28,7 @@ export type ResolvedLoraStack = {
     path: string;
   };
   loras: ResolvedLora[];
-  trigger_token: string | null; // ⭐ NEW
+  trigger_token: string | null;
 };
 
 /**
@@ -37,8 +37,12 @@ export type ResolvedLoraStack = {
 const BIGLUST_BASE_PATH =
   "/workspace/sirensforge/models/base/bigLust_v16.safetensors";
 
-const BODY_LORA_STRENGTH = 0.75;
-const IDENTITY_LORA_STRENGTH = 1.0;
+/**
+ * 🧪 TEMPORARY TUNING VALUES (Identity Isolation Test)
+ * Body LoRA disabled, Identity LoRA only.
+ */
+const BODY_LORA_STRENGTH = 0.0;
+const IDENTITY_LORA_STRENGTH = 1.15;
 
 const COMFY_LORA_DIR = "/workspace/ComfyUI/models/loras";
 
@@ -122,7 +126,6 @@ export async function resolveLoraStack(
     loras.push(identity);
   }
 
-  // ⭐ NEW — fetch token
   const trigger_token = await fetchTriggerToken(userLora);
 
   return {
@@ -130,6 +133,6 @@ export async function resolveLoraStack(
       path: BIGLUST_BASE_PATH,
     },
     loras,
-    trigger_token, // ⭐ NEW
+    trigger_token,
   };
 }
