@@ -252,7 +252,7 @@ function GeneratorHeader() {
   // For now, static placeholders; gate is handled via route/middleware.
   const userName = "Creator";
   const userAvatar = "";
-  const badge: "OG_FOUNDER" | "EARLY_BIRD" | "STARTER_HIT" | null = null;
+  const badge: "OG_FOUNDER" | "EARLY_BIRD" | null = null;
   const subscriptionStatus: "active" | "inactive" = "active";
 
   const getBadgeConfig = () => {
@@ -268,12 +268,6 @@ function GeneratorHeader() {
           icon: Star,
           text: "EARLY BIRD",
           color: "from-blue-400 to-cyan-500",
-        };
-      case "STARTER_HIT":
-        return {
-          icon: Sparkles,
-          text: "STARTER HIT",
-          color: "from-purple-400 to-pink-500",
         };
       default:
         return null;
@@ -1251,12 +1245,20 @@ export default function GeneratePage() {
         };
 
         const runPayload = {
-          workflow: {
-            type: "sirens_generate_v1",
+          tier: "subscriber",
+          mode: "txt2img",
+          params: {
             engine: "comfyui",
             template: "sirens_image_v3_production",
-            mode: "txt2img",
-            inputs: runWorkflowInputs,
+            prompt,
+            negative_prompt: negativePrompt,
+            body_mode: runWorkflowInputs.body_mode,
+            width: runWorkflowInputs.width,
+            height: runWorkflowInputs.height,
+            steps: runWorkflowInputs.steps,
+            cfg: runWorkflowInputs.cfg,
+            seed: runWorkflowInputs.seed,
+            identity_lora: runWorkflowInputs.identity_lora,
           },
         };
 
@@ -1289,12 +1291,16 @@ export default function GeneratePage() {
 
         const data = await res.json();
 
-        // Our API returns images[] (strings or objects)
-        if (!Array.isArray(data?.images) || data.images.length === 0) {
-          throw new Error("/api/generate did not return images[].");
-        }
+        // Our API may return images[] or outputs[] (strings or objects)
+        const outputs = Array.isArray(data?.images)
+          ? data.images
+          : Array.isArray(data?.outputs)
+          ? data.outputs
+          : [];
 
-        const outputs = data.images;
+        if (!outputs.length) {
+          throw new Error("/api/generate did not return images[] or outputs[].");
+        }
         const now = new Date().toISOString();
 
         const generated: GeneratedItem[] = outputs.map((output: any) => ({
