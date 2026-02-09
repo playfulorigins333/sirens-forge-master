@@ -6,16 +6,10 @@ import {
   Sparkles,
   Crown,
   Star,
-  Image as ImageIcon,
   Video as VideoIcon,
   FileText,
-  Wand2,
   ChevronDown,
   ChevronUp,
-  Shield,
-  Upload,
-  X,
-  Check,
   Clock,
   Search,
   Play,
@@ -471,7 +465,7 @@ function PromptSection(props: {
 }
 
 // -----------------------------------------------------------------------------
-// Model & Style Section (Base model + SFW/NSFW/ULTRA + style preset)
+// Model & Style Section
 // -----------------------------------------------------------------------------
 
 function ModelStyleSection(props: {
@@ -499,12 +493,10 @@ function ModelStyleSection(props: {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          SDXL core model (bigLust_v16) with body-specific LoRA shaping +
-          content modes.
+          SDXL core model (bigLust_v16) with body-specific LoRA shaping.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        {/* Base model */}
         <div>
           <p className="text-xs font-semibold mb-2 text-gray-200">
             Base Model (Body Type)
@@ -530,7 +522,6 @@ function ModelStyleSection(props: {
           </div>
         </div>
 
-        {/* Style preset */}
         <div>
           <p className="text-xs font-semibold mb-2 text-gray-200">Style Preset</p>
           <div className="flex flex-wrap gap-2">
@@ -559,7 +550,7 @@ function ModelStyleSection(props: {
 }
 
 // -----------------------------------------------------------------------------
-// LoRA Identity Section (Option A default; Option B available)
+// LoRA Identity Section
 // -----------------------------------------------------------------------------
 
 function LoraIdentitySection(props: {
@@ -614,7 +605,7 @@ function LoraIdentitySection(props: {
 }
 
 // -----------------------------------------------------------------------------
-// Advanced Settings (resolution, CFG, steps, seed, batch size)
+// Advanced Settings
 // -----------------------------------------------------------------------------
 
 function AdvancedSettings(props: {
@@ -660,7 +651,6 @@ function AdvancedSettings(props: {
             exit={{ opacity: 0, height: 0 }}
           >
             <CardContent className="space-y-4 text-xs pt-0 pb-4">
-              {/* Resolution */}
               <div>
                 <p className="font-semibold mb-1 text-gray-200">Resolution</p>
                 <Select value={props.resolution} onValueChange={props.onResolutionChange}>
@@ -678,7 +668,6 @@ function AdvancedSettings(props: {
                 <p className="text-[10px] text-gray-400 mt-1">SDXL max 1024x1792.</p>
               </div>
 
-              {/* CFG */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-gray-200">CFG / Guidance Scale</p>
@@ -697,7 +686,6 @@ function AdvancedSettings(props: {
                 />
               </div>
 
-              {/* Steps */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-gray-200">Steps</p>
@@ -714,7 +702,6 @@ function AdvancedSettings(props: {
                 />
               </div>
 
-              {/* Seed */}
               <div>
                 <p className="font-semibold mb-1 text-gray-200">Seed</p>
                 <div className="flex gap-2">
@@ -745,7 +732,6 @@ function AdvancedSettings(props: {
                 </label>
               </div>
 
-              {/* Batch size */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-gray-200">Batch Size</p>
@@ -1102,13 +1088,12 @@ export default function GeneratePage() {
   const [identityOptions, setIdentityOptions] = useState<
     { id: string; name: string | null }[]
   >([]);
-  // NOTE: selectedIdentity is legacy UI-only state.
-  // Generation uses loraSelection.selected[0] exclusively.
-  const [selectedIdentity, setSelectedIdentity] = useState<string | "none">("none");
+
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
   const [stylePreset, setStylePreset] = useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
   const [consistencyPreset] = useState<ConsistencyPreset>("medium");
+
   // LoRA identity (UI + payload)
   const [loraSelection, setLoraSelection] = useState<LoraSelection>({
     mode: "single",
@@ -1116,6 +1101,7 @@ export default function GeneratePage() {
     createNew: false,
     newName: "",
   });
+
   // Advanced
   const [resolution, setResolution] = useState("1024x1024");
   const [guidance, setGuidance] = useState(7.5);
@@ -1213,7 +1199,7 @@ export default function GeneratePage() {
     setErrorMessage(null);
     setIsGenerating(true);
 
-    // ✅ Parse resolution from UI state (source of truth) — ONCE (no redeclare)
+    // Parse resolution once
     const [parsedWidth, parsedHeight] = resolution
       .split("x")
       .map((v) => parseInt(v, 10));
@@ -1221,7 +1207,11 @@ export default function GeneratePage() {
     try {
       const seedValue = lockSeed ? seed : Math.floor(Math.random() * 1_000_000_000);
 
-      const workflowInputs = {
+      // ✅ This is the ONLY contract the frontend sends.
+      // Backend (Next.js /api/generate) resolves subscription + builds full Comfy workflow.
+      const baseParams = {
+        engine: "comfyui",
+        template: "sirens_image_v3_production",
         prompt,
         negative_prompt: negativePrompt,
         body_mode: bodyModeMap[baseModel],
@@ -1239,40 +1229,20 @@ export default function GeneratePage() {
       for (let i = 0; i < runCount; i++) {
         const runSeed = lockSeed ? seedValue + i : Math.floor(Math.random() * 1_000_000_000);
 
-        const runWorkflowInputs = {
-          ...workflowInputs,
-          seed: runSeed,
-        };
-
         const runPayload = {
-          tier: "subscriber",
-          mode: "txt2img",
-          params: {
-            engine: "comfyui",
-            template: "sirens_image_v3_production",
-            prompt,
-            negative_prompt: negativePrompt,
-            body_mode: runWorkflowInputs.body_mode,
-            width: runWorkflowInputs.width,
-            height: runWorkflowInputs.height,
-            steps: runWorkflowInputs.steps,
-            cfg: runWorkflowInputs.cfg,
-            seed: runWorkflowInputs.seed,
-            identity_lora: runWorkflowInputs.identity_lora,
-          },
+          ...baseParams,
+          seed: runSeed,
         };
 
         // ✅ IMPORTANT: Call your Next.js API route (not Railway directly)
         const res = await fetch("/api/generate", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify(runPayload),
         });
 
         if (res.status === 402 || res.status === 403) {
-          let reason = "You need an active SirensForge subscription with generator access.";
+          let reason = "You need an active SirensForge subscription to use the generator.";
           try {
             const data = await res.json();
             if (typeof data?.error === "string") reason = data.error;
@@ -1286,7 +1256,8 @@ export default function GeneratePage() {
         }
 
         if (!res.ok) {
-          throw new Error(`Generate failed with status ${res.status}`);
+          const text = await res.text().catch(() => "");
+          throw new Error(`Generate failed (${res.status}): ${text || "Unknown error"}`);
         }
 
         const data = await res.json();
@@ -1301,8 +1272,8 @@ export default function GeneratePage() {
         if (!outputs.length) {
           throw new Error("/api/generate did not return images[] or outputs[].");
         }
-        const now = new Date().toISOString();
 
+        const now = new Date().toISOString();
         const generated: GeneratedItem[] = outputs.map((output: any) => ({
           id: `${now}-${Math.random().toString(36).slice(2)}`,
           kind: inferKindFromOutput(output),
@@ -1337,7 +1308,6 @@ export default function GeneratePage() {
 
   const handleHistorySelect = (item: GeneratedItem) => {
     setPrompt(item.prompt);
-    // later: restore full settings from item.settings if you want
   };
 
   const handleHistoryRerun = (item: GeneratedItem) => {
@@ -1350,13 +1320,10 @@ export default function GeneratePage() {
       <GeneratorHeader />
 
       <main className="flex-1 flex flex-col md:flex-row">
-        {/* Left + center */}
         <div className="flex-1 px-4 md:px-6 py-4 md:py-6 space-y-4 max-w-6xl mx-auto w-full">
-          {/* Mode tabs */}
           <ModeTabs activeMode={mode} onChange={setMode} />
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-            {/* Left column: prompt */}
             <div className="space-y-4 xl:col-span-1">
               <PromptSection
                 prompt={prompt}
@@ -1376,7 +1343,6 @@ export default function GeneratePage() {
               </div>
             </div>
 
-            {/* Middle column: model/style + advanced + generate */}
             <div className="space-y-4 xl:col-span-1">
               <ModelStyleSection
                 baseModel={baseModel}
@@ -1387,11 +1353,7 @@ export default function GeneratePage() {
 
               <LoraIdentitySection
                 value={loraSelection}
-                onChange={(next) => {
-                  setLoraSelection(next);
-                  const first = next.selected[0] || "none";
-                  setSelectedIdentity(first as any);
-                }}
+                onChange={(next) => setLoraSelection(next)}
                 options={identitySelectOptions}
               />
 
@@ -1409,6 +1371,7 @@ export default function GeneratePage() {
                 onLockSeedChange={setLockSeed}
                 onBatchSizeChange={setBatchSize}
               />
+
               <GenerateButton
                 isGenerating={isGenerating}
                 batchSize={batchSize}
@@ -1417,10 +1380,10 @@ export default function GeneratePage() {
                 disabled={!canGenerate}
                 onClick={handleGenerate}
               />
+
               {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
             </div>
 
-            {/* Right column: output */}
             <div className="space-y-4 xl:col-span-1">
               <Card className="border-gray-800 bg-gray-900/80 h-full">
                 <CardContent className="p-4 h-full">
@@ -1431,13 +1394,11 @@ export default function GeneratePage() {
           </div>
         </div>
 
-        {/* History sidebar */}
         <div className="w-full md:w-80 lg:w-96 border-t md:border-t-0 md:border-l border-gray-900">
           <HistorySidebar history={history} onSelect={handleHistorySelect} onRerun={handleHistoryRerun} />
         </div>
       </main>
 
-      {/* Subscription gating modal */}
       <SubscriptionModal
         open={showSubModal}
         message={subscriptionError}
