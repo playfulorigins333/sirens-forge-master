@@ -20,8 +20,7 @@ type BuildWorkflowInput = {
 
 export function buildWorkflow(input: BuildWorkflowInput) {
 
-  // ⭐⭐⭐ THIS WAS THE BUG ⭐⭐⭐
-  // We must load the NEW Comfy API workflow you exported
+  // ⭐ Load the NEW API workflow export (THIS was the breaking bug)
   const workflowPath = path.join(
     process.cwd(),
     "lib/comfy/workflows/sirens_image_v3_production.json"
@@ -41,7 +40,7 @@ export function buildWorkflow(input: BuildWorkflowInput) {
   } = input;
 
   /* ------------------------------------------------
-   * NODE SHORTCUTS (these IDs come from your exported workflow)
+   * NODE SHORTCUTS (IDs come from exported API workflow)
    * ------------------------------------------------ */
   const KSampler = workflow["3"];
   const CheckpointLoader = workflow["4"];
@@ -95,8 +94,8 @@ export function buildWorkflow(input: BuildWorkflowInput) {
         strength_model: bodyLora.strength,
         strength_clip: bodyLora.strength * 0.5,
         model: lastModelNode,
-        clip: lastClipNode
-      }
+        clip: lastClipNode,
+      },
     };
 
     lastModelNode = ["12", 0];
@@ -111,11 +110,11 @@ export function buildWorkflow(input: BuildWorkflowInput) {
       class_type: "LoraLoader",
       inputs: {
         lora_name: identityLora.path,
-        strength_model: 1.15,
+        strength_model: 1.15, // locked identity strength
         strength_clip: 1.0,
         model: lastModelNode,
-        clip: lastClipNode
-      }
+        clip: lastClipNode,
+      },
     };
 
     lastModelNode = ["13", 0];
