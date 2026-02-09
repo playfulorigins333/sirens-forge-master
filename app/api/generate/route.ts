@@ -9,6 +9,23 @@ import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* ------------------------------------------------
+ * Helper — Inject LoRA trigger token into prompt
+ * ------------------------------------------------ */
+function injectTriggerToken(prompt: string, token: string) {
+  const trimmedPrompt = (prompt || "").trim();
+  const trimmedToken = (token || "").trim();
+
+  if (!trimmedToken) return trimmedPrompt;
+  if (!trimmedPrompt) return trimmedToken;
+
+  // Avoid double injection
+  const re = new RegExp(`(^|\\s)${trimmedToken}(\\s|$)`, "i");
+  if (re.test(trimmedPrompt)) return trimmedPrompt;
+
+  return `${trimmedToken} ${trimmedPrompt}`.trim();
+}
+
 export async function POST(req: Request) {
   try {
     /* ------------------------------------------------
@@ -53,7 +70,7 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * PARSE REQUEST (SAFE)
+     * PARSE REQUEST
      * ------------------------------------------------ */
     const raw = await req.json();
 
@@ -71,7 +88,25 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * RESOLVE LORAS
+     * ⭐ AUTO-INJECT IDENTITY TOKEN ⭐
+     * ------------------------------------------------ */
+    let finalPrompt = request.params.prompt;
+
+    if (request.params.user_lora?.id) {
+      const { data, error } = await supabase
+        .from("user_loras")
+        .select("trigger_token")
+        .eq("id", request.params.user_lora.id)
+        .single();
+
+      if (!error && data?.trigger_token) {
+        finalPrompt = injectTriggerToken(finalPrompt, data.trigger_token);
+        console.log("Injected trigger token:", data.trigger_token);
+      }
+    }
+
+    /* ------------------------------------------------
+     * RESOLVE LORA STACK
      * ------------------------------------------------ */
     const loraStack = await resolveLoraStack(
       request.params.body_mode,
@@ -82,7 +117,7 @@ export async function POST(req: Request) {
      * BUILD WORKFLOW
      * ------------------------------------------------ */
     const workflow = buildWorkflow({
-      prompt: request.params.prompt,
+      prompt: finalPrompt,
       negative: request.params.negative_prompt || "",
       seed: request.params.seed ?? 0,
       steps: request.params.steps,
