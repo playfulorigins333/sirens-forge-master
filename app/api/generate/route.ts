@@ -3,7 +3,7 @@ export const dynamic = "force-dynamic";
 export const preferredRegion = "home";
 export const maxDuration = 300;
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 import { resolveLoraStack } from "@/lib/generation/lora-resolver";
@@ -22,7 +22,7 @@ function injectTriggerToken(prompt: string, token: string) {
   return `${trimmedToken} ${trimmedPrompt}`.trim();
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
 
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ USE NORMAL SUPABASE CLIENT (NOT SSR)
+    // ✅ SERVER SUPABASE CLIENT (NO SSR COOKIES)
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
 
     let finalPrompt = prompt;
 
-    // Fetch LoRA trigger token (public read allowed)
+    // 🔹 Inject trigger token if identity LoRA selected
     if (identity_lora) {
       const { data } = await supabase
         .from("user_loras")
@@ -75,8 +75,10 @@ export async function POST(req: Request) {
       }
     }
 
+    // 🔹 Resolve LoRA stack (body + identity)
     const loraStack = await resolveLoraStack(body_mode, identity_lora ?? null);
 
+    // 🔹 Build Comfy workflow JSON
     const workflowGraph = buildWorkflow({
       prompt: finalPrompt,
       negative: negative_prompt || "",
@@ -102,7 +104,7 @@ export async function POST(req: Request) {
       },
     };
 
-    // 🚀 CALL RAILWAY
+    // 🚀 Call Railway → RunPod gateway
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
       method: "POST",
       headers: {
