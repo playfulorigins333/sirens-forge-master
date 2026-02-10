@@ -28,10 +28,7 @@ export async function POST(req: Request) {
   try {
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
     if (!RUNPOD_BASE_URL) {
-      return NextResponse.json(
-        { error: "RUNPOD_BASE_URL_MISSING" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "RUNPOD_BASE_URL_MISSING" }, { status: 500 });
     }
 
     /* ------------------------------------------------
@@ -99,9 +96,9 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * Resolve LoRA stack
+     * Resolve LoRA stack (FIXED: pass ID string)
      * ------------------------------------------------ */
-    const loraStack = await resolveLoraStack(body_mode, identity_lora);
+    const loraStack = await resolveLoraStack(body_mode, identity_lora ?? null);
 
     /* ------------------------------------------------
      * Build Comfy workflow graph
@@ -120,7 +117,7 @@ export async function POST(req: Request) {
     });
 
     /* ------------------------------------------------
-     * 🚨 CRITICAL FIX — SEND identity_lora TO RAILWAY
+     * Wrap workflow for gateway
      * ------------------------------------------------ */
     const payload = {
       workflow: {
@@ -129,7 +126,6 @@ export async function POST(req: Request) {
         template: "sirens_image_v3_production",
         mode: "txt2img",
         inputs: {
-          identity_lora: identity_lora ?? null,   // ⭐ FIX
           workflow_json: workflowGraph,
         },
       },
@@ -154,7 +150,6 @@ export async function POST(req: Request) {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
-
   } catch (err: any) {
     console.error("generate fatal error:", err);
     return NextResponse.json(

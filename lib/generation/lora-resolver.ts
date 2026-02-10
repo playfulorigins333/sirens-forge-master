@@ -1,7 +1,7 @@
 // lib/generation/lora-resolver.ts
-// PRODUCTION-LOCKED — Identity-first LoRA resolution
+// PRODUCTION-LOCKED — Identity-first LoRA resolution (ID-based)
 
-import type { BodyMode, UserLora } from "./contract";
+import type { BodyMode } from "./contract";
 import path from "path";
 import fs from "fs/promises";
 import { ensureUserLoraCached } from "./ensureUserLoraCached";
@@ -9,6 +9,7 @@ import { createClient } from "@supabase/supabase-js";
 
 /**
  * 🔒 SUPABASE (server-side only)
+ * NOTE: requires SUPABASE_SERVICE_ROLE_KEY to be present in the server runtime
  */
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,7 +20,7 @@ const supabase = createClient(
  * 🔒 EXPORTED TYPES (REQUIRED BY buildWorkflow)
  */
 export type ResolvedLora = {
-  path: string; // FILENAME ONLY
+  path: string; // FILENAME ONLY (what Comfy uses)
   strength: number;
 };
 
@@ -58,22 +59,34 @@ const BODY_LORA_NAMES: Record<Exclude<BodyMode, "none">, string> = {
 
 /**
  * Materialize user LoRA into ComfyUI and return filename ONLY
+ * Accepts the LoRA ID string (UUID).
  */
-async function resolveUserLora(
-  userLora?: UserLora
-): Promise<ResolvedLora | null> {
-  if (!userLora) return null;
+async function resolveUserLora(loraId?: string | null): Promise<ResolvedLora | null> {
+  if (!loraId) return null;
 
-  const cachedPath = await ensureUserLoraCached(userLora.id);
+  // 1) Cache the LoRA file locally (Vercel-safe /tmp)
+  const cachedPath = await ensureUserLoraCached(loraId);
 
-  const comfyFileName = `identity_${userLora.id}.safetensors`;
+  // 2) The filename Comfy should load
+  const comfyFileName = `identity_${loraId}.safetensors`;
   const comfyPath = path.join(COMFY_LORA_DIR, comfyFileName);
 
+  // 3) Try to copy into ComfyUI models dir (works on RunPod; may fail on Vercel)
   try {
     await fs.access(comfyPath);
   } catch {
-    await fs.mkdir(COMFY_LORA_DIR, { recursive: true });
-    await fs.copyFile(cachedPath, comfyPath);
+    try {
+      await fs.mkdir(COMFY_LORA_DIR, { recursive: true });
+      await fs.copyFile(cachedPath, comfyPath);
+    } catch (e) {
+      // IMPORTANT: Do not crash generation on platforms that can't write /workspace.
+      // If the generation pod already has the LoRA, Comfy will still succeed.
+      console.warn(
+        `[lora-resolver] Could not materialize LoRA into ${COMFY_LORA_DIR}. ` +
+          `Continuing with filename-only. Error:`,
+        e
+      );
+    }
   }
 
   return {
@@ -85,15 +98,13 @@ async function resolveUserLora(
 /**
  * Fetch trigger token from Supabase
  */
-async function fetchTriggerToken(
-  userLora?: UserLora
-): Promise<string | null> {
-  if (!userLora) return null;
+async function fetchTriggerToken(loraId?: string | null): Promise<string | null> {
+  if (!loraId) return null;
 
   const { data, error } = await supabase
     .from("user_loras")
     .select("trigger_token")
-    .eq("id", userLora.id)
+    .eq("id", loraId)
     .single();
 
   if (error || !data?.trigger_token) return null;
@@ -103,17 +114,20 @@ async function fetchTriggerToken(
 
 /**
  * MAIN RESOLVER — ASYNC
+ * Accepts (bodyMode, identityLoraId)
  */
 export async function resolveLoraStack(
   bodyMode: BodyMode,
-  userLora?: UserLora
+  identityLoraId?: string | null
 ): Promise<ResolvedLoraStack> {
   const loras: ResolvedLora[] = [];
 
+  // Launch-only guard
   if (bodyMode === "body_mtf" || bodyMode === "body_ftm") {
     throw new Error(`Unsupported body mode for launch: ${bodyMode}`);
   }
 
+  // Body LoRA (currently strength 0.0 for isolation testing)
   if (bodyMode !== "none") {
     loras.push({
       path: BODY_LORA_NAMES[bodyMode],
@@ -121,17 +135,16 @@ export async function resolveLoraStack(
     });
   }
 
-  const identity = await resolveUserLora(userLora);
+  // Identity LoRA
+  const identity = await resolveUserLora(identityLoraId);
   if (identity) {
     loras.push(identity);
   }
 
-  const trigger_token = await fetchTriggerToken(userLora);
+  const trigger_token = await fetchTriggerToken(identityLoraId);
 
   return {
-    base_model: {
-      path: BIGLUST_BASE_PATH,
-    },
+    base_model: { path: BIGLUST_BASE_PATH },
     loras,
     trigger_token,
   };
