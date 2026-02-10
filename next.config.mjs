@@ -1,10 +1,4 @@
-﻿import { dirname } from "path";
-import { fileURLToPath } from "url";
-
-/** ESM replacement for __dirname */
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/** @type {import('next').NextConfig} */
+﻿/** @type {import('next').NextConfig} */
 const nextConfig = {
   trailingSlash: false,
 
@@ -14,14 +8,17 @@ const nextConfig = {
     },
   },
 
-  // Required for Supabase in serverless
-  serverExternalPackages: ["@supabase/supabase-js"],
+  // ⭐ CRITICAL: bundle Node deps into serverless functions
+  serverExternalPackages: [
+    "@supabase/supabase-js",
+    "@supabase/ssr",
+  ],
 
-  // Required because Next 16 uses Turbopack
+  // ⭐ CRITICAL: silence Turbopack + webpack conflict
   turbopack: {},
 
-  // 🔥 CRITICAL: fixes Vercel function crash before handler executes
-  outputFileTracingRoot: __dirname,
+  // ⭐ CRITICAL: force standalone output for Vercel functions
+  output: "standalone",
 
   async redirects() {
     return [];
