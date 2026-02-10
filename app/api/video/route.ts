@@ -141,10 +141,13 @@ export async function POST(req: Request) {
     // Enforce tier caps + choose backend
     const backend = enforceVideoCaps(sub.tier, videoParams);
 
-    // Resolve model stack (SAME as image)
-    const loraStack = resolveLoraStack(
+    // ------------------------------------------------------------
+    // ⭐⭐⭐ FIXED — USE NORMALIZED CONTRACT ⭐⭐⭐
+    // identity_lora (flat payload) → params.user_lora.id
+    // ------------------------------------------------------------
+    const loraStack = await resolveLoraStack(
       request.params.body_mode,
-      request.params.user_lora
+      request.params.user_lora?.id ?? null
     );
 
     // ------------------------------------------------------------
@@ -163,10 +166,6 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
-
-    // NOTE:
-    // Payload shape will be finalized per backend in next step.
-    // For now, pass through normalized data cleanly.
 
     const res = await fetch(endpoint, {
       method: "POST",
