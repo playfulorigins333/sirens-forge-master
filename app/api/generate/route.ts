@@ -4,9 +4,10 @@ export const preferredRegion = "home";
 export const maxDuration = 300;
 
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
-// ⭐️ CRITICAL: static imports so Vercel bundles server code
+// ⭐️ Static imports so Vercel bundles server code
 import { resolveLoraStack } from "@/lib/generation/lora-resolver";
 import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
@@ -27,12 +28,27 @@ export async function POST(req: Request) {
   try {
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
     if (!RUNPOD_BASE_URL) {
-      return NextResponse.json({ error: "RUNPOD_BASE_URL_MISSING" }, { status: 500 });
+      return NextResponse.json(
+        { error: "RUNPOD_BASE_URL_MISSING" },
+        { status: 500 }
+      );
     }
 
-    const supabase = createClient(
+    // ⭐️ FIX: use SERVER Supabase client inside serverless function
+    const cookieStore = cookies();
+
+    const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value;
+          },
+          set() {},
+          remove() {},
+        },
+      }
     );
 
     const body = await req.json();
@@ -50,11 +66,15 @@ export async function POST(req: Request) {
     } = body;
 
     if (!prompt) {
-      return NextResponse.json({ error: "PROMPT_REQUIRED" }, { status: 400 });
+      return NextResponse.json(
+        { error: "PROMPT_REQUIRED" },
+        { status: 400 }
+      );
     }
 
     let finalPrompt = prompt;
 
+    // Inject LoRA trigger token if identity LoRA is selected
     if (identity_lora) {
       const { data } = await supabase
         .from("user_loras")
@@ -94,9 +114,12 @@ export async function POST(req: Request) {
       },
     };
 
+    // Call Railway FastAPI gateway
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+      },
       body: JSON.stringify(payload),
     });
 
@@ -104,7 +127,11 @@ export async function POST(req: Request) {
 
     if (!upstream.ok) {
       return NextResponse.json(
-        { error: "UPSTREAM_ERROR", status: upstream.status, body: text },
+        {
+          error: "UPSTREAM_ERROR",
+          status: upstream.status,
+          body: text,
+        },
         { status: upstream.status }
       );
     }
@@ -113,10 +140,14 @@ export async function POST(req: Request) {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
+
   } catch (err: any) {
     console.error("generate fatal error:", err);
     return NextResponse.json(
-      { error: "INTERNAL_ERROR", message: err?.message ?? "Unknown error" },
+      {
+        error: "INTERNAL_ERROR",
+        message: err?.message ?? "Unknown error",
+      },
       { status: 500 }
     );
   }
