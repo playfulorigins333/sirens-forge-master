@@ -28,7 +28,10 @@ export async function POST(req: Request) {
   try {
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
     if (!RUNPOD_BASE_URL) {
-      return NextResponse.json({ error: "RUNPOD_BASE_URL_MISSING" }, { status: 500 });
+      return NextResponse.json(
+        { error: "RUNPOD_BASE_URL_MISSING" },
+        { status: 500 }
+      );
     }
 
     /* ------------------------------------------------
@@ -96,7 +99,7 @@ export async function POST(req: Request) {
     }
 
     /* ------------------------------------------------
-     * Resolve LoRA stack (FIXED: pass ID string)
+     * Resolve LoRA stack
      * ------------------------------------------------ */
     const loraStack = await resolveLoraStack(body_mode, identity_lora ?? null);
 
@@ -117,7 +120,7 @@ export async function POST(req: Request) {
     });
 
     /* ------------------------------------------------
-     * Wrap workflow for gateway
+     * 🚨 CRITICAL — SEND identity_lora TO RAILWAY
      * ------------------------------------------------ */
     const payload = {
       workflow: {
@@ -126,6 +129,7 @@ export async function POST(req: Request) {
         template: "sirens_image_v3_production",
         mode: "txt2img",
         inputs: {
+          identity_lora: identity_lora ?? null,   // ⭐ REQUIRED
           workflow_json: workflowGraph,
         },
       },
