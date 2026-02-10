@@ -6,6 +6,8 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: "2mb",
     },
+    // ⭐️ CRITICAL: ensure serverless functions bundle our server libs
+    serverComponentsExternalPackages: ["@supabase/supabase-js"],
   },
 
   async redirects() {
@@ -16,9 +18,19 @@ const nextConfig = {
     return [
       {
         source: "/api/webhook",
-        destination: "/api/webhook", // Prevent 307 redirect
+        destination: "/api/webhook",
       },
     ];
+  },
+
+  webpack: (config) => {
+    // ⭐️ CRITICAL: bundle local server libraries used by /api/generate
+    config.externals = config.externals || [];
+    config.externals.push({
+      "@/lib/generation/lora-resolver": "commonjs @/lib/generation/lora-resolver",
+      "@/lib/comfy/buildWorkflow": "commonjs @/lib/comfy/buildWorkflow",
+    });
+    return config;
   },
 };
 
