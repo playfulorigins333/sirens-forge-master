@@ -6,8 +6,17 @@ export const maxDuration = 300;
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
-import { resolveLoraStack } from "@/lib/generation/lora-resolver";
-import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
+/*
+🚨 TEMP DEBUG BUILD 🚨
+We are isolating the 405 error.
+
+These imports are temporarily disabled because one of them
+is crashing the route during module load, which prevents
+NextJS from registering POST and causes 405 forever.
+*/
+
+// import { resolveLoraStack } from "@/lib/generation/lora-resolver";
+// import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
 function injectTriggerToken(prompt: string, token: string) {
   const trimmedPrompt = (prompt || "").trim();
@@ -33,7 +42,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ✅ SERVER SUPABASE CLIENT (NO SSR COOKIES)
+    // Server-safe Supabase client
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -62,7 +71,7 @@ export async function POST(req: NextRequest) {
 
     let finalPrompt = prompt;
 
-    // 🔹 Inject trigger token if identity LoRA selected
+    // Fetch LoRA trigger token (public read allowed)
     if (identity_lora) {
       const { data } = await supabase
         .from("user_loras")
@@ -75,22 +84,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 🔹 Resolve LoRA stack (body + identity)
-    const loraStack = await resolveLoraStack(body_mode, identity_lora ?? null);
-
-    // 🔹 Build Comfy workflow JSON
-    const workflowGraph = buildWorkflow({
-      prompt: finalPrompt,
-      negative: negative_prompt || "",
-      seed: seed ?? 0,
-      steps,
-      cfg,
-      width,
-      height,
-      loraStack,
-      dnaImageNames: [],
-      fluxLock: null,
-    });
+    /*
+      🚨 TEMP: Stub workflow until route loads correctly
+      Once 405 is gone we re-enable real workflow builder.
+    */
+    const workflowGraph = {
+      debug: true,
+      message: "Route is alive. Imports disabled.",
+      inputs: {
+        prompt: finalPrompt,
+        negative_prompt,
+        body_mode,
+        width,
+        height,
+        steps,
+        cfg,
+        seed,
+        identity_lora,
+      },
+    };
 
     const payload = {
       workflow: {
@@ -104,7 +116,6 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    // 🚀 Call Railway → RunPod gateway
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
       method: "POST",
       headers: {
