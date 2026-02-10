@@ -6,9 +6,13 @@ const nextConfig = {
     serverActions: {
       bodySizeLimit: "2mb",
     },
-    // ⭐️ CRITICAL: ensure serverless functions bundle our server libs
-    serverComponentsExternalPackages: ["@supabase/supabase-js"],
   },
+
+  // ⭐️ Required in Next 16 for serverless bundling
+  serverExternalPackages: ["@supabase/supabase-js"],
+
+  // ⭐️ Required because Next 16 uses Turbopack by default
+  turbopack: {},
 
   async redirects() {
     return [];
@@ -21,16 +25,6 @@ const nextConfig = {
         destination: "/api/webhook",
       },
     ];
-  },
-
-  webpack: (config) => {
-    // ⭐️ CRITICAL: bundle local server libraries used by /api/generate
-    config.externals = config.externals || [];
-    config.externals.push({
-      "@/lib/generation/lora-resolver": "commonjs @/lib/generation/lora-resolver",
-      "@/lib/comfy/buildWorkflow": "commonjs @/lib/comfy/buildWorkflow",
-    });
-    return config;
   },
 };
 
