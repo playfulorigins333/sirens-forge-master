@@ -14,6 +14,9 @@ const nextConfig = {
   // ⭐️ Required because Next 16 uses Turbopack by default
   turbopack: {},
 
+  // ⭐️ CRITICAL: Fixes Vercel serverless function crashing before handler loads
+  outputFileTracingRoot: __dirname,
+
   async redirects() {
     return [];
   },
