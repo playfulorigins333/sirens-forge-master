@@ -4,10 +4,8 @@ export const preferredRegion = "home";
 export const maxDuration = 300;
 
 import { NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { createClient } from "@supabase/supabase-js";
 
-// Static imports so Vercel bundles server code
 import { resolveLoraStack } from "@/lib/generation/lora-resolver";
 import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
@@ -25,8 +23,6 @@ function injectTriggerToken(prompt: string, token: string) {
 }
 
 export async function POST(req: Request) {
-  console.log("🔥 /api/generate HIT"); // ← CRITICAL DEBUG LOG
-
   try {
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
 
@@ -37,21 +33,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // NEXT 16 cookies are async
-    const cookieStore = await cookies();
-
-    const supabase = createServerClient(
+    // ✅ USE NORMAL SUPABASE CLIENT (NOT SSR)
+    const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-          set() {},
-          remove() {},
-        },
-      }
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
 
     const body = await req.json();
@@ -77,7 +62,7 @@ export async function POST(req: Request) {
 
     let finalPrompt = prompt;
 
-    // Inject trigger token if identity LoRA selected
+    // Fetch LoRA trigger token (public read allowed)
     if (identity_lora) {
       const { data } = await supabase
         .from("user_loras")
@@ -117,28 +102,18 @@ export async function POST(req: Request) {
       },
     };
 
-    console.log("➡️ Calling Railway:", `${RUNPOD_BASE_URL}/gateway/generate`);
-
-    // Abort after 4 minutes (prevents Vercel crash → fake 405)
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 240000);
-
+    // 🚀 CALL RAILWAY
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
       method: "POST",
-      cache: "no-store",            // ⭐ REQUIRED ON VERCEL
-      signal: controller.signal,    // ⭐ prevent silent timeout crash
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     });
 
-    clearTimeout(timeout);
-
     const text = await upstream.text();
 
     if (!upstream.ok) {
-      console.error("❌ Railway error:", text);
       return NextResponse.json(
         {
           error: "UPSTREAM_ERROR",
@@ -149,15 +124,13 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log("✅ Railway success");
-
     return new NextResponse(text, {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
 
   } catch (err: any) {
-    console.error("💥 generate fatal error:", err);
+    console.error("generate fatal error:", err);
 
     return NextResponse.json(
       {
