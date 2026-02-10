@@ -1,16 +1,21 @@
+import "./globals.css";
+import { ReactNode } from "react";
+
 export const metadata = {
-  title: "SirensForge",
-  description: "SirensForge",
+  title: "Sirens Forge",
+  description: "Forge Your Muse. Rule Your Empire.",
 };
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }
