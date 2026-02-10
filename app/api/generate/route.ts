@@ -2,9 +2,6 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
-import { resolveLoraStack } from "@/lib/generation/lora-resolver";
-import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
-
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = "home";
@@ -28,6 +25,10 @@ function injectTriggerToken(prompt: string, token: string) {
 
 export async function POST(req: Request) {
   try {
+    // 🚨 CRITICAL: runtime imports (prevents Vercel from skipping route)
+    const { resolveLoraStack } = await import("@/lib/generation/lora-resolver");
+    const { buildWorkflow } = await import("@/lib/comfy/buildWorkflow");
+
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
     if (!RUNPOD_BASE_URL) {
       return NextResponse.json({ error: "RUNPOD_BASE_URL_MISSING" }, { status: 500 });
