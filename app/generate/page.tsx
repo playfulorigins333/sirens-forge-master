@@ -1129,22 +1129,42 @@ export default function GeneratePage() {
     let cancelled = false;
 
     const loadIdentities = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-      if (!session) return;
+    // If user not logged in → empty dropdown
+    if (!session?.user?.id) {
+      if (!cancelled) setIdentityOptions([]);
+      return;
+    }
 
-      const { data } = await supabase
-        .from("user_loras")
-        .select("id, name")
-        .eq("status", "completed")
-        .order("created_at", { ascending: false });
+    // 🔒 IMPORTANT FIX:
+    // We MUST filter by the logged in user's id
+    // RLS requires this or Supabase returns an empty array.
+    const { data, error } = await supabase
+      .from("user_loras")
+      .select("id, name")
+      .eq("user_id", session.user.id)
+      .eq("status", "completed")
+      .order("created_at", { ascending: false });
 
-      if (!cancelled) setIdentityOptions(data ?? []);
-    };
+    if (error) {
+      console.error("Failed to load user LoRAs:", error);
+      if (!cancelled) setIdentityOptions([]);
+      return;
+    }
 
-    loadIdentities();
+    if (!cancelled) setIdentityOptions(data ?? []);
+  } catch (err) {
+    console.error("Identity load crash:", err);
+    if (!cancelled) setIdentityOptions([]);
+  }
+};
+
+loadIdentities();
+
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) loadIdentities();
