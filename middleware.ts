@@ -19,6 +19,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // ✅ ALWAYS ALLOW API + INTERNAL + STATIC
+  // (Keep this list explicit for safety, but matcher also avoids _next/static/image files)
   if (
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
@@ -54,15 +55,17 @@ export async function middleware(req: NextRequest) {
     }
   );
 
-  // 🔥 This refreshes/creates cookies if a session exists
+  // 🔥 Refresh/creates cookies if a session exists
   await supabase.auth.getUser();
 
   // 🔒 Detect session cookie after sync
-  const hasSession = Array.from(res.cookies.getAll()).some(
-    (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
-  ) || req.cookies.getAll().some(
-    (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
-  );
+  const hasSession =
+    Array.from(res.cookies.getAll()).some(
+      (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
+    ) ||
+    req.cookies.getAll().some(
+      (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
+    );
 
   // 🔒 PRODUCTION DOMAIN RULES
   if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
@@ -92,6 +95,13 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api|_next|checkout|auth|login|favicon.ico|robots.txt|sitemap.xml).*)",
+    /*
+     * SAFE matcher:
+     * - Do NOT use negative-lookahead to exclude /api (Next/Vercel can still run middleware on /api in some builds)
+     * - Only exclude known Next internals + static files here
+     *
+     * NOTE: We still explicitly early-return for pathname.startsWith("/api") above.
+     */
+    "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };
