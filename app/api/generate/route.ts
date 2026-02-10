@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-// ⭐ Static imports so Vercel bundles server code
+// Static imports so Vercel bundles server code
 import { resolveLoraStack } from "@/lib/generation/lora-resolver";
 import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
@@ -24,9 +24,10 @@ function injectTriggerToken(prompt: string, token: string) {
   return `${trimmedToken} ${trimmedPrompt}`.trim();
 }
 
-export async function POST(req: Request): Promise<Response> {
+export async function POST(req: Request) {
   try {
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
+
     if (!RUNPOD_BASE_URL) {
       return NextResponse.json(
         { error: "RUNPOD_BASE_URL_MISSING" },
@@ -34,10 +35,9 @@ export async function POST(req: Request): Promise<Response> {
       );
     }
 
-    // ⭐ Next 16 FIX — cookies() is now async
+    // ✅ NEXT 16 FIX — cookies() IS NOW ASYNC
     const cookieStore = await cookies();
 
-    // ⭐ Server-side Supabase client (serverless safe)
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -75,7 +75,7 @@ export async function POST(req: Request): Promise<Response> {
 
     let finalPrompt = prompt;
 
-    // Inject LoRA trigger token if identity LoRA is selected
+    // Inject trigger token if identity LoRA selected
     if (identity_lora) {
       const { data } = await supabase
         .from("user_loras")
@@ -115,7 +115,7 @@ export async function POST(req: Request): Promise<Response> {
       },
     };
 
-    // ⭐ Call Railway FastAPI gateway
+    // Call Railway FastAPI gateway
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
       method: "POST",
       headers: {
@@ -144,6 +144,7 @@ export async function POST(req: Request): Promise<Response> {
 
   } catch (err: any) {
     console.error("generate fatal error:", err);
+
     return NextResponse.json(
       {
         error: "INTERNAL_ERROR",
