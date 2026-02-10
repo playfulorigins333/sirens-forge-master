@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +24,6 @@ function injectTriggerToken(prompt: string, token: string) {
 
 export async function POST(req: Request) {
   try {
-    // 🚨 CRITICAL: runtime imports (prevents Vercel from skipping route)
     const { resolveLoraStack } = await import("@/lib/generation/lora-resolver");
     const { buildWorkflow } = await import("@/lib/comfy/buildWorkflow");
 
@@ -34,28 +32,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "RUNPOD_BASE_URL_MISSING" }, { status: 500 });
     }
 
-    const cookieStore = await cookies();
-
-    const supabase = createServerClient(
+    // ✅ Correct server-side Supabase client for Route Handlers
+    const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          get(name: string) {
-            return cookieStore.get(name)?.value;
-          },
-        },
-      }
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 });
-    }
 
     const body = await req.json();
 
