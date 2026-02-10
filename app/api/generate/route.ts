@@ -7,7 +7,7 @@ import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
-// ⭐️ Static imports so Vercel bundles server code
+// ⭐ Static imports so Vercel bundles server code
 import { resolveLoraStack } from "@/lib/generation/lora-resolver";
 import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 
@@ -24,7 +24,7 @@ function injectTriggerToken(prompt: string, token: string) {
   return `${trimmedToken} ${trimmedPrompt}`.trim();
 }
 
-export async function POST(req: Request) {
+export async function POST(req: Request): Promise<Response> {
   try {
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
     if (!RUNPOD_BASE_URL) {
@@ -34,9 +34,10 @@ export async function POST(req: Request) {
       );
     }
 
-    // ⭐️ FIX: use SERVER Supabase client inside serverless function
-    const cookieStore = cookies();
+    // ⭐ Next 16 FIX — cookies() is now async
+    const cookieStore = await cookies();
 
+    // ⭐ Server-side Supabase client (serverless safe)
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -114,7 +115,7 @@ export async function POST(req: Request) {
       },
     };
 
-    // Call Railway FastAPI gateway
+    // ⭐ Call Railway FastAPI gateway
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
       method: "POST",
       headers: {
