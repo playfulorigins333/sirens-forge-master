@@ -85,7 +85,38 @@ type DatasetDoctorAnalyzeResult = {
   summary?: DatasetDoctorAnalyzeSummary;
 };
 
+type DatasetDoctorImage = {
+  id: string;
+  filename: string;
+  decision: "accepted" | "rejected" | "review" | string;
+  decision_reason?: string | null;
+  quality_score?: number | null;
+  framing_type?: string | null;
+  angle_type?: string | null;
+  r2_bucket?: string | null;
+  r2_key?: string | null;
+};
+
+type DatasetDoctorApproveResult = {
+  success: boolean;
+  job_id: string;
+  lora_id: string;
+  final_r2_bucket: string;
+  final_r2_prefix: string;
+  queued_training: boolean;
+  copied_files: Array<{
+    image_id: string;
+    source_bucket: string;
+    source_key: string;
+    dest_bucket: string;
+    dest_key: string;
+    filename: string;
+  }>;
+};
+
 const POLL_INTERVAL_MS = 5000;
+const DATASET_DOCTOR_BASE_URL =
+  "https://sirens-forge-api-production.up.railway.app/dataset-doctor";
 
 // Floating particles component
 const FloatingParticles = () => {
@@ -175,6 +206,11 @@ export default function LoRATrainerPage() {
   );
   const [datasetDoctorSummary, setDatasetDoctorSummary] =
     useState<DatasetDoctorAnalyzeSummary | null>(null);
+  const [datasetDoctorImages, setDatasetDoctorImages] = useState<
+    DatasetDoctorImage[]
+  >([]);
+  const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
+  const [isApproving, setIsApproving] = useState(false);
   const [trainingProgress, setTrainingProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -414,18 +450,15 @@ export default function LoRATrainerPage() {
   const analyzeDataset = async (
     jobId: string
   ): Promise<DatasetDoctorAnalyzeResult> => {
-    const res = await fetch(
-      `https://sirens-forge-api-production.up.railway.app/dataset-doctor/jobs/${jobId}/analyze`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          rebuild_from_r2: true,
-        }),
-      }
-    );
+    const res = await fetch(`${DATASET_DOCTOR_BASE_URL}/jobs/${jobId}/analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        rebuild_from_r2: true,
+      }),
+    });
 
     const json = await res.json().catch(() => ({} as any));
 
@@ -434,6 +467,46 @@ export default function LoRATrainerPage() {
     }
 
     return json as DatasetDoctorAnalyzeResult;
+  };
+
+  const fetchDatasetDoctorImages = async (
+    jobId: string
+  ): Promise<DatasetDoctorImage[]> => {
+    const res = await fetch(`${DATASET_DOCTOR_BASE_URL}/jobs/${jobId}/images`, {
+      cache: "no-store",
+    });
+
+    const json = await res.json().catch(() => ({} as any));
+
+    if (!res.ok) {
+      throw new Error(json?.detail || "Failed to load analyzed images");
+    }
+
+    return Array.isArray(json?.images) ? json.images : [];
+  };
+
+  const approveDatasetDoctorJob = async (
+    jobId: string,
+    imageIds: string[]
+  ): Promise<DatasetDoctorApproveResult> => {
+    const res = await fetch(`${DATASET_DOCTOR_BASE_URL}/jobs/${jobId}/approve`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        selected_image_ids: imageIds,
+        queue_training: false,
+      }),
+    });
+
+    const json = await res.json().catch(() => ({} as any));
+
+    if (!res.ok) {
+      throw new Error(json?.detail || "Approval failed");
+    }
+
+    return json as DatasetDoctorApproveResult;
   };
 
   const uploadImagesToSupabaseStorage = async (
@@ -472,6 +545,8 @@ export default function LoRATrainerPage() {
     setErrorMessage(null);
     setTrainingProgress(0);
     setDatasetDoctorSummary(null);
+    setDatasetDoctorImages([]);
+    setSelectedImageIds([]);
     setTrainingStatus("training");
 
     try {
@@ -505,21 +580,30 @@ export default function LoRATrainerPage() {
 
       setLoraId(createdId);
 
-      // 2) Upload images directly to R2 (browser → R2 via presigned PUT URLs)
-      // This is REQUIRED because the Dataset Doctor flow now owns the
-      // authoritative raw dataset path + job linkage.
+      // 2) Upload images directly to R2
       const uploadResult = await uploadImagesToR2(createdId, uploadedImages);
       setDatasetDoctorJobId(uploadResult.dataset_doctor_job_id);
 
-      // 3) Analyze uploaded dataset inside Dataset Doctor
+      // 3) Analyze uploaded dataset
       const analyzeResult = await analyzeDataset(
         uploadResult.dataset_doctor_job_id
       );
 
       setDatasetDoctorSummary(analyzeResult.summary || null);
 
-      // 4) Stop here until review/approval UI is wired.
-      // Training can only be queued after Dataset Doctor approval.
+      // 4) Load analyzed image rows and preselect accepted images
+      const images = await fetchDatasetDoctorImages(
+        uploadResult.dataset_doctor_job_id
+      );
+      setDatasetDoctorImages(images);
+
+      const acceptedIds = images
+        .filter((image) => image.decision === "accepted")
+        .map((image) => image.id);
+
+      setSelectedImageIds(acceptedIds);
+
+      // 5) Stop in review until approval
       setTrainingStatus("review");
       setErrorMessage(null);
       return;
@@ -530,6 +614,61 @@ export default function LoRATrainerPage() {
     }
   };
 
+  const handleApproveAndStartTraining = async () => {
+    if (!loraId || !datasetDoctorJobId) {
+      setErrorMessage("Missing LoRA or Dataset Doctor job reference.");
+      return;
+    }
+
+    setIsApproving(true);
+    setErrorMessage(null);
+
+    try {
+      await approveDatasetDoctorJob(datasetDoctorJobId, selectedImageIds);
+
+      setTrainingStatus("training");
+
+      const queueRes = await fetch("/api/lora/train", {
+        credentials: "include",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          lora_id: loraId,
+          dataset_doctor_job_id: datasetDoctorJobId,
+          identityName: identityName.trim(),
+          description: (description?.trim() || "") || null,
+          image_count: uploadedImages.length,
+        }),
+      });
+
+      const queueJson = await queueRes.json().catch(() => ({} as any));
+
+      if (!queueRes.ok) {
+        setTrainingStatus("failed");
+        setErrorMessage(queueJson?.error || "Failed to queue training.");
+        return;
+      }
+
+      setTrainingStatus("queued");
+    } catch (err: any) {
+      console.error("Approve/start training error:", err);
+      setTrainingStatus("review");
+      setErrorMessage(err?.message || "Failed to approve dataset.");
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  const toggleSelectedImage = (imageId: string) => {
+    setSelectedImageIds((prev) =>
+      prev.includes(imageId)
+        ? prev.filter((id) => id !== imageId)
+        : [...prev, imageId]
+    );
+  };
+
   const handleRetry = () => {
     clearPolling();
     setTrainingStatus("idle");
@@ -538,6 +677,9 @@ export default function LoRATrainerPage() {
     setLoraId(null);
     setDatasetDoctorJobId(null);
     setDatasetDoctorSummary(null);
+    setDatasetDoctorImages([]);
+    setSelectedImageIds([]);
+    setIsApproving(false);
   };
 
   const getProgressColor = () => {
@@ -839,7 +981,8 @@ export default function LoRATrainerPage() {
                   <motion.span
                     className={`text-lg font-bold ${getProgressTextColor()}`}
                     animate={{
-                      scale: uploadedImages.length >= 10 ? [1, 1.1, 1] : 1,
+                      scale:
+                        uploadedImages.length >= 10 ? [1, 1.1, 1] : 1,
                     }}
                     transition={{ duration: 0.5 }}
                   >
@@ -917,16 +1060,12 @@ export default function LoRATrainerPage() {
                   {uploadedImages.length >= 20 ? (
                     <span className="text-amber-400">Maximum images reached ⚡</span>
                   ) : isDragging ? (
-                    <span className="text-purple-400">
-                      Drop your images here! ✨
-                    </span>
+                    <span className="text-purple-400">Drop your images here! ✨</span>
                   ) : (
                     <span>Drag & drop your images here</span>
                   )}
                 </p>
-                <p className="text-sm text-gray-400">
-                  or click to browse your files
-                </p>
+                <p className="text-sm text-gray-400">or click to browse your files</p>
                 {uploadedImages.length === 0 && (
                   <motion.p
                     initial={{ opacity: 0 }}
@@ -1020,26 +1159,10 @@ export default function LoRATrainerPage() {
                       className="space-y-3 text-sm text-gray-300 overflow-hidden"
                     >
                       {[
-                        {
-                          icon: Check,
-                          text: "Minimum: 10 images required",
-                          color: "text-emerald-400",
-                        },
-                        {
-                          icon: Star,
-                          text: "Maximum: 20 images for best results",
-                          color: "text-purple-400",
-                        },
-                        {
-                          icon: Sparkles,
-                          text: "Clear faces recommended",
-                          color: "text-cyan-400",
-                        },
-                        {
-                          icon: Zap,
-                          text: "Mix of angles and expressions encouraged",
-                          color: "text-pink-400",
-                        },
+                        { icon: Check, text: "Minimum: 10 images required", color: "text-emerald-400" },
+                        { icon: Star, text: "Maximum: 20 images for best results", color: "text-purple-400" },
+                        { icon: Sparkles, text: "Clear faces recommended", color: "text-cyan-400" },
+                        { icon: Zap, text: "Mix of angles and expressions encouraged", color: "text-pink-400" },
                       ].map((item, index) => (
                         <motion.div
                           key={index}
@@ -1048,9 +1171,7 @@ export default function LoRATrainerPage() {
                           transition={{ delay: index * 0.1 }}
                           className="flex items-start gap-3 p-3 rounded-lg bg-black/30 hover:bg-black/50 transition-colors"
                         >
-                          <item.icon
-                            className={`w-5 h-5 ${item.color} mt-0.5 flex-shrink-0`}
-                          />
+                          <item.icon className={`w-5 h-5 ${item.color} mt-0.5 flex-shrink-0`} />
                           <span>{item.text}</span>
                         </motion.div>
                       ))}
@@ -1095,26 +1216,10 @@ export default function LoRATrainerPage() {
                   </h3>
                   <ul className="space-y-3 text-gray-300">
                     {[
-                      {
-                        icon: Crown,
-                        text: "Your identity is trained once and lives forever",
-                        color: "text-yellow-400",
-                      },
-                      {
-                        icon: Zap,
-                        text: "Use it across images, videos, and future creations",
-                        color: "text-cyan-400",
-                      },
-                      {
-                        icon: Clock,
-                        text: "Training takes just a few minutes",
-                        color: "text-purple-400",
-                      },
-                      {
-                        icon: Star,
-                        text: "Create multiple identities to build your AI universe",
-                        color: "text-pink-400",
-                      },
+                      { icon: Crown, text: "Your identity is trained once and lives forever", color: "text-yellow-400" },
+                      { icon: Zap, text: "Use it across images, videos, and future creations", color: "text-cyan-400" },
+                      { icon: Clock, text: "Training takes just a few minutes", color: "text-purple-400" },
+                      { icon: Star, text: "Create multiple identities to build your AI universe", color: "text-pink-400" },
                     ].map((item, index) => (
                       <motion.li
                         key={index}
@@ -1123,9 +1228,7 @@ export default function LoRATrainerPage() {
                         transition={{ delay: 0.5 + index * 0.1 }}
                         className="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 transition-colors"
                       >
-                        <item.icon
-                          className={`w-5 h-5 ${item.color} mt-0.5 flex-shrink-0`}
-                        />
+                        <item.icon className={`w-5 h-5 ${item.color} mt-0.5 flex-shrink-0`} />
                         <span>{item.text}</span>
                       </motion.li>
                     ))}
@@ -1214,7 +1317,7 @@ export default function LoRATrainerPage() {
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.8, opacity: 0, y: 50 }}
               transition={{ type: "spring", damping: 20 }}
-              className="max-w-lg w-full bg-gradient-to-br from-gray-900 to-black rounded-3xl border border-gray-800 shadow-2xl overflow-hidden relative"
+              className="max-w-4xl w-full bg-gradient-to-br from-gray-900 to-black rounded-3xl border border-gray-800 shadow-2xl overflow-hidden relative max-h-[90vh] overflow-y-auto"
             >
               <motion.div
                 className="absolute inset-0 bg-gradient-to-r from-purple-600/20 via-pink-600/20 to-cyan-600/20"
@@ -1253,11 +1356,7 @@ export default function LoRATrainerPage() {
                   {trainingStatus === "training" && (
                     <motion.div
                       animate={{ rotate: 360 }}
-                      transition={{
-                        repeat: Infinity,
-                        duration: 3,
-                        ease: "linear",
-                      }}
+                      transition={{ repeat: Infinity, duration: 3, ease: "linear" }}
                       className="p-8 rounded-full bg-gradient-to-br from-cyan-500/30 to-purple-500/30 backdrop-blur-sm relative"
                     >
                       <Sparkles className="w-16 h-16 text-cyan-400" />
@@ -1307,7 +1406,7 @@ export default function LoRATrainerPage() {
                         Dataset Doctor Review Ready ✨
                       </motion.h3>
                       <p className="text-gray-300 text-lg">
-                        Your images were uploaded and analyzed successfully.
+                        Review the analyzed images below, then approve at least 3 accepted shots.
                       </p>
                       {loraId && (
                         <p className="text-xs text-gray-400 mt-2">
@@ -1316,57 +1415,43 @@ export default function LoRATrainerPage() {
                       )}
                       {datasetDoctorJobId && (
                         <p className="text-xs text-gray-400 mt-1">
-                          Dataset Doctor Job:{" "}
-                          <span className="font-mono">
-                            {datasetDoctorJobId}
-                          </span>
+                          Dataset Doctor Job: <span className="font-mono">{datasetDoctorJobId}</span>
                         </p>
                       )}
                       {datasetDoctorSummary && (
-                        <div className="mt-4 space-y-2 text-sm text-gray-300 bg-black/30 rounded-xl p-4 border border-gray-800">
-                          <div>
-                            Accepted:{" "}
-                            <span className="text-emerald-400 font-semibold">
+                        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm text-gray-300">
+                          <div className="bg-black/30 rounded-xl p-3 border border-gray-800">
+                            Accepted
+                            <div className="text-emerald-400 font-semibold text-lg">
                               {datasetDoctorSummary.accepted_count ?? 0}
-                            </span>
-                          </div>
-                          <div>
-                            Rejected:{" "}
-                            <span className="text-rose-400 font-semibold">
-                              {datasetDoctorSummary.rejected_count ?? 0}
-                            </span>
-                          </div>
-                          <div>
-                            Review:{" "}
-                            <span className="text-amber-400 font-semibold">
-                              {datasetDoctorSummary.review_count ?? 0}
-                            </span>
-                          </div>
-                          <div>
-                            Ready:{" "}
-                            <span
-                              className={
-                                datasetDoctorSummary.dataset_ready
-                                  ? "text-emerald-400 font-semibold"
-                                  : "text-amber-400 font-semibold"
-                              }
-                            >
-                              {datasetDoctorSummary.dataset_ready
-                                ? "Yes"
-                                : "Not yet"}
-                            </span>
-                          </div>
-                          {datasetDoctorSummary.confidence_message && (
-                            <div className="text-gray-400">
-                              {datasetDoctorSummary.confidence_message}
                             </div>
-                          )}
+                          </div>
+                          <div className="bg-black/30 rounded-xl p-3 border border-gray-800">
+                            Rejected
+                            <div className="text-rose-400 font-semibold text-lg">
+                              {datasetDoctorSummary.rejected_count ?? 0}
+                            </div>
+                          </div>
+                          <div className="bg-black/30 rounded-xl p-3 border border-gray-800">
+                            Review
+                            <div className="text-amber-400 font-semibold text-lg">
+                              {datasetDoctorSummary.review_count ?? 0}
+                            </div>
+                          </div>
+                          <div className="bg-black/30 rounded-xl p-3 border border-gray-800">
+                            Ready
+                            <div
+                              className={`font-semibold text-lg ${
+                                datasetDoctorSummary.dataset_ready
+                                  ? "text-emerald-400"
+                                  : "text-amber-400"
+                              }`}
+                            >
+                              {datasetDoctorSummary.dataset_ready ? "Yes" : "Not yet"}
+                            </div>
+                          </div>
                         </div>
                       )}
-                      <p className="text-sm text-amber-300">
-                        Approval UI is the next step to wire before training can
-                        be queued.
-                      </p>
                     </>
                   )}
 
@@ -1389,10 +1474,7 @@ export default function LoRATrainerPage() {
                       )}
                       {datasetDoctorJobId && (
                         <p className="text-xs text-gray-400 mt-1">
-                          Dataset Doctor Job:{" "}
-                          <span className="font-mono">
-                            {datasetDoctorJobId}
-                          </span>
+                          Dataset Doctor Job: <span className="font-mono">{datasetDoctorJobId}</span>
                         </p>
                       )}
                     </>
@@ -1419,17 +1501,12 @@ export default function LoRATrainerPage() {
                       )}
                       {datasetDoctorJobId && (
                         <p className="text-xs text-gray-400 mt-1">
-                          Dataset Doctor Job:{" "}
-                          <span className="font-mono">
-                            {datasetDoctorJobId}
-                          </span>
+                          Dataset Doctor Job: <span className="font-mono">{datasetDoctorJobId}</span>
                         </p>
                       )}
                       <div className="pt-6 flex flex-col items-center justify-center gap-4">
                         <div className="w-12 h-12 border-4 border-gray-700 border-t-cyan-400 rounded-full animate-spin" />
-                        <p className="text-lg text-gray-300">
-                          Training in progress…
-                        </p>
+                        <p className="text-lg text-gray-300">Training in progress…</p>
                       </div>
                     </>
                   )}
@@ -1471,16 +1548,154 @@ export default function LoRATrainerPage() {
                   )}
                 </div>
 
+                {trainingStatus === "review" && (
+                  <div className="space-y-6 text-left">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-300">
+                        Selected accepted images:{" "}
+                        <span className="text-emerald-400 font-semibold">
+                          {selectedImageIds.length}
+                        </span>
+                      </span>
+                      <span className="text-gray-400">
+                        Minimum required: 3
+                      </span>
+                    </div>
+
+                    {datasetDoctorSummary?.guidance &&
+                      datasetDoctorSummary.guidance.length > 0 && (
+                        <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
+                          <div className="text-sm font-semibold text-cyan-400 mb-2">
+                            Dataset Doctor Guidance
+                          </div>
+                          <div className="space-y-1 text-sm text-gray-300">
+                            {datasetDoctorSummary.guidance.map((item, index) => (
+                              <div key={index}>• {item}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[420px] overflow-y-auto pr-1">
+                      {datasetDoctorImages.map((image) => {
+                        const isAccepted = image.decision === "accepted";
+                        const isSelected = selectedImageIds.includes(image.id);
+
+                        return (
+                          <div
+                            key={image.id}
+                            className={`rounded-2xl border p-4 bg-black/30 ${
+                              image.decision === "accepted"
+                                ? "border-emerald-500/40"
+                                : image.decision === "rejected"
+                                ? "border-rose-500/40"
+                                : "border-amber-500/40"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-white truncate">
+                                  {image.filename}
+                                </div>
+                                <div
+                                  className={`text-xs mt-1 ${
+                                    image.decision === "accepted"
+                                      ? "text-emerald-400"
+                                      : image.decision === "rejected"
+                                      ? "text-rose-400"
+                                      : "text-amber-400"
+                                  }`}
+                                >
+                                  {image.decision}
+                                </div>
+                              </div>
+
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                disabled={!isAccepted || isApproving}
+                                onChange={() => toggleSelectedImage(image.id)}
+                                className="h-4 w-4 accent-emerald-500"
+                              />
+                            </div>
+
+                            <div className="mt-3 space-y-1 text-xs text-gray-400">
+                              {image.decision_reason && (
+                                <div>
+                                  Reason:{" "}
+                                  <span className="text-gray-300">
+                                    {image.decision_reason}
+                                  </span>
+                                </div>
+                              )}
+                              {typeof image.quality_score === "number" && (
+                                <div>
+                                  Score:{" "}
+                                  <span className="text-gray-300">
+                                    {image.quality_score}
+                                  </span>
+                                </div>
+                              )}
+                              {image.framing_type && (
+                                <div>
+                                  Framing:{" "}
+                                  <span className="text-gray-300">
+                                    {image.framing_type}
+                                  </span>
+                                </div>
+                              )}
+                              {image.angle_type && (
+                                <div>
+                                  Angle:{" "}
+                                  <span className="text-gray-300">
+                                    {image.angle_type}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            {!isAccepted && (
+                              <div className="mt-3 text-xs text-gray-500">
+                                Only accepted images can be selected for approval.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Action Buttons */}
                 <div className="space-y-3 pt-6">
                   {trainingStatus === "review" && (
-                    <Button
-                      onClick={() => setTrainingStatus("idle")}
-                      className="w-full py-6 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500"
-                    >
-                      <Sparkles className="w-5 h-5 mr-2" />
-                      Back to Review Flow
-                    </Button>
+                    <>
+                      <Button
+                        onClick={handleApproveAndStartTraining}
+                        disabled={selectedImageIds.length < 3 || isApproving}
+                        className="w-full py-6 text-lg font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 shadow-xl disabled:opacity-50"
+                      >
+                        {isApproving ? (
+                          <>
+                            <Clock className="w-5 h-5 mr-2 animate-spin" />
+                            Approving & Starting Training...
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-5 h-5 mr-2" />
+                            Approve & Start Training
+                          </>
+                        )}
+                      </Button>
+
+                      <Button
+                        variant="secondary"
+                        onClick={() => setTrainingStatus("idle")}
+                        className="w-full py-6 bg-zinc-800 text-gray-100 hover:bg-zinc-700 border-0"
+                      >
+                        Back to Uploads
+                      </Button>
+                    </>
                   )}
 
                   {trainingStatus === "completed" && (
@@ -1521,6 +1736,9 @@ export default function LoRATrainerPage() {
                             setLoraId(null);
                             setDatasetDoctorJobId(null);
                             setDatasetDoctorSummary(null);
+                            setDatasetDoctorImages([]);
+                            setSelectedImageIds([]);
+                            setIsApproving(false);
                           }}
                           className="w-full py-6 bg-zinc-800 text-gray-100 hover:bg-zinc-700 border-0"
                         >
@@ -1562,11 +1780,13 @@ export default function LoRATrainerPage() {
                         setLoraId(null);
                         setDatasetDoctorJobId(null);
                         setDatasetDoctorSummary(null);
+                        setDatasetDoctorImages([]);
+                        setSelectedImageIds([]);
+                        setIsApproving(false);
                       }}
                       className="w-full py-6 bg-zinc-800 text-gray-400 opacity-60 cursor-not-allowed border-0 hover:bg-zinc-800"
                     >
-                      This may take a few minutes — we’ll let you know when it’s
-                      ready ✨
+                      This may take a few minutes — we’ll let you know when it’s ready ✨
                     </Button>
                   )}
                 </div>
