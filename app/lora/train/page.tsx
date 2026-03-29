@@ -513,7 +513,6 @@ export default function LoRATrainerPage() {
     loraIdForPath: string,
     images: UploadedImage[]
   ): Promise<void> => {
-    // Upload to: lora_datasets/<lora_id>/img_1.jpg ... img_20.jpg
     const bucket = "lora-datasets";
     const basePath = `lora_datasets/${loraIdForPath}`;
 
@@ -550,7 +549,6 @@ export default function LoRATrainerPage() {
     setTrainingStatus("training");
 
     try {
-      // 1) Create draft row
       const createDraftRes = await fetch("/api/lora/create", {
         credentials: "include",
         method: "POST",
@@ -580,21 +578,23 @@ export default function LoRATrainerPage() {
 
       setLoraId(createdId);
 
-      // 2) Upload images directly to R2
       const uploadResult = await uploadImagesToR2(createdId, uploadedImages);
       setDatasetDoctorJobId(uploadResult.dataset_doctor_job_id);
 
-      // 3) Analyze uploaded dataset
       const analyzeResult = await analyzeDataset(
         uploadResult.dataset_doctor_job_id
       );
 
       setDatasetDoctorSummary(analyzeResult.summary || null);
 
-      // 4) Load analyzed image rows and preselect accepted images
       const images = await fetchDatasetDoctorImages(
         uploadResult.dataset_doctor_job_id
       );
+
+      if (!images || images.length === 0) {
+        throw new Error("Dataset Doctor returned no images");
+      }
+
       setDatasetDoctorImages(images);
 
       const acceptedIds = images
@@ -603,7 +603,6 @@ export default function LoRATrainerPage() {
 
       setSelectedImageIds(acceptedIds);
 
-      // 5) Stop in review until approval
       setTrainingStatus("review");
       setErrorMessage(null);
       return;
@@ -705,7 +704,6 @@ export default function LoRATrainerPage() {
 
   return (
     <div className="min-h-screen bg-black text-white relative overflow-hidden">
-      {/* Animated Background */}
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-br from-purple-900/20 via-black to-pink-900/20" />
         <motion.div
@@ -717,7 +715,6 @@ export default function LoRATrainerPage() {
         <FloatingParticles />
       </div>
 
-      {/* Header */}
       <header className="border-b border-gray-800/50 bg-black/50 backdrop-blur-xl top-0 z-40 relative">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
@@ -741,7 +738,6 @@ export default function LoRATrainerPage() {
         </div>
       </header>
 
-      {/* Hero Section */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -822,9 +818,7 @@ export default function LoRATrainerPage() {
         </motion.div>
       </motion.div>
 
-      {/* Main Content */}
       <div className="max-w-4xl mx-auto px-6 pb-20 space-y-8 relative z-10">
-        {/* Identity Details Card */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -940,7 +934,6 @@ export default function LoRATrainerPage() {
           </Card>
         </motion.div>
 
-        {/* Training Images Card */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -975,7 +968,6 @@ export default function LoRATrainerPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 relative z-10">
-              {/* Progress Indicator */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <motion.span
@@ -1024,7 +1016,6 @@ export default function LoRATrainerPage() {
                 </div>
               </div>
 
-              {/* Upload Zone */}
               <motion.div
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -1078,7 +1069,6 @@ export default function LoRATrainerPage() {
                 )}
               </motion.div>
 
-              {/* Image Grid */}
               {uploadedImages.length > 0 && (
                 <div className="grid grid-cols-3 md:grid-cols-4 gap-4">
                   <AnimatePresence>
@@ -1124,7 +1114,6 @@ export default function LoRATrainerPage() {
                 </div>
               )}
 
-              {/* Guidelines */}
               <motion.div
                 className="space-y-3 p-6 rounded-xl bg-gradient-to-br from-cyan-500/10 to-purple-500/10 border border-cyan-500/30 backdrop-blur-sm"
                 whileHover={{ scale: 1.02 }}
@@ -1183,7 +1172,6 @@ export default function LoRATrainerPage() {
           </Card>
         </motion.div>
 
-        {/* Training Info Card */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1251,7 +1239,6 @@ export default function LoRATrainerPage() {
           </motion.div>
         )}
 
-        {/* Action Button */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1302,7 +1289,6 @@ export default function LoRATrainerPage() {
         </motion.div>
       </div>
 
-      {/* Training Status Modal */}
       <AnimatePresence>
         {trainingStatus !== "idle" && (
           <motion.div
@@ -1328,7 +1314,6 @@ export default function LoRATrainerPage() {
               />
 
               <div className="p-12 text-center space-y-8 relative z-10">
-                {/* Status Icon */}
                 <div className="flex justify-center">
                   {trainingStatus === "review" && (
                     <motion.div
@@ -1394,7 +1379,6 @@ export default function LoRATrainerPage() {
                   )}
                 </div>
 
-                {/* Status Message */}
                 <div className="space-y-4">
                   {trainingStatus === "review" && (
                     <>
@@ -1666,7 +1650,6 @@ export default function LoRATrainerPage() {
                   </div>
                 )}
 
-                {/* Action Buttons */}
                 <div className="space-y-3 pt-6">
                   {trainingStatus === "review" && (
                     <>
