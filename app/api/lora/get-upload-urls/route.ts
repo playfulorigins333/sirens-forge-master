@@ -13,15 +13,19 @@ import { requireUserId } from "@/lib/supabaseServer";
 /**
  * Generates presigned PUT URLs for uploading Dataset Doctor raw images directly to R2.
  *
- * NEW CONTRACT (Dataset Doctor source of truth):
+ * CONTRACT:
  *   Bucket: identity-loras
  *   Key:    dataset_doctor/<lora_id>/raw/<timestamp>_<index>.jpg
  *
- * Behavior:
- * - Verifies LoRA ownership
- * - Creates or reuses a Dataset Doctor job for this LoRA/user
- * - Clears existing objects under that raw prefix before returning URLs
- * - Returns dataset_doctor_job_id so the UI can continue the flow
+ * IMPORTANT:
+ * - Always creates a fresh Dataset Doctor job for each upload attempt
+ * - Relinks user_loras.dataset_doctor_job_id to the fresh job
+ * - Clears objects under the raw prefix before returning URLs
+ *
+ * Why:
+ * - Reusing an old Dataset Doctor job can leave stale dataset_doctor_images rows
+ * - Those stale rows can point at deleted raw R2 keys
+ * - Approval must operate only on the current upload attempt
  */
 
 export const runtime = "nodejs";
@@ -100,7 +104,7 @@ export async function POST(req: Request) {
 
     const { data: lora, error: loraErr } = await supabaseAdmin
       .from("user_loras")
-      .select("id, user_id, dataset_doctor_job_id")
+      .select("id, user_id")
       .eq("id", lora_id)
       .single();
 
@@ -113,76 +117,56 @@ export async function POST(req: Request) {
     }
 
     /* ────────────────────────────────────────── */
-    /* Find or create Dataset Doctor job         */
+    /* Always create a fresh Dataset Doctor job  */
     /* ────────────────────────────────────────── */
 
-    let datasetDoctorJob:
-      | {
-          id: string;
-          raw_r2_bucket: string;
-          raw_r2_prefix: string;
-        }
-      | null = null;
+    const raw_r2_bucket = BUCKET;
+    const raw_r2_prefix = buildDatasetDoctorRawPrefix(lora_id);
 
-    if (lora.dataset_doctor_job_id) {
-      const { data: existingJob } = await supabaseAdmin
-        .from("dataset_doctor_jobs")
-        .select("id, raw_r2_bucket, raw_r2_prefix")
-        .eq("id", lora.dataset_doctor_job_id)
-        .eq("lora_id", lora_id)
-        .eq("user_id", userId)
-        .maybeSingle();
+    const { data: createdJob, error: createJobErr } = await supabaseAdmin
+      .from("dataset_doctor_jobs")
+      .insert({
+        lora_id,
+        user_id: userId,
+        status: "uploaded",
+        raw_r2_bucket,
+        raw_r2_prefix,
+        auto_approve: false,
+      })
+      .select("id, raw_r2_bucket, raw_r2_prefix")
+      .single();
 
-      if (existingJob) {
-        datasetDoctorJob = existingJob;
-      }
+    if (createJobErr || !createdJob) {
+      console.error(
+        "[get-upload-urls] Failed to create Dataset Doctor job:",
+        createJobErr
+      );
+      return NextResponse.json(
+        { error: "Failed to create Dataset Doctor job" },
+        { status: 500 }
+      );
     }
 
-    if (!datasetDoctorJob) {
-      const raw_r2_bucket = BUCKET;
-      const raw_r2_prefix = buildDatasetDoctorRawPrefix(lora_id);
+    const { error: patchLoraErr } = await supabaseAdmin
+      .from("user_loras")
+      .update({
+        dataset_doctor_job_id: createdJob.id,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", lora_id);
 
-      const { data: createdJob, error: createJobErr } = await supabaseAdmin
-        .from("dataset_doctor_jobs")
-        .insert({
-          lora_id,
-          user_id: userId,
-          status: "uploaded",
-          raw_r2_bucket,
-          raw_r2_prefix,
-          auto_approve: false,
-        })
-        .select("id, raw_r2_bucket, raw_r2_prefix")
-        .single();
-
-      if (createJobErr || !createdJob) {
-        console.error("[get-upload-urls] Failed to create Dataset Doctor job:", createJobErr);
-        return NextResponse.json(
-          { error: "Failed to create Dataset Doctor job" },
-          { status: 500 }
-        );
-      }
-
-      datasetDoctorJob = createdJob;
-
-      const { error: patchLoraErr } = await supabaseAdmin
-        .from("user_loras")
-        .update({
-          dataset_doctor_job_id: createdJob.id,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", lora_id);
-
-      if (patchLoraErr) {
-        console.error("[get-upload-urls] Failed to link Dataset Doctor job to LoRA:", patchLoraErr);
-        return NextResponse.json(
-          { error: "Failed to link Dataset Doctor job to LoRA" },
-          { status: 500 }
-        );
-      }
+    if (patchLoraErr) {
+      console.error(
+        "[get-upload-urls] Failed to link Dataset Doctor job to LoRA:",
+        patchLoraErr
+      );
+      return NextResponse.json(
+        { error: "Failed to link Dataset Doctor job to LoRA" },
+        { status: 500 }
+      );
     }
 
-    const basePrefix = `${normalizePrefix(datasetDoctorJob.raw_r2_prefix)}/`;
+    const basePrefix = `${normalizePrefix(createdJob.raw_r2_prefix)}/`;
 
     /* ────────────────────────────────────────── */
     /* Clear existing raw dataset objects        */
@@ -190,7 +174,7 @@ export async function POST(req: Request) {
 
     const listResp = await r2.send(
       new ListObjectsV2Command({
-        Bucket: datasetDoctorJob.raw_r2_bucket,
+        Bucket: createdJob.raw_r2_bucket,
         Prefix: basePrefix,
       })
     );
@@ -200,7 +184,7 @@ export async function POST(req: Request) {
         if (obj.Key) {
           await r2.send(
             new DeleteObjectCommand({
-              Bucket: datasetDoctorJob.raw_r2_bucket,
+              Bucket: createdJob.raw_r2_bucket,
               Key: obj.Key,
             })
           );
@@ -213,12 +197,13 @@ export async function POST(req: Request) {
     /* ────────────────────────────────────────── */
 
     const urls: { url: string; key: string }[] = [];
+    const now = Date.now();
 
     for (let i = 0; i < image_count; i++) {
-      const key = `${basePrefix}${Date.now()}_${i + 1}.jpg`;
+      const key = `${basePrefix}${now}_${i + 1}.jpg`;
 
       const command = new PutObjectCommand({
-        Bucket: datasetDoctorJob.raw_r2_bucket,
+        Bucket: createdJob.raw_r2_bucket,
         Key: key,
         ContentType: "image/jpeg",
       });
@@ -232,8 +217,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       lora_id,
-      dataset_doctor_job_id: datasetDoctorJob.id,
-      bucket: datasetDoctorJob.raw_r2_bucket,
+      dataset_doctor_job_id: createdJob.id,
+      bucket: createdJob.raw_r2_bucket,
       prefix: basePrefix,
       urls,
     });
