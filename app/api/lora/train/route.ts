@@ -42,10 +42,49 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ MUST match trainer expectations + DB schema
-    const dataset_r2_bucket =
-      process.env.R2_DATASET_BUCKET || "identity-loras";
-    const dataset_r2_prefix = `lora_datasets/${lora_id}`;
+    // ✅ Dataset Doctor is now the source of truth for training datasets.
+    // Find the latest exported/approved job that has a final dataset location.
+    const { data: datasetJob, error: datasetJobErr } = await supabaseAdmin
+      .from("dataset_doctor_jobs")
+      .select(
+        "id, lora_id, user_id, status, final_r2_bucket, final_r2_prefix, approved_at, exported_at, updated_at, created_at"
+      )
+      .eq("lora_id", lora_id)
+      .eq("user_id", userId)
+      .in("status", ["approved", "exported"])
+      .not("final_r2_bucket", "is", null)
+      .not("final_r2_prefix", "is", null)
+      .order("exported_at", { ascending: false, nullsFirst: false })
+      .order("approved_at", { ascending: false, nullsFirst: false })
+      .order("updated_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (datasetJobErr) {
+      console.error("[lora/train] Dataset Doctor lookup failed:", datasetJobErr);
+      return NextResponse.json(
+        { error: "Failed to find approved dataset" },
+        { status: 500 }
+      );
+    }
+
+    if (
+      !datasetJob ||
+      !datasetJob.final_r2_bucket ||
+      !datasetJob.final_r2_prefix
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "No approved Dataset Doctor dataset found. Please analyze and approve a dataset before starting training.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const dataset_r2_bucket = datasetJob.final_r2_bucket;
+    const dataset_r2_prefix = datasetJob.final_r2_prefix;
 
     const now = new Date().toISOString();
     const { error: updateErr } = await supabaseAdmin
@@ -72,6 +111,7 @@ export async function POST(req: Request) {
       status: "queued",
       dataset_r2_bucket,
       dataset_r2_prefix,
+      dataset_doctor_job_id: datasetJob.id,
     });
   } catch (err: any) {
     const msg = String(err?.message || err);

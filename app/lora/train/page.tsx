@@ -50,6 +50,13 @@ type LoraRow = {
   updated_at?: string | null;
 };
 
+type UploadImagesToR2Result = {
+  dataset_doctor_job_id: string;
+  bucket: string;
+  prefix: string;
+  keys: string[];
+};
+
 const POLL_INTERVAL_MS = 5000;
 
 // Floating particles component
@@ -135,6 +142,7 @@ export default function LoRATrainerPage() {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>("idle");
   const [loraId, setLoraId] = useState<string | null>(null);
+  const [datasetDoctorJobId, setDatasetDoctorJobId] = useState<string | null>(null);
   const [trainingProgress, setTrainingProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -313,7 +321,7 @@ export default function LoRATrainerPage() {
   const uploadImagesToR2 = async (
     loraIdForPath: string,
     images: UploadedImage[]
-  ): Promise<void> => {
+  ): Promise<UploadImagesToR2Result> => {
     const res = await fetch("/api/lora/get-upload-urls", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -328,9 +336,18 @@ export default function LoRATrainerPage() {
       throw new Error(j?.error || "Failed to get R2 upload URLs");
     }
 
-    const { urls } = (await res.json()) as {
+    const json = (await res.json()) as {
+      dataset_doctor_job_id?: string;
+      bucket?: string;
+      prefix?: string;
       urls: { url: string; key: string }[];
     };
+
+    const { dataset_doctor_job_id, bucket, prefix, urls } = json;
+
+    if (!dataset_doctor_job_id || !bucket || !prefix) {
+      throw new Error("Missing Dataset Doctor upload metadata");
+    }
 
     if (!Array.isArray(urls) || urls.length !== images.length) {
       throw new Error("R2 upload URL count mismatch");
@@ -349,6 +366,13 @@ export default function LoRATrainerPage() {
         throw new Error(`R2 upload failed on image ${i + 1}`);
       }
     }
+
+    return {
+      dataset_doctor_job_id,
+      bucket,
+      prefix,
+      keys: urls.map((item) => item.key),
+    };
   };
 
   const uploadImagesToSupabaseStorage = async (
@@ -430,9 +454,10 @@ export default function LoRATrainerPage() {
       setLoraId(createdId);
 
       // 2) Upload images directly to R2 (browser → R2 via presigned PUT URLs)
-      // This is REQUIRED because the training worker reads datasets from R2:
-      // s3://identity-loras/lora_datasets/<lora_id>/...
-      await uploadImagesToR2(createdId, uploadedImages);
+      // This is REQUIRED because the Dataset Doctor flow now owns the
+      // authoritative raw dataset path + job linkage.
+      const uploadResult = await uploadImagesToR2(createdId, uploadedImages);
+      setDatasetDoctorJobId(uploadResult.dataset_doctor_job_id);
 
       // 3) Queue training (metadata only)
       const queueRes = await fetch("/api/lora/train", {
@@ -443,6 +468,7 @@ export default function LoRATrainerPage() {
         },
         body: JSON.stringify({
           lora_id: createdId,
+          dataset_doctor_job_id: uploadResult.dataset_doctor_job_id,
           identityName: identityName.trim(),
           description: (description?.trim() || "") || null,
           image_count: uploadedImages.length,
@@ -455,7 +481,7 @@ export default function LoRATrainerPage() {
         setTrainingStatus("failed");
         setErrorMessage(
           queueJson?.error ||
-  "Failed to queue training."
+            "Failed to queue training."
         );
         return;
       }
@@ -474,6 +500,7 @@ export default function LoRATrainerPage() {
     setTrainingProgress(0);
     setErrorMessage(null);
     setLoraId(null);
+    setDatasetDoctorJobId(null);
   };
 
   const getProgressColor = () => {
@@ -1195,6 +1222,11 @@ export default function LoRATrainerPage() {
                           LoRA Job: <span className="font-mono">{loraId}</span>
                         </p>
                       )}
+                      {datasetDoctorJobId && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          Dataset Doctor Job: <span className="font-mono">{datasetDoctorJobId}</span>
+                        </p>
+                      )}
                     </>
                   )}
 
@@ -1215,6 +1247,11 @@ export default function LoRATrainerPage() {
                       {loraId && (
                         <p className="text-xs text-gray-400 mt-2">
                           LoRA Job: <span className="font-mono">{loraId}</span>
+                        </p>
+                      )}
+                      {datasetDoctorJobId && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          Dataset Doctor Job: <span className="font-mono">{datasetDoctorJobId}</span>
                         </p>
                       )}
                       <div className="pt-6 flex flex-col items-center justify-center gap-4">
@@ -1287,7 +1324,7 @@ export default function LoRATrainerPage() {
                       >
                         <Button
                           variant="secondary"
-                      disabled
+                          disabled
                           onClick={() => {
                             clearPolling();
                             setTrainingStatus("idle");
@@ -1299,6 +1336,7 @@ export default function LoRATrainerPage() {
                             );
                             setUploadedImages([]);
                             setLoraId(null);
+                            setDatasetDoctorJobId(null);
                           }}
                           className="w-full py-6 bg-zinc-800 text-gray-100 hover:bg-zinc-700 border-0"
                         >
@@ -1337,6 +1375,7 @@ export default function LoRATrainerPage() {
                         setTrainingStatus("idle");
                         setTrainingProgress(0);
                         setLoraId(null);
+                        setDatasetDoctorJobId(null);
                       }}
                       className="w-full py-6 bg-zinc-800 text-gray-400 opacity-60 cursor-not-allowed border-0 hover:bg-zinc-800"
                     >
