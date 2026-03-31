@@ -63,6 +63,15 @@ type UploadImagesToR2Result = {
   keys: string[];
 };
 
+type DatasetDoctorCompositionBalance = {
+  status?: string;
+  missing?: string[];
+  underrepresented?: string[];
+  overrepresented?: string[];
+  balance_score?: number | null;
+  target_mix?: Record<string, string>;
+};
+
 type DatasetDoctorAnalyzeSummary = {
   raw_count?: number;
   accepted_count?: number;
@@ -71,8 +80,14 @@ type DatasetDoctorAnalyzeSummary = {
   needs_more_images?: boolean;
   missing_coverage?: string[];
   composition_summary?: Record<string, number>;
+  composition_balance?: DatasetDoctorCompositionBalance;
+  balance_score?: number | null;
   dataset_quality_score?: number | null;
   dataset_warnings?: string[];
+  primary_issue?: string | null;
+  secondary_issues?: string[];
+  priority_guidance?: string[];
+  dataset_strengths?: string[];
   guidance?: string[];
   dataset_ready?: boolean;
   confidence_message?: string | null;
@@ -194,6 +209,21 @@ const Confetti = () => {
     </div>
   );
 };
+
+function formatIssueLabel(value?: string | null): string {
+  if (!value) return "No primary issue";
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatCompositionLabel(value?: string): string {
+  if (!value) return "Unknown";
+  if (value === "closeup") return "Closeups";
+  if (value === "midshot") return "Midshots";
+  if (value === "fullbody") return "Full-body";
+  return value.replace(/_/g, " ");
+}
 
 export default function LoRATrainerPage() {
   const [identityName, setIdentityName] = useState("");
@@ -1546,19 +1576,202 @@ export default function LoRATrainerPage() {
                       </span>
                     </div>
 
-                    {datasetDoctorSummary?.guidance &&
-                      datasetDoctorSummary.guidance.length > 0 && (
-                        <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
-                          <div className="text-sm font-semibold text-cyan-400 mb-2">
-                            Dataset Doctor Guidance
+                    {datasetDoctorSummary && (
+                      <div className="space-y-4">
+                        {datasetDoctorSummary.primary_issue && (
+                          <div className="bg-amber-500/10 rounded-xl p-4 border border-amber-500/30">
+                            <div className="text-sm font-semibold text-amber-300 mb-2">
+                              Primary issue
+                            </div>
+                            <div className="text-lg font-semibold text-white">
+                              {formatIssueLabel(datasetDoctorSummary.primary_issue)}
+                            </div>
+                            {!!datasetDoctorSummary.confidence_message && (
+                              <div className="mt-2 text-sm text-gray-300">
+                                {datasetDoctorSummary.confidence_message}
+                              </div>
+                            )}
                           </div>
-                          <div className="space-y-1 text-sm text-gray-300">
-                            {datasetDoctorSummary.guidance.map((item, index) => (
-                              <div key={index}>• {item}</div>
-                            ))}
+                        )}
+
+                        {datasetDoctorSummary.priority_guidance &&
+                          datasetDoctorSummary.priority_guidance.length > 0 && (
+                            <div className="bg-cyan-500/10 rounded-xl p-4 border border-cyan-500/30">
+                              <div className="text-sm font-semibold text-cyan-300 mb-2">
+                                What to fix first
+                              </div>
+                              <div className="space-y-2 text-sm text-gray-200">
+                                {datasetDoctorSummary.priority_guidance.map(
+                                  (item, index) => (
+                                    <div key={index}>• {item}</div>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                        {datasetDoctorSummary.dataset_strengths &&
+                          datasetDoctorSummary.dataset_strengths.length > 0 && (
+                            <div className="bg-emerald-500/10 rounded-xl p-4 border border-emerald-500/30">
+                              <div className="text-sm font-semibold text-emerald-300 mb-2">
+                                Dataset strengths
+                              </div>
+                              <div className="space-y-2 text-sm text-gray-200">
+                                {datasetDoctorSummary.dataset_strengths.map(
+                                  (item, index) => (
+                                    <div key={index}>• {item}</div>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                        {datasetDoctorSummary.composition_balance && (
+                          <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
+                            <div className="flex flex-wrap items-center gap-3 mb-3">
+                              <div className="text-sm font-semibold text-purple-300">
+                                Composition balance
+                              </div>
+                              {typeof datasetDoctorSummary.balance_score ===
+                                "number" && (
+                                <div className="text-xs px-2 py-1 rounded-full bg-purple-500/20 border border-purple-500/30 text-purple-200">
+                                  Balance score: {datasetDoctorSummary.balance_score}
+                                </div>
+                              )}
+                              {datasetDoctorSummary.composition_balance.status && (
+                                <div
+                                  className={`text-xs px-2 py-1 rounded-full border ${
+                                    datasetDoctorSummary.composition_balance
+                                      .status === "balanced"
+                                      ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-200"
+                                      : datasetDoctorSummary.composition_balance
+                                          .status === "missing_required"
+                                      ? "bg-amber-500/20 border-amber-500/30 text-amber-200"
+                                      : "bg-gray-700/40 border-gray-600 text-gray-200"
+                                  }`}
+                                >
+                                  {formatIssueLabel(
+                                    datasetDoctorSummary.composition_balance.status
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                              <div className="rounded-lg bg-black/30 border border-gray-800 p-3">
+                                <div className="text-gray-400 mb-1">Missing</div>
+                                <div className="text-white">
+                                  {datasetDoctorSummary.composition_balance.missing &&
+                                  datasetDoctorSummary.composition_balance.missing
+                                    .length > 0
+                                    ? datasetDoctorSummary.composition_balance.missing
+                                        .map((item) =>
+                                          formatCompositionLabel(item)
+                                        )
+                                        .join(", ")
+                                    : "None"}
+                                </div>
+                              </div>
+                              <div className="rounded-lg bg-black/30 border border-gray-800 p-3">
+                                <div className="text-gray-400 mb-1">
+                                  Underrepresented
+                                </div>
+                                <div className="text-white">
+                                  {datasetDoctorSummary.composition_balance
+                                    .underrepresented &&
+                                  datasetDoctorSummary.composition_balance
+                                    .underrepresented!.length > 0
+                                    ? datasetDoctorSummary.composition_balance.underrepresented
+                                        .map((item) =>
+                                          formatCompositionLabel(item)
+                                        )
+                                        .join(", ")
+                                    : "None"}
+                                </div>
+                              </div>
+                              <div className="rounded-lg bg-black/30 border border-gray-800 p-3">
+                                <div className="text-gray-400 mb-1">
+                                  Overrepresented
+                                </div>
+                                <div className="text-white">
+                                  {datasetDoctorSummary.composition_balance
+                                    .overrepresented &&
+                                  datasetDoctorSummary.composition_balance
+                                    .overrepresented!.length > 0
+                                    ? datasetDoctorSummary.composition_balance.overrepresented
+                                        .map((item) =>
+                                          formatCompositionLabel(item)
+                                        )
+                                        .join(", ")
+                                    : "None"}
+                                </div>
+                              </div>
+                            </div>
+
+                            {datasetDoctorSummary.composition_summary && (
+                              <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                                <div className="rounded-lg bg-black/30 border border-gray-800 p-3">
+                                  <div className="text-gray-400 mb-1">Closeups</div>
+                                  <div className="text-white font-semibold">
+                                    {datasetDoctorSummary.composition_summary.closeup ??
+                                      0}
+                                  </div>
+                                </div>
+                                <div className="rounded-lg bg-black/30 border border-gray-800 p-3">
+                                  <div className="text-gray-400 mb-1">Midshots</div>
+                                  <div className="text-white font-semibold">
+                                    {datasetDoctorSummary.composition_summary.midshot ??
+                                      0}
+                                  </div>
+                                </div>
+                                <div className="rounded-lg bg-black/30 border border-gray-800 p-3">
+                                  <div className="text-gray-400 mb-1">Full-body</div>
+                                  <div className="text-white font-semibold">
+                                    {datasetDoctorSummary.composition_summary.fullbody ??
+                                      0}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      )}
+                        )}
+
+                        {datasetDoctorSummary.secondary_issues &&
+                          datasetDoctorSummary.secondary_issues.length > 0 && (
+                            <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
+                              <div className="text-sm font-semibold text-gray-300 mb-2">
+                                Secondary issues
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                {datasetDoctorSummary.secondary_issues.map(
+                                  (item, index) => (
+                                    <div
+                                      key={index}
+                                      className="text-xs px-2 py-1 rounded-full bg-gray-800 border border-gray-700 text-gray-200"
+                                    >
+                                      {formatIssueLabel(item)}
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                        {datasetDoctorSummary.guidance &&
+                          datasetDoctorSummary.guidance.length > 0 && (
+                            <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
+                              <div className="text-sm font-semibold text-cyan-400 mb-2">
+                                Additional guidance
+                              </div>
+                              <div className="space-y-1 text-sm text-gray-300">
+                                {datasetDoctorSummary.guidance.map((item, index) => (
+                                  <div key={index}>• {item}</div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[420px] overflow-y-auto pr-1">
                       {datasetDoctorImages.map((image) => {
