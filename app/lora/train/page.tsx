@@ -133,7 +133,6 @@ const POLL_INTERVAL_MS = 5000;
 const DATASET_DOCTOR_BASE_URL =
   "https://sirens-forge-api-production.up.railway.app/dataset-doctor";
 
-// Floating particles component
 const FloatingParticles = () => {
   const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 });
 
@@ -170,7 +169,6 @@ const FloatingParticles = () => {
   );
 };
 
-// Confetti component
 const Confetti = () => {
   const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 });
 
@@ -411,15 +409,6 @@ export default function LoRATrainerPage() {
     });
   };
 
-  const getAccessToken = async (): Promise<string | null> => {
-    try {
-      const { data } = await supabaseClient.auth.getSession();
-      return data.session?.access_token ?? null;
-    } catch {
-      return null;
-    }
-  };
-
   const uploadImagesToR2 = async (
     loraIdForPath: string,
     images: UploadedImage[]
@@ -537,34 +526,6 @@ export default function LoRATrainerPage() {
     }
 
     return json as DatasetDoctorApproveResult;
-  };
-
-  const uploadImagesToSupabaseStorage = async (
-    loraIdForPath: string,
-    images: UploadedImage[]
-  ): Promise<void> => {
-    const bucket = "lora-datasets";
-    const basePath = `lora_datasets/${loraIdForPath}`;
-
-    for (let i = 0; i < images.length; i++) {
-      const img = images[i];
-      const file = img.file;
-
-      const objectPath = `${basePath}/img_${i + 1}.jpg`;
-
-      const { error: uploadErr } = await supabaseClient.storage
-        .from(bucket)
-        .upload(objectPath, file, {
-          contentType: file.type || "image/jpeg",
-          upsert: false,
-        });
-
-      if (uploadErr) {
-        throw new Error(
-          `Storage upload failed on image ${i + 1}: ${uploadErr.message}`
-        );
-      }
-    }
   };
 
   const handleStartTraining = async () => {
@@ -1753,20 +1714,6 @@ export default function LoRATrainerPage() {
                                     </div>
                                   )
                                 )}
-                              </div>
-                            </div>
-                          )}
-
-                        {datasetDoctorSummary.guidance &&
-                          datasetDoctorSummary.guidance.length > 0 && (
-                            <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
-                              <div className="text-sm font-semibold text-cyan-400 mb-2">
-                                Additional guidance
-                              </div>
-                              <div className="space-y-1 text-sm text-gray-300">
-                                {datasetDoctorSummary.guidance.map((item, index) => (
-                                  <div key={index}>• {item}</div>
-                                ))}
                               </div>
                             </div>
                           )}
