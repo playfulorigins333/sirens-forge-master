@@ -223,6 +223,14 @@ function formatCompositionLabel(value?: string): string {
   return value.replace(/_/g, " ");
 }
 
+function formatFramingTypeLabel(value?: string | null): string {
+  if (!value) return "Unknown";
+  if (value === "face") return "Closeup";
+  if (value === "upper_body") return "Midshot";
+  if (value === "full_body") return "Full Body";
+  return value.replace(/_/g, " ");
+}
+
 export default function LoRATrainerPage() {
   const [identityName, setIdentityName] = useState("");
   const [description, setDescription] = useState("");
@@ -1784,7 +1792,7 @@ export default function LoRATrainerPage() {
                                 <div>
                                   Framing:{" "}
                                   <span className="text-gray-300">
-                                    {image.framing_type}
+                                    {formatFramingTypeLabel(image.framing_type)}
                                   </span>
                                 </div>
                               )}
