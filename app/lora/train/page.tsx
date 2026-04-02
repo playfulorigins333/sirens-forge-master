@@ -89,6 +89,10 @@ type DatasetDoctorAnalyzeSummary = {
   priority_guidance?: string[];
   dataset_strengths?: string[];
   shot_suggestions?: string[];
+  training_prediction?: {
+    label?: string;
+    reason?: string;
+  };
   guidance?: string[];
   dataset_ready?: boolean;
   confidence_message?: string | null;
@@ -1596,7 +1600,35 @@ export default function LoRATrainerPage() {
                             </div>
                           )}
 
+                        {datasetDoctorSummary.training_prediction && (
+                          <div className="bg-indigo-500/10 rounded-xl p-4 border border-indigo-500/30">
+                            <div className="text-sm font-semibold text-indigo-300 mb-2">
+                              Training prediction
+                            </div>
 
+                            <div className="flex items-center gap-3 mb-2">
+                              <div
+                                className={`text-xs px-2 py-1 rounded-full border ${
+                                  datasetDoctorSummary.training_prediction.label === "high"
+                                    ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-200"
+                                    : datasetDoctorSummary.training_prediction.label === "medium"
+                                      ? "bg-amber-500/20 border-amber-500/30 text-amber-200"
+                                      : "bg-rose-500/20 border-rose-500/30 text-rose-200"
+                                }`}
+                              >
+                                {formatIssueLabel(
+                                  datasetDoctorSummary.training_prediction.label
+                                )}
+                              </div>
+                            </div>
+
+                            {datasetDoctorSummary.training_prediction.reason && (
+                              <div className="text-sm text-gray-200">
+                                {datasetDoctorSummary.training_prediction.reason}
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         <div className="bg-purple-500/10 rounded-xl p-4 border border-purple-500/30">
                           <div className="text-sm font-semibold text-purple-300 mb-2">
@@ -1618,6 +1650,7 @@ export default function LoRATrainerPage() {
                             )}
                           </div>
                         </div>
+
                         {datasetDoctorSummary.composition_balance && (
                           <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
                             <div className="flex flex-wrap items-center gap-3 mb-3">
