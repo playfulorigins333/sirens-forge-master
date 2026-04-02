@@ -1598,21 +1598,26 @@ export default function LoRATrainerPage() {
 
 
 
-                        {datasetDoctorSummary.shot_suggestions &&
-                          datasetDoctorSummary.shot_suggestions.length > 0 && (
-                            <div className="bg-purple-500/10 rounded-xl p-4 border border-purple-500/30">
-                              <div className="text-sm font-semibold text-purple-300 mb-2">
-                                Suggested improvements
-                              </div>
-                              <div className="space-y-2 text-sm text-gray-200">
-                                {datasetDoctorSummary.shot_suggestions.map(
-                                  (item, index) => (
-                                    <div key={index}>• {item}</div>
-                                  )
-                                )}
-                              </div>
-                            </div>
-                          )}
+                        <div className="bg-purple-500/10 rounded-xl p-4 border border-purple-500/30">
+                          <div className="text-sm font-semibold text-purple-300 mb-2">
+                            Suggested improvements
+                          </div>
+                          <div className="space-y-2 text-sm text-gray-200">
+                            {datasetDoctorSummary.shot_suggestions &&
+                            datasetDoctorSummary.shot_suggestions.length > 0 ? (
+                              datasetDoctorSummary.shot_suggestions.map(
+                                (item, index) => (
+                                  <div key={index}>• {item}</div>
+                                )
+                              )
+                            ) : (
+                              <>
+                                <div>• Your dataset is already well balanced</div>
+                                <div>• No major improvements needed</div>
+                              </>
+                            )}
+                          </div>
+                        </div>
                         {datasetDoctorSummary.composition_balance && (
                           <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
                             <div className="flex flex-wrap items-center gap-3 mb-3">
