@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
@@ -26,7 +27,6 @@ import {
   Heart,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { createClient } from "@supabase/supabase-js";
 
 interface UploadedImage {
   id: string;
@@ -42,11 +42,6 @@ type TrainingStatus =
   | "training"
   | "completed"
   | "failed";
-
-const supabaseClient = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 type LoraRow = {
   id: string;
@@ -72,6 +67,17 @@ type DatasetDoctorCompositionBalance = {
   target_mix?: Record<string, string>;
 };
 
+type DatasetDoctorSummaryCard = {
+  label?: string;
+  reason?: string;
+};
+
+type DatasetDoctorConfidenceSignal = {
+  label?: string;
+  level?: "high" | "medium" | "low" | string;
+  reason?: string;
+};
+
 type DatasetDoctorAnalyzeSummary = {
   raw_count?: number;
   accepted_count?: number;
@@ -89,10 +95,9 @@ type DatasetDoctorAnalyzeSummary = {
   priority_guidance?: string[];
   dataset_strengths?: string[];
   shot_suggestions?: string[];
-  training_prediction?: {
-    label?: string;
-    reason?: string;
-  };
+  dataset_grade?: DatasetDoctorSummaryCard;
+  training_prediction?: DatasetDoctorSummaryCard;
+  confidence_signal?: DatasetDoctorConfidenceSignal;
   guidance?: string[];
   dataset_ready?: boolean;
   confidence_message?: string | null;
@@ -236,6 +241,36 @@ function formatFramingTypeLabel(value?: string | null): string {
   return value.replace(/_/g, " ");
 }
 
+function getPredictionBadgeClass(label?: string | null): string {
+  if (label === "high") {
+    return "bg-emerald-500/20 border-emerald-500/30 text-emerald-200";
+  }
+  if (label === "medium") {
+    return "bg-amber-500/20 border-amber-500/30 text-amber-200";
+  }
+  return "bg-rose-500/20 border-rose-500/30 text-rose-200";
+}
+
+function getConfidenceBadgeClass(level?: string | null): string {
+  if (level === "high") {
+    return "bg-emerald-500/20 border-emerald-500/30 text-emerald-200";
+  }
+  if (level === "medium") {
+    return "bg-amber-500/20 border-amber-500/30 text-amber-200";
+  }
+  return "bg-rose-500/20 border-rose-500/30 text-rose-200";
+}
+
+function getGradeBadgeClass(label?: string | null): string {
+  if (label === "A") {
+    return "bg-emerald-500/20 border-emerald-500/30 text-emerald-200";
+  }
+  if (label === "B") {
+    return "bg-amber-500/20 border-amber-500/30 text-amber-200";
+  }
+  return "bg-rose-500/20 border-rose-500/30 text-rose-200";
+}
+
 export default function LoRATrainerPage() {
   const [identityName, setIdentityName] = useState("");
   const [description, setDescription] = useState("");
@@ -260,6 +295,7 @@ export default function LoRATrainerPage() {
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   const [mounted, setMounted] = useState(false);
 
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   );
@@ -270,6 +306,38 @@ export default function LoRATrainerPage() {
       pollingIntervalRef.current = null;
     }
   };
+
+  const resetTrainingState = useCallback(
+    (options?: { clearImages?: boolean; clearIdentity?: boolean }) => {
+      clearPolling();
+      setTrainingStatus("idle");
+      setTrainingProgress(0);
+      setErrorMessage(null);
+      setLoraId(null);
+      setDatasetDoctorJobId(null);
+      setDatasetDoctorSummary(null);
+      setDatasetDoctorImages([]);
+      setSelectedImageIds([]);
+      setIsApproving(false);
+      setShowConfetti(false);
+
+      if (options?.clearIdentity) {
+        setIdentityName("");
+        setDescription("");
+      }
+
+      if (options?.clearImages) {
+        setUploadedImages((prev) => {
+          prev.forEach((img) => URL.revokeObjectURL(img.preview));
+          return [];
+        });
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      }
+    },
+    []
+  );
 
   const mapDbStatusToUi = (dbStatus: string): TrainingStatus => {
     if (dbStatus === "queued") return "queued";
@@ -363,6 +431,13 @@ export default function LoRATrainerPage() {
     return () => window.removeEventListener("mousemove", handleMouseMove);
   }, [mounted]);
 
+  useEffect(() => {
+    return () => {
+      clearPolling();
+      uploadedImages.forEach((img) => URL.revokeObjectURL(img.preview));
+    };
+  }, [uploadedImages]);
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -373,28 +448,28 @@ export default function LoRATrainerPage() {
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-      const files = Array.from(e.dataTransfer.files);
-      handleFiles(files);
-    },
-    [uploadedImages]
-  );
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files);
+    handleFiles(files);
+  }, [uploadedImages]);
 
-  const handleFileInput = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files) {
-        const files = Array.from(e.target.files);
-        handleFiles(files);
-      }
-    },
-    [uploadedImages]
-  );
+  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const files = Array.from(e.target.files);
+      handleFiles(files);
+      e.target.value = "";
+    }
+  }, [uploadedImages]);
 
   const handleFiles = (files: File[]) => {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+
+    if (imageFiles.length === 0) {
+      setErrorMessage("Please upload image files only.");
+      return;
+    }
 
     if (uploadedImages.length + imageFiles.length > 20) {
       setErrorMessage("Maximum 20 images allowed");
@@ -402,7 +477,7 @@ export default function LoRATrainerPage() {
     }
 
     const newImages: UploadedImage[] = imageFiles.map((file) => ({
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       file,
       preview: URL.createObjectURL(file),
       uploadStatus: "complete",
@@ -673,16 +748,7 @@ export default function LoRATrainerPage() {
   };
 
   const handleRetry = () => {
-    clearPolling();
-    setTrainingStatus("idle");
-    setTrainingProgress(0);
-    setErrorMessage(null);
-    setLoraId(null);
-    setDatasetDoctorJobId(null);
-    setDatasetDoctorSummary(null);
-    setDatasetDoctorImages([]);
-    setSelectedImageIds([]);
-    setIsApproving(false);
+    resetTrainingState();
   };
 
   const getProgressColor = () => {
@@ -1032,6 +1098,7 @@ export default function LoRATrainerPage() {
                 }`}
               >
                 <input
+                  ref={fileInputRef}
                   type="file"
                   multiple
                   accept="image/*"
@@ -1495,6 +1562,20 @@ export default function LoRATrainerPage() {
                       <div className="pt-6 flex flex-col items-center justify-center gap-4">
                         <div className="w-12 h-12 border-4 border-gray-700 border-t-cyan-400 rounded-full animate-spin" />
                         <p className="text-lg text-gray-300">Training in progress…</p>
+                        {trainingProgress > 0 && (
+                          <div className="w-full max-w-md space-y-2">
+                            <div className="relative h-3 bg-gray-800 rounded-full overflow-hidden">
+                              <motion.div
+                                className="h-full bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500"
+                                animate={{ width: `${trainingProgress}%` }}
+                                transition={{ duration: 0.4 }}
+                              />
+                            </div>
+                            <div className="text-sm text-gray-400">
+                              {trainingProgress}% complete
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
@@ -1600,36 +1681,6 @@ export default function LoRATrainerPage() {
                             </div>
                           )}
 
-                        {datasetDoctorSummary.training_prediction && (
-                          <div className="bg-indigo-500/10 rounded-xl p-4 border border-indigo-500/30">
-                            <div className="text-sm font-semibold text-indigo-300 mb-2">
-                              Training prediction
-                            </div>
-
-                            <div className="flex items-center gap-3 mb-2">
-                              <div
-                                className={`text-xs px-2 py-1 rounded-full border ${
-                                  datasetDoctorSummary.training_prediction.label === "high"
-                                    ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-200"
-                                    : datasetDoctorSummary.training_prediction.label === "medium"
-                                      ? "bg-amber-500/20 border-amber-500/30 text-amber-200"
-                                      : "bg-rose-500/20 border-rose-500/30 text-rose-200"
-                                }`}
-                              >
-                                {formatIssueLabel(
-                                  datasetDoctorSummary.training_prediction.label
-                                )}
-                              </div>
-                            </div>
-
-                            {datasetDoctorSummary.training_prediction.reason && (
-                              <div className="text-sm text-gray-200">
-                                {datasetDoctorSummary.training_prediction.reason}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
                         <div className="bg-purple-500/10 rounded-xl p-4 border border-purple-500/30">
                           <div className="text-sm font-semibold text-purple-300 mb-2">
                             Suggested improvements
@@ -1650,6 +1701,80 @@ export default function LoRATrainerPage() {
                             )}
                           </div>
                         </div>
+
+                        {datasetDoctorSummary.dataset_grade && (
+                          <div className="bg-fuchsia-500/10 rounded-xl p-4 border border-fuchsia-500/30">
+                            <div className="text-sm font-semibold text-fuchsia-300 mb-2">
+                              Dataset grade
+                            </div>
+
+                            <div className="flex items-center gap-3 mb-2">
+                              <div
+                                className={`text-xs px-2 py-1 rounded-full border ${getGradeBadgeClass(
+                                  datasetDoctorSummary.dataset_grade.label
+                                )}`}
+                              >
+                                Grade {datasetDoctorSummary.dataset_grade.label ?? "—"}
+                              </div>
+                            </div>
+
+                            {datasetDoctorSummary.dataset_grade.reason && (
+                              <div className="text-sm text-gray-200">
+                                {datasetDoctorSummary.dataset_grade.reason}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {datasetDoctorSummary.training_prediction && (
+                          <div className="bg-indigo-500/10 rounded-xl p-4 border border-indigo-500/30">
+                            <div className="text-sm font-semibold text-indigo-300 mb-2">
+                              Training prediction
+                            </div>
+
+                            <div className="flex items-center gap-3 mb-2">
+                              <div
+                                className={`text-xs px-2 py-1 rounded-full border ${getPredictionBadgeClass(
+                                  datasetDoctorSummary.training_prediction.label
+                                )}`}
+                              >
+                                {formatIssueLabel(
+                                  datasetDoctorSummary.training_prediction.label
+                                )}
+                              </div>
+                            </div>
+
+                            {datasetDoctorSummary.training_prediction.reason && (
+                              <div className="text-sm text-gray-200">
+                                {datasetDoctorSummary.training_prediction.reason}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {datasetDoctorSummary.confidence_signal && (
+                          <div className="bg-sky-500/10 rounded-xl p-4 border border-sky-500/30">
+                            <div className="text-sm font-semibold text-sky-300 mb-2">
+                              Confidence / ready signal
+                            </div>
+
+                            <div className="flex items-center gap-3 mb-2">
+                              <div
+                                className={`text-xs px-2 py-1 rounded-full border ${getConfidenceBadgeClass(
+                                  datasetDoctorSummary.confidence_signal.level
+                                )}`}
+                              >
+                                {datasetDoctorSummary.confidence_signal.label ?? "Unknown"}
+                              </div>
+                            </div>
+
+                            {datasetDoctorSummary.confidence_signal.reason && (
+                              <div className="text-sm text-gray-200">
+                                {datasetDoctorSummary.confidence_signal.reason}
+                              </div>
+                            )}
+                          </div>
+                        )}
 
                         {datasetDoctorSummary.composition_balance && (
                           <div className="bg-black/30 rounded-xl p-4 border border-gray-800">
@@ -1897,7 +2022,7 @@ export default function LoRATrainerPage() {
 
                       <Button
                         variant="secondary"
-                        onClick={() => setTrainingStatus("idle")}
+                        onClick={() => resetTrainingState()}
                         className="w-full py-6 bg-zinc-800 text-gray-100 hover:bg-zinc-700 border-0"
                       >
                         Back to Uploads
@@ -1929,24 +2054,12 @@ export default function LoRATrainerPage() {
                       >
                         <Button
                           variant="secondary"
-                          disabled
-                          onClick={() => {
-                            clearPolling();
-                            setTrainingStatus("idle");
-                            setTrainingProgress(0);
-                            setIdentityName("");
-                            setDescription("");
-                            uploadedImages.forEach((img) =>
-                              URL.revokeObjectURL(img.preview)
-                            );
-                            setUploadedImages([]);
-                            setLoraId(null);
-                            setDatasetDoctorJobId(null);
-                            setDatasetDoctorSummary(null);
-                            setDatasetDoctorImages([]);
-                            setSelectedImageIds([]);
-                            setIsApproving(false);
-                          }}
+                          onClick={() =>
+                            resetTrainingState({
+                              clearImages: true,
+                              clearIdentity: true,
+                            })
+                          }
                           className="w-full py-6 bg-zinc-800 text-gray-100 hover:bg-zinc-700 border-0"
                         >
                           <Crown className="w-5 h-5 mr-2" />
@@ -1967,7 +2080,11 @@ export default function LoRATrainerPage() {
                       </Button>
                       <Button
                         variant="secondary"
-                        onClick={() => setTrainingStatus("idle")}
+                        onClick={() =>
+                          resetTrainingState({
+                            clearImages: true,
+                          })
+                        }
                         className="w-full py-6 bg-zinc-800 text-gray-100 hover:bg-zinc-700 border-0"
                       >
                         Upload Different Images
@@ -1980,20 +2097,10 @@ export default function LoRATrainerPage() {
                     <Button
                       variant="secondary"
                       disabled
-                      onClick={() => {
-                        clearPolling();
-                        setTrainingStatus("idle");
-                        setTrainingProgress(0);
-                        setLoraId(null);
-                        setDatasetDoctorJobId(null);
-                        setDatasetDoctorSummary(null);
-                        setDatasetDoctorImages([]);
-                        setSelectedImageIds([]);
-                        setIsApproving(false);
-                      }}
-                      className="w-full py-6 bg-zinc-800 text-gray-400 opacity-60 cursor-not-allowed border-0 hover:bg-zinc-800"
+                      className="w-full py-6 bg-zinc-800 text-gray-400 border-0"
                     >
-                      This may take a few minutes — we’ll let you know when it’s ready ✨
+                      <Clock className="w-5 h-5 mr-2 animate-spin" />
+                      Training in Progress
                     </Button>
                   )}
                 </div>
@@ -2005,5 +2112,3 @@ export default function LoRATrainerPage() {
     </div>
   );
 }
-
-// END OF FILE
