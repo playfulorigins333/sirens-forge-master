@@ -8,6 +8,7 @@ import {
   Star,
   Video as VideoIcon,
   FileText,
+  Image as ImageIcon,
   ChevronDown,
   ChevronUp,
   Clock,
@@ -15,6 +16,8 @@ import {
   Play,
   Maximize2,
   AlertTriangle,
+  Upload,
+  X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
@@ -71,7 +74,7 @@ type LoraMode = "single" | "advanced";
 
 interface LoraSelection {
   mode: LoraMode;
-  selected: string[]; // LoRA ids/names
+  selected: string[];
   createNew: boolean;
   newName: string;
 }
@@ -92,7 +95,6 @@ interface GeneratedItem {
 // -----------------------------------------------------------------------------
 
 function inferKindFromOutput(output: any): MediaKind {
-  // Support both string URLs and object outputs
   if (typeof output === "string") {
     const url = output.toLowerCase();
     if (url.endsWith(".mp4") || url.endsWith(".webm") || url.includes("video")) {
@@ -110,6 +112,20 @@ function inferKindFromOutput(output: any): MediaKind {
     return "video";
   }
   return "image";
+}
+
+function getOutputUrl(output: any): string {
+  if (typeof output === "string") return output;
+  return output?.url || "";
+}
+
+async function fileToDataUrl(file: File): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read uploaded image."));
+    reader.readAsDataURL(file);
+  });
 }
 
 // -----------------------------------------------------------------------------
@@ -145,7 +161,6 @@ function SubscriptionModal({
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.9, opacity: 0 }}
         >
-          {/* Neon border wrapper */}
           <div className="absolute -inset-[2px] rounded-3xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 opacity-80 blur-sm animate-pulse" />
           <div className="relative rounded-3xl bg-gray-950/95 border border-purple-700/60 shadow-[0_0_40px_rgba(168,85,247,0.6)] overflow-hidden">
             <div className="px-6 pt-5 pb-4 border-b border-purple-900/50 flex items-center gap-3">
@@ -238,12 +253,7 @@ function SubscriptionModal({
   );
 }
 
-// -----------------------------------------------------------------------------
-// Header
-// -----------------------------------------------------------------------------
-
-function GeneratorHeader() {
-  // For now, static placeholders; gate is handled via route/middleware.
+function GeneratorHeader(props: { activeMode: GenerationMode }) {
   const userName = "Creator";
   const userAvatar = "";
   const badge: "OG_FOUNDER" | "EARLY_BIRD" | null = null;
@@ -270,6 +280,13 @@ function GeneratorHeader() {
 
   const badgeConfig = getBadgeConfig();
 
+  const subtitle =
+    props.activeMode === "image_to_video"
+      ? "Image → Video • Flux / I2V motion"
+      : props.activeMode === "text_to_video"
+      ? "Text → Video • Flux Cinematic"
+      : "Text → Image • SDXL + LoRA Identity";
+
   return (
     <header className="border-b border-gray-800 bg-gray-950/70 backdrop-blur sticky top-0 z-40">
       <div className="flex items-center justify-between px-6 py-4">
@@ -277,9 +294,7 @@ function GeneratorHeader() {
           <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
             SirensForge Generator
           </h1>
-          <p className="text-xs md:text-sm text-gray-300 mt-1">
-            Text → Image • SDXL + LoRA Identity
-          </p>
+          <p className="text-xs md:text-sm text-gray-300 mt-1">{subtitle}</p>
         </div>
 
         <div className="flex items-center gap-4">
@@ -319,20 +334,18 @@ function GeneratorHeader() {
   );
 }
 
-// -----------------------------------------------------------------------------
-// Mode Tabs
-// -----------------------------------------------------------------------------
-
 function ModeTabs(props: {
   activeMode: GenerationMode;
   onChange: (mode: GenerationMode) => void;
 }) {
   const modes: { id: GenerationMode; label: string; icon: React.ElementType }[] = [
     { id: "text_to_image", label: "Text → Image", icon: FileText },
+    { id: "image_to_video", label: "Image → Video", icon: ImageIcon },
+    { id: "text_to_video", label: "Text → Video", icon: VideoIcon },
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
       {modes.map((mode) => {
         const Icon = mode.icon;
         const isActive = props.activeMode === mode.id;
@@ -369,11 +382,8 @@ function ModeTabs(props: {
   );
 }
 
-// -----------------------------------------------------------------------------
-// Prompt Section
-// -----------------------------------------------------------------------------
-
 function PromptSection(props: {
+  mode: GenerationMode;
   prompt: string;
   negativePrompt: string;
   onPromptChange: (value: string) => void;
@@ -381,19 +391,38 @@ function PromptSection(props: {
 }) {
   const [showNegative, setShowNegative] = useState(false);
 
-  const styleChips = [
-    "Add more detail",
-    "Sharpen anatomy",
-    "Soft lighting",
-    "High fashion",
-    "Cinematic mood",
-    "Professional photography",
-  ];
+  const styleChips =
+    props.mode === "text_to_image"
+      ? [
+          "Add more detail",
+          "Sharpen anatomy",
+          "Soft lighting",
+          "High fashion",
+          "Cinematic mood",
+          "Professional photography",
+        ]
+      : props.mode === "image_to_video"
+      ? ["Slow movement", "Subtle camera motion", "Breathing motion", "Cinematic energy"]
+      : ["Cinematic motion", "Slow dolly", "Atmospheric lighting", "Seductive pacing"];
 
   const addChip = (chip: string) => {
     const lower = chip.toLowerCase();
     props.onPromptChange(props.prompt ? `${props.prompt}, ${lower}` : lower);
   };
+
+  const description =
+    props.mode === "image_to_video"
+      ? "Optional motion guidance for the uploaded image."
+      : props.mode === "text_to_video"
+      ? "Describe the motion scene, style, pacing, and camera feel."
+      : "Describe exactly what you want SirensForge to create.";
+
+  const placeholder =
+    props.mode === "image_to_video"
+      ? "Optional: describe the movement, camera energy, mood, and pacing..."
+      : props.mode === "text_to_video"
+      ? "Describe the full video scene, motion, pacing, and mood..."
+      : "Describe the scene, style, mood, and details...";
 
   return (
     <Card className="border-gray-800 bg-gray-900/80">
@@ -403,8 +432,7 @@ function PromptSection(props: {
           Prompt Builder
         </CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Describe exactly what you want SirensForge to create. This feeds SDXL
-          and video generation.
+          {description}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -412,7 +440,7 @@ function PromptSection(props: {
           <Textarea
             value={props.prompt}
             onChange={(e) => props.onPromptChange(e.target.value)}
-            placeholder="Describe the scene, style, mood, and details..."
+            placeholder={placeholder}
             className="min-h-32 bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 resize-none text-sm"
           />
           <p className="text-[10px] text-gray-400 mt-1">
@@ -464,9 +492,63 @@ function PromptSection(props: {
   );
 }
 
-// -----------------------------------------------------------------------------
-// Model & Style Section
-// -----------------------------------------------------------------------------
+function ImageToVideoUploadSection(props: {
+  imageFile: File | null;
+  previewUrl: string | null;
+  onFileChange: (file: File | null) => void;
+}) {
+  return (
+    <Card className="border-gray-800 bg-gray-900/80">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm md:text-base">
+          <Upload className="w-5 h-5 text-cyan-400" />
+          Source Image
+        </CardTitle>
+        <CardDescription className="text-xs text-gray-300">
+          Upload the image you want to animate into motion.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!props.imageFile ? (
+          <label className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-gray-700 bg-gray-950 px-4 py-8 text-center cursor-pointer hover:border-purple-500/60 transition-colors">
+            <Upload className="w-7 h-7 text-purple-400" />
+            <span className="text-xs text-gray-300">Click to upload an image for animation</span>
+            <span className="text-[10px] text-gray-500">PNG, JPG, WEBP</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={(e) => props.onFileChange(e.target.files?.[0] || null)}
+            />
+          </label>
+        ) : (
+          <div className="rounded-xl border border-gray-800 bg-gray-950 p-3 space-y-3">
+            {props.previewUrl && (
+              <img src={props.previewUrl} alt="Upload preview" className="w-full rounded-lg max-h-72 object-cover" />
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-gray-100 truncate">{props.imageFile.name}</div>
+                <div className="text-[10px] text-gray-400">
+                  {(props.imageFile.size / 1024 / 1024).toFixed(2)} MB
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => props.onFileChange(null)}
+                className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
+              >
+                <X className="w-4 h-4 mr-2" />
+                Remove
+              </Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function ModelStyleSection(props: {
   baseModel: BaseModel;
@@ -549,10 +631,6 @@ function ModelStyleSection(props: {
   );
 }
 
-// -----------------------------------------------------------------------------
-// LoRA Identity Section
-// -----------------------------------------------------------------------------
-
 function LoraIdentitySection(props: {
   value: LoraSelection;
   onChange: (next: LoraSelection) => void;
@@ -603,10 +681,6 @@ function LoraIdentitySection(props: {
     </Card>
   );
 }
-
-// -----------------------------------------------------------------------------
-// Advanced Settings
-// -----------------------------------------------------------------------------
 
 function AdvancedSettings(props: {
   resolution: string;
@@ -757,11 +831,125 @@ function AdvancedSettings(props: {
   );
 }
 
-// -----------------------------------------------------------------------------
-// Generate Button
-// -----------------------------------------------------------------------------
+function VideoSettings(props: {
+  duration: number;
+  fps: number;
+  motion: number;
+  batchSize: number;
+  onDurationChange: (value: number) => void;
+  onFpsChange: (value: number) => void;
+  onMotionChange: (value: number) => void;
+  onBatchSizeChange: (value: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Card className="border-gray-800 bg-gray-900/80">
+      <CardHeader className="py-3">
+        <Button
+          variant="ghost"
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="w-full justify-between px-0 hover:bg-transparent text-gray-100 hover:text-white"
+        >
+          <CardTitle className="text-sm md:text-base">Video Settings</CardTitle>
+          {open ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+        </Button>
+      </CardHeader>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <CardContent className="space-y-4 text-xs pt-0 pb-4">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="font-semibold text-gray-200">Duration</p>
+                  <span className="text-[11px] text-purple-300 font-semibold">
+                    {props.duration}s
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={5}
+                  max={25}
+                  step={1}
+                  value={props.duration}
+                  onChange={(e) => props.onDurationChange(parseInt(e.target.value, 10) || 10)}
+                  className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
+              </div>
+
+              <div>
+                <p className="font-semibold mb-1 text-gray-200">FPS</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {[12, 24, 30].map((fpsOption) => (
+                    <button
+                      key={fpsOption}
+                      type="button"
+                      onClick={() => props.onFpsChange(fpsOption)}
+                      className={`rounded-lg px-3 py-2 text-[11px] font-medium ${
+                        props.fps === fpsOption
+                          ? "bg-purple-500 text-white"
+                          : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                      }`}
+                    >
+                      {fpsOption} fps
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="font-semibold text-gray-200">Motion Strength</p>
+                  <span className="text-[11px] text-purple-300 font-semibold">
+                    {props.motion.toFixed(2)}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={1}
+                  step={0.05}
+                  value={props.motion}
+                  onChange={(e) => props.onMotionChange(parseFloat(e.target.value))}
+                  className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="font-semibold text-gray-200">Batch Size</p>
+                  <span className="text-[11px] text-purple-300 font-semibold">{props.batchSize}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={4}
+                  step={1}
+                  value={props.batchSize}
+                  onChange={(e) =>
+                    props.onBatchSizeChange(Math.max(1, parseInt(e.target.value, 10) || 1))
+                  }
+                  className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                />
+                <p className="text-[10px] text-gray-400 mt-1">
+                  Video batch is visible now for launch planning. Final tier enforcement should remain backend-side.
+                </p>
+              </div>
+            </CardContent>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Card>
+  );
+}
 
 function GenerateButton(props: {
+  mode: GenerationMode;
   isGenerating: boolean;
   batchSize: number;
   qualityPreset: QualityPreset;
@@ -769,6 +957,13 @@ function GenerateButton(props: {
   disabled?: boolean;
   onClick: () => void;
 }) {
+  const actionLabel =
+    props.mode === "image_to_video"
+      ? "Generate Video"
+      : props.mode === "text_to_video"
+      ? "Generate Cinematic Video"
+      : "Generate";
+
   const subtext = `This will create ${props.batchSize} ${
     props.batchSize > 1 ? "outputs" : "output"
   } at ${props.qualityPreset} quality with ${props.consistencyPreset} consistency.`;
@@ -802,7 +997,7 @@ function GenerateButton(props: {
             ) : (
               <span className="flex items-center gap-2">
                 <Sparkles className="w-4 h-4" />
-                Generate
+                {actionLabel}
               </span>
             )}
           </Button>
@@ -812,10 +1007,6 @@ function GenerateButton(props: {
     </Card>
   );
 }
-
-// -----------------------------------------------------------------------------
-// Output Grid + Modal
-// -----------------------------------------------------------------------------
 
 function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
   const [selected, setSelected] = useState<GeneratedItem | null>(null);
@@ -941,23 +1132,22 @@ function DownloadIcon() {
   );
 }
 
-// -----------------------------------------------------------------------------
-// History Sidebar
-// -----------------------------------------------------------------------------
-
 function HistorySidebar(props: {
   history: GeneratedItem[];
   onSelect: (item: GeneratedItem) => void;
   onRerun: (item: GeneratedItem) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<"all" | "images">("all");
+  const [filter, setFilter] = useState<"all" | "images" | "videos">("all");
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
 
   const filtered = [...props.history]
     .filter((item) => {
       const matchesQuery = item.prompt.toLowerCase().includes(query.toLowerCase());
-      const matchesFilter = filter === "all" || (filter === "images" && item.kind === "image");
+      const matchesFilter =
+        filter === "all" ||
+        (filter === "images" && item.kind === "image") ||
+        (filter === "videos" && item.kind === "video");
       return matchesQuery && matchesFilter;
     })
     .sort((a, b) => {
@@ -982,23 +1172,14 @@ function HistorySidebar(props: {
         </div>
 
         <div className="flex gap-2">
-          <Select value={filter} onValueChange={(v) => setFilter(v as "all" | "images")}>
+          <Select value={filter} onValueChange={(v) => setFilter(v as "all" | "images" | "videos")}>
             <SelectTrigger className="bg-gray-950 border-gray-800 h-8 text-xs text-gray-100">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-              <SelectItem
-                className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"
-                value="all"
-              >
-                All
-              </SelectItem>
-              <SelectItem
-                className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"
-                value="images"
-              >
-                Images
-              </SelectItem>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="images">Images</SelectItem>
+              <SelectItem value="videos">Videos</SelectItem>
             </SelectContent>
           </Select>
 
@@ -1007,18 +1188,8 @@ function HistorySidebar(props: {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-              <SelectItem
-                className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"
-                value="newest"
-              >
-                Newest
-              </SelectItem>
-              <SelectItem
-                className="text-gray-100 focus:bg-purple-500/20 focus:text-gray-100"
-                value="oldest"
-              >
-                Oldest
-              </SelectItem>
+              <SelectItem value="newest">Newest</SelectItem>
+              <SelectItem value="oldest">Oldest</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1071,14 +1242,9 @@ function HistorySidebar(props: {
   );
 }
 
-// -----------------------------------------------------------------------------
-// MAIN PAGE
-// -----------------------------------------------------------------------------
-
 export default function GeneratePage() {
   const router = useRouter();
 
-  // Core state
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
@@ -1094,15 +1260,13 @@ export default function GeneratePage() {
   const [qualityPreset] = useState<QualityPreset>("balanced");
   const [consistencyPreset] = useState<ConsistencyPreset>("medium");
 
-  // LoRA identity (UI + payload)
   const [loraSelection, setLoraSelection] = useState<LoraSelection>({
     mode: "single",
-    selected: [], // currently single-select only
+    selected: [],
     createNew: false,
     newName: "",
   });
 
-  // Advanced
   const [resolution, setResolution] = useState("1024x1024");
   const [guidance, setGuidance] = useState(7.5);
   const [steps, setSteps] = useState(30);
@@ -1110,21 +1274,32 @@ export default function GeneratePage() {
   const [lockSeed, setLockSeed] = useState(false);
   const [batchSize, setBatchSize] = useState(1);
 
-  // Output & history
+  const [videoDuration, setVideoDuration] = useState(10);
+  const [videoFps, setVideoFps] = useState(24);
+  const [videoMotion, setVideoMotion] = useState(0.45);
+  const [videoBatchSize, setVideoBatchSize] = useState(1);
+
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+
   const [items, setItems] = useState<GeneratedItem[]>([]);
   const [history, setHistory] = useState<GeneratedItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
 
-  const canGenerate = !isGenerating && Boolean(prompt?.trim()) && Boolean(baseModel);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Subscription modal state
   const [showSubModal, setShowSubModal] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
 
-  // ------------------------------------------------------------
-  // Siren's Mind → Generator injection (LOCKED)
-  // ------------------------------------------------------------
+  const canGenerate =
+    !isGenerating &&
+    (
+      mode === "image_to_video"
+        ? Boolean(imageFile)
+        : Boolean(prompt?.trim())
+    ) &&
+    Boolean(baseModel);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -1134,15 +1309,11 @@ export default function GeneratePage() {
           data: { session },
         } = await supabase.auth.getSession();
 
-        // If user not logged in → empty dropdown
         if (!session?.user?.id) {
           if (!cancelled) setIdentityOptions([]);
           return;
         }
 
-        // 🔒 IMPORTANT FIX:
-        // We MUST filter by the logged in user's id
-        // RLS requires this or Supabase returns an empty array.
         const { data, error } = await supabase
           .from("user_loras")
           .select("id, name")
@@ -1199,6 +1370,18 @@ export default function GeneratePage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!imageFile) {
+      setImagePreviewUrl(null);
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(imageFile);
+    setImagePreviewUrl(objectUrl);
+
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [imageFile]);
+
   const identitySelectOptions: { id: string; label: string }[] = [
     { id: "none", label: "None (no identity LoRA)" },
     ...identityOptions.map((l) => ({
@@ -1218,7 +1401,6 @@ export default function GeneratePage() {
     setErrorMessage(null);
     setIsGenerating(true);
 
-    // Parse resolution once
     const [parsedWidth, parsedHeight] = resolution
       .split("x")
       .map((v) => parseInt(v, 10));
@@ -1226,8 +1408,6 @@ export default function GeneratePage() {
     try {
       const seedValue = lockSeed ? seed : Math.floor(Math.random() * 1_000_000_000);
 
-      // ✅ This is the ONLY contract the frontend sends.
-      // Backend (Next.js /api/generate) resolves subscription + builds full Comfy workflow.
       const baseParams = {
         engine: "comfyui",
         template: "sirens_image_v3_production",
@@ -1242,71 +1422,141 @@ export default function GeneratePage() {
         identity_lora: selectedLoraId ? selectedLoraId : null,
       };
 
-      const runCount = Math.max(1, batchSize || 1);
+      const runCount =
+        mode === "text_to_image"
+          ? Math.max(1, batchSize || 1)
+          : Math.max(1, videoBatchSize || 1);
+
       const generatedAll: GeneratedItem[] = [];
 
       for (let i = 0; i < runCount; i++) {
         const runSeed = lockSeed ? seedValue + i : Math.floor(Math.random() * 1_000_000_000);
 
-        const runPayload = {
-          ...baseParams,
-          seed: runSeed,
-        };
+        if (mode === "text_to_image") {
+          const runPayload = {
+            ...baseParams,
+            seed: runSeed,
+          };
 
-        // ✅ IMPORTANT: Call your Next.js API route (not Railway directly)
-        const res = await fetch("/api/generate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(runPayload),
-        });
+          const res = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(runPayload),
+          });
 
-        if (res.status === 402 || res.status === 403) {
-          let reason = "You need an active SirensForge subscription to use the generator.";
-          try {
-            const data = await res.json();
-            if (typeof data?.error === "string") reason = data.error;
-            else if (typeof data?.message === "string") reason = data.message;
-            else if (typeof data?.code === "string") reason = data.code;
-          } catch {}
-          setSubscriptionError(reason);
-          setShowSubModal(true);
-          setIsGenerating(false);
-          return;
+          if (res.status === 402 || res.status === 403) {
+            let reason = "You need an active SirensForge subscription to use the generator.";
+            try {
+              const data = await res.json();
+              if (typeof data?.error === "string") reason = data.error;
+              else if (typeof data?.message === "string") reason = data.message;
+              else if (typeof data?.code === "string") reason = data.code;
+            } catch {}
+            setSubscriptionError(reason);
+            setShowSubModal(true);
+            setIsGenerating(false);
+            return;
+          }
+
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`Generate failed (${res.status}): ${text || "Unknown error"}`);
+          }
+
+          const data = await res.json();
+          const outputs = Array.isArray(data?.images)
+            ? data.images
+            : Array.isArray(data?.outputs)
+            ? data.outputs
+            : [];
+
+          if (!outputs.length) {
+            throw new Error("/api/generate did not return images[] or outputs[].");
+          }
+
+          const now = new Date().toISOString();
+          const generated: GeneratedItem[] = outputs.map((output: any) => ({
+            id: `${now}-${Math.random().toString(36).slice(2)}`,
+            kind: inferKindFromOutput(output),
+            url: getOutputUrl(output),
+            prompt,
+            settings: runPayload,
+            createdAt: now,
+          }));
+
+          generatedAll.push(...generated);
+        } else {
+          const videoPayload = {
+            ...baseParams,
+            mode,
+            seed: runSeed,
+            image_input:
+              mode === "image_to_video" && imageFile
+                ? {
+                    filename: imageFile.name,
+                    data_url: await fileToDataUrl(imageFile),
+                  }
+                : null,
+            video: {
+              duration: videoDuration,
+              fps: videoFps,
+              motion: videoMotion,
+              batch: 1,
+            },
+          };
+
+          const res = await fetch("/api/generate_video", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(videoPayload),
+          });
+
+          if (res.status === 402 || res.status === 403) {
+            let reason = "You need an active SirensForge subscription to use the generator.";
+            try {
+              const data = await res.json();
+              if (typeof data?.error === "string") reason = data.error;
+              else if (typeof data?.message === "string") reason = data.message;
+              else if (typeof data?.code === "string") reason = data.code;
+            } catch {}
+            setSubscriptionError(reason);
+            setShowSubModal(true);
+            setIsGenerating(false);
+            return;
+          }
+
+          if (!res.ok) {
+            const text = await res.text().catch(() => "");
+            throw new Error(`Video generate failed (${res.status}): ${text || "Unknown error"}`);
+          }
+
+          const data = await res.json();
+          const outputs = Array.isArray(data?.outputs)
+            ? data.outputs
+            : data?.video_url
+            ? [data.video_url]
+            : [];
+
+          if (!outputs.length) {
+            throw new Error("/api/generate_video did not return outputs[] or video_url.");
+          }
+
+          const now = new Date().toISOString();
+          const generated: GeneratedItem[] = outputs.map((output: any) => ({
+            id: `${now}-${Math.random().toString(36).slice(2)}`,
+            kind: "video",
+            url: getOutputUrl(output),
+            prompt: prompt || "(Image-driven video)",
+            settings: videoPayload,
+            createdAt: now,
+          }));
+
+          generatedAll.push(...generated);
         }
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(`Generate failed (${res.status}): ${text || "Unknown error"}`);
-        }
-
-        const data = await res.json();
-
-        // Our API may return images[] or outputs[] (strings or objects)
-        const outputs = Array.isArray(data?.images)
-          ? data.images
-          : Array.isArray(data?.outputs)
-          ? data.outputs
-          : [];
-
-        if (!outputs.length) {
-          throw new Error("/api/generate did not return images[] or outputs[].");
-        }
-
-        const now = new Date().toISOString();
-        const generated: GeneratedItem[] = outputs.map((output: any) => ({
-          id: `${now}-${Math.random().toString(36).slice(2)}`,
-          kind: inferKindFromOutput(output),
-          url: typeof output === "string" ? output : output?.url,
-          prompt,
-          settings: runPayload,
-          createdAt: now,
-        }));
-
-        generatedAll.push(...generated);
       }
 
       if (!generatedAll.length) {
-        throw new Error("/api/generate returned no outputs.");
+        throw new Error("Generation returned no outputs.");
       }
 
       setItems((prev) => [...generatedAll, ...prev].slice(0, 12));
@@ -1316,7 +1566,7 @@ export default function GeneratePage() {
 
       const fallback =
         outputType === "IMAGE"
-          ? "Something went wrong generating your image. Check backend logs."
+          ? "Something went wrong generating your output. Check backend logs."
           : "Something went wrong generating your story. Check backend logs.";
 
       setErrorMessage(err?.message || fallback);
@@ -1336,7 +1586,7 @@ export default function GeneratePage() {
 
   return (
     <div className="min-h-screen bg-black text-gray-100 flex flex-col">
-      <GeneratorHeader />
+      <GeneratorHeader activeMode={mode} />
 
       <main className="flex-1 flex flex-col md:flex-row">
         <div className="flex-1 px-4 md:px-6 py-4 md:py-6 space-y-4 max-w-6xl mx-auto w-full">
@@ -1344,7 +1594,16 @@ export default function GeneratePage() {
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <div className="space-y-4 xl:col-span-1">
+              {mode === "image_to_video" && (
+                <ImageToVideoUploadSection
+                  imageFile={imageFile}
+                  previewUrl={imagePreviewUrl}
+                  onFileChange={setImageFile}
+                />
+              )}
+
               <PromptSection
+                mode={mode}
                 prompt={prompt}
                 negativePrompt={negativePrompt}
                 onPromptChange={setPrompt}
@@ -1376,24 +1635,38 @@ export default function GeneratePage() {
                 options={identitySelectOptions}
               />
 
-              <AdvancedSettings
-                resolution={resolution}
-                guidance={guidance}
-                steps={steps}
-                seed={seed}
-                lockSeed={lockSeed}
-                batchSize={batchSize}
-                onResolutionChange={setResolution}
-                onGuidanceChange={setGuidance}
-                onStepsChange={setSteps}
-                onSeedChange={setSeed}
-                onLockSeedChange={setLockSeed}
-                onBatchSizeChange={setBatchSize}
-              />
+              {mode === "text_to_image" ? (
+                <AdvancedSettings
+                  resolution={resolution}
+                  guidance={guidance}
+                  steps={steps}
+                  seed={seed}
+                  lockSeed={lockSeed}
+                  batchSize={batchSize}
+                  onResolutionChange={setResolution}
+                  onGuidanceChange={setGuidance}
+                  onStepsChange={setSteps}
+                  onSeedChange={setSeed}
+                  onLockSeedChange={setLockSeed}
+                  onBatchSizeChange={setBatchSize}
+                />
+              ) : (
+                <VideoSettings
+                  duration={videoDuration}
+                  fps={videoFps}
+                  motion={videoMotion}
+                  batchSize={videoBatchSize}
+                  onDurationChange={setVideoDuration}
+                  onFpsChange={setVideoFps}
+                  onMotionChange={setVideoMotion}
+                  onBatchSizeChange={setVideoBatchSize}
+                />
+              )}
 
               <GenerateButton
+                mode={mode}
                 isGenerating={isGenerating}
-                batchSize={batchSize}
+                batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
                 qualityPreset={qualityPreset}
                 consistencyPreset={consistencyPreset}
                 disabled={!canGenerate}
