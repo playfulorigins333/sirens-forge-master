@@ -47,6 +47,31 @@ function inferAssetKind(row: any): "image" | "video" {
   return "image";
 }
 
+function pickIdentityPreviewUrl(
+  loraPreviewUrl: string | null | undefined,
+  linkedAssets: IdentityDetailAsset[]
+): string | null {
+  if (loraPreviewUrl && String(loraPreviewUrl).trim().length > 0) {
+    return loraPreviewUrl;
+  }
+
+  const latestImageAsset = linkedAssets.find(
+    (asset) => asset.kind === "image" && asset.url
+  );
+  if (latestImageAsset) {
+    return latestImageAsset.url;
+  }
+
+  const latestVideoAsset = linkedAssets.find(
+    (asset) => asset.kind === "video" && asset.url
+  );
+  if (latestVideoAsset) {
+    return latestVideoAsset.url;
+  }
+
+  return null;
+}
+
 export default async function IdentityDetailPage({ params }: PageProps) {
   const { id } = await params;
 
@@ -160,10 +185,7 @@ export default async function IdentityDetailPage({ params }: PageProps) {
     progress: typeof lora.progress === "number" ? lora.progress : null,
     datasetImageCount:
       typeof lora.image_count === "number" ? lora.image_count : null,
-    previewUrl:
-      lora.preview_url ||
-      linkedAssets.find((a) => a.kind === "image")?.url ||
-      null,
+    previewUrl: pickIdentityPreviewUrl(lora.preview_url, linkedAssets),
     artifactKey: lora.artifact_r2_key || null,
     datasetPrefix: lora.dataset_r2_prefix || null,
     imageCount,

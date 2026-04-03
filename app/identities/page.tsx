@@ -44,6 +44,31 @@ function inferAssetKind(row: any): "image" | "video" {
   return "image";
 }
 
+function pickIdentityCoverUrl(
+  loraPreviewUrl: string | null | undefined,
+  linkedAssets: any[]
+): string | null {
+  if (loraPreviewUrl && String(loraPreviewUrl).trim().length > 0) {
+    return loraPreviewUrl;
+  }
+
+  const latestImageAsset = linkedAssets.find(
+    (row: any) => inferAssetUrl(row) && inferAssetKind(row) === "image"
+  );
+  if (latestImageAsset) {
+    return inferAssetUrl(latestImageAsset);
+  }
+
+  const latestVideoAsset = linkedAssets.find(
+    (row: any) => inferAssetUrl(row) && inferAssetKind(row) === "video"
+  );
+  if (latestVideoAsset) {
+    return inferAssetUrl(latestVideoAsset);
+  }
+
+  return null;
+}
+
 export default async function IdentitiesPage() {
   const auth = await ensureActiveSubscription();
 
@@ -123,16 +148,7 @@ export default async function IdentitiesPage() {
       (row: any) => row?.metadata?.identity_lora === lora.id
     );
 
-    const firstImageAsset = linkedAssets.find(
-      (row: any) => inferAssetUrl(row) && inferAssetKind(row) === "image"
-    );
-    const firstAnyAsset = linkedAssets.find((row: any) => inferAssetUrl(row));
-
-    const coverUrl =
-      lora.preview_url ||
-      inferAssetUrl(firstImageAsset) ||
-      inferAssetUrl(firstAnyAsset) ||
-      null;
+    const coverUrl = pickIdentityCoverUrl(lora.preview_url, linkedAssets);
 
     const imageCount = linkedAssets.filter(
       (row: any) => inferAssetKind(row) === "image"
