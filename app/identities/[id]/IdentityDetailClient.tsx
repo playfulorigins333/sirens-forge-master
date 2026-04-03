@@ -119,6 +119,17 @@ function statusTone(status: string) {
   }
 }
 
+function isVideoUrl(url?: string | null) {
+  if (!url) return false;
+  const clean = url.toLowerCase().split("?")[0].split("#")[0];
+  return (
+    clean.endsWith(".mp4") ||
+    clean.endsWith(".webm") ||
+    clean.endsWith(".mov") ||
+    clean.endsWith(".m4v")
+  );
+}
+
 function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
   return (
     <header className="border-b border-gray-800 bg-gray-950/70 backdrop-blur sticky top-0 z-40">
@@ -171,16 +182,35 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
 }
 
 function IdentityHero({ identity }: { identity: IdentityDetailData }) {
+  const previewIsVideo = isVideoUrl(identity.previewUrl);
+
   return (
     <Card className="overflow-hidden border-gray-800 bg-gray-900/80">
       <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="relative aspect-[4/3] xl:aspect-auto bg-gray-950 overflow-hidden">
           {identity.previewUrl ? (
-            <img
-              src={identity.previewUrl}
-              alt={identity.name}
-              className="w-full h-full object-cover"
-            />
+            previewIsVideo ? (
+              <>
+                <video
+                  src={identity.previewUrl}
+                  className="w-full h-full object-cover"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                />
+                <div className="absolute top-4 right-4 px-2.5 py-1 rounded-full bg-black/60 border border-white/10 text-[10px] font-semibold text-cyan-200 flex items-center gap-1 z-10">
+                  <Play className="w-3 h-3" />
+                  VIDEO PREVIEW
+                </div>
+              </>
+            ) : (
+              <img
+                src={identity.previewUrl}
+                alt={identity.name}
+                className="w-full h-full object-cover"
+              />
+            )
           ) : (
             <div className="w-full h-full bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-cyan-500/10 flex items-center justify-center">
               <div className="h-20 w-20 rounded-[28px] bg-black/30 border border-white/10 flex items-center justify-center">
@@ -190,7 +220,7 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
           )}
 
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/10" />
-          <div className="absolute top-4 left-4">
+          <div className="absolute top-4 left-4 z-10">
             <span
               className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border ${statusTone(
                 identity.status
