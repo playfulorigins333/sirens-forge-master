@@ -160,7 +160,10 @@ export default async function IdentityDetailPage({ params }: PageProps) {
     progress: typeof lora.progress === "number" ? lora.progress : null,
     datasetImageCount:
       typeof lora.image_count === "number" ? lora.image_count : null,
-    previewUrl: lora.preview_url || linkedAssets.find((a) => a.kind === "image")?.url || null,
+    previewUrl:
+      lora.preview_url ||
+      linkedAssets.find((a) => a.kind === "image")?.url ||
+      null,
     artifactKey: lora.artifact_r2_key || null,
     datasetPrefix: lora.dataset_r2_prefix || null,
     imageCount,

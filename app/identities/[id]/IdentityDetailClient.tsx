@@ -5,14 +5,12 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
-  Crown,
   Dna,
   Download,
   Image as ImageIcon,
   Maximize2,
   Play,
   Search,
-  Shield,
   Sparkles,
   Star,
   Video as VideoIcon,
@@ -647,6 +645,7 @@ export default function IdentityDetailClient({
 
       <main className="max-w-[1600px] mx-auto px-4 md:px-6 py-6 space-y-6">
         <IdentityHero identity={identity} />
+
         <IdentityAssetToolbar
           query={query}
           filter={filter}
