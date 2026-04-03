@@ -13,7 +13,6 @@ export type ActiveSubscriptionResult = {
     email?: string | null;
     badge?: string | null;
     seat_number?: number | null;
-    is_og_member?: boolean | null;
     tokens?: number | null;
   } | null;
   subscription?: {
@@ -59,7 +58,6 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
         email,
         badge,
         seat_number,
-        is_og_member,
         tokens
       `
       )
@@ -153,7 +151,14 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
         id: user.id,
         email: user.email ?? null,
       },
-      profile,
+      profile: {
+        id: profile.id,
+        user_id: profile.user_id ?? null,
+        email: profile.email ?? null,
+        badge: profile.badge ?? null,
+        seat_number: profile.seat_number ?? null,
+        tokens: profile.tokens ?? null,
+      },
       subscription: {
         id: subscription.id,
         status: subscription.status,
