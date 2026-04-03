@@ -17,14 +17,11 @@ export default async function GenerateLayout({
 
   if (!auth.ok) {
     if (auth.error === "UNAUTHENTICATED") {
-      // Not logged in → send to login (or age-check if you prefer)
       redirect("/login");
     } else {
-      // Logged in but not subscribed / expired → send to pricing
       redirect("/pricing");
     }
   }
 
-  // User is logged in AND has an active/trialing subscription
   return <>{children}</>;
 }

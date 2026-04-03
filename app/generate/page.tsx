@@ -1097,7 +1097,7 @@ export default function GeneratePage() {
   // LoRA identity (UI + payload)
   const [loraSelection, setLoraSelection] = useState<LoraSelection>({
     mode: "single",
-    selected: [],
+    selected: [], // currently single-select only
     createNew: false,
     newName: "",
   });
@@ -1129,42 +1129,41 @@ export default function GeneratePage() {
     let cancelled = false;
 
     const loadIdentities = async () => {
-  try {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-    // If user not logged in → empty dropdown
-    if (!session?.user?.id) {
-      if (!cancelled) setIdentityOptions([]);
-      return;
-    }
+        // If user not logged in → empty dropdown
+        if (!session?.user?.id) {
+          if (!cancelled) setIdentityOptions([]);
+          return;
+        }
 
-    // 🔒 IMPORTANT FIX:
-    // We MUST filter by the logged in user's id
-    // RLS requires this or Supabase returns an empty array.
-    const { data, error } = await supabase
-      .from("user_loras")
-      .select("id, name")
-      .eq("user_id", session.user.id)
-      .eq("status", "completed")
-      .order("created_at", { ascending: false });
+        // 🔒 IMPORTANT FIX:
+        // We MUST filter by the logged in user's id
+        // RLS requires this or Supabase returns an empty array.
+        const { data, error } = await supabase
+          .from("user_loras")
+          .select("id, name")
+          .eq("user_id", session.user.id)
+          .eq("status", "completed")
+          .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error("Failed to load user LoRAs:", error);
-      if (!cancelled) setIdentityOptions([]);
-      return;
-    }
+        if (error) {
+          console.error("Failed to load user LoRAs:", error);
+          if (!cancelled) setIdentityOptions([]);
+          return;
+        }
 
-    if (!cancelled) setIdentityOptions(data ?? []);
-  } catch (err) {
-    console.error("Identity load crash:", err);
-    if (!cancelled) setIdentityOptions([]);
-  }
-};
+        if (!cancelled) setIdentityOptions(data ?? []);
+      } catch (err) {
+        console.error("Identity load crash:", err);
+        if (!cancelled) setIdentityOptions([]);
+      }
+    };
 
-loadIdentities();
-
+    loadIdentities();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) loadIdentities();
