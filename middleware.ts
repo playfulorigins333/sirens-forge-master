@@ -9,23 +9,13 @@ function mustEnv(name: string): string {
 }
 
 export async function middleware(req: NextRequest) {
-  const url = req.nextUrl;
-  const hostname = req.headers.get("host") || "";
-  const pathname = url.pathname;
+  const pathname = req.nextUrl.pathname;
 
-  // ✅ ALWAYS ALLOW LOCAL DEV
-  if (hostname.includes("localhost") || hostname.includes("127.0.0.1")) {
-    return NextResponse.next();
-  }
-
-  // ✅ ALWAYS ALLOW API + INTERNAL + STATIC
-  // (Keep this list explicit for safety, but matcher also avoids _next/static/image files)
+  // Always allow API, auth, and static/internal assets through.
   if (
     pathname.startsWith("/api") ||
     pathname.startsWith("/_next") ||
-    pathname.startsWith("/checkout") ||
     pathname.startsWith("/auth") ||
-    pathname.startsWith("/login") ||
     pathname === "/favicon.ico" ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml"
@@ -33,10 +23,9 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // ✅ Create response we can attach Set-Cookie headers to
+  // Create a response so Supabase can refresh/set auth cookies.
   const res = NextResponse.next();
 
-  // ✅ CRITICAL: This is what keeps sb-* cookies alive in prod
   const supabase = createServerClient(
     mustEnv("NEXT_PUBLIC_SUPABASE_URL"),
     mustEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
@@ -55,53 +44,18 @@ export async function middleware(req: NextRequest) {
     }
   );
 
-  // 🔥 Refresh/creates cookies if a session exists
+  // Keep Supabase session cookies alive in production.
   await supabase.auth.getUser();
 
-  // 🔒 Detect session cookie after sync
-  const hasSession =
-    Array.from(res.cookies.getAll()).some(
-      (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
-    ) ||
-    req.cookies.getAll().some(
-      (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
-    );
-
-  // 🔒 PRODUCTION DOMAIN RULES
-  if (hostname === "sirensforge.vip" || hostname === "www.sirensforge.vip") {
-    // 🚫 NOT LOGGED IN
-    if (!hasSession) {
-      // ✅ Allow generate + lora routes (your choice)
-      if (pathname === "/generate" || pathname.startsWith("/lora")) {
-        return res;
-      }
-
-      // 🔒 Everything else → pricing
-      if (!pathname.startsWith("/pricing")) {
-        const to = new URL("/pricing", req.url);
-
-        const ref = url.searchParams.get("ref");
-        if (ref) to.searchParams.set("ref", ref);
-
-        return NextResponse.redirect(to);
-      }
-    }
-
-    return res;
-  }
-
+  // Launch mode:
+  // Middleware is now session-preservation only.
+  // Public/private access control should happen in layouts/routes,
+  // not here via broad redirect funnels.
   return res;
 }
 
 export const config = {
   matcher: [
-    /*
-     * SAFE matcher:
-     * - Do NOT use negative-lookahead to exclude /api (Next/Vercel can still run middleware on /api in some builds)
-     * - Only exclude known Next internals + static files here
-     *
-     * NOTE: We still explicitly early-return for pathname.startsWith("/api") above.
-     */
     "/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)",
   ],
 };
