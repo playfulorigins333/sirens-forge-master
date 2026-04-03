@@ -40,17 +40,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-// -----------------------------------------------------------------------------
-// Supabase (client)
-// -----------------------------------------------------------------------------
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 );
-
-// -----------------------------------------------------------------------------
-// Types
-// -----------------------------------------------------------------------------
 
 type GenerationMode =
   | "text_to_image"
@@ -90,10 +83,6 @@ interface GeneratedItem {
   createdAt: string;
 }
 
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
 function inferKindFromOutput(output: any): MediaKind {
   if (typeof output === "string") {
     const url = output.toLowerCase();
@@ -127,10 +116,6 @@ async function fileToDataUrl(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
-
-// -----------------------------------------------------------------------------
-// Subscription Modal (Neon SirensForge Style)
-// -----------------------------------------------------------------------------
 
 interface SubscriptionModalProps {
   open: boolean;
@@ -446,6 +431,13 @@ function PromptSection(props: {
           <p className="text-[10px] text-gray-400 mt-1">
             {props.prompt.length} characters
           </p>
+          <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
+            Tip: Describe the subject clearly for better repeatability. Example:{" "}
+            <span className="text-gray-100 font-medium">
+              same woman, consistent face, repeatable character
+            </span>
+            .
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -637,6 +629,7 @@ function LoraIdentitySection(props: {
   options: { id: string; label: string }[];
 }) {
   const v = props.value;
+  const hasIdentity = v.selected.length > 0;
 
   const setSelected = (id: string) =>
     props.onChange({
@@ -648,11 +641,11 @@ function LoraIdentitySection(props: {
     });
 
   return (
-    <Card className="border-gray-800 bg-gray-900/80">
+    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_24px_rgba(168,85,247,0.12)]">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm md:text-base">Identity LoRA</CardTitle>
+        <CardTitle className="text-sm md:text-base">Identity Control</CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Select one trained identity LoRA to control identity consistency.
+          Use a trained identity LoRA to keep the same person consistent across generations and video.
         </CardDescription>
       </CardHeader>
 
@@ -677,6 +670,13 @@ function LoraIdentitySection(props: {
             ))}
           </SelectContent>
         </Select>
+
+        {!hasIdentity && (
+          <div className="rounded-lg border border-purple-900/50 bg-purple-500/5 px-3 py-2 text-[11px] text-gray-300">
+            <span className="text-purple-300 font-semibold">New here?</span>{" "}
+            Generate once, then train an identity LoRA for more consistent results across images and video.
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -864,6 +864,10 @@ function VideoSettings(props: {
             exit={{ opacity: 0, height: 0 }}
           >
             <CardContent className="space-y-4 text-xs pt-0 pb-4">
+              <div className="rounded-lg border border-cyan-900/50 bg-cyan-500/5 px-3 py-2 text-[11px] text-gray-300">
+                Best results: use an identity LoRA for more consistent character motion across frames.
+              </div>
+
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <p className="font-semibold text-gray-200">Duration</p>
@@ -1602,6 +1606,12 @@ export default function GeneratePage() {
                 />
               )}
 
+              <LoraIdentitySection
+                value={loraSelection}
+                onChange={(next) => setLoraSelection(next)}
+                options={identitySelectOptions}
+              />
+
               <PromptSection
                 mode={mode}
                 prompt={prompt}
@@ -1627,12 +1637,6 @@ export default function GeneratePage() {
                 stylePreset={stylePreset}
                 onBaseModelChange={setBaseModel}
                 onStylePresetChange={setStylePreset}
-              />
-
-              <LoraIdentitySection
-                value={loraSelection}
-                onChange={(next) => setLoraSelection(next)}
-                options={identitySelectOptions}
               />
 
               {mode === "text_to_image" ? (
