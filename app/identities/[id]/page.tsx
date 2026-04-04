@@ -97,6 +97,7 @@ function pickFirstString(row: Record<string, unknown>, keys: string[]): string |
 
 function normalizeAsset(row: GenerationRow): IdentityDetailAsset | null {
   const id = asString(row.id, "");
+  if (!id) return null;
 
   const directVideoUrl = pickFirstString(row, [
     "video_url",
@@ -116,7 +117,7 @@ function normalizeAsset(row: GenerationRow): IdentityDetailAsset | null {
   const fallbackUrl = pickFirstString(row, ["url"]);
   const url = directVideoUrl || directImageUrl || fallbackUrl;
 
-  if (!id || !url) return null;
+  if (!url) return null;
 
   const explicitKind =
     asNullableString(row.kind) ||
@@ -193,25 +194,29 @@ export default async function IdentityDetailPage({
     .maybeSingle();
 
   if (identityError) {
-    throw new Error(identityError.message);
+    throw new Error(`user_loras query failed: ${identityError.message}`);
   }
 
   if (!identityRow) {
     notFound();
   }
 
-  const { data: generationRows, error: generationError } = await supabase
+  let generationRows: GenerationRow[] = [];
+
+  const generationsResult = await supabase
     .from("generations")
     .select("*")
     .eq("user_id", user.id)
     .eq("identity_lora", id)
     .order("created_at", { ascending: false });
 
-  if (generationError) {
-    throw new Error(generationError.message);
+  if (!generationsResult.error && Array.isArray(generationsResult.data)) {
+    generationRows = generationsResult.data as GenerationRow[];
+  } else {
+    console.error("Identity detail generations query failed:", generationsResult.error);
   }
 
-  const assets = ((generationRows ?? []) as GenerationRow[])
+  const assets = generationRows
     .map(normalizeAsset)
     .filter((item): item is IdentityDetailAsset => item !== null);
 
@@ -248,7 +253,9 @@ export default async function IdentityDetailPage({
     previewUrl,
     previewKind,
     artifactKey: asNullableString(identityRow.artifact_r2_key),
-    datasetPrefix: asNullableString(identityRow.dataset_r2_prefix),
+    datasetPrefix:
+      asNullableString(identityRow.dataset_r2_prefix) ??
+      asNullableString(identityRow.dataset_prefix),
     imageCount,
     videoCount,
     totalAssets: assets.length,
