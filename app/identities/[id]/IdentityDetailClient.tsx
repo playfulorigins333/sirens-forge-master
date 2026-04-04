@@ -15,6 +15,7 @@ import {
   Star,
   Video as VideoIcon,
   Wand2,
+  X,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-export type IdentityDetailAsset = {
+type IdentityDetailAsset = {
   id: string;
   kind: "image" | "video";
   url: string;
@@ -45,7 +46,7 @@ export type IdentityDetailAsset = {
   bodyMode: string | null;
 };
 
-export type IdentityDetailData = {
+type IdentityDetailData = {
   id: string;
   name: string;
   status: string;
@@ -67,44 +68,59 @@ export type IdentityDetailData = {
 type FilterMode = "all" | "images" | "videos";
 type SortMode = "newest" | "oldest";
 
-function formatDate(value: string) {
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
+function safeString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
 }
 
-function formatRelative(value: string) {
-  try {
-    const date = new Date(value).getTime();
-    const now = Date.now();
-    const diffMs = now - date;
-    const minutes = Math.floor(diffMs / 1000 / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
+function safeNullableString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
 
-    if (minutes < 1) return "Just now";
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return `${days}d ago`;
-  } catch {
-    return "Recently";
-  }
+function safeAssets(value: unknown): IdentityDetailAsset[] {
+  return Array.isArray(value) ? (value as IdentityDetailAsset[]) : [];
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "Unknown";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleString();
+}
+
+function formatRelative(value?: string | null) {
+  if (!value) return "Recently";
+
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return "Recently";
+
+  const diffMs = Date.now() - time;
+  const minutes = Math.floor(diffMs / 1000 / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
 }
 
 function downloadFile(url: string, filename?: string) {
+  if (!url) return;
+
   const link = document.createElement("a");
   link.href = url;
   link.download = filename || "sirensforge-identity-asset";
   link.target = "_blank";
+  link.rel = "noopener noreferrer";
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
 }
 
-function statusTone(status: string) {
-  switch (status) {
+function statusTone(status?: string | null) {
+  switch ((status || "").toLowerCase()) {
     case "completed":
       return "bg-emerald-500/15 text-emerald-200 border-emerald-500/30";
     case "training":
@@ -121,6 +137,9 @@ function statusTone(status: string) {
 }
 
 function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
+  const displayName = safeString(identity?.name, "Unnamed Identity");
+  const initial = displayName.trim().charAt(0).toUpperCase() || "I";
+
   return (
     <header className="border-b border-gray-800 bg-gray-950/70 backdrop-blur sticky top-0 z-40">
       <div className="flex items-center justify-between px-6 py-4">
@@ -139,7 +158,7 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
 
             <div>
               <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
-                {identity.name}
+                {displayName}
               </h1>
               <p className="text-xs md:text-sm text-gray-300 mt-1">
                 Identity workspace • assets created with this character
@@ -161,7 +180,7 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
           <div className="flex items-center gap-3">
             <Avatar className="h-9 w-9 border border-purple-500/60">
               <AvatarFallback className="bg-gray-900 text-purple-300">
-                {identity.name[0] || "I"}
+                {initial}
               </AvatarFallback>
             </Avatar>
           </div>
@@ -172,15 +191,20 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
 }
 
 function IdentityHero({ identity }: { identity: IdentityDetailData }) {
+  const displayName = safeString(identity?.name, "Unnamed Identity");
+  const previewUrl = safeNullableString(identity?.previewUrl);
+  const previewKind = identity?.previewKind;
+  const status = safeString(identity?.status, "unknown");
+
   return (
     <Card className="overflow-hidden border-gray-800 bg-gray-900/80">
       <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="relative aspect-[4/3] xl:aspect-auto bg-gray-950 overflow-hidden">
-          {identity.previewUrl ? (
-            identity.previewKind === "video" ? (
+          {previewUrl ? (
+            previewKind === "video" ? (
               <>
                 <video
-                  src={identity.previewUrl}
+                  src={previewUrl}
                   className="w-full h-full object-cover"
                   autoPlay
                   muted
@@ -194,8 +218,8 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
               </>
             ) : (
               <img
-                src={identity.previewUrl}
-                alt={identity.name}
+                src={previewUrl}
+                alt={displayName}
                 className="w-full h-full object-cover"
               />
             )
@@ -211,17 +235,17 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
           <div className="absolute top-4 left-4 z-10">
             <span
               className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border ${statusTone(
-                identity.status
+                status
               )}`}
             >
-              {identity.status.toUpperCase()}
+              {status.toUpperCase()}
             </span>
           </div>
         </div>
 
         <CardContent className="p-5 md:p-6 space-y-5">
           <div>
-            <h2 className="text-2xl font-bold text-white">{identity.name}</h2>
+            <h2 className="text-2xl font-bold text-white">{displayName}</h2>
             <p className="text-sm text-gray-400 mt-1">
               This workspace organizes every saved image and video created with this identity.
             </p>
@@ -235,7 +259,7 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
                   Images
                 </span>
               </div>
-              <p className="text-xl font-bold text-pink-200">{identity.imageCount}</p>
+              <p className="text-xl font-bold text-pink-200">{identity.imageCount ?? 0}</p>
             </div>
 
             <div className="rounded-xl border border-gray-800 bg-gray-950 p-3">
@@ -245,7 +269,7 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
                   Videos
                 </span>
               </div>
-              <p className="text-xl font-bold text-cyan-200">{identity.videoCount}</p>
+              <p className="text-xl font-bold text-cyan-200">{identity.videoCount ?? 0}</p>
             </div>
 
             <div className="rounded-xl border border-gray-800 bg-gray-950 p-3">
@@ -255,7 +279,7 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
                   Total
                 </span>
               </div>
-              <p className="text-xl font-bold text-purple-200">{identity.totalAssets}</p>
+              <p className="text-xl font-bold text-purple-200">{identity.totalAssets ?? 0}</p>
             </div>
 
             <div className="rounded-xl border border-gray-800 bg-gray-950 p-3">
@@ -404,93 +428,68 @@ function AssetGrid(props: {
           initial={{ opacity: 0, y: 12, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ delay: index * 0.03 }}
-          className="group rounded-2xl overflow-hidden border border-gray-800 bg-gray-900/80 hover:border-purple-700/50 hover:shadow-[0_0_28px_rgba(168,85,247,0.12)] transition-all cursor-pointer"
-          onClick={() => props.onOpen(item)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              props.onOpen(item);
-            }
-          }}
+          className="group"
         >
-          <div className="relative aspect-[4/5] bg-gray-950 overflow-hidden">
-            {item.kind === "image" ? (
-              <img
-                src={item.url}
-                alt={item.prompt}
-                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-              />
-            ) : (
-              <>
-                <video
+          <button
+            type="button"
+            onClick={() => props.onOpen(item)}
+            className="w-full text-left rounded-2xl overflow-hidden border border-gray-800 bg-gray-900/80 hover:border-purple-700/50 hover:shadow-[0_0_28px_rgba(168,85,247,0.12)] transition-all"
+          >
+            <div className="relative aspect-[4/5] bg-gray-950 overflow-hidden">
+              {item.kind === "image" ? (
+                <img
                   src={item.url}
+                  alt={item.prompt || "Identity asset"}
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                  muted
-                  loop
-                  playsInline
                 />
-                <div className="absolute top-3 left-3 px-2 py-1 rounded-full bg-black/60 border border-white/10 text-[10px] font-semibold text-cyan-200 flex items-center gap-1">
-                  <Play className="w-3 h-3" />
-                  VIDEO
-                </div>
-              </>
-            )}
+              ) : (
+                <>
+                  <video
+                    src={item.url}
+                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                    muted
+                    loop
+                    playsInline
+                  />
+                  <div className="absolute top-3 left-3 px-2 py-1 rounded-full bg-black/60 border border-white/10 text-[10px] font-semibold text-cyan-200 flex items-center gap-1">
+                    <Play className="w-3 h-3" />
+                    VIDEO
+                  </div>
+                </>
+              )}
 
-            <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-black/10 opacity-100" />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-black/10 opacity-100" />
 
-            <div className="absolute top-3 right-3 flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-              <Button
-                size="icon"
-                type="button"
-                variant="ghost"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  props.onOpen(item);
-                }}
-                className="h-9 w-9 bg-black/55 border border-white/10 hover:bg-black/75 text-white"
-              >
-                <Maximize2 className="w-4 h-4" />
-              </Button>
-
-              <Button
-                size="icon"
-                type="button"
-                variant="ghost"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  downloadFile(item.url, `sirensforge-identity-asset-${item.id}`);
-                }}
-                className="h-9 w-9 bg-black/55 border border-white/10 hover:bg-black/75 text-white"
-              >
-                <Download className="w-4 h-4" />
-              </Button>
-            </div>
-
-            <div className="absolute bottom-0 left-0 right-0 p-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span
-                  className={`px-2 py-1 rounded-full text-[10px] font-semibold border ${
-                    item.kind === "image"
-                      ? "bg-pink-500/15 text-pink-200 border-pink-500/30"
-                      : "bg-cyan-500/15 text-cyan-200 border-cyan-500/30"
-                  }`}
-                >
-                  {item.kind === "image" ? "IMAGE" : "VIDEO"}
+              <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/55 border border-white/10 text-white">
+                  <Maximize2 className="w-4 h-4" />
                 </span>
               </div>
 
-              <p className="text-xs font-medium text-gray-100 line-clamp-2">
-                {item.prompt || "(No prompt saved)"}
-              </p>
+              <div className="absolute bottom-0 left-0 right-0 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span
+                    className={`px-2 py-1 rounded-full text-[10px] font-semibold border ${
+                      item.kind === "image"
+                        ? "bg-pink-500/15 text-pink-200 border-pink-500/30"
+                        : "bg-cyan-500/15 text-cyan-200 border-cyan-500/30"
+                    }`}
+                  >
+                    {item.kind === "image" ? "IMAGE" : "VIDEO"}
+                  </span>
+                </div>
 
-              <div className="mt-2 flex items-center justify-between text-[10px] text-gray-400">
-                <span>{formatRelative(item.createdAt)}</span>
-                <span>{item.mode || "generation"}</span>
+                <p className="text-xs font-medium text-gray-100 line-clamp-2">
+                  {item.prompt || "(No prompt saved)"}
+                </p>
+
+                <div className="mt-2 flex items-center justify-between text-[10px] text-gray-400">
+                  <span>{formatRelative(item.createdAt)}</span>
+                  <span>{item.mode || "generation"}</span>
+                </div>
               </div>
             </div>
-          </div>
+          </button>
         </motion.div>
       ))}
     </div>
@@ -521,12 +520,25 @@ function AssetModal(props: {
           exit={{ scale: 0.96, opacity: 0 }}
           onClick={(e) => e.stopPropagation()}
         >
+          <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3 xl:hidden">
+            <div className="text-sm font-semibold text-gray-100">Identity Asset</div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={props.onClose}
+              className="text-gray-300 hover:text-white hover:bg-gray-800"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+
           <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_0.65fr]">
             <div className="bg-black flex items-center justify-center max-h-[82vh] overflow-hidden">
               {item.kind === "image" ? (
                 <img
                   src={item.url}
-                  alt={item.prompt}
+                  alt={item.prompt || "Identity asset"}
                   className="w-full h-full object-contain"
                 />
               ) : (
@@ -537,6 +549,7 @@ function AssetModal(props: {
                   autoPlay
                   loop
                   muted
+                  playsInline
                 />
               )}
             </div>
@@ -596,7 +609,7 @@ function AssetModal(props: {
                     <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
                       Status
                     </p>
-                    <p className="text-gray-200">{item.status}</p>
+                    <p className="text-gray-200">{item.status || "unknown"}</p>
                   </div>
                 </div>
               </div>
@@ -640,10 +653,12 @@ export default function IdentityDetailClient({
   const [sort, setSort] = useState<SortMode>("newest");
   const [selected, setSelected] = useState<IdentityDetailAsset | null>(null);
 
+  const assets = safeAssets(identity?.assets);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    return [...identity.assets]
+    return [...assets]
       .filter((item) => {
         const matchesFilter =
           filter === "all" ||
@@ -651,7 +666,7 @@ export default function IdentityDetailClient({
           (filter === "videos" && item.kind === "video");
 
         const haystack = [
-          item.prompt,
+          item.prompt || "",
           item.mode || "",
           item.bodyMode || "",
           item.status || "",
@@ -666,9 +681,11 @@ export default function IdentityDetailClient({
       .sort((a, b) => {
         const at = new Date(a.createdAt).getTime();
         const bt = new Date(b.createdAt).getTime();
-        return sort === "newest" ? bt - at : at - bt;
+        const safeAt = Number.isNaN(at) ? 0 : at;
+        const safeBt = Number.isNaN(bt) ? 0 : bt;
+        return sort === "newest" ? safeBt - safeAt : safeAt - safeBt;
       });
-  }, [identity.assets, query, filter, sort]);
+  }, [assets, query, filter, sort]);
 
   return (
     <div className="min-h-screen bg-black text-gray-100">
@@ -686,7 +703,7 @@ export default function IdentityDetailClient({
           onSortChange={setSort}
         />
 
-        {identity.assets.length === 0 ? (
+        {assets.length === 0 ? (
           <Card className="border-gray-800 bg-gray-900/80">
             <CardContent className="py-16">
               <div className="text-center space-y-4">
