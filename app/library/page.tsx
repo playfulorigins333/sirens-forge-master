@@ -10,22 +10,64 @@ export const metadata = {
   title: "Sirens Forge — Vault",
 };
 
-function inferKind(row: any): "image" | "video" {
-  const imageUrl = String(row?.image_url || "").toLowerCase();
-  const metadata = row?.metadata || {};
-  const outputUrl = String(
-    metadata?.video_url ||
-      metadata?.output_url ||
-      metadata?.placeholder_url ||
-      ""
-  ).toLowerCase();
+type GenerationRow = {
+  id: string;
+  user_id: string | null;
+  prompt: string | null;
+  image_url: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  status: string | null;
+  job_type: string | null;
+  body_type: string | null;
+  metadata: Record<string, unknown> | null;
+  lora_used?: string | null;
+  mode?: string | null;
+};
+
+function getMetadata(row: GenerationRow): Record<string, unknown> {
+  return row?.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? row.metadata
+    : {};
+}
+
+function isCompletedStatus(row: GenerationRow): boolean {
+  return String(row?.status || "").trim().toLowerCase() === "completed";
+}
+
+function isPlaceholderRow(row: GenerationRow): boolean {
+  const metadata = getMetadata(row);
+  return metadata.placeholder === true;
+}
+
+function getRealAssetUrl(row: GenerationRow): string | null {
+  if (isPlaceholderRow(row)) {
+    return null;
+  }
+
+  const metadata = getMetadata(row);
+  const candidates = [row?.image_url, metadata.video_url, metadata.output_url];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function getAssetKind(row: GenerationRow, url: string): "image" | "video" {
+  const metadata = getMetadata(row);
+  const normalizedUrl = url.toLowerCase().split("?")[0].split("#")[0];
+  const normalizedMode = String(metadata.mode || row.mode || row.job_type || "").toLowerCase();
 
   if (
-    imageUrl.endsWith(".mp4") ||
-    imageUrl.endsWith(".webm") ||
-    outputUrl.endsWith(".mp4") ||
-    outputUrl.endsWith(".webm") ||
-    String(metadata?.mode || "").includes("video")
+    normalizedUrl.endsWith(".mp4") ||
+    normalizedUrl.endsWith(".webm") ||
+    normalizedUrl.endsWith(".mov") ||
+    normalizedUrl.endsWith(".m4v") ||
+    normalizedMode.includes("video")
   ) {
     return "video";
   }
@@ -33,33 +75,45 @@ function inferKind(row: any): "image" | "video" {
   return "image";
 }
 
-function inferUrl(row: any): string {
-  const metadata = row?.metadata || {};
-
-  return (
-    row?.image_url ||
-    metadata?.video_url ||
-    metadata?.output_url ||
-    metadata?.placeholder_url ||
-    ""
-  );
+function isRealAsset(row: GenerationRow): boolean {
+  return isCompletedStatus(row) && !isPlaceholderRow(row) && !!getRealAssetUrl(row);
 }
 
-function inferBodyMode(row: any): string | null {
-  return (
-    row?.body_type ||
-    row?.metadata?.body_mode ||
-    row?.metadata?.request?.body_mode ||
-    null
-  );
+function getBodyMode(row: GenerationRow): string | null {
+  const metadata = getMetadata(row);
+  const request =
+    metadata.request && typeof metadata.request === "object" && !Array.isArray(metadata.request)
+      ? (metadata.request as Record<string, unknown>)
+      : {};
+
+  const candidates = [row?.body_type, metadata.body_mode, request.body_mode];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
 }
 
-function inferIdentityLora(row: any): string | null {
-  return row?.metadata?.identity_lora || null;
+function getGenerationMode(row: GenerationRow): string | null {
+  const metadata = getMetadata(row);
+  const candidates = [row?.job_type, row?.mode, metadata.mode];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
 }
 
-function inferGenerationMode(row: any): string | null {
-  return row?.job_type || row?.metadata?.mode || null;
+function getIdentityLora(row: GenerationRow): string | null {
+  return typeof row?.lora_used === "string" && row.lora_used.trim().length > 0
+    ? row.lora_used.trim()
+    : null;
 }
 
 export default async function LibraryPage() {
@@ -73,8 +127,10 @@ export default async function LibraryPage() {
     }
   }
 
+  const authUserId = auth.user?.id;
   const profileId = auth.profile?.id;
-  if (!profileId) {
+
+  if (!authUserId || !profileId) {
     redirect("/pricing");
   }
 
@@ -93,33 +149,37 @@ export default async function LibraryPage() {
       status,
       job_type,
       body_type,
-      metadata
+      metadata,
+      lora_used,
+      mode
     `
     )
-    .eq("user_id", profileId)
+    .in("user_id", [authUserId, profileId])
     .order("created_at", { ascending: false });
 
   if (error) {
     console.error("[library] Failed to load generations:", error);
   }
 
-  const items: LibraryItem[] = (data || [])
-    .map((row: any) => {
-      const url = inferUrl(row);
+  const rows: GenerationRow[] = Array.isArray(data) ? (data as GenerationRow[]) : [];
+
+  const items: LibraryItem[] = rows
+    .filter((row) => isRealAsset(row))
+    .map((row) => {
+      const url = getRealAssetUrl(row)!;
 
       return {
         id: row.id,
-        kind: inferKind(row),
+        kind: getAssetKind(row, url),
         url,
         prompt: row.prompt || "",
         createdAt: row.created_at || row.updated_at || new Date().toISOString(),
         status: row.status || "unknown",
-        mode: inferGenerationMode(row),
-        bodyMode: inferBodyMode(row),
-        identityLora: inferIdentityLora(row),
+        mode: getGenerationMode(row),
+        bodyMode: getBodyMode(row),
+        identityLora: getIdentityLora(row),
       };
-    })
-    .filter((item) => Boolean(item.url));
+    });
 
   return <LibraryClient items={items} />;
 }
