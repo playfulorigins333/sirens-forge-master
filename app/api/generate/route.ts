@@ -116,6 +116,20 @@ async function bestEffortLogGeneration(args: {
   }
 
   const now = new Date().toISOString();
+  const status = args.upstream.ok ? "completed" : "failed";
+
+  const isRealCompletedAsset =
+    status === "completed" &&
+    !args.placeholder &&
+    typeof args.imageUrl === "string" &&
+    args.imageUrl.trim().length > 0;
+
+  const authoritativeLinkedLora =
+    isRealCompletedAsset &&
+    typeof args.identityLora === "string" &&
+    args.identityLora.trim().length > 0
+      ? args.identityLora.trim()
+      : null;
 
   const metadata = {
     engine: "comfyui",
@@ -123,6 +137,7 @@ async function bestEffortLogGeneration(args: {
     mode: args.upstream.mode,
     placeholder: args.placeholder,
     output_url: args.imageUrl,
+    ...(args.placeholder && args.imageUrl ? { placeholder_url: args.imageUrl } : {}),
     body_mode: args.bodyMode,
     identity_lora: args.identityLora,
     negative_prompt: args.negativePrompt,
@@ -135,22 +150,50 @@ async function bestEffortLogGeneration(args: {
     {
       user_id: args.userId,
       prompt: args.prompt,
-      status: args.upstream.ok ? "completed" : "failed",
+      status,
+      kind: "image",
+      image_url: args.imageUrl,
+      output_url: args.imageUrl,
+      lora_used: authoritativeLinkedLora,
+      metadata,
+    },
+    {
+      user_id: args.userId,
+      prompt: args.prompt,
+      status,
       kind: "image",
       output_url: args.imageUrl,
+      lora_used: authoritativeLinkedLora,
       metadata,
     },
     {
       user_id: args.userId,
       prompt: args.prompt,
-      status: args.upstream.ok ? "completed" : "failed",
+      status,
+      image_url: args.imageUrl,
       output_url: args.imageUrl,
+      lora_used: authoritativeLinkedLora,
       metadata,
     },
     {
       user_id: args.userId,
       prompt: args.prompt,
-      status: args.upstream.ok ? "completed" : "failed",
+      status,
+      output_url: args.imageUrl,
+      lora_used: authoritativeLinkedLora,
+      metadata,
+    },
+    {
+      user_id: args.userId,
+      prompt: args.prompt,
+      status,
+      lora_used: authoritativeLinkedLora,
+      metadata,
+    },
+    {
+      user_id: args.userId,
+      prompt: args.prompt,
+      status,
       metadata,
     },
     {
@@ -166,7 +209,7 @@ async function bestEffortLogGeneration(args: {
 
   for (const payload of candidates) {
     const cleaned = Object.fromEntries(
-      Object.entries(payload).filter(([, value]) => value !== undefined)
+      Object.entries(payload).filter(([, value]) => value !== undefined && value !== null)
     );
 
     const { data, error } = await admin
@@ -363,6 +406,11 @@ export async function POST(req: NextRequest) {
         ? upstreamJson.outputs[0].url
         : null;
 
+    const upstreamPlaceholder =
+      typeof upstreamJson?.placeholder === "boolean"
+        ? upstreamJson.placeholder
+        : false;
+
     const logged = await bestEffortLogGeneration({
       userId,
       prompt: finalPrompt,
@@ -370,7 +418,7 @@ export async function POST(req: NextRequest) {
       bodyMode,
       identityLora,
       imageUrl: inferredImageUrl,
-      placeholder: false,
+      placeholder: upstreamPlaceholder,
       request: normalized,
       upstream: {
         status: upstream.status,
@@ -405,10 +453,7 @@ export async function POST(req: NextRequest) {
         generation_id: upstreamJson?.generation_id ?? logged?.id ?? null,
         image_url: finalImageUrl,
         outputs: finalOutputs,
-        placeholder:
-          typeof upstreamJson?.placeholder === "boolean"
-            ? upstreamJson.placeholder
-            : false,
+        placeholder: upstreamPlaceholder,
       },
       { status: 200 }
     );
