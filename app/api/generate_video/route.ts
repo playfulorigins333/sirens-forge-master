@@ -118,6 +118,17 @@ async function bestEffortLogGeneration(args: {
   }
 
   const now = new Date().toISOString();
+  const status = "completed";
+
+  // 🔥 CONTRACT: placeholder video = NEVER a real asset
+  const isRealCompletedAsset = false;
+
+  const authoritativeLinkedLora =
+    isRealCompletedAsset &&
+    typeof args.identityLora === "string" &&
+    args.identityLora.trim().length > 0
+      ? args.identityLora.trim()
+      : null;
 
   const metadata = {
     engine: "video-soft-mode",
@@ -137,22 +148,26 @@ async function bestEffortLogGeneration(args: {
     {
       user_id: args.userId,
       prompt: args.prompt,
-      status: "completed",
+      status,
       kind: "video",
+      video_url: args.placeholderUrl,
       output_url: args.placeholderUrl,
+      lora_used: authoritativeLinkedLora,
       metadata,
     },
     {
       user_id: args.userId,
       prompt: args.prompt,
-      status: "completed",
+      status,
       output_url: args.placeholderUrl,
+      lora_used: authoritativeLinkedLora,
       metadata,
     },
     {
       user_id: args.userId,
       prompt: args.prompt,
-      status: "completed",
+      status,
+      lora_used: authoritativeLinkedLora,
       metadata,
     },
     {
@@ -168,7 +183,7 @@ async function bestEffortLogGeneration(args: {
 
   for (const payload of candidates) {
     const cleaned = Object.fromEntries(
-      Object.entries(payload).filter(([, value]) => value !== undefined)
+      Object.entries(payload).filter(([, value]) => value !== undefined && value !== null)
     );
 
     const { data, error } = await admin
