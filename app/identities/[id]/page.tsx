@@ -35,6 +35,7 @@ type IdentityDetailData = {
 
 type UserLoraRow = Record<string, unknown>;
 type GenerationRow = Record<string, unknown>;
+type GenerationMetadata = Record<string, unknown>;
 
 function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
@@ -57,9 +58,43 @@ function asDateString(value: unknown, fallback = new Date(0).toISOString()): str
   return typeof value === "string" && value.trim().length > 0 ? value : fallback;
 }
 
-function inferKindFromUrl(url?: string | null): "image" | "video" | null {
-  if (!url) return null;
+function getMetadata(row: GenerationRow): GenerationMetadata {
+  const value = row.metadata;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as GenerationMetadata)
+    : {};
+}
 
+function isCompletedStatus(row: GenerationRow): boolean {
+  return String(row.status || "").trim().toLowerCase() === "completed";
+}
+
+function isPlaceholderRow(row: GenerationRow): boolean {
+  const metadata = getMetadata(row);
+  return metadata.placeholder === true;
+}
+
+function getRealAssetUrl(row: GenerationRow): string | null {
+  if (isPlaceholderRow(row)) return null;
+
+  const metadata = getMetadata(row);
+
+  const candidates = [
+    row.image_url,
+    metadata.video_url,
+    metadata.output_url,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function getAssetKind(url: string): "image" | "video" {
   const clean = url.toLowerCase().split("?")[0].split("#")[0];
 
   if (
@@ -71,85 +106,46 @@ function inferKindFromUrl(url?: string | null): "image" | "video" | null {
     return "video";
   }
 
-  if (
-    clean.endsWith(".jpg") ||
-    clean.endsWith(".jpeg") ||
-    clean.endsWith(".png") ||
-    clean.endsWith(".webp") ||
-    clean.endsWith(".gif") ||
-    clean.endsWith(".avif")
-  ) {
-    return "image";
-  }
-
-  return null;
+  return "image";
 }
 
-function pickFirstString(row: Record<string, unknown>, keys: string[]): string | null {
-  for (const key of keys) {
-    const value = row[key];
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value;
-    }
-  }
-  return null;
+function isRealAsset(row: GenerationRow): boolean {
+  return isCompletedStatus(row) && !isPlaceholderRow(row) && !!getRealAssetUrl(row);
 }
 
 function normalizeAsset(row: GenerationRow): IdentityDetailAsset | null {
-  const id = asString(row.id, "");
-  if (!id) return null;
+  if (!isRealAsset(row)) return null;
 
-  const directVideoUrl = pickFirstString(row, [
-    "video_url",
-    "output_video_url",
-    "final_video_url",
-    "asset_video_url",
-  ]);
-
-  const directImageUrl = pickFirstString(row, [
-    "image_url",
-    "output_url",
-    "final_image_url",
-    "asset_url",
-    "thumbnail_url",
-  ]);
-
-  const fallbackUrl = pickFirstString(row, ["url"]);
-  const url = directVideoUrl || directImageUrl || fallbackUrl;
-
+  const url = getRealAssetUrl(row);
   if (!url) return null;
 
-  const explicitKind =
-    asNullableString(row.kind) ||
-    asNullableString(row.media_kind) ||
-    asNullableString(row.asset_kind) ||
-    asNullableString(row.output_kind);
-
-  const kind =
-    explicitKind === "image" || explicitKind === "video"
-      ? explicitKind
-      : directVideoUrl
-        ? "video"
-        : directImageUrl
-          ? "image"
-          : inferKindFromUrl(url);
-
-  if (!kind) return null;
-
   return {
-    id,
-    kind,
+    id: asString(row.id, ""),
+    kind: getAssetKind(url),
     url,
-    prompt:
-      asString(row.prompt) ||
-      asString(row.final_prompt) ||
-      asString(row.positive_prompt) ||
-      "",
-    createdAt: asDateString(row.created_at ?? row.updated_at ?? row.generated_at),
-    status: asString(row.status, "completed"),
+    prompt: asString(row.prompt),
+    createdAt: asDateString(row.created_at),
+    status: "completed",
     mode: asNullableString(row.mode),
-    bodyMode: asNullableString(row.body_mode) ?? asNullableString(row.bodyMode),
+    bodyMode: asNullableString(row.body_type),
   };
+}
+
+async function fetchGenerationsForIdentity(
+  supabase: ReturnType<typeof createServerClient>,
+  userId: string,
+  identityId: string
+): Promise<GenerationRow[]> {
+  const { data, error } = await supabase
+    .from("generations")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("lora_used", identityId)
+    .order("created_at", { ascending: false });
+
+  if (error || !Array.isArray(data)) return [];
+
+  return data as GenerationRow[];
 }
 
 export default async function IdentityDetailPage({
@@ -172,9 +168,7 @@ export default async function IdentityDetailPage({
       getAll() {
         return cookieStore.getAll();
       },
-      setAll() {
-        // no-op in server component
-      },
+      setAll() {},
     },
   });
 
@@ -186,60 +180,38 @@ export default async function IdentityDetailPage({
     redirect("/login");
   }
 
-  const { data: identityRow, error: identityError } = await supabase
+  const { data: identityRow } = await supabase
     .from("user_loras")
     .select("*")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
 
-  if (identityError) {
-    throw new Error(`user_loras query failed: ${identityError.message}`);
-  }
-
   if (!identityRow) {
     notFound();
   }
 
-  let generationRows: GenerationRow[] = [];
-
-  const generationsResult = await supabase
-    .from("generations")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("identity_lora", id)
-    .order("created_at", { ascending: false });
-
-  if (!generationsResult.error && Array.isArray(generationsResult.data)) {
-    generationRows = generationsResult.data as GenerationRow[];
-  } else {
-    console.error("Identity detail generations query failed:", generationsResult.error);
-  }
+  const generationRows = await fetchGenerationsForIdentity(
+    supabase,
+    user.id,
+    id
+  );
 
   const assets = generationRows
     .map(normalizeAsset)
-    .filter((item): item is IdentityDetailAsset => item !== null);
+    .filter((a): a is IdentityDetailAsset => a !== null);
 
   const previewAsset = assets[0] ?? null;
 
   const previewUrl =
-    pickFirstString(identityRow as UserLoraRow, [
-      "preview_url",
-      "hero_url",
-      "thumbnail_url",
-      "cover_url",
-      "artifact_preview_url",
-    ]) ??
+    asNullableString(identityRow.preview_url) ??
     previewAsset?.url ??
     null;
 
-  const previewKind =
-    previewAsset && previewUrl === previewAsset.url
-      ? previewAsset.kind
-      : inferKindFromUrl(previewUrl);
+  const previewKind = previewUrl ? getAssetKind(previewUrl) : null;
 
-  const imageCount = assets.filter((asset) => asset.kind === "image").length;
-  const videoCount = assets.filter((asset) => asset.kind === "video").length;
+  const imageCount = assets.filter((a) => a.kind === "image").length;
+  const videoCount = assets.filter((a) => a.kind === "video").length;
 
   const identity: IdentityDetailData = {
     id: asString(identityRow.id, id),
@@ -253,9 +225,7 @@ export default async function IdentityDetailPage({
     previewUrl,
     previewKind,
     artifactKey: asNullableString(identityRow.artifact_r2_key),
-    datasetPrefix:
-      asNullableString(identityRow.dataset_r2_prefix) ??
-      asNullableString(identityRow.dataset_prefix),
+    datasetPrefix: asNullableString(identityRow.dataset_r2_prefix),
     imageCount,
     videoCount,
     totalAssets: assets.length,
