@@ -10,7 +10,20 @@ export const metadata = {
   title: "Sirens Forge — My Identities",
 };
 
-function inferAssetUrl(row: any): string | null {
+type GenerationRow = {
+  id: string;
+  user_id: string | null;
+  prompt: string | null;
+  image_url: string | null;
+  created_at: string | null;
+  status: string | null;
+  metadata: any;
+  lora_used?: string | null;
+  job_type?: string | null;
+  mode?: string | null;
+};
+
+function inferAssetUrl(row: GenerationRow): string | null {
   const metadata = row?.metadata || {};
   return (
     row?.image_url ||
@@ -21,7 +34,7 @@ function inferAssetUrl(row: any): string | null {
   );
 }
 
-function inferAssetKind(row: any): "image" | "video" {
+function inferAssetKind(row: GenerationRow): "image" | "video" {
   const metadata = row?.metadata || {};
   const imageUrl = String(row?.image_url || "").toLowerCase();
   const outputUrl = String(
@@ -36,7 +49,7 @@ function inferAssetKind(row: any): "image" | "video" {
     imageUrl.endsWith(".webm") ||
     outputUrl.endsWith(".mp4") ||
     outputUrl.endsWith(".webm") ||
-    String(metadata?.mode || "").includes("video")
+    String(metadata?.mode || row?.mode || row?.job_type || "").toLowerCase().includes("video")
   ) {
     return "video";
   }
@@ -46,27 +59,56 @@ function inferAssetKind(row: any): "image" | "video" {
 
 function pickIdentityCoverUrl(
   loraPreviewUrl: string | null | undefined,
-  linkedAssets: any[]
+  linkedAssets: GenerationRow[]
 ): string | null {
   if (loraPreviewUrl && String(loraPreviewUrl).trim().length > 0) {
     return loraPreviewUrl;
   }
 
   const latestImageAsset = linkedAssets.find(
-    (row: any) => inferAssetUrl(row) && inferAssetKind(row) === "image"
+    (row) => inferAssetUrl(row) && inferAssetKind(row) === "image"
   );
   if (latestImageAsset) {
     return inferAssetUrl(latestImageAsset);
   }
 
   const latestVideoAsset = linkedAssets.find(
-    (row: any) => inferAssetUrl(row) && inferAssetKind(row) === "video"
+    (row) => inferAssetUrl(row) && inferAssetKind(row) === "video"
   );
   if (latestVideoAsset) {
     return inferAssetUrl(latestVideoAsset);
   }
 
   return null;
+}
+
+function matchesIdentityLink(
+  row: GenerationRow,
+  identityId: string,
+  triggerToken: string | null | undefined
+) {
+  const metadata = row?.metadata || {};
+  const loraUsed =
+    typeof row?.lora_used === "string" && row.lora_used.trim().length > 0
+      ? row.lora_used.trim()
+      : null;
+
+  const metadataIdentityLora =
+    typeof metadata?.identity_lora === "string" && metadata.identity_lora.trim().length > 0
+      ? metadata.identity_lora.trim()
+      : null;
+
+  const normalizedTrigger =
+    typeof triggerToken === "string" && triggerToken.trim().length > 0
+      ? triggerToken.trim()
+      : null;
+
+  if (loraUsed === identityId) return true;
+  if (normalizedTrigger && loraUsed === normalizedTrigger) return true;
+  if (metadataIdentityLora === identityId) return true;
+  if (normalizedTrigger && metadataIdentityLora === normalizedTrigger) return true;
+
+  return false;
 }
 
 export default async function IdentitiesPage() {
@@ -89,12 +131,14 @@ export default async function IdentitiesPage() {
 
   const supabase = await supabaseServer();
 
-  const [{ data: loras, error: loraError }, { data: generations, error: generationError }] =
-    await Promise.all([
-      supabase
-        .from("user_loras")
-        .select(
-          `
+  const [
+    { data: loras, error: loraError },
+    { data: generations, error: generationError },
+  ] = await Promise.all([
+    supabase
+      .from("user_loras")
+      .select(
+        `
           id,
           user_id,
           name,
@@ -113,25 +157,30 @@ export default async function IdentitiesPage() {
           artifact_r2_bucket,
           artifact_r2_key
         `
-        )
-        .eq("user_id", authUserId)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("generations")
-        .select(
-          `
+      )
+      .eq("user_id", authUserId)
+      .order("created_at", { ascending: false }),
+
+    // Pull both possible user_id contracts so overview matches reality.
+    supabase
+      .from("generations")
+      .select(
+        `
           id,
           user_id,
           prompt,
           image_url,
           created_at,
           status,
-          metadata
+          metadata,
+          lora_used,
+          job_type,
+          mode
         `
-        )
-        .eq("user_id", profileId)
-        .order("created_at", { ascending: false }),
-    ]);
+      )
+      .in("user_id", [authUserId, profileId])
+      .order("created_at", { ascending: false }),
+  ]);
 
   if (loraError) {
     console.error("[identities] Failed to load user_loras:", loraError);
@@ -141,21 +190,21 @@ export default async function IdentitiesPage() {
     console.error("[identities] Failed to load generations:", generationError);
   }
 
-  const generationRows = generations || [];
+  const generationRows: GenerationRow[] = Array.isArray(generations) ? generations : [];
 
   const items: IdentityCardItem[] = (loras || []).map((lora: any) => {
-    const linkedAssets = generationRows.filter(
-      (row: any) => row?.metadata?.identity_lora === lora.id
+    const linkedAssets = generationRows.filter((row) =>
+      matchesIdentityLink(row, lora.id, lora.trigger_token || null)
     );
 
     const coverUrl = pickIdentityCoverUrl(lora.preview_url, linkedAssets);
 
     const imageCount = linkedAssets.filter(
-      (row: any) => inferAssetKind(row) === "image"
+      (row) => inferAssetKind(row) === "image"
     ).length;
 
     const videoCount = linkedAssets.filter(
-      (row: any) => inferAssetKind(row) === "video"
+      (row) => inferAssetKind(row) === "video"
     ).length;
 
     return {
