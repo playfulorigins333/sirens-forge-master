@@ -5,6 +5,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
+  CheckCircle2,
   Dna,
   Download,
   Image as ImageIcon,
@@ -136,9 +137,23 @@ function statusTone(status?: string | null) {
   }
 }
 
+function getDisplayName(identity: IdentityDetailData) {
+  const rawName = safeString(identity?.name).trim();
+  if (rawName.length > 0) return rawName;
+
+  const token = safeString(identity?.triggerToken).trim();
+  if (token.length > 0) return `Identity ${token}`;
+
+  return "Unnamed Identity";
+}
+
+function getInitials(label: string) {
+  return label.trim().charAt(0).toUpperCase() || "I";
+}
+
 function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
-  const displayName = safeString(identity?.name, "Unnamed Identity");
-  const initial = displayName.trim().charAt(0).toUpperCase() || "I";
+  const displayName = getDisplayName(identity);
+  const initial = getInitials(displayName);
 
   return (
     <header className="border-b border-gray-800 bg-gray-950/70 backdrop-blur sticky top-0 z-40">
@@ -190,21 +205,91 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
   );
 }
 
+function HeroEmptyState({ identity }: { identity: IdentityDetailData }) {
+  const displayName = getDisplayName(identity);
+  const status = safeString(identity?.status, "unknown").toLowerCase();
+  const hasTrainingData = (identity.datasetImageCount ?? 0) > 0;
+
+  return (
+    <div className="relative w-full h-full overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.18),transparent_35%),radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.14),transparent_35%),linear-gradient(135deg,#050816_0%,#070b1d_45%,#04070f_100%)]">
+      <div className="absolute inset-0 opacity-30">
+        <div className="absolute -left-16 top-8 h-40 w-40 rounded-full bg-purple-500/20 blur-3xl" />
+        <div className="absolute right-8 bottom-10 h-44 w-44 rounded-full bg-cyan-500/15 blur-3xl" />
+      </div>
+
+      <div className="absolute inset-0 flex items-center justify-center p-8">
+        <div className="max-w-md w-full text-center">
+          <div className="mx-auto mb-6 h-24 w-24 rounded-[30px] border border-white/10 bg-black/25 backdrop-blur flex items-center justify-center shadow-[0_0_35px_rgba(168,85,247,0.18)]">
+            {status === "completed" ? (
+              <CheckCircle2 className="h-11 w-11 text-emerald-300" />
+            ) : (
+              <Dna className="h-11 w-11 text-purple-300" />
+            )}
+          </div>
+
+          <h3 className="text-2xl font-bold text-white">
+            {status === "completed" ? "Identity Ready" : displayName}
+          </h3>
+
+          <p className="mt-3 text-sm leading-6 text-gray-300">
+            {identity.totalAssets > 0
+              ? "Preview media is not available for this identity yet, but linked assets are available below."
+              : status === "completed"
+                ? "This identity has completed training, but no saved images or videos are linked to it yet."
+                : "This identity does not have preview media yet."}
+          </p>
+
+          <div className="mt-6 grid grid-cols-2 gap-3 text-left">
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400">
+                Training Images
+              </p>
+              <p className="mt-1 text-lg font-semibold text-white">
+                {identity.datasetImageCount ?? 0}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
+              <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400">
+                Saved Assets
+              </p>
+              <p className="mt-1 text-lg font-semibold text-white">
+                {identity.totalAssets ?? 0}
+              </p>
+            </div>
+          </div>
+
+          {hasTrainingData && (
+            <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-4 py-2 text-xs font-medium text-emerald-200">
+              <CheckCircle2 className="h-4 w-4" />
+              Training data is present — preview media just hasn’t been linked.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+    </div>
+  );
+}
+
 function IdentityHero({ identity }: { identity: IdentityDetailData }) {
-  const displayName = safeString(identity?.name, "Unnamed Identity");
+  const displayName = getDisplayName(identity);
   const previewUrl = safeNullableString(identity?.previewUrl);
   const previewKind = identity?.previewKind;
   const status = safeString(identity?.status, "unknown");
+
+  const hasPreview = Boolean(previewUrl && (previewKind === "image" || previewKind === "video"));
 
   return (
     <Card className="overflow-hidden border-gray-800 bg-gray-900/80">
       <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="relative aspect-[4/3] xl:aspect-auto bg-gray-950 overflow-hidden">
-          {previewUrl ? (
+          {hasPreview ? (
             previewKind === "video" ? (
               <>
                 <video
-                  src={previewUrl}
+                  src={previewUrl ?? undefined}
                   className="w-full h-full object-cover"
                   autoPlay
                   muted
@@ -218,17 +303,13 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
               </>
             ) : (
               <img
-                src={previewUrl}
+                src={previewUrl ?? undefined}
                 alt={displayName}
                 className="w-full h-full object-cover"
               />
             )
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-cyan-500/10 flex items-center justify-center">
-              <div className="h-20 w-20 rounded-[28px] bg-black/30 border border-white/10 flex items-center justify-center">
-                <Dna className="w-10 h-10 text-purple-300" />
-              </div>
-            </div>
+            <HeroEmptyState identity={identity} />
           )}
 
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/10" />
