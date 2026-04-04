@@ -23,24 +23,42 @@ type GenerationRow = {
   mode?: string | null;
 };
 
-function inferAssetUrl(row: GenerationRow): string | null {
-  const metadata = row?.metadata || {};
-  return (
-    row?.image_url ||
-    metadata?.video_url ||
-    metadata?.output_url ||
-    metadata?.placeholder_url ||
-    null
-  );
+function isCompletedStatus(row: GenerationRow): boolean {
+  return String(row?.status || "").trim().toLowerCase() === "completed";
 }
 
-function inferAssetKind(row: GenerationRow): "image" | "video" {
+function isPlaceholderRow(row: GenerationRow): boolean {
+  return row?.metadata?.placeholder === true;
+}
+
+function inferRealAssetUrl(row: GenerationRow): string | null {
+  if (isPlaceholderRow(row)) {
+    return null;
+  }
+
+  const metadata = row?.metadata || {};
+
+  const candidates = [
+    row?.image_url,
+    metadata?.video_url,
+    metadata?.output_url,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function inferRealAssetKind(row: GenerationRow): "image" | "video" {
   const metadata = row?.metadata || {};
   const imageUrl = String(row?.image_url || "").toLowerCase();
   const outputUrl = String(
     metadata?.video_url ||
       metadata?.output_url ||
-      metadata?.placeholder_url ||
       ""
   ).toLowerCase();
 
@@ -57,6 +75,10 @@ function inferAssetKind(row: GenerationRow): "image" | "video" {
   return "image";
 }
 
+function isRealAsset(row: GenerationRow): boolean {
+  return isCompletedStatus(row) && !isPlaceholderRow(row) && !!inferRealAssetUrl(row);
+}
+
 function pickIdentityCoverUrl(
   loraPreviewUrl: string | null | undefined,
   linkedAssets: GenerationRow[]
@@ -66,49 +88,29 @@ function pickIdentityCoverUrl(
   }
 
   const latestImageAsset = linkedAssets.find(
-    (row) => inferAssetUrl(row) && inferAssetKind(row) === "image"
+    (row) => inferRealAssetUrl(row) && inferRealAssetKind(row) === "image"
   );
   if (latestImageAsset) {
-    return inferAssetUrl(latestImageAsset);
+    return inferRealAssetUrl(latestImageAsset);
   }
 
   const latestVideoAsset = linkedAssets.find(
-    (row) => inferAssetUrl(row) && inferAssetKind(row) === "video"
+    (row) => inferRealAssetUrl(row) && inferRealAssetKind(row) === "video"
   );
   if (latestVideoAsset) {
-    return inferAssetUrl(latestVideoAsset);
+    return inferRealAssetUrl(latestVideoAsset);
   }
 
   return null;
 }
 
-function matchesIdentityLink(
-  row: GenerationRow,
-  identityId: string,
-  triggerToken: string | null | undefined
-) {
-  const metadata = row?.metadata || {};
+function matchesIdentityLink(row: GenerationRow, identityId: string) {
   const loraUsed =
     typeof row?.lora_used === "string" && row.lora_used.trim().length > 0
       ? row.lora_used.trim()
       : null;
 
-  const metadataIdentityLora =
-    typeof metadata?.identity_lora === "string" && metadata.identity_lora.trim().length > 0
-      ? metadata.identity_lora.trim()
-      : null;
-
-  const normalizedTrigger =
-    typeof triggerToken === "string" && triggerToken.trim().length > 0
-      ? triggerToken.trim()
-      : null;
-
-  if (loraUsed === identityId) return true;
-  if (normalizedTrigger && loraUsed === normalizedTrigger) return true;
-  if (metadataIdentityLora === identityId) return true;
-  if (normalizedTrigger && metadataIdentityLora === normalizedTrigger) return true;
-
-  return false;
+  return loraUsed === identityId;
 }
 
 export default async function IdentitiesPage() {
@@ -161,7 +163,6 @@ export default async function IdentitiesPage() {
       .eq("user_id", authUserId)
       .order("created_at", { ascending: false }),
 
-    // Pull both possible user_id contracts so overview matches reality.
     supabase
       .from("generations")
       .select(
@@ -193,18 +194,18 @@ export default async function IdentitiesPage() {
   const generationRows: GenerationRow[] = Array.isArray(generations) ? generations : [];
 
   const items: IdentityCardItem[] = (loras || []).map((lora: any) => {
-    const linkedAssets = generationRows.filter((row) =>
-      matchesIdentityLink(row, lora.id, lora.trigger_token || null)
+    const linkedAssets = generationRows.filter(
+      (row) => isRealAsset(row) && matchesIdentityLink(row, lora.id)
     );
 
     const coverUrl = pickIdentityCoverUrl(lora.preview_url, linkedAssets);
 
     const imageCount = linkedAssets.filter(
-      (row) => inferAssetKind(row) === "image"
+      (row) => inferRealAssetKind(row) === "image"
     ).length;
 
     const videoCount = linkedAssets.filter(
-      (row) => inferAssetKind(row) === "video"
+      (row) => inferRealAssetKind(row) === "video"
     ).length;
 
     return {
