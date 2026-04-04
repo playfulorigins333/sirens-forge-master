@@ -8,11 +8,6 @@ import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
 
-// Real workflow imports remain intentionally disabled until
-// the image route is ready to reconnect to the actual builder.
-// import { resolveLoraStack } from "@/lib/generation/lora-resolver";
-// import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
-
 type GenerateImageRequest = {
   prompt?: string;
   negative_prompt?: string;
@@ -118,14 +113,16 @@ async function bestEffortLogGeneration(args: {
   const now = new Date().toISOString();
   const status = args.upstream.ok ? "completed" : "failed";
 
-  const isRealCompletedAsset =
+  const hasValidUrl =
+    typeof args.imageUrl === "string" && args.imageUrl.trim().length > 0;
+
+  const isRealAsset =
     status === "completed" &&
     !args.placeholder &&
-    typeof args.imageUrl === "string" &&
-    args.imageUrl.trim().length > 0;
+    hasValidUrl;
 
   const authoritativeLinkedLora =
-    isRealCompletedAsset &&
+    isRealAsset &&
     typeof args.identityLora === "string" &&
     args.identityLora.trim().length > 0
       ? args.identityLora.trim()
@@ -135,96 +132,45 @@ async function bestEffortLogGeneration(args: {
     engine: "comfyui",
     template: args.upstream.template,
     mode: args.upstream.mode,
-    placeholder: args.placeholder,
+    placeholder: args.placeholder === true,
     output_url: args.imageUrl,
     ...(args.placeholder && args.imageUrl ? { placeholder_url: args.imageUrl } : {}),
     body_mode: args.bodyMode,
-    identity_lora: args.identityLora,
+    identity_lora: args.identityLora, // legacy only
     negative_prompt: args.negativePrompt,
     request: args.request,
     upstream: args.upstream,
     logged_at: now,
   };
 
-  const candidates: Record<string, unknown>[] = [
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      kind: "image",
-      image_url: args.imageUrl,
-      output_url: args.imageUrl,
-      lora_used: authoritativeLinkedLora,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      kind: "image",
-      output_url: args.imageUrl,
-      lora_used: authoritativeLinkedLora,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      image_url: args.imageUrl,
-      output_url: args.imageUrl,
-      lora_used: authoritativeLinkedLora,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      output_url: args.imageUrl,
-      lora_used: authoritativeLinkedLora,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      lora_used: authoritativeLinkedLora,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      metadata,
-    },
-    {
-      prompt: args.prompt,
-      metadata,
-    },
-  ];
+  // 🚨 STRICT CONTRACT ENFORCEMENT
+  const payload = {
+    user_id: args.userId,
+    prompt: args.prompt,
+    status,
+    kind: "image",
+    image_url: isRealAsset ? args.imageUrl : null,
+    output_url: isRealAsset ? args.imageUrl : null,
+    lora_used: authoritativeLinkedLora, // ONLY valid when real asset
+    metadata,
+  };
 
-  for (const payload of candidates) {
-    const cleaned = Object.fromEntries(
-      Object.entries(payload).filter(([, value]) => value !== undefined && value !== null)
-    );
+  const cleaned = Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined)
+  );
 
-    const { data, error } = await admin
-      .from("generations")
-      .insert(cleaned)
-      .select("id")
-      .single();
+  const { data, error } = await admin
+    .from("generations")
+    .insert(cleaned)
+    .select("id")
+    .single();
 
-    if (!error) {
-      return { id: data?.id };
-    }
+  if (error) {
+    console.warn("[generate] Could not insert generation record:", error);
+    return null;
   }
 
-  console.warn("[generate] Could not insert generation record into generations table.");
-  return null;
+  return { id: data?.id };
 }
 
 export async function POST(req: NextRequest) {
