@@ -120,11 +120,11 @@ async function bestEffortLogGeneration(args: {
   const now = new Date().toISOString();
   const status = "completed";
 
-  // 🔥 CONTRACT: placeholder video = NEVER a real asset
-  const isRealCompletedAsset = false;
+  // 🚨 VIDEO IS ALWAYS PLACEHOLDER RIGHT NOW
+  const isRealAsset = false;
 
   const authoritativeLinkedLora =
-    isRealCompletedAsset &&
+    isRealAsset &&
     typeof args.identityLora === "string" &&
     args.identityLora.trim().length > 0
       ? args.identityLora.trim()
@@ -139,66 +139,39 @@ async function bestEffortLogGeneration(args: {
     placeholder_url: args.placeholderUrl,
     video: args.video,
     body_mode: args.bodyMode,
-    identity_lora: args.identityLora,
+    identity_lora: args.identityLora, // legacy only
     negative_prompt: args.negativePrompt,
     logged_at: now,
   };
 
-  const candidates: Record<string, unknown>[] = [
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      kind: "video",
-      video_url: args.placeholderUrl,
-      output_url: args.placeholderUrl,
-      lora_used: authoritativeLinkedLora,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      output_url: args.placeholderUrl,
-      lora_used: authoritativeLinkedLora,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      status,
-      lora_used: authoritativeLinkedLora,
-      metadata,
-    },
-    {
-      user_id: args.userId,
-      prompt: args.prompt,
-      metadata,
-    },
-    {
-      prompt: args.prompt,
-      metadata,
-    },
-  ];
+  // 🔥 STRICT CONTRACT PAYLOAD (NO FALLBACK INSERT SPAM)
+  const payload = {
+    user_id: args.userId,
+    prompt: args.prompt,
+    status,
+    kind: "video",
+    video_url: null, // NOT a real video yet
+    output_url: null,
+    lora_used: authoritativeLinkedLora, // always null for now
+    metadata,
+  };
 
-  for (const payload of candidates) {
-    const cleaned = Object.fromEntries(
-      Object.entries(payload).filter(([, value]) => value !== undefined && value !== null)
-    );
+  const cleaned = Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined)
+  );
 
-    const { data, error } = await admin
-      .from("generations")
-      .insert(cleaned)
-      .select("id")
-      .single();
+  const { data, error } = await admin
+    .from("generations")
+    .insert(cleaned)
+    .select("id")
+    .single();
 
-    if (!error) {
-      return { id: data?.id };
-    }
+  if (error) {
+    console.warn("[generate_video] Could not insert generation record:", error);
+    return null;
   }
 
-  console.warn("[generate_video] Could not insert generation record into generations table.");
-  return null;
+  return { id: data?.id };
 }
 
 export async function POST(req: NextRequest) {
