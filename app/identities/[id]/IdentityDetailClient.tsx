@@ -55,6 +55,7 @@ export type IdentityDetailData = {
   progress: number | null;
   datasetImageCount: number | null;
   previewUrl: string | null;
+  previewKind: "image" | "video" | null;
   artifactKey: string | null;
   datasetPrefix: string | null;
   imageCount: number;
@@ -119,17 +120,6 @@ function statusTone(status: string) {
   }
 }
 
-function isVideoUrl(url?: string | null) {
-  if (!url) return false;
-  const clean = url.toLowerCase().split("?")[0].split("#")[0];
-  return (
-    clean.endsWith(".mp4") ||
-    clean.endsWith(".webm") ||
-    clean.endsWith(".mov") ||
-    clean.endsWith(".m4v")
-  );
-}
-
 function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
   return (
     <header className="border-b border-gray-800 bg-gray-950/70 backdrop-blur sticky top-0 z-40">
@@ -182,14 +172,12 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
 }
 
 function IdentityHero({ identity }: { identity: IdentityDetailData }) {
-  const previewIsVideo = isVideoUrl(identity.previewUrl);
-
   return (
     <Card className="overflow-hidden border-gray-800 bg-gray-900/80">
       <div className="grid grid-cols-1 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="relative aspect-[4/3] xl:aspect-auto bg-gray-950 overflow-hidden">
           {identity.previewUrl ? (
-            previewIsVideo ? (
+            identity.previewKind === "video" ? (
               <>
                 <video
                   src={identity.previewUrl}
@@ -416,7 +404,16 @@ function AssetGrid(props: {
           initial={{ opacity: 0, y: 12, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ delay: index * 0.03 }}
-          className="group rounded-2xl overflow-hidden border border-gray-800 bg-gray-900/80 hover:border-purple-700/50 hover:shadow-[0_0_28px_rgba(168,85,247,0.12)] transition-all"
+          className="group rounded-2xl overflow-hidden border border-gray-800 bg-gray-900/80 hover:border-purple-700/50 hover:shadow-[0_0_28px_rgba(168,85,247,0.12)] transition-all cursor-pointer"
+          onClick={() => props.onOpen(item)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              props.onOpen(item);
+            }
+          }}
         >
           <div className="relative aspect-[4/5] bg-gray-950 overflow-hidden">
             {item.kind === "image" ? (
@@ -443,12 +440,15 @@ function AssetGrid(props: {
 
             <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-black/10 opacity-100" />
 
-            <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="absolute top-3 right-3 flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
               <Button
                 size="icon"
                 type="button"
                 variant="ghost"
-                onClick={() => props.onOpen(item)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onOpen(item);
+                }}
                 className="h-9 w-9 bg-black/55 border border-white/10 hover:bg-black/75 text-white"
               >
                 <Maximize2 className="w-4 h-4" />
@@ -458,9 +458,10 @@ function AssetGrid(props: {
                 size="icon"
                 type="button"
                 variant="ghost"
-                onClick={() =>
-                  downloadFile(item.url, `sirensforge-identity-asset-${item.id}`)
-                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  downloadFile(item.url, `sirensforge-identity-asset-${item.id}`);
+                }}
                 className="h-9 w-9 bg-black/55 border border-white/10 hover:bg-black/75 text-white"
               >
                 <Download className="w-4 h-4" />
