@@ -47,7 +47,7 @@ export default function ChatUI() {
       id: "init",
       role: "assistant",
       content:
-        "Tell me what you want to create — I’ll shape it into something strong, refined, and ready to use.",
+        "Tell me what you want to create — a scene, character concept, mood, or full prompt. I’ll shape it into something stronger and ready to use.",
     },
   ])
 
@@ -68,6 +68,10 @@ export default function ChatUI() {
   const appendMessage = useCallback((msg: Message) => {
     setMessages((prev) => [...prev, msg])
   }, [])
+
+  const handleStarterClick = (starter: string) => {
+    void handleSend(starter)
+  }
 
   const handleSend = async (userText: string) => {
     if (!userText.trim()) return
@@ -134,13 +138,13 @@ export default function ChatUI() {
     <div className="relative flex h-screen w-full overflow-hidden bg-black text-white">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.14),transparent_30%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.10),transparent_24%),linear-gradient(to_bottom,rgba(20,20,28,0.65),rgba(0,0,0,1))]" />
-        <div className="absolute inset-0 opacity-[0.045] [background-image:radial-gradient(#ffffff_0.6px,transparent_0.6px)] [background-size:18px_18px]" />
+        <div className="absolute inset-0 opacity-[0.04] [background-image:radial-gradient(#ffffff_0.6px,transparent_0.6px)] [background-size:18px_18px]" />
       </div>
 
       <div className="relative flex min-w-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col">
-          <header className="border-b border-white/6 bg-black/45 backdrop-blur-md">
-            <div className="mx-auto w-full max-w-5xl px-6 pb-4 pt-7">
+          <header className="bg-black/35 backdrop-blur-md">
+            <div className="mx-auto w-full max-w-5xl px-6 pb-5 pt-7">
               <div className="flex items-end justify-between gap-6">
                 <div className="max-w-2xl">
                   <h1 className="text-3xl font-semibold tracking-tight text-purple-400">
@@ -149,13 +153,17 @@ export default function ChatUI() {
                   <p className="mt-2 text-sm leading-6 text-zinc-400">
                     Erotic Prompt Intelligence
                   </p>
-                  <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-300">
-                    Describe the scene, mood, identity, or direction you want.
-                    Siren’s Mind will refine it into a stronger, generator-ready result.
+                  <p className="mt-5 max-w-xl text-sm leading-7 text-zinc-200">
+                    <span className="font-medium text-white">
+                      Tell me what you want to create.
+                    </span>{" "}
+                    I can turn a rough idea into a polished prompt, refine an
+                    existing concept, or build around a character for
+                    consistency.
                   </p>
                 </div>
 
-                <div className="hidden shrink-0 rounded-full border border-white/8 bg-white/[0.03] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500 md:block">
+                <div className="hidden shrink-0 rounded-full border border-white/10 bg-white/[0.02] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500 md:block">
                   Chat-first creative engine
                 </div>
               </div>
@@ -171,13 +179,38 @@ export default function ChatUI() {
                       A Siren’s Mind
                     </div>
                     <p className="text-base leading-8 text-zinc-100">
-                      Tell me what you want to create — I’ll shape it into something strong,
-                      refined, and ready to use.
+                      Tell me what you want to create — a scene, character
+                      concept, mood, or full prompt. I’ll shape it into
+                      something stronger and ready to use.
                     </p>
                     <p className="mt-3 text-sm leading-6 text-zinc-400">
-                      If you’re building around a character or consistent identity, I’ll keep
-                      that continuity intact while refining the scene.
+                      If you’re building around a character or consistent
+                      identity, I’ll keep that continuity intact while refining
+                      the scene.
                     </p>
+
+                    <div className="mt-5">
+                      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                        New here? Try:
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          "Build me a cinematic dominant cowboy scene",
+                          "Refine this into a stronger image prompt",
+                          "Create something darker and more luxurious",
+                        ].map((starter) => (
+                          <button
+                            key={starter}
+                            type="button"
+                            onClick={() => handleStarterClick(starter)}
+                            className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-zinc-300 transition hover:border-purple-400/20 hover:bg-purple-500/10 hover:text-white"
+                          >
+                            {starter}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   </div>
 
                   <div className="flex flex-col gap-6">
@@ -199,7 +232,7 @@ export default function ChatUI() {
                 </div>
               </div>
 
-              <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/8 bg-black/80 backdrop-blur-xl">
+              <div className="fixed bottom-0 left-0 right-0 z-20 bg-black/70 backdrop-blur-xl">
                 <div className="mx-auto w-full max-w-5xl px-6 py-4">
                   <div className="rounded-[28px] border border-white/8 bg-gradient-to-br from-[#05070d]/95 to-[#0b1222]/95 p-3 shadow-[0_-10px_40px_rgba(0,0,0,0.35)]">
                     <ChatInput
@@ -212,7 +245,7 @@ export default function ChatUI() {
               </div>
             </section>
 
-            <aside className="hidden w-72 shrink-0 border-l border-white/6 bg-black/35 backdrop-blur-md xl:block">
+            <aside className="hidden w-72 shrink-0 bg-black/20 backdrop-blur-md xl:block">
               <div className="sticky top-0 p-6">
                 <div className="mb-6">
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
@@ -243,7 +276,8 @@ export default function ChatUI() {
                   </div>
 
                   <div className="pt-4 text-xs leading-6 text-zinc-600">
-                    This panel reflects session state as Siren’s Mind builds context.
+                    This panel reflects session state as Siren’s Mind builds
+                    context.
                   </div>
                 </div>
               </div>
