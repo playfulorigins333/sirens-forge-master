@@ -1,7 +1,7 @@
 "use client"
 
-import { ChatUI } from "@/components/chat/ChatUI"
+import ChatUI from "@/components/chat/ChatUI"
 
-export default function Page() {
+export default function SirensMindPage() {
   return <ChatUI />
 }

@@ -1,160 +1,204 @@
 "use client"
 
-import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Shield, Users, Star } from "lucide-react"
-import { motion } from "framer-motion"
-import { ChatMessage, TypingIndicator } from "./ChatMessage"
+import React, { useCallback, useEffect, useRef, useState } from "react"
+import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 
-type Mode = "SAFE" | "NSFW" | "ULTRA"
+type Role = "user" | "assistant"
 
-interface Message {
+type Message = {
   id: string
-  role: "assistant" | "user"
+  role: Role
   content: string
-  isStreaming?: boolean
+  isError?: boolean
 }
 
-export const ChatUI: React.FC = () => {
+type HeadlessRequest = {
+  mode: "SAFE" | "NSFW" | "ULTRA"
+  intent: string
+  output_format: "plain" | "structured"
+  dna_decision: "none" | "save" | "reuse"
+  stack_depth: "light" | "medium" | "deep"
+  description: string
+}
+
+type HeadlessSuccessResponse = {
+  status: "ok"
+  mode: string
+  model: string
+  result: {
+    prompt: string
+    negative_prompt?: string
+    tags?: string[]
+    style?: string
+    metadata?: Record<string, any>
+  }
+}
+
+type HeadlessRefusalResponse = {
+  status: "refused"
+  error_code: string
+  reason: string
+}
+
+export default function ChatUI() {
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: "1",
+      id: "init",
       role: "assistant",
       content:
-        "Welcome to A Siren's Mind.\n\nI guide prompt construction with precision.\n\nWhat would you like to create?",
+        "Tell me what you want to create — I’ll shape it into something strong, refined, and ready to use.",
     },
   ])
 
   const [isTyping, setIsTyping] = useState(false)
-  const [isStreaming, setIsStreaming] = useState(false)
-  const [mode, setMode] = useState<Mode>("SAFE")
 
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
+  const [intent, setIntent] = useState<string>("image_prompt")
+  const [outputFormat] = useState<"plain">("plain")
+  const [dnaDecision] = useState<"none">("none")
+  const [stackDepth] = useState<"light">("light")
+
+  const bottomRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isTyping])
 
-  const handleSendMessage = async (content: string) => {
-    if (!content.trim()) return
+  const appendMessage = useCallback((msg: Message) => {
+    setMessages(prev => [...prev, msg])
+  }, [])
 
-    setMessages((prev) => [
-      ...prev,
-      { id: Date.now().toString(), role: "user", content },
-    ])
+  const handleSend = async (userText: string) => {
+    if (!userText.trim()) return
+
+    appendMessage({
+      id: crypto.randomUUID(),
+      role: "user",
+      content: userText,
+    })
 
     setIsTyping(true)
 
-    setTimeout(() => {
-      setIsTyping(false)
-      setIsStreaming(true)
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: "This is a response from Siren’s Mind.",
-          isStreaming: true,
-        },
-      ])
-    }, 600)
-  }
-
-  const getModeColor = (m: Mode) => {
-    switch (m) {
-      case "SAFE":
-        return "bg-emerald-500"
-      case "NSFW":
-        return "bg-amber-500"
-      case "ULTRA":
-        return "bg-rose-600"
+    const payload: HeadlessRequest = {
+      mode,
+      intent,
+      output_format: outputFormat,
+      dna_decision: dnaDecision,
+      stack_depth: stackDepth,
+      description: userText,
     }
-  }
 
-  const getModeIcon = (m: Mode) => {
-    switch (m) {
-      case "SAFE":
-        return Shield
-      case "NSFW":
-        return Users
-      case "ULTRA":
-        return Star
+    try {
+      const res = await fetch("/api/nsfw-gpt/headless", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
+
+      const data = (await res.json()) as
+        | HeadlessSuccessResponse
+        | HeadlessRefusalResponse
+
+      await new Promise(r => setTimeout(r, 350))
+
+      if ("error_code" in data) {
+        appendMessage({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `${data.error_code}: ${data.reason}`,
+          isError: true,
+        })
+      } else {
+        appendMessage({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: data.result.prompt,
+        })
+      }
+    } catch {
+      appendMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "SYSTEM_ERROR: Failed to reach prompt engine.",
+        isError: true,
+      })
+    } finally {
+      setIsTyping(false)
     }
   }
 
   return (
-    <div className="h-screen flex bg-black text-white">
-
-      {/* MAIN COLUMN */}
-      <div className="flex-1 flex flex-col">
+    <div className="flex h-screen w-full bg-black text-white">
+      {/* MAIN CHAT AREA */}
+      <div className="flex flex-1 flex-col">
 
         {/* HEADER */}
-        <div className="px-6 py-4 border-b border-gray-800 bg-black/70 backdrop-blur">
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+        <div className="px-6 pt-6 pb-3">
+          <h1 className="text-xl font-semibold tracking-tight text-purple-400">
             A Siren’s Mind
           </h1>
-
-          {/* MODE */}
-          <div className="flex gap-2 mt-3">
-            {(["SAFE", "NSFW", "ULTRA"] as Mode[]).map((m) => {
-              const Icon = getModeIcon(m)
-              return (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold ${
-                    mode === m
-                      ? `${getModeColor(m)} text-white`
-                      : "bg-gray-800 text-gray-400"
-                  }`}
-                >
-                  <Icon className="w-3 h-3" />
-                  {m}
-                </button>
-              )
-            })}
+          <div className="mt-3 flex gap-2">
+            {["SAFE", "NSFW", "ULTRA"].map(m => (
+              <button
+                key={m}
+                onClick={() => setMode(m as any)}
+                className={`px-4 py-1.5 rounded-full text-xs font-medium transition ${
+                  mode === m
+                    ? "bg-purple-500 text-white"
+                    : "bg-gray-800 text-gray-400 hover:text-white"
+                }`}
+              >
+                {m}
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* CHAT AREA */}
-        <div className="flex-1 overflow-y-auto px-6 py-6">
-          <div className="max-w-3xl mx-auto w-full">
+        {/* CHAT STREAM */}
+        <div className="flex-1 overflow-y-auto px-6 pb-32 pt-4">
+          <div className="max-w-3xl mx-auto space-y-6">
 
-            {messages.map((msg, i) => (
+            {messages.map(msg => (
               <ChatMessage
                 key={msg.id}
                 role={msg.role}
                 content={msg.content}
-                isStreaming={msg.isStreaming}
-                isFirstMessage={i === 0}
+                isError={msg.isError}
               />
             ))}
 
-            {isTyping && <TypingIndicator />}
-            <div ref={messagesEndRef} />
+            {isTyping && (
+              <ChatMessage role="assistant" content="…" isTyping />
+            )}
 
+            <div ref={bottomRef} />
           </div>
         </div>
 
-        {/* INPUT (NOW PROPERLY DOCKED) */}
-        <div className="border-t border-gray-800 bg-black/80 px-6 py-4">
+        {/* INPUT */}
+        <div className="fixed bottom-0 left-0 right-0 border-t border-gray-800 bg-black/90 backdrop-blur px-6 py-4">
           <div className="max-w-3xl mx-auto">
-            <ChatInput onSendMessage={handleSendMessage} />
+            <ChatInput
+              mode={mode}
+              onModeChange={setMode}
+              onSend={handleSend}
+            />
           </div>
         </div>
       </div>
 
-      {/* SIDEBAR (SOFTENED + SMALLER) */}
-      <div className="hidden md:flex w-64 border-l border-gray-800 bg-black/70 p-4">
-        <div className="text-sm text-gray-400">
-          <div className="mb-4 font-bold text-white">Current Stack</div>
+      {/* SIDEBAR (DE-EMPHASIZED) */}
+      <div className="hidden md:flex w-72 border-l border-gray-900 bg-black/60 backdrop-blur-sm p-6">
+        <div className="text-xs text-gray-500 space-y-3">
+          <div className="text-gray-400 font-semibold">Current Stack</div>
           <div>Mode: {mode}</div>
           <div>Intent: —</div>
           <div>DNA: —</div>
         </div>
       </div>
-
     </div>
   )
 }
