@@ -62,7 +62,10 @@ export default function ChatUI() {
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
+    bottomRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    })
   }, [messages, isTyping])
 
   const appendMessage = useCallback((msg: Message) => {
@@ -138,32 +141,25 @@ export default function ChatUI() {
     <div className="relative flex h-screen w-full overflow-hidden bg-black text-white">
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute inset-0 bg-[#05060a]" />
-        <div className="absolute inset-y-0 left-0 w-[24rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.10),transparent_72%)]" />
-        <div className="absolute top-0 right-0 h-64 w-64 bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.05),transparent_72%)]" />
+        <div className="absolute inset-y-0 left-0 w-[22rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.10),transparent_72%)]" />
       </div>
 
       <main className="relative flex min-w-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
           <header className="border-b border-white/5 bg-black/50">
-            <div className="mx-auto flex w-full max-w-6xl items-end justify-between gap-6 px-6 py-5">
-              <div>
-                <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[22px] font-semibold tracking-tight text-transparent sm:text-[26px]">
-                  A Siren’s Mind
-                </h1>
-                <p className="mt-1 text-sm text-zinc-400">
-                  Erotic Prompt Intelligence
-                </p>
-              </div>
-
-              <div className="hidden rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-400 xl:block">
-                Prompt workspace
-              </div>
+            <div className="mx-auto w-full max-w-4xl px-6 py-6">
+              <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent">
+                A Siren’s Mind
+              </h1>
+              <p className="mt-1 text-sm text-zinc-400">
+                Erotic Prompt Intelligence
+              </p>
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-40 pt-5">
-            <div className="mx-auto w-full max-w-6xl">
-              <div className="mb-5 max-w-4xl rounded-[24px] border border-fuchsia-500/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.98),rgba(7,7,10,0.98))] px-7 py-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-[19rem] pt-5">
+            <div className="mx-auto w-full max-w-4xl">
+              <div className="mb-5 rounded-[24px] border border-fuchsia-500/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.98),rgba(7,7,10,0.98))] px-7 py-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
                 <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-fuchsia-300/80">
                   A Siren’s Mind
                 </div>
@@ -208,30 +204,28 @@ export default function ChatUI() {
                 </div>
               </div>
 
-              <div className="max-w-4xl">
-                <div className="flex flex-col gap-5">
-                  {messages.slice(1).map((msg) => (
-                    <ChatMessage
-                      key={msg.id}
-                      role={msg.role}
-                      content={msg.content}
-                      isError={msg.isError}
-                    />
-                  ))}
+              <div className="flex flex-col gap-5">
+                {messages.slice(1).map((msg) => (
+                  <ChatMessage
+                    key={msg.id}
+                    role={msg.role}
+                    content={msg.content}
+                    isError={msg.isError}
+                  />
+                ))}
 
-                  {isTyping && (
-                    <ChatMessage role="assistant" content="…" isTyping />
-                  )}
+                {isTyping && (
+                  <ChatMessage role="assistant" content="…" isTyping />
+                )}
 
-                  <div ref={bottomRef} />
-                </div>
+                <div ref={bottomRef} className="h-8 scroll-mb-[18rem]" />
               </div>
             </div>
           </div>
 
-          <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/5 bg-[rgba(5,6,10,0.9)] backdrop-blur-xl">
-            <div className="mx-auto w-full max-w-6xl px-6 py-4">
-              <div className="max-w-4xl rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(12,12,16,0.98),rgba(8,8,12,0.98))] p-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
+          <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/5 bg-[rgba(5,6,10,0.94)] backdrop-blur-xl">
+            <div className="mx-auto w-full max-w-4xl px-6 py-4">
+              <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(12,12,16,0.98),rgba(8,8,12,0.98))] p-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
                 <ChatInput
                   mode={mode}
                   onModeChange={setMode}
