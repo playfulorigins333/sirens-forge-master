@@ -1,7 +1,7 @@
 GENERATOR COMPATIBILITY ENFORCER — SIRENS FORGE
 
 This file enforces strict output compatibility with the Sirens Forge
-Generation Page. All prompt outputs MUST conform to these rules.
+Generation Page.
 
 This file applies to BOTH Conversational Mode and Headless Mode.
 
@@ -21,31 +21,38 @@ This means:
 - No emojis inside prompt output
 - No prefaces like “Here is your prompt”
 
-If the output is intended for generation, it must be CLEAN PROMPT TEXT ONLY.
+If the output is intended for generation:
+→ it MUST be CLEAN PROMPT TEXT ONLY
 
 ---
 
 ALLOWED OUTPUT FORMS
 
-The assistant MAY output:
+The assistant MAY output ONLY the following:
 
-1. Plain-text prompt strings
-2. Structured prompt objects:
-   {
-     "prompt": "string",
-     "negative_prompt": "string (optional)",
-     "tags": ["optional", "array"],
-     "style": "optional",
-     "metadata": { "optional": true }
-   }
+1. Plain-text prompt string
+
+2. Structured prompt object:
+{
+  "prompt": "string",
+  "negative_prompt": "string (optional)",
+  "tags": ["optional", "array"],
+  "style": "optional",
+  "metadata": { "optional": true }
+}
+
 3. Prompt fragments / stacks (clearly labeled)
+
 4. Batch arrays of prompt strings or objects
 
-The assistant MUST NOT invent new output formats.
+The assistant MUST NOT:
+- invent new formats
+- mix formats
+- produce hybrid structures
 
 ---
 
-NO CHAT LEAKAGE RULE
+NO CHAT LEAKAGE RULE (CRITICAL)
 
 When outputting a prompt intended for generation:
 
@@ -55,26 +62,91 @@ When outputting a prompt intended for generation:
 - Suggestions
 - Questions
 - Commentary
-- Formatting headers
+- Labels
+- Headers
 
-✅ Output ONLY the prompt content or structured object.
+✅ Output ONLY:
+- the prompt string
+OR
+- the structured object
 
-If explanation is needed, it must be sent in a SEPARATE message
-and clearly labeled as non-generation content.
+---
+
+CONVERSATIONAL MODE SEPARATION
+
+In Conversational Mode:
+
+The assistant MAY:
+
+- Generate the prompt
+- THEN provide a short optional refinement suggestion
+
+BUT:
+
+- The prompt MUST be isolated and clean
+- The suggestion MUST be clearly separate
+- The suggestion MUST NOT contaminate the prompt text
+
+Example behavior:
+
+[Prompt output]
+<clean prompt text>
+
+[Optional note]
+“Want me to push this more cinematic or keep it clean?”
+
+---
+
+HEADLESS MODE STRICTNESS
+
+In Headless Mode:
+
+- Output MUST be JSON ONLY
+- No additional text allowed
+- No conversational content
+- No optional notes
+- No separation blocks
 
 ---
 
 DEFAULT OUTPUT PREFERENCE
 
 Unless otherwise specified:
+
 - Output should be plain text
 - Minimal verbosity
 - Optimized for downstream generation quality
+- No extra formatting
+
+---
+
+NEGATIVE PROMPT HANDLING
+
+If negative prompts are included:
+
+- They MUST be clearly separated in structured output
+- OR appended in plain-text format only if expected by system
+- Never mix unclear negative syntax
 
 ---
 
 FAILURE MODE
 
 If the requested output cannot be made generator-compatible:
+
 - Do NOT attempt partial generation
+- Do NOT produce degraded output
 - Defer to refusal logic defined in the Headless Contract file
+
+---
+
+STRICT OUTPUT DISCIPLINE
+
+The assistant MUST treat prompt output as:
+
+- production-ready
+- directly executable
+- clean and isolated
+
+Prompt output is NOT conversational text.
+It is system input.
