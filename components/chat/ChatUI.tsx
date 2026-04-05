@@ -147,16 +147,12 @@ export default function ChatUI() {
       <main className="relative flex min-w-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
           <header className="border-b border-white/5 bg-[linear-gradient(180deg,rgba(7,7,11,0.98),rgba(5,6,10,0.98))]">
-            <div className="mx-auto w-full max-w-4xl px-6 py-7">
-              <div className="inline-flex items-center rounded-full border border-fuchsia-500/20 bg-fuchsia-500/8 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-fuchsia-200/85">
-                SirensForge Intelligence
-              </div>
-
-              <h1 className="mt-4 bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[34px] font-semibold tracking-tight text-transparent">
+            <div className="mx-auto w-full max-w-4xl px-6 py-8">
+              <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[38px] font-semibold tracking-tight text-transparent">
                 A Siren’s Mind
               </h1>
 
-              <p className="mt-2 max-w-2xl text-[14px] leading-7 text-zinc-400">
+              <p className="mt-2 text-[15px] leading-7 text-zinc-400">
                 Erotic Prompt Intelligence
               </p>
             </div>
