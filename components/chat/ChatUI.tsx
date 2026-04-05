@@ -54,7 +54,7 @@ export default function ChatUI() {
   const [isTyping, setIsTyping] = useState(false)
 
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
-  const [intent, setIntent] = useState<string>("image_prompt")
+  const [intent] = useState<string>("image_prompt")
   const [outputFormat] = useState<"plain">("plain")
   const [dnaDecision] = useState<"none">("none")
   const [stackDepth] = useState<"light">("light")
@@ -66,7 +66,7 @@ export default function ChatUI() {
   }, [messages, isTyping])
 
   const appendMessage = useCallback((msg: Message) => {
-    setMessages(prev => [...prev, msg])
+    setMessages((prev) => [...prev, msg])
   }, [])
 
   const handleSend = async (userText: string) => {
@@ -102,7 +102,7 @@ export default function ChatUI() {
         | HeadlessSuccessResponse
         | HeadlessRefusalResponse
 
-      await new Promise(r => setTimeout(r, 350))
+      await new Promise((r) => setTimeout(r, 350))
 
       if ("error_code" in data) {
         appendMessage({
@@ -131,73 +131,125 @@ export default function ChatUI() {
   }
 
   return (
-    <div className="flex h-screen w-full bg-black text-white">
-      {/* MAIN CHAT AREA */}
-      <div className="flex flex-1 flex-col">
-
-        {/* HEADER */}
-        <div className="px-6 pt-6 pb-3">
-          <h1 className="text-xl font-semibold tracking-tight text-purple-400">
-            A Siren’s Mind
-          </h1>
-          <div className="mt-3 flex gap-2">
-            {["SAFE", "NSFW", "ULTRA"].map(m => (
-              <button
-                key={m}
-                onClick={() => setMode(m as any)}
-                className={`px-4 py-1.5 rounded-full text-xs font-medium transition ${
-                  mode === m
-                    ? "bg-purple-500 text-white"
-                    : "bg-gray-800 text-gray-400 hover:text-white"
-                }`}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* CHAT STREAM */}
-        <div className="flex-1 overflow-y-auto px-6 pb-32 pt-4">
-          <div className="max-w-3xl mx-auto space-y-6">
-
-            {messages.map(msg => (
-              <ChatMessage
-                key={msg.id}
-                role={msg.role}
-                content={msg.content}
-                isError={msg.isError}
-              />
-            ))}
-
-            {isTyping && (
-              <ChatMessage role="assistant" content="…" isTyping />
-            )}
-
-            <div ref={bottomRef} />
-          </div>
-        </div>
-
-        {/* INPUT */}
-        <div className="fixed bottom-0 left-0 right-0 border-t border-gray-800 bg-black/90 backdrop-blur px-6 py-4">
-          <div className="max-w-3xl mx-auto">
-            <ChatInput
-              mode={mode}
-              onModeChange={setMode}
-              onSend={handleSend}
-            />
-          </div>
-        </div>
+    <div className="relative flex h-screen w-full overflow-hidden bg-black text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.14),transparent_30%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.10),transparent_24%),linear-gradient(to_bottom,rgba(20,20,28,0.65),rgba(0,0,0,1))]" />
+        <div className="absolute inset-0 opacity-[0.045] [background-image:radial-gradient(#ffffff_0.6px,transparent_0.6px)] [background-size:18px_18px]" />
       </div>
 
-      {/* SIDEBAR (DE-EMPHASIZED) */}
-      <div className="hidden md:flex w-72 border-l border-gray-900 bg-black/60 backdrop-blur-sm p-6">
-        <div className="text-xs text-gray-500 space-y-3">
-          <div className="text-gray-400 font-semibold">Current Stack</div>
-          <div>Mode: {mode}</div>
-          <div>Intent: —</div>
-          <div>DNA: —</div>
-        </div>
+      <div className="relative flex min-w-0 flex-1">
+        <main className="flex min-w-0 flex-1 flex-col">
+          <header className="border-b border-white/6 bg-black/45 backdrop-blur-md">
+            <div className="mx-auto w-full max-w-5xl px-6 pb-4 pt-7">
+              <div className="flex items-end justify-between gap-6">
+                <div className="max-w-2xl">
+                  <h1 className="text-3xl font-semibold tracking-tight text-purple-400">
+                    A Siren’s Mind
+                  </h1>
+                  <p className="mt-2 text-sm leading-6 text-zinc-400">
+                    Erotic Prompt Intelligence
+                  </p>
+                  <p className="mt-4 max-w-xl text-sm leading-6 text-zinc-300">
+                    Describe the scene, mood, identity, or direction you want.
+                    Siren’s Mind will refine it into a stronger, generator-ready result.
+                  </p>
+                </div>
+
+                <div className="hidden shrink-0 rounded-full border border-white/8 bg-white/[0.03] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500 md:block">
+                  Chat-first creative engine
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <div className="flex min-h-0 flex-1">
+            <section className="flex min-w-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-44 pt-8">
+                <div className="mx-auto flex w-full max-w-5xl flex-col">
+                  <div className="mb-8 max-w-3xl rounded-3xl border border-purple-500/10 bg-gradient-to-br from-[#0a0812]/90 via-[#0b1020]/75 to-[#09090b]/90 px-6 py-5 shadow-[0_0_60px_rgba(168,85,247,0.06)]">
+                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-purple-300/70">
+                      A Siren’s Mind
+                    </div>
+                    <p className="text-base leading-8 text-zinc-100">
+                      Tell me what you want to create — I’ll shape it into something strong,
+                      refined, and ready to use.
+                    </p>
+                    <p className="mt-3 text-sm leading-6 text-zinc-400">
+                      If you’re building around a character or consistent identity, I’ll keep
+                      that continuity intact while refining the scene.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col gap-6">
+                    {messages.slice(1).map((msg) => (
+                      <ChatMessage
+                        key={msg.id}
+                        role={msg.role}
+                        content={msg.content}
+                        isError={msg.isError}
+                      />
+                    ))}
+
+                    {isTyping && (
+                      <ChatMessage role="assistant" content="…" isTyping />
+                    )}
+
+                    <div ref={bottomRef} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/8 bg-black/80 backdrop-blur-xl">
+                <div className="mx-auto w-full max-w-5xl px-6 py-4">
+                  <div className="rounded-[28px] border border-white/8 bg-gradient-to-br from-[#05070d]/95 to-[#0b1222]/95 p-3 shadow-[0_-10px_40px_rgba(0,0,0,0.35)]">
+                    <ChatInput
+                      mode={mode}
+                      onModeChange={setMode}
+                      onSend={handleSend}
+                    />
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside className="hidden w-72 shrink-0 border-l border-white/6 bg-black/35 backdrop-blur-md xl:block">
+              <div className="sticky top-0 p-6">
+                <div className="mb-6">
+                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                    Current Stack
+                  </div>
+                </div>
+
+                <div className="space-y-5 text-sm">
+                  <div>
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                      Mode
+                    </div>
+                    <div className="text-zinc-300">{mode}</div>
+                  </div>
+
+                  <div>
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                      Intent
+                    </div>
+                    <div className="text-zinc-500">—</div>
+                  </div>
+
+                  <div>
+                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                      DNA
+                    </div>
+                    <div className="text-zinc-500">—</div>
+                  </div>
+
+                  <div className="pt-4 text-xs leading-6 text-zinc-600">
+                    This panel reflects session state as Siren’s Mind builds context.
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </main>
       </div>
     </div>
   )
