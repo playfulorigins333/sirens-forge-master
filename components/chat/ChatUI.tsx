@@ -13,26 +13,16 @@ type Message = {
   isError?: boolean
 }
 
-type HeadlessRequest = {
-  mode: "SAFE" | "NSFW" | "ULTRA"
-  intent: string
-  output_format: "plain" | "structured"
-  dna_decision: "none" | "save" | "reuse"
-  stack_depth: "light" | "medium" | "deep"
-  description: string
-}
-
+/**
+ * 🔥 FIXED RESPONSE TYPE
+ * Matches your ACTUAL API response
+ */
 type HeadlessSuccessResponse = {
   status: "ok"
   mode: string
   model: string
-  result: {
-    prompt: string
-    negative_prompt?: string
-    tags?: string[]
-    style?: string
-    metadata?: Record<string, any>
-  }
+  output_type: string
+  prompt: string
 }
 
 type HeadlessRefusalResponse = {
@@ -54,10 +44,6 @@ export default function ChatUI() {
   const [isTyping, setIsTyping] = useState(false)
 
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
-  const [intent] = useState<string>("image_prompt")
-  const [outputFormat] = useState<"plain">("plain")
-  const [dnaDecision] = useState<"none">("none")
-  const [stackDepth] = useState<"light">("light")
 
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
@@ -87,22 +73,16 @@ export default function ChatUI() {
 
     setIsTyping(true)
 
-    const payload: HeadlessRequest = {
-      mode,
-      intent,
-      output_format: outputFormat,
-      dna_decision: dnaDecision,
-      stack_depth: stackDepth,
-      description: userText,
-    }
-
     try {
       const res = await fetch("/api/nsfw-gpt/headless", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          mode,
+          description: userText,
+        }),
       })
 
       const data = (await res.json()) as
@@ -111,6 +91,9 @@ export default function ChatUI() {
 
       await new Promise((r) => setTimeout(r, 350))
 
+      /**
+       * 🔥 FIX: HANDLE API PROPERLY
+       */
       if ("error_code" in data) {
         appendMessage({
           id: crypto.randomUUID(),
@@ -118,14 +101,23 @@ export default function ChatUI() {
           content: `${data.error_code}: ${data.reason}`,
           isError: true,
         })
+      } else if (data.status === "ok") {
+        appendMessage({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: data.prompt, // ✅ CORRECT FIELD
+        })
       } else {
         appendMessage({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: data.result.prompt,
+          content: "SYSTEM_ERROR: Invalid response format.",
+          isError: true,
         })
       }
-    } catch {
+    } catch (err) {
+      console.error("Chat error:", err)
+
       appendMessage({
         id: crypto.randomUUID(),
         role: "assistant",
@@ -162,7 +154,7 @@ export default function ChatUI() {
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-[19rem] pt-5">
             <div className="mx-auto w-full max-w-4xl">
-              <div className="mb-5 rounded-[24px] border border-fuchsia-500/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.98),rgba(7,7,10,0.98))] px-7 py-6 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+              <div className="mb-5 rounded-[24px] border border-fuchsia-500/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.98),rgba(7,7,10,0.98))] px-7 py-6">
                 <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-fuchsia-300/80">
                   A Siren’s Mind
                 </div>
@@ -175,31 +167,24 @@ export default function ChatUI() {
                   </span>
                 </p>
 
-                <p className="mt-3 max-w-3xl text-[14px] leading-7 text-zinc-400">
+                <p className="mt-3 text-[14px] leading-7 text-zinc-400">
                   I’ll shape it into something stronger and ready to use.
                 </p>
 
-                <div className="mt-5">
-                  <div className="mb-3 text-[10px] font-medium uppercase tracking-[0.18em] text-zinc-500">
-                    Start with one of these
-                  </div>
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {[
-                      "Build a polished feminine character prompt with luxury styling",
-                      "Turn this rough idea into a stronger image prompt",
-                      "Create something darker, moodier, and more seductive",
-                    ].map((starter) => (
-                      <button
-                        key={starter}
-                        type="button"
-                        onClick={() => handleStarterClick(starter)}
-                        className="rounded-2xl border border-transparent bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 px-4 py-3 text-left text-[13px] font-medium leading-6 text-white shadow-[0_0_18px_rgba(168,85,247,0.16)] transition-all duration-200 hover:brightness-110"
-                      >
-                        {starter}
-                      </button>
-                    ))}
-                  </div>
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  {[
+                    "Build a polished feminine character prompt with luxury styling",
+                    "Turn this rough idea into a stronger image prompt",
+                    "Create something darker, moodier, and more seductive",
+                  ].map((starter) => (
+                    <button
+                      key={starter}
+                      onClick={() => handleStarterClick(starter)}
+                      className="rounded-2xl bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 px-4 py-3 text-left text-white"
+                    >
+                      {starter}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -217,59 +202,21 @@ export default function ChatUI() {
                   <ChatMessage role="assistant" content="…" isTyping />
                 )}
 
-                <div ref={bottomRef} className="h-8 scroll-mb-[18rem]" />
+                <div ref={bottomRef} className="h-8" />
               </div>
             </div>
           </div>
 
-          <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/5 bg-[rgba(5,6,10,0.94)] backdrop-blur-xl">
+          <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/5 bg-black/90">
             <div className="mx-auto w-full max-w-4xl px-6 py-4">
-              <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(12,12,16,0.98),rgba(8,8,12,0.98))] p-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)]">
-                <ChatInput
-                  mode={mode}
-                  onModeChange={setMode}
-                  onSend={handleSend}
-                />
-              </div>
+              <ChatInput
+                mode={mode}
+                onModeChange={setMode}
+                onSend={handleSend}
+              />
             </div>
           </div>
         </section>
-
-        <aside className="hidden w-72 shrink-0 border-l border-white/5 bg-[linear-gradient(180deg,rgba(9,9,13,0.98),rgba(6,6,9,0.98))] xl:block">
-          <div className="sticky top-0 p-6">
-            <div className="mb-6 text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
-              Current Stack
-            </div>
-
-            <div className="space-y-6 text-sm">
-              <div>
-                <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
-                  Mode
-                </div>
-                <div className="text-zinc-200">{mode}</div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
-                  Intent
-                </div>
-                <div className="text-zinc-500">—</div>
-              </div>
-
-              <div>
-                <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
-                  DNA
-                </div>
-                <div className="text-zinc-500">—</div>
-              </div>
-
-              <div className="pt-4 text-xs leading-7 text-zinc-600">
-                This panel reflects session state as Siren’s Mind builds
-                context.
-              </div>
-            </div>
-          </div>
-        </aside>
       </main>
     </div>
   )
