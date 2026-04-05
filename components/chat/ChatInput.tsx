@@ -49,8 +49,8 @@ export function ChatInput({
         onClick={() => onModeChange(label)}
         className={`rounded-full border px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] transition-all duration-200 ${
           active
-            ? "border-transparent bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 text-white shadow-[0_0_18px_rgba(168,85,247,0.18)]"
-            : "border-white/10 bg-white/[0.03] text-zinc-400 hover:border-white/20 hover:bg-white/[0.05] hover:text-white"
+            ? "border-transparent bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 text-white shadow-[0_0_18px_rgba(168,85,247,0.16)]"
+            : "border-white/10 bg-[#111218] text-zinc-400 hover:border-white/20 hover:bg-[#15161d] hover:text-white"
         }`}
       >
         {label}
@@ -66,8 +66,8 @@ export function ChatInput({
         {modeButton("ULTRA")}
       </div>
 
-      <div className="rounded-[24px] border border-white/10 bg-black/30 p-3">
-        <div className="flex items-end gap-3 rounded-[20px] border border-white/12 bg-[#09090d] px-4 py-3">
+      <div className="rounded-[24px] border border-white/10 bg-[#0d0e13] p-3">
+        <div className="flex items-end gap-3 rounded-[20px] border border-white/10 bg-black px-4 py-3">
           <textarea
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -81,7 +81,7 @@ export function ChatInput({
             type="button"
             onClick={submit}
             disabled={!value.trim() || sending}
-            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-gradient-to-r from-violet-500/80 via-fuchsia-500/80 to-cyan-500/80 text-white transition-all duration-200 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
+            className="flex h-11 w-11 items-center justify-center rounded-2xl border border-transparent bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 text-white shadow-[0_0_18px_rgba(168,85,247,0.16)] transition-all duration-200 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:brightness-100"
             aria-label="Send"
           >
             <span className="text-lg leading-none">↗</span>
