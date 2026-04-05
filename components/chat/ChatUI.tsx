@@ -137,25 +137,25 @@ export default function ChatUI() {
   return (
     <div className="relative flex h-screen w-full overflow-hidden bg-black text-white">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.14),transparent_30%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.10),transparent_24%),linear-gradient(to_bottom,rgba(20,20,28,0.65),rgba(0,0,0,1))]" />
-        <div className="absolute inset-0 opacity-[0.04] [background-image:radial-gradient(#ffffff_0.6px,transparent_0.6px)] [background-size:18px_18px]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.18),transparent_32%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.12),transparent_26%),linear-gradient(to_bottom,rgba(20,20,28,0.7),rgba(0,0,0,1))]" />
+        <div className="absolute inset-0 opacity-[0.035] [background-image:radial-gradient(#ffffff_0.6px,transparent_0.6px)] [background-size:18px_18px]" />
       </div>
 
       <main className="relative flex min-w-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="bg-black/35 backdrop-blur-md">
-            <div className="mx-auto w-full max-w-4xl px-6 pb-5 pt-7">
+          <header className="bg-black/40 backdrop-blur-md">
+            <div className="mx-auto w-full max-w-4xl px-6 pb-6 pt-8">
               <div className="flex items-end justify-between gap-6">
                 <div className="max-w-3xl">
-                  <h1 className="text-3xl font-semibold tracking-tight text-purple-400">
+                  <h1 className="text-[34px] font-semibold tracking-tight text-purple-300">
                     A Siren’s Mind
                   </h1>
 
-                  <p className="mt-2 text-sm leading-6 text-zinc-400">
+                  <p className="mt-2 text-[13px] tracking-wide text-zinc-500">
                     Erotic Prompt Intelligence
                   </p>
 
-                  <p className="mt-5 max-w-3xl text-sm leading-7 text-zinc-200">
+                  <p className="mt-5 max-w-3xl text-[15px] leading-7 text-zinc-200">
                     <span className="font-medium text-white">
                       Tell me what you want to create.
                     </span>{" "}
@@ -165,32 +165,32 @@ export default function ChatUI() {
                   </p>
                 </div>
 
-                <div className="hidden shrink-0 rounded-full border border-white/10 bg-white/[0.02] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500 xl:block">
+                <div className="hidden shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500 xl:block">
                   Chat-first creative engine
                 </div>
               </div>
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-44 pt-8">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-44 pt-10">
             <div className="mx-auto w-full max-w-4xl">
-              <div className="mb-8 rounded-3xl border border-purple-500/10 bg-gradient-to-br from-[#0a0812]/90 via-[#0b1020]/75 to-[#09090b]/90 px-6 py-5 shadow-[0_0_60px_rgba(168,85,247,0.06)]">
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-purple-300/70">
+              <div className="mb-10 rounded-3xl border border-purple-500/10 bg-gradient-to-br from-[#0a0812]/95 via-[#0b1020]/80 to-[#09090b]/95 px-7 py-6 shadow-[0_0_80px_rgba(168,85,247,0.08)] backdrop-blur-sm">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-purple-300/70">
                   A Siren’s Mind
                 </div>
 
-                <p className="text-base leading-8 text-zinc-100">
+                <p className="text-[16px] leading-8 text-zinc-100">
                   Tell me what you want to create — a mood, a character, a
                   scene, or a polished prompt. I’ll shape it into something
                   stronger and ready to use.
                 </p>
 
-                <p className="mt-3 text-sm leading-6 text-zinc-400">
+                <p className="mt-4 text-[14px] leading-6 text-zinc-400">
                   If you’re building around a consistent character, I can keep
                   the look, tone, and identity aligned across prompts.
                 </p>
 
-                <div className="mt-5">
+                <div className="mt-6">
                   <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
                     Start with one of these
                   </div>
@@ -205,7 +205,7 @@ export default function ChatUI() {
                         key={starter}
                         type="button"
                         onClick={() => handleStarterClick(starter)}
-                        className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-zinc-300 transition hover:border-purple-400/20 hover:bg-purple-500/10 hover:text-white"
+                        className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-[13px] text-zinc-300 transition-all duration-200 hover:scale-[1.02] hover:border-purple-400/30 hover:bg-purple-500/10 hover:text-white active:scale-[0.98]"
                       >
                         {starter}
                       </button>
@@ -214,7 +214,7 @@ export default function ChatUI() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-7">
                 {messages.slice(1).map((msg) => (
                   <ChatMessage
                     key={msg.id}
@@ -233,9 +233,9 @@ export default function ChatUI() {
             </div>
           </div>
 
-          <div className="fixed bottom-0 left-0 right-0 z-20 bg-black/70 backdrop-blur-xl">
-            <div className="mx-auto w-full max-w-4xl px-6 py-4">
-              <div className="rounded-[28px] border border-white/8 bg-gradient-to-br from-[#05070d]/95 to-[#0b1222]/95 p-3 shadow-[0_-10px_40px_rgba(0,0,0,0.35)]">
+          <div className="fixed bottom-0 left-0 right-0 z-20 bg-black/75 backdrop-blur-xl">
+            <div className="mx-auto w-full max-w-4xl px-6 py-5">
+              <div className="rounded-[30px] border border-white/10 bg-gradient-to-br from-[#05070d]/95 to-[#0b1222]/95 p-4 shadow-[0_-15px_50px_rgba(0,0,0,0.45)] transition-all focus-within:shadow-[0_0_40px_rgba(168,85,247,0.15)]">
                 <ChatInput
                   mode={mode}
                   onModeChange={setMode}
