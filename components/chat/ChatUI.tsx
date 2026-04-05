@@ -144,137 +144,98 @@ export default function ChatUI() {
       <main className="relative flex min-w-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
           <header className="bg-black/35 backdrop-blur-md">
-            <div className="mx-auto flex w-full max-w-[1400px] items-end justify-between gap-8 px-6 pb-5 pt-7">
-              <div className="w-full max-w-4xl">
-                <h1 className="text-3xl font-semibold tracking-tight text-purple-400">
-                  A Siren’s Mind
-                </h1>
+            <div className="mx-auto w-full max-w-4xl px-6 pb-5 pt-7">
+              <div className="flex items-end justify-between gap-6">
+                <div className="max-w-3xl">
+                  <h1 className="text-3xl font-semibold tracking-tight text-purple-400">
+                    A Siren’s Mind
+                  </h1>
 
-                <p className="mt-2 text-sm leading-6 text-zinc-400">
-                  Erotic Prompt Intelligence
-                </p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-400">
+                    Erotic Prompt Intelligence
+                  </p>
 
-                <p className="mt-5 max-w-3xl text-sm leading-7 text-zinc-200">
-                  <span className="font-medium text-white">
-                    Tell me what you want to create.
-                  </span>{" "}
-                  I can turn a rough idea into a polished prompt, refine an
-                  existing concept, or build around a character for consistency.
-                </p>
-              </div>
+                  <p className="mt-5 max-w-3xl text-sm leading-7 text-zinc-200">
+                    <span className="font-medium text-white">
+                      Tell me what you want to create.
+                    </span>{" "}
+                    I can turn a rough idea into a polished prompt, refine an
+                    existing concept, or build around a character for
+                    consistency.
+                  </p>
+                </div>
 
-              <div className="hidden shrink-0 rounded-full border border-white/10 bg-white/[0.02] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500 xl:block">
-                Chat-first creative engine
+                <div className="hidden shrink-0 rounded-full border border-white/10 bg-white/[0.02] px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-zinc-500 xl:block">
+                  Chat-first creative engine
+                </div>
               </div>
             </div>
           </header>
 
-          <div className="flex min-h-0 flex-1">
-            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-44 pt-8">
-              <div className="mx-auto w-full max-w-[1400px]">
-                <div className="w-full max-w-4xl">
-                  <div className="mb-8 rounded-3xl border border-purple-500/10 bg-gradient-to-br from-[#0a0812]/90 via-[#0b1020]/75 to-[#09090b]/90 px-6 py-5 shadow-[0_0_60px_rgba(168,85,247,0.06)]">
-                    <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-purple-300/70">
-                      A Siren’s Mind
-                    </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-44 pt-8">
+            <div className="mx-auto w-full max-w-4xl">
+              <div className="mb-8 rounded-3xl border border-purple-500/10 bg-gradient-to-br from-[#0a0812]/90 via-[#0b1020]/75 to-[#09090b]/90 px-6 py-5 shadow-[0_0_60px_rgba(168,85,247,0.06)]">
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-purple-300/70">
+                  A Siren’s Mind
+                </div>
 
-                    <p className="text-base leading-8 text-zinc-100">
-                      Tell me what you want to create — a mood, a character, a
-                      scene, or a polished prompt. I’ll shape it into something
-                      stronger and ready to use.
-                    </p>
+                <p className="text-base leading-8 text-zinc-100">
+                  Tell me what you want to create — a mood, a character, a
+                  scene, or a polished prompt. I’ll shape it into something
+                  stronger and ready to use.
+                </p>
 
-                    <p className="mt-3 text-sm leading-6 text-zinc-400">
-                      If you’re building around a consistent character, I can
-                      keep the look, tone, and identity aligned across prompts.
-                    </p>
+                <p className="mt-3 text-sm leading-6 text-zinc-400">
+                  If you’re building around a consistent character, I can keep
+                  the look, tone, and identity aligned across prompts.
+                </p>
 
-                    <div className="mt-5">
-                      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                        Start with one of these
-                      </div>
-
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          "Build a polished feminine character prompt with luxury styling",
-                          "Turn this rough idea into a stronger image prompt",
-                          "Create something darker, moodier, and more seductive",
-                        ].map((starter) => (
-                          <button
-                            key={starter}
-                            type="button"
-                            onClick={() => handleStarterClick(starter)}
-                            className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-zinc-300 transition hover:border-purple-400/20 hover:bg-purple-500/10 hover:text-white"
-                          >
-                            {starter}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                <div className="mt-5">
+                  <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                    Start with one of these
                   </div>
 
-                  <div className="flex flex-col gap-6">
-                    {messages.slice(1).map((msg) => (
-                      <ChatMessage
-                        key={msg.id}
-                        role={msg.role}
-                        content={msg.content}
-                        isError={msg.isError}
-                      />
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      "Build a polished feminine character prompt with luxury styling",
+                      "Turn this rough idea into a stronger image prompt",
+                      "Create something darker, moodier, and more seductive",
+                    ].map((starter) => (
+                      <button
+                        key={starter}
+                        type="button"
+                        onClick={() => handleStarterClick(starter)}
+                        className="rounded-full border border-white/8 bg-white/[0.03] px-3 py-2 text-xs text-zinc-300 transition hover:border-purple-400/20 hover:bg-purple-500/10 hover:text-white"
+                      >
+                        {starter}
+                      </button>
                     ))}
-
-                    {isTyping && (
-                      <ChatMessage role="assistant" content="…" isTyping />
-                    )}
-
-                    <div ref={bottomRef} />
                   </div>
                 </div>
+              </div>
+
+              <div className="flex flex-col gap-6">
+                {messages.slice(1).map((msg) => (
+                  <ChatMessage
+                    key={msg.id}
+                    role={msg.role}
+                    content={msg.content}
+                    isError={msg.isError}
+                  />
+                ))}
+
+                {isTyping && (
+                  <ChatMessage role="assistant" content="…" isTyping />
+                )}
+
+                <div ref={bottomRef} />
               </div>
             </div>
-
-            <aside className="hidden w-72 shrink-0 border-l border-white/5 bg-black/20 backdrop-blur-md xl:block">
-              <div className="sticky top-0 p-6">
-                <div className="mb-6">
-                  <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
-                    Current Stack
-                  </div>
-                </div>
-
-                <div className="space-y-5 text-sm">
-                  <div>
-                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
-                      Mode
-                    </div>
-                    <div className="text-zinc-300">{mode}</div>
-                  </div>
-
-                  <div>
-                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
-                      Intent
-                    </div>
-                    <div className="text-zinc-500">—</div>
-                  </div>
-
-                  <div>
-                    <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
-                      DNA
-                    </div>
-                    <div className="text-zinc-500">—</div>
-                  </div>
-
-                  <div className="pt-4 text-xs leading-6 text-zinc-600">
-                    This panel reflects session state as Siren’s Mind builds
-                    context.
-                  </div>
-                </div>
-              </div>
-            </aside>
           </div>
 
           <div className="fixed bottom-0 left-0 right-0 z-20 bg-black/70 backdrop-blur-xl">
-            <div className="mx-auto w-full max-w-[1400px] px-6 py-4">
-              <div className="w-full max-w-4xl rounded-[28px] border border-white/8 bg-gradient-to-br from-[#05070d]/95 to-[#0b1222]/95 p-3 shadow-[0_-10px_40px_rgba(0,0,0,0.35)]">
+            <div className="mx-auto w-full max-w-4xl px-6 py-4">
+              <div className="rounded-[28px] border border-white/8 bg-gradient-to-br from-[#05070d]/95 to-[#0b1222]/95 p-3 shadow-[0_-10px_40px_rgba(0,0,0,0.35)]">
                 <ChatInput
                   mode={mode}
                   onModeChange={setMode}
@@ -284,6 +245,44 @@ export default function ChatUI() {
             </div>
           </div>
         </section>
+
+        <aside className="hidden w-72 shrink-0 border-l border-white/5 bg-black/20 backdrop-blur-md xl:block">
+          <div className="sticky top-0 p-6">
+            <div className="mb-6">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                Current Stack
+              </div>
+            </div>
+
+            <div className="space-y-5 text-sm">
+              <div>
+                <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                  Mode
+                </div>
+                <div className="text-zinc-300">{mode}</div>
+              </div>
+
+              <div>
+                <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                  Intent
+                </div>
+                <div className="text-zinc-500">—</div>
+              </div>
+
+              <div>
+                <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                  DNA
+                </div>
+                <div className="text-zinc-500">—</div>
+              </div>
+
+              <div className="pt-4 text-xs leading-6 text-zinc-600">
+                This panel reflects session state as Siren’s Mind builds
+                context.
+              </div>
+            </div>
+          </div>
+        </aside>
       </main>
     </div>
   )
