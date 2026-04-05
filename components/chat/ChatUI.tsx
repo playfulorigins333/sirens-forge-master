@@ -137,16 +137,16 @@ export default function ChatUI() {
   return (
     <div className="relative flex h-screen w-full overflow-hidden bg-black text-white">
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(168,85,247,0.16),transparent_30%),radial-gradient(circle_at_top_right,rgba(59,130,246,0.10),transparent_24%),linear-gradient(to_bottom,rgba(20,20,28,0.65),rgba(0,0,0,1))]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(7,7,10,0.98),rgba(5,5,8,1))]" />
+        <div className="absolute inset-y-0 left-0 w-[34rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.12),transparent_68%)]" />
+        <div className="absolute top-0 right-0 h-72 w-72 bg-[radial-gradient(circle_at_top_right,rgba(236,72,153,0.08),transparent_70%)]" />
       </div>
 
       <main className="relative flex min-w-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
-
-          {/* 🔥 COMPRESSED HEADER */}
           <header className="border-b border-white/5 bg-black/40 backdrop-blur-md">
-            <div className="mx-auto w-full max-w-4xl px-6 py-4">
-              <h1 className="text-[28px] font-semibold tracking-tight text-purple-300">
+            <div className="mx-auto w-full max-w-4xl px-6 py-5">
+              <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[30px] font-semibold tracking-tight text-transparent">
                 A Siren’s Mind
               </h1>
 
@@ -156,23 +156,21 @@ export default function ChatUI() {
             </div>
           </header>
 
-          {/* 🔥 FIXED VIEWPORT ECONOMY */}
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-36 pt-6">
             <div className="mx-auto w-full max-w-4xl">
-
-              {/* 🔥 COMPRESSED INTRO CARD */}
-              <div className="mb-6 rounded-2xl border border-purple-500/10 bg-gradient-to-br from-[#0a0812]/95 via-[#0b1020]/80 to-[#09090b]/95 px-6 py-4 shadow-[0_0_60px_rgba(168,85,247,0.06)]">
-
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-purple-300/70">
+              <div className="mb-5 rounded-[26px] border border-fuchsia-500/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.96),rgba(8,8,12,0.96))] px-6 py-5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+                <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-fuchsia-300/75">
                   A Siren’s Mind
                 </div>
 
                 <p className="text-[15px] leading-7 text-zinc-100">
-                  Tell me what you want to create — a mood, a character, a
-                  scene, or a polished prompt.
+                  <span className="font-medium text-white">
+                    Tell me what you want to create
+                  </span>{" "}
+                  — a mood, a character, a scene, or a polished prompt.
                 </p>
 
-                <p className="mt-2 text-[13px] text-zinc-400">
+                <p className="mt-2 text-[13px] leading-6 text-zinc-400">
                   I’ll shape it into something stronger and ready to use.
                 </p>
 
@@ -191,7 +189,7 @@ export default function ChatUI() {
                         key={starter}
                         type="button"
                         onClick={() => handleStarterClick(starter)}
-                        className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-2 text-[12px] text-zinc-300 transition hover:border-purple-400/30 hover:bg-purple-500/10 hover:text-white"
+                        className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-[12px] text-zinc-200 transition-all duration-200 hover:border-fuchsia-400/30 hover:bg-white/[0.05] hover:text-white"
                       >
                         {starter}
                       </button>
@@ -200,8 +198,7 @@ export default function ChatUI() {
                 </div>
               </div>
 
-              {/* 🔥 MESSAGES */}
-              <div className="flex flex-col gap-6">
+              <div className="flex flex-col gap-5">
                 {messages.slice(1).map((msg) => (
                   <ChatMessage
                     key={msg.id}
@@ -220,10 +217,9 @@ export default function ChatUI() {
             </div>
           </div>
 
-          {/* 🔥 INPUT */}
-          <div className="fixed bottom-0 left-0 right-0 z-20 bg-black/80 backdrop-blur-xl border-t border-white/5">
+          <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/5 bg-black/70 backdrop-blur-xl">
             <div className="mx-auto w-full max-w-4xl px-6 py-4">
-              <div className="rounded-[26px] border border-white/10 bg-gradient-to-br from-[#05070d]/95 to-[#0b1222]/95 p-3 shadow-[0_-10px_40px_rgba(0,0,0,0.4)]">
+              <div className="rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(11,11,16,0.96),rgba(8,8,12,0.96))] p-3 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
                 <ChatInput
                   mode={mode}
                   onModeChange={setMode}
@@ -234,38 +230,39 @@ export default function ChatUI() {
           </div>
         </section>
 
-        <aside className="hidden w-72 shrink-0 border-l border-white/5 bg-black/20 backdrop-blur-md xl:block">
+        <aside className="hidden w-72 shrink-0 border-l border-white/5 bg-[linear-gradient(180deg,rgba(9,9,13,0.96),rgba(6,6,9,0.98))] xl:block">
           <div className="sticky top-0 p-6">
             <div className="mb-6">
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-zinc-500">
                 Current Stack
               </div>
             </div>
 
-            <div className="space-y-5 text-sm">
+            <div className="space-y-6 text-sm">
               <div>
-                <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
                   Mode
                 </div>
-                <div className="text-zinc-300">{mode}</div>
+                <div className="text-zinc-200">{mode}</div>
               </div>
 
               <div>
-                <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
                   Intent
                 </div>
                 <div className="text-zinc-500">—</div>
               </div>
 
               <div>
-                <div className="mb-1 text-[11px] uppercase tracking-[0.18em] text-zinc-600">
+                <div className="mb-2 text-[10px] uppercase tracking-[0.18em] text-zinc-600">
                   DNA
                 </div>
                 <div className="text-zinc-500">—</div>
               </div>
 
-              <div className="pt-4 text-xs leading-6 text-zinc-600">
-                This panel reflects session state as Siren’s Mind builds context.
+              <div className="pt-4 text-xs leading-7 text-zinc-600">
+                This panel reflects session state as Siren’s Mind builds
+                context.
               </div>
             </div>
           </div>
