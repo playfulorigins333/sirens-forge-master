@@ -146,12 +146,17 @@ export default function ChatUI() {
 
       <main className="relative flex min-w-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="border-b border-white/5 bg-black/50">
-            <div className="mx-auto w-full max-w-4xl px-6 py-6">
-              <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent">
+          <header className="border-b border-white/5 bg-[linear-gradient(180deg,rgba(7,7,11,0.98),rgba(5,6,10,0.98))]">
+            <div className="mx-auto w-full max-w-4xl px-6 py-7">
+              <div className="inline-flex items-center rounded-full border border-fuchsia-500/20 bg-fuchsia-500/8 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-fuchsia-200/85">
+                SirensForge Intelligence
+              </div>
+
+              <h1 className="mt-4 bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[34px] font-semibold tracking-tight text-transparent">
                 A Siren’s Mind
               </h1>
-              <p className="mt-1 text-sm text-zinc-400">
+
+              <p className="mt-2 max-w-2xl text-[14px] leading-7 text-zinc-400">
                 Erotic Prompt Intelligence
               </p>
             </div>
@@ -186,16 +191,12 @@ export default function ChatUI() {
                       "Build a polished feminine character prompt with luxury styling",
                       "Turn this rough idea into a stronger image prompt",
                       "Create something darker, moodier, and more seductive",
-                    ].map((starter, index) => (
+                    ].map((starter) => (
                       <button
                         key={starter}
                         type="button"
                         onClick={() => handleStarterClick(starter)}
-                        className={`rounded-2xl border px-4 py-3 text-left text-[13px] leading-6 transition-all duration-200 ${
-                          index === 0
-                            ? "border-transparent bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 font-medium text-white shadow-[0_0_18px_rgba(168,85,247,0.16)] hover:brightness-110"
-                            : "border-white/10 bg-[#101117] text-zinc-200 hover:border-fuchsia-400/30 hover:bg-[#13141b] hover:text-white"
-                        }`}
+                        className="rounded-2xl border border-transparent bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 px-4 py-3 text-left text-[13px] font-medium leading-6 text-white shadow-[0_0_18px_rgba(168,85,247,0.16)] transition-all duration-200 hover:brightness-110"
                       >
                         {starter}
                       </button>
