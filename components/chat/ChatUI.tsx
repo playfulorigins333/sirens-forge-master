@@ -52,8 +52,14 @@ export default function ChatUI() {
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const hasMountedRef = useRef(false)
 
   useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true
+      return
+    }
+
     const id = window.setTimeout(() => {
       const el = scrollContainerRef.current
       if (!el) return
