@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useEffect, useRef, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 
@@ -11,6 +11,11 @@ type Message = {
   role: Role
   content: string
   isError?: boolean
+}
+
+type HeadlessHistoryMessage = {
+  role: Role
+  content: string
 }
 
 type HeadlessSuccessResponse = {
@@ -27,13 +32,19 @@ type HeadlessRefusalResponse = {
   reason: string
 }
 
+type HeadlessErrorResponse = {
+  error: string
+  reason?: string
+  message?: string
+}
+
 export default function ChatUI() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "init",
       role: "assistant",
       content:
-        "Tell me what you want to create — a mood, a character, a scene, or a polished prompt. I’ll shape it into something stronger and ready to use.",
+        "Tell me what you want to create — a mood, a character, a scene, or a polished prompt.",
     },
   ])
 
@@ -42,26 +53,29 @@ export default function ChatUI() {
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    const el = scrollContainerRef.current
-    if (!el) return
-    el.scrollTo({
-      top: el.scrollHeight,
-      behavior,
-    })
-  }, [])
-
   useEffect(() => {
     const id = window.setTimeout(() => {
-      scrollToBottom("smooth")
+      const el = scrollContainerRef.current
+      if (!el) return
+      el.scrollTo({
+        top: el.scrollHeight,
+        behavior: "smooth",
+      })
     }, 80)
 
     return () => window.clearTimeout(id)
-  }, [messages, isTyping, scrollToBottom])
+  }, [messages, isTyping])
 
-  const appendMessage = useCallback((msg: Message) => {
+  const appendMessage = (msg: Message) => {
     setMessages((prev) => [...prev, msg])
-  }, [])
+  }
+
+  const buildHistory = (items: Message[]): HeadlessHistoryMessage[] => {
+    return items.map((m) => ({
+      role: m.role,
+      content: m.content,
+    }))
+  }
 
   const handleStarterClick = (starter: string) => {
     void handleSend(starter)
@@ -70,12 +84,14 @@ export default function ChatUI() {
   const handleSend = async (userText: string) => {
     if (!userText.trim()) return
 
-    appendMessage({
+    const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
       content: userText,
-    })
+    }
 
+    const nextMessages = [...messages, userMessage]
+    setMessages(nextMessages)
     setIsTyping(true)
 
     try {
@@ -87,14 +103,26 @@ export default function ChatUI() {
         body: JSON.stringify({
           mode,
           description: userText,
+          output_type: "IMAGE",
+          history: buildHistory(nextMessages),
         }),
       })
 
       const data = (await res.json()) as
         | HeadlessSuccessResponse
         | HeadlessRefusalResponse
+        | HeadlessErrorResponse
 
       await new Promise((r) => setTimeout(r, 350))
+
+      if ("status" in data && data.status === "ok") {
+        appendMessage({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: data.prompt,
+        })
+        return
+      }
 
       if ("error_code" in data) {
         appendMessage({
@@ -103,20 +131,25 @@ export default function ChatUI() {
           content: `${data.error_code}: ${data.reason}`,
           isError: true,
         })
-      } else if (data.status === "ok") {
+        return
+      }
+
+      if ("error" in data) {
         appendMessage({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: data.prompt,
-        })
-      } else {
-        appendMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "SYSTEM_ERROR: Invalid response format.",
+          content: data.reason || data.message || data.error,
           isError: true,
         })
+        return
       }
+
+      appendMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: "SYSTEM_ERROR: Invalid response format.",
+        isError: true,
+      })
     } catch (err) {
       console.error("Chat error:", err)
 
@@ -194,7 +227,7 @@ export default function ChatUI() {
               </div>
 
               <div className="flex flex-col gap-5">
-                {messages.slice(1).map((msg) => (
+                {messages.map((msg) => (
                   <ChatMessage
                     key={msg.id}
                     role={msg.role}

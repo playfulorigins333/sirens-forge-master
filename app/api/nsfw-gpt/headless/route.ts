@@ -1,94 +1,102 @@
-import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
+import { NextRequest, NextResponse } from "next/server"
+import fs from "fs"
+import path from "path"
 import {
   validateVaultIds,
   type Mode as VaultMode,
-} from "@/prompts/nsfw_gpt/vault_registry";
-import { validateMacroIds } from "@/prompts/nsfw_gpt/macro_registry";
+} from "@/prompts/nsfw_gpt/vault_registry"
+import { validateMacroIds } from "@/prompts/nsfw_gpt/macro_registry"
 
-export const runtime = "nodejs";
+export const runtime = "nodejs"
 
 /**
  * Runtime-safe env access
  */
 function getEnv(name: string): string | null {
-  return process.env[name] ?? null;
+  return process.env[name] ?? null
 }
 
 /**
  * Load prompt files
  */
 function loadPrompt(file: string): string {
-  const fullPath = path.join(process.cwd(), "prompts", "nsfw_gpt", file);
-  return fs.readFileSync(fullPath, "utf-8");
+  const fullPath = path.join(process.cwd(), "prompts", "nsfw_gpt", file)
+  return fs.readFileSync(fullPath, "utf-8")
 }
 
 /**
  * Load system layers (HEADLESS ONLY — CLEAN STACK)
  */
-const SYSTEM_BASE = loadPrompt("nsfw_gpt.system.base.txt");
-const ROUTER = loadPrompt("nsfw_gpt.router.system.txt");
+const SYSTEM_BASE = loadPrompt("nsfw_gpt.system.base.txt")
+const ROUTER = loadPrompt("nsfw_gpt.router.system.txt")
 const OUTPUT_ENFORCER = loadPrompt(
   "nsfw_gpt.output.generator_compat_enforcer.txt"
-);
+)
 const HEADLESS_CONTRACT = loadPrompt(
   "nsfw_gpt.headless.contract_and_refusal.txt"
-);
+)
 
 /**
  * Output types
  */
-type OutputType = "IMAGE" | "VIDEO" | "STORY";
+type OutputType = "IMAGE" | "VIDEO" | "STORY"
 
 function normalizeOutputType(v: unknown): OutputType | null {
   const s = String(v || "")
     .trim()
-    .toUpperCase();
-  if (s === "IMAGE" || s === "VIDEO" || s === "STORY") return s;
-  return null;
+    .toUpperCase()
+  if (s === "IMAGE" || s === "VIDEO" || s === "STORY") return s
+  return null
+}
+
+type HistoryRole = "user" | "assistant"
+
+type HistoryMessage = {
+  role: HistoryRole
+  content: string
 }
 
 /**
  * Headless payload
  */
 type HeadlessBody = {
-  mode?: string;
-  intent?: string;
-  output_format?: string;
-  dna_decision?: string;
-  stack_depth?: string;
-  description?: string;
-  output_type?: OutputType | string;
-  vault_ids?: string[];
-  macro_ids?: string[];
-};
+  mode?: string
+  intent?: string
+  output_format?: string
+  dna_decision?: string
+  stack_depth?: string
+  description?: string
+  output_type?: OutputType | string
+  vault_ids?: string[]
+  macro_ids?: string[]
+  history?: HistoryMessage[]
+}
 
 type HeadlessError = {
-  error: string;
-  [k: string]: any;
-};
+  error: string
+  [k: string]: any
+}
 
 type HeadlessSuccess = {
-  status: "ok";
-  mode: VaultMode;
-  model: string;
-  output_type: OutputType;
-  prompt: string;
-  structured: any | null;
-  raw_text: string;
+  status: "ok"
+  mode: VaultMode
+  model: string
+  output_type: OutputType
+  prompt: string
+  structured: any | null
+  raw_text: string
   metadata: {
-    vault_ids: string[];
-    invalid_vaults: string[];
-    blocked_vaults: string[];
-    missing_vault_files: string[];
-    macro_ids: string[];
-    invalid_macros: string[];
-    blocked_macros: string[];
-    missing_macro_files: string[];
-    contract_parse: "ok" | "fallback_text";
-  };
-};
+    vault_ids: string[]
+    invalid_vaults: string[]
+    blocked_vaults: string[]
+    missing_vault_files: string[]
+    macro_ids: string[]
+    invalid_macros: string[]
+    blocked_macros: string[]
+    missing_macro_files: string[]
+    contract_parse: "ok" | "fallback_text"
+  }
+}
 
 /**
  * Output-type router system layer
@@ -108,7 +116,7 @@ function buildOutputTypeSystem(outputType: OutputType): string {
       "- Output a single clean generator-ready image prompt string.",
       "- No markdown, no backticks, no headings, no commentary.",
       "- If negative prompting is needed, keep the main prompt clean and prioritize the primary prompt text.",
-    ].join("\n");
+    ].join("\n")
   }
 
   if (outputType === "VIDEO") {
@@ -121,7 +129,7 @@ function buildOutputTypeSystem(outputType: OutputType): string {
       "- `camera` must describe camera movement or lens behavior.",
       "- `negative_prompt` should be concise and quality-focused.",
       "- `notes` should briefly state what was emphasized.",
-    ].join("\n");
+    ].join("\n")
   }
 
   return [
@@ -129,7 +137,7 @@ function buildOutputTypeSystem(outputType: OutputType): string {
     "- Return a SINGLE JSON object only (no markdown, no backticks).",
     '- JSON schema: { "title": string, "scene": string, "notes": string }',
     "- `scene` should contain the actual story/prose output.",
-  ].join("\n");
+  ].join("\n")
 }
 
 /**
@@ -143,11 +151,11 @@ function loadVaultText(vaultId: string): string | null {
       "nsfw_gpt",
       "vaults",
       `${vaultId}.txt`
-    );
-    if (!fs.existsSync(fullPath)) return null;
-    return fs.readFileSync(fullPath, "utf-8");
+    )
+    if (!fs.existsSync(fullPath)) return null
+    return fs.readFileSync(fullPath, "utf-8")
   } catch {
-    return null;
+    return null
   }
 }
 
@@ -162,11 +170,11 @@ function loadMacroText(macroId: string): string | null {
       "nsfw_gpt",
       "macros",
       `${macroId}.txt`
-    );
-    if (!fs.existsSync(fullPath)) return null;
-    return fs.readFileSync(fullPath, "utf-8");
+    )
+    if (!fs.existsSync(fullPath)) return null
+    return fs.readFileSync(fullPath, "utf-8")
   } catch {
-    return null;
+    return null
   }
 }
 
@@ -177,18 +185,18 @@ const MODEL_BY_MODE: Record<VaultMode, string> = {
   SAFE: "openai/gpt-5-mini",
   NSFW: "openai/gpt-4o",
   ULTRA: "nousresearch/hermes-4-405b",
-};
+}
 
 function tryParseJsonObject(text: string): any | null {
-  const raw = String(text || "").trim();
-  if (!raw) return null;
+  const raw = String(text || "").trim()
+  if (!raw) return null
 
   try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") return parsed;
-    return null;
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === "object") return parsed
+    return null
   } catch {
-    return null;
+    return null
   }
 }
 
@@ -197,51 +205,70 @@ function coercePromptFromResponse(
   structured: any | null,
   rawText: string
 ): string {
-  const trimmed = String(rawText || "").trim();
+  const trimmed = String(rawText || "").trim()
 
   if (outputType === "IMAGE") {
-    return trimmed;
+    return trimmed
   }
 
   if (structured && typeof structured === "object") {
     if (typeof structured.prompt === "string" && structured.prompt.trim()) {
-      return structured.prompt.trim();
+      return structured.prompt.trim()
     }
 
     if (outputType === "STORY") {
       const title =
-        typeof structured.title === "string" ? structured.title.trim() : "";
+        typeof structured.title === "string" ? structured.title.trim() : ""
       const scene =
-        typeof structured.scene === "string" ? structured.scene.trim() : "";
-      const pieces = [title && `Title: ${title}`, scene].filter(Boolean);
-      if (pieces.length > 0) return pieces.join("\n\n");
+        typeof structured.scene === "string" ? structured.scene.trim() : ""
+      const pieces = [title && `Title: ${title}`, scene].filter(Boolean)
+      if (pieces.length > 0) return pieces.join("\n\n")
     }
   }
 
-  return trimmed;
+  return trimmed
+}
+
+function sanitizeHistory(history: unknown): HistoryMessage[] {
+  if (!Array.isArray(history)) return []
+
+  return history
+    .filter((item): item is HistoryMessage => {
+      if (!item || typeof item !== "object") return false
+      const maybe = item as Partial<HistoryMessage>
+      return (
+        (maybe.role === "user" || maybe.role === "assistant") &&
+        typeof maybe.content === "string" &&
+        maybe.content.trim().length > 0
+      )
+    })
+    .map((item) => ({
+      role: item.role,
+      content: item.content.trim(),
+    }))
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json().catch(() => null)) as HeadlessBody | null;
+    const body = (await req.json().catch(() => null)) as HeadlessBody | null
 
     if (!body) {
       return NextResponse.json(
         { error: "INVALID_JSON" } satisfies HeadlessError,
         { status: 400 }
-      );
+      )
     }
 
-    const description = String(body.description || "").trim();
+    const description = String(body.description || "").trim()
     if (!description) {
       return NextResponse.json(
         { error: "MISSING_DESCRIPTION" } satisfies HeadlessError,
         { status: 400 }
-      );
+      )
     }
 
-    const mode = String(body.mode || "").toUpperCase() as VaultMode;
-    const model = MODEL_BY_MODE[mode];
+    const mode = String(body.mode || "").toUpperCase() as VaultMode
+    const model = MODEL_BY_MODE[mode]
 
     if (!model) {
       return NextResponse.json(
@@ -250,13 +277,13 @@ export async function POST(req: NextRequest) {
           allowed: Object.keys(MODEL_BY_MODE),
         } satisfies HeadlessError,
         { status: 400 }
-      );
+      )
     }
 
-    const outputType: OutputType = normalizeOutputType(body.output_type) ?? "IMAGE";
+    const outputType: OutputType = normalizeOutputType(body.output_type) ?? "IMAGE"
 
-    const apiKey = getEnv("OPENAI_COMPAT_API_KEY");
-    const baseUrl = getEnv("OPENAI_COMPAT_BASE_URL");
+    const apiKey = getEnv("OPENAI_COMPAT_API_KEY")
+    const baseUrl = getEnv("OPENAI_COMPAT_BASE_URL")
 
     if (!apiKey || !baseUrl) {
       return NextResponse.json(
@@ -265,37 +292,38 @@ export async function POST(req: NextRequest) {
           reason: "Missing OPENAI_COMPAT_API_KEY or OPENAI_COMPAT_BASE_URL",
         } satisfies HeadlessError,
         { status: 500 }
-      );
+      )
     }
 
-    const v = validateVaultIds(body.vault_ids || [], mode);
-    const m = validateMacroIds(body.macro_ids || [], mode);
+    const v = validateVaultIds(body.vault_ids || [], mode)
+    const m = validateMacroIds(body.macro_ids || [], mode)
 
-    const missingVaultFiles: string[] = [];
+    const missingVaultFiles: string[] = []
     const vaultTexts = v.vault_ids
       .map((id) => {
-        const txt = loadVaultText(id);
+        const txt = loadVaultText(id)
         if (!txt) {
-          missingVaultFiles.push(id);
-          return null;
+          missingVaultFiles.push(id)
+          return null
         }
-        return `--- VAULT:${id} ---\n${txt}`;
+        return `--- VAULT:${id} ---\n${txt}`
       })
-      .filter((x): x is string => Boolean(x));
+      .filter((x): x is string => Boolean(x))
 
-    const missingMacroFiles: string[] = [];
+    const missingMacroFiles: string[] = []
     const macroTexts = m.macro_ids
       .map((id) => {
-        const txt = loadMacroText(id);
+        const txt = loadMacroText(id)
         if (!txt) {
-          missingMacroFiles.push(id);
-          return null;
+          missingMacroFiles.push(id)
+          return null
         }
-        return `--- MACRO:${id} ---\n${txt}`;
+        return `--- MACRO:${id} ---\n${txt}`
       })
-      .filter((x): x is string => Boolean(x));
+      .filter((x): x is string => Boolean(x))
 
-    const OUTPUT_TYPE_SYSTEM = buildOutputTypeSystem(outputType);
+    const OUTPUT_TYPE_SYSTEM = buildOutputTypeSystem(outputType)
+    const history = sanitizeHistory(body.history)
 
     const systemPrompt = [
       SYSTEM_BASE,
@@ -309,7 +337,17 @@ export async function POST(req: NextRequest) {
       ...(macroTexts.length
         ? ["# MACRO STACK\n" + macroTexts.join("\n\n")]
         : []),
-    ].join("\n\n");
+    ].join("\n\n")
+
+    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      { role: "system", content: systemPrompt },
+      ...history,
+    ]
+
+    const lastHistory = history[history.length - 1]
+    if (!lastHistory || lastHistory.role !== "user" || lastHistory.content !== description) {
+      messages.push({ role: "user", content: description })
+    }
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
@@ -321,14 +359,11 @@ export async function POST(req: NextRequest) {
         model,
         max_tokens: 1200,
         temperature: mode === "SAFE" ? 0.6 : 0.85,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: description },
-        ],
+        messages,
       }),
-    });
+    })
 
-    const raw = await response.json().catch(() => null);
+    const raw = await response.json().catch(() => null)
 
     if (!response.ok) {
       return NextResponse.json(
@@ -338,15 +373,15 @@ export async function POST(req: NextRequest) {
           raw,
         } satisfies HeadlessError,
         { status: response.status }
-      );
+      )
     }
 
-    const rawText = String(raw?.choices?.[0]?.message?.content || "").trim();
+    const rawText = String(raw?.choices?.[0]?.message?.content || "").trim()
 
     const structured =
-      outputType === "IMAGE" ? null : tryParseJsonObject(rawText);
+      outputType === "IMAGE" ? null : tryParseJsonObject(rawText)
 
-    const prompt = coercePromptFromResponse(outputType, structured, rawText);
+    const prompt = coercePromptFromResponse(outputType, structured, rawText)
 
     const out: HeadlessSuccess = {
       status: "ok",
@@ -372,9 +407,9 @@ export async function POST(req: NextRequest) {
             ? "ok"
             : "fallback_text",
       },
-    };
+    }
 
-    return NextResponse.json(out, { status: 200 });
+    return NextResponse.json(out, { status: 200 })
   } catch (err: any) {
     return NextResponse.json(
       {
@@ -382,6 +417,6 @@ export async function POST(req: NextRequest) {
         message: err?.message,
       } satisfies HeadlessError,
       { status: 500 }
-    );
+    )
   }
 }
