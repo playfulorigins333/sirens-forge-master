@@ -13,10 +13,6 @@ type Message = {
   isError?: boolean
 }
 
-/**
- * 🔥 FIXED RESPONSE TYPE
- * Matches your ACTUAL API response
- */
 type HeadlessSuccessResponse = {
   status: "ok"
   mode: string
@@ -42,17 +38,26 @@ export default function ChatUI() {
   ])
 
   const [isTyping, setIsTyping] = useState(false)
-
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
 
-  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior,
+    })
+  }, [])
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: "smooth",
-      block: "end",
-    })
-  }, [messages, isTyping])
+    const id = window.setTimeout(() => {
+      scrollToBottom("smooth")
+    }, 80)
+
+    return () => window.clearTimeout(id)
+  }, [messages, isTyping, scrollToBottom])
 
   const appendMessage = useCallback((msg: Message) => {
     setMessages((prev) => [...prev, msg])
@@ -91,9 +96,6 @@ export default function ChatUI() {
 
       await new Promise((r) => setTimeout(r, 350))
 
-      /**
-       * 🔥 FIX: HANDLE API PROPERLY
-       */
       if ("error_code" in data) {
         appendMessage({
           id: crypto.randomUUID(),
@@ -105,7 +107,7 @@ export default function ChatUI() {
         appendMessage({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: data.prompt, // ✅ CORRECT FIELD
+          content: data.prompt,
         })
       } else {
         appendMessage({
@@ -152,7 +154,10 @@ export default function ChatUI() {
             </div>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-[19rem] pt-5">
+          <div
+            ref={scrollContainerRef}
+            className="min-h-0 flex-1 overflow-y-auto px-6 pb-[19rem] pt-5"
+          >
             <div className="mx-auto w-full max-w-4xl">
               <div className="mb-5 rounded-[24px] border border-fuchsia-500/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.98),rgba(7,7,10,0.98))] px-7 py-6">
                 <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-fuchsia-300/80">
@@ -202,7 +207,7 @@ export default function ChatUI() {
                   <ChatMessage role="assistant" content="…" isTyping />
                 )}
 
-                <div ref={bottomRef} className="h-8" />
+                <div className="h-12" />
               </div>
             </div>
           </div>
