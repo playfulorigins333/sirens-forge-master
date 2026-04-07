@@ -122,13 +122,16 @@ function buildOutputTypeSystem(outputType: OutputType): string {
   if (outputType === "VIDEO") {
     return [
       "# OUTPUT TYPE ROUTER: VIDEO",
-      "- Return a SINGLE JSON object only (no markdown, no backticks).",
+      "- You MUST return a VALID JSON object only.",
+      "- No text before or after JSON.",
+      "- No markdown. No explanations. No prose outside the object.",
       '- JSON schema: { "prompt": string, "negative_prompt": string, "motion": string, "camera": string, "notes": string }',
       "- `prompt` must describe the visual scene clearly for video generation.",
-      "- `motion` must describe subject/environment motion.",
+      "- `motion` must describe subject and environment motion.",
       "- `camera` must describe camera movement or lens behavior.",
       "- `negative_prompt` should be concise and quality-focused.",
       "- `notes` should briefly state what was emphasized.",
+      "- The JSON must be complete and valid.",
     ].join("\n")
   }
 
@@ -224,6 +227,23 @@ function coercePromptFromResponse(
       const pieces = [title && `Title: ${title}`, scene].filter(Boolean)
       if (pieces.length > 0) return pieces.join("\n\n")
     }
+
+    if (outputType === "VIDEO") {
+      const prompt =
+        typeof structured.prompt === "string" ? structured.prompt.trim() : ""
+      const motion =
+        typeof structured.motion === "string" ? structured.motion.trim() : ""
+      const camera =
+        typeof structured.camera === "string" ? structured.camera.trim() : ""
+
+      const pieces = [
+        prompt && `Prompt: ${prompt}`,
+        motion && `Motion: ${motion}`,
+        camera && `Camera: ${camera}`,
+      ].filter(Boolean)
+
+      if (pieces.length > 0) return pieces.join("\n")
+    }
   }
 
   return trimmed
@@ -280,7 +300,8 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const outputType: OutputType = normalizeOutputType(body.output_type) ?? "IMAGE"
+    const outputType: OutputType =
+      normalizeOutputType(body.output_type) ?? "IMAGE"
 
     const apiKey = getEnv("OPENAI_COMPAT_API_KEY")
     const baseUrl = getEnv("OPENAI_COMPAT_BASE_URL")
@@ -339,13 +360,17 @@ export async function POST(req: NextRequest) {
         : []),
     ].join("\n\n")
 
-    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-      { role: "system", content: systemPrompt },
-      ...history,
-    ]
+    const messages: Array<{
+      role: "system" | "user" | "assistant"
+      content: string
+    }> = [{ role: "system", content: systemPrompt }, ...history]
 
     const lastHistory = history[history.length - 1]
-    if (!lastHistory || lastHistory.role !== "user" || lastHistory.content !== description) {
+    if (
+      !lastHistory ||
+      lastHistory.role !== "user" ||
+      lastHistory.content !== description
+    ) {
       messages.push({ role: "user", content: description })
     }
 
@@ -357,7 +382,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         model,
-        max_tokens: 1200,
+        max_tokens: 2000,
         temperature: mode === "SAFE" ? 0.6 : 0.85,
         messages,
       }),

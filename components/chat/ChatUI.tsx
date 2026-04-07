@@ -76,8 +76,11 @@ export default function ChatUI() {
     setMessages((prev) => [...prev, msg])
   }
 
+  /**
+   * 🔥 FIX: Do NOT include the latest user message twice
+   */
   const buildHistory = (items: Message[]): HeadlessHistoryMessage[] => {
-    return items.map((m) => ({
+    return items.slice(0, -1).map((m) => ({
       role: m.role,
       content: m.content,
     }))
@@ -110,7 +113,7 @@ export default function ChatUI() {
           mode,
           description: userText,
           output_type: "IMAGE",
-          history: buildHistory(nextMessages),
+          history: buildHistory(nextMessages), // 🔥 FIXED
         }),
       })
 
