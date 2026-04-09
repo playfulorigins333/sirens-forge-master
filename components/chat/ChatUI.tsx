@@ -39,15 +39,7 @@ type HeadlessErrorResponse = {
 }
 
 export default function ChatUI() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: "init",
-      role: "assistant",
-      content:
-        "Tell me what you want to create — a mood, a character, a scene, or a polished prompt.",
-    },
-  ])
-
+  const [messages, setMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
 
@@ -55,9 +47,8 @@ export default function ChatUI() {
 
   useEffect(() => {
     // Do NOT auto-scroll on initial page load.
-    // Only scroll after the conversation actually grows beyond the initial assistant message
-    // or while the assistant typing state is active.
-    if (messages.length <= 1 && !isTyping) return
+    // Only scroll after real conversation begins or while typing is active.
+    if (messages.length === 0 && !isTyping) return
 
     const id = window.setTimeout(() => {
       const el = scrollContainerRef.current
