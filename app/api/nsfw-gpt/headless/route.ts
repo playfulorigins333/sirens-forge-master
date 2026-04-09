@@ -40,6 +40,7 @@ const HEADLESS_CONTRACT = loadPrompt(
  * Output types
  */
 type OutputType = "IMAGE" | "VIDEO" | "STORY"
+type GenerationTarget = "text_to_image" | "text_to_video" | "image_to_video"
 
 function normalizeOutputType(v: unknown): OutputType | null {
   const s = String(v || "")
@@ -47,6 +48,46 @@ function normalizeOutputType(v: unknown): OutputType | null {
     .toUpperCase()
   if (s === "IMAGE" || s === "VIDEO" || s === "STORY") return s
   return null
+}
+
+function normalizeGenerationTarget(v: unknown): GenerationTarget | null {
+  const s = String(v || "")
+    .trim()
+    .toLowerCase()
+
+  if (
+    s === "text_to_image" ||
+    s === "text-to-image" ||
+    s === "text to image"
+  ) {
+    return "text_to_image"
+  }
+
+  if (
+    s === "text_to_video" ||
+    s === "text-to-video" ||
+    s === "text to video"
+  ) {
+    return "text_to_video"
+  }
+
+  if (
+    s === "image_to_video" ||
+    s === "image-to-video" ||
+    s === "image to video"
+  ) {
+    return "image_to_video"
+  }
+
+  return null
+}
+
+function outputTypeFromGenerationTarget(
+  generationTarget: GenerationTarget | null
+): OutputType | null {
+  if (!generationTarget) return null
+  if (generationTarget === "text_to_image") return "IMAGE"
+  return "VIDEO"
 }
 
 type HistoryRole = "user" | "assistant"
@@ -67,6 +108,7 @@ type HeadlessBody = {
   stack_depth?: string
   description?: string
   output_type?: OutputType | string
+  generation_target?: GenerationTarget | string
   vault_ids?: string[]
   macro_ids?: string[]
   history?: HistoryMessage[]
@@ -82,10 +124,12 @@ type HeadlessSuccess = {
   mode: VaultMode
   model: string
   output_type: OutputType
+  generation_target: GenerationTarget | null
   prompt: string
   structured: any | null
   raw_text: string
   metadata: {
+    generation_target: GenerationTarget | null
     vault_ids: string[]
     invalid_vaults: string[]
     blocked_vaults: string[]
@@ -146,6 +190,64 @@ function buildOutputTypeSystem(outputType: OutputType): string {
     "- Return a SINGLE JSON object only (no markdown, no backticks).",
     '- JSON schema: { "title": string, "scene": string, "notes": string }',
     "- `scene` should contain the actual story/prose output.",
+  ].join("\n")
+}
+
+/**
+ * Generation-target router system layer
+ *
+ * IMPORTANT:
+ * - text_to_image => optimize for still-image generation
+ * - text_to_video => optimize for short-form text-driven video
+ * - image_to_video => optimize for continuity from a provided source image
+ */
+function buildGenerationTargetSystem(
+  generationTarget: GenerationTarget | null
+): string {
+  if (!generationTarget) {
+    return [
+      "# GENERATION TARGET ROUTER: UNSPECIFIED",
+      "- No explicit generation target was provided.",
+      "- Follow the selected output type exactly.",
+      "- Do not invent extra formats.",
+      "- Keep the response generator-ready and concise.",
+    ].join("\n")
+  }
+
+  if (generationTarget === "text_to_image") {
+    return [
+      "# GENERATION TARGET ROUTER: TEXT_TO_IMAGE",
+      "- The user is creating for a still-image generation pipeline.",
+      "- Optimize for a single-frame visual result.",
+      "- Prioritize subject clarity, styling, composition, environment, lighting, mood, and rendering fidelity.",
+      "- Do NOT describe time progression.",
+      "- Do NOT describe camera movement.",
+      "- Do NOT write as a screenplay or story beat list.",
+      "- Keep the prompt clean, visual, and generator-ready.",
+    ].join("\n")
+  }
+
+  if (generationTarget === "text_to_video") {
+    return [
+      "# GENERATION TARGET ROUTER: TEXT_TO_VIDEO",
+      "- The user is creating for a text-to-video generation pipeline.",
+      "- Optimize for one short-form video moment only.",
+      "- Keep the scene compact, visually coherent, and easy to animate.",
+      "- Emphasize one subject, one environment, one emotional beat.",
+      "- Motion and camera should be simple, cinematic, and production-friendly.",
+      "- Avoid multi-scene progression, long narrative arcs, and screenplay formatting.",
+    ].join("\n")
+  }
+
+  return [
+    "# GENERATION TARGET ROUTER: IMAGE_TO_VIDEO",
+    "- The user is creating for an image-to-video generation pipeline.",
+    "- Optimize for continuity from an already existing source image.",
+    "- Preserve the core subject identity, styling, framing logic, wardrobe logic, and scene continuity unless the user explicitly asks for change.",
+    "- Motion should feel natural, restrained, and compatible with a source still image.",
+    "- Camera movement should be subtle, smooth, and production-friendly.",
+    "- Avoid abrupt scene changes, new environments, or major subject redesign unless explicitly requested.",
+    "- Keep the result compact and suitable for a short-form continuity-driven video clip.",
   ].join("\n")
 }
 
@@ -321,8 +423,12 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const generationTarget = normalizeGenerationTarget(body.generation_target)
+
     const outputType: OutputType =
-      normalizeOutputType(body.output_type) ?? "IMAGE"
+      outputTypeFromGenerationTarget(generationTarget) ??
+      normalizeOutputType(body.output_type) ??
+      "IMAGE"
 
     const apiKey = getEnv("OPENAI_COMPAT_API_KEY")
     const baseUrl = getEnv("OPENAI_COMPAT_BASE_URL")
@@ -365,6 +471,8 @@ export async function POST(req: NextRequest) {
       .filter((x): x is string => Boolean(x))
 
     const OUTPUT_TYPE_SYSTEM = buildOutputTypeSystem(outputType)
+    const GENERATION_TARGET_SYSTEM =
+      buildGenerationTargetSystem(generationTarget)
     const history = sanitizeHistory(body.history)
 
     const systemPrompt = [
@@ -373,6 +481,7 @@ export async function POST(req: NextRequest) {
       OUTPUT_ENFORCER,
       HEADLESS_CONTRACT,
       OUTPUT_TYPE_SYSTEM,
+      GENERATION_TARGET_SYSTEM,
       ...(vaultTexts.length
         ? ["# VAULT STACK\n" + vaultTexts.join("\n\n")]
         : []),
@@ -434,10 +543,12 @@ export async function POST(req: NextRequest) {
       mode,
       model,
       output_type: outputType,
+      generation_target: generationTarget,
       prompt,
       structured,
       raw_text: rawText,
       metadata: {
+        generation_target: generationTarget,
         vault_ids: v.vault_ids,
         invalid_vaults: v.invalid_ids,
         blocked_vaults: v.blocked_ids,

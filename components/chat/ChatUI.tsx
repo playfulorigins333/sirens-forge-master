@@ -38,12 +38,101 @@ type HeadlessErrorResponse = {
   message?: string
 }
 
-export default function ChatUI() {
+type GenerationTarget = "text_to_image" | "text_to_video" | "image_to_video"
+type OutputType = "IMAGE" | "VIDEO"
+
+type ChatUIProps = {
+  initialGenerationTarget?: GenerationTarget | null
+}
+
+const TARGET_SELECTION_PROMPT =
+  "What are we building this for — text-to-image, text-to-video, or image-to-video?"
+
+function targetToOutputType(target: GenerationTarget): OutputType {
+  if (target === "text_to_image") return "IMAGE"
+  return "VIDEO"
+}
+
+function targetToLabel(target: GenerationTarget): string {
+  switch (target) {
+    case "text_to_image":
+      return "text-to-image"
+    case "text_to_video":
+      return "text-to-video"
+    case "image_to_video":
+      return "image-to-video"
+    default:
+      return "text-to-image"
+  }
+}
+
+function parseGenerationTarget(input: string): GenerationTarget | null {
+  const normalized = input.trim().toLowerCase()
+
+  const compact = normalized
+    .replace(/[_–—-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+
+  if (
+    compact.includes("image to video") ||
+    compact.includes("img to video") ||
+    compact.includes("image into video") ||
+    compact.includes("animate image") ||
+    compact.includes("animate this image")
+  ) {
+    return "image_to_video"
+  }
+
+  if (
+    compact.includes("text to video") ||
+    compact.includes("prompt to video") ||
+    compact === "video" ||
+    compact === "text video"
+  ) {
+    return "text_to_video"
+  }
+
+  if (
+    compact.includes("text to image") ||
+    compact.includes("prompt to image") ||
+    compact.includes("still image") ||
+    compact === "image" ||
+    compact === "still"
+  ) {
+    return "text_to_image"
+  }
+
+  return null
+}
+
+export default function ChatUI({
+  initialGenerationTarget = null,
+}: ChatUIProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
+  const [generationTarget, setGenerationTarget] =
+    useState<GenerationTarget | null>(initialGenerationTarget)
+  const [awaitingGenerationTarget, setAwaitingGenerationTarget] =
+    useState(false)
+  const [pendingDescription, setPendingDescription] = useState<string | null>(
+    null,
+  )
+  const [pendingHistoryBase, setPendingHistoryBase] = useState<Message[] | null>(
+    null,
+  )
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (initialGenerationTarget) {
+      setGenerationTarget(initialGenerationTarget)
+      setAwaitingGenerationTarget(false)
+      setPendingDescription(null)
+      setPendingHistoryBase(null)
+    }
+  }, [initialGenerationTarget])
 
   useEffect(() => {
     // Do NOT auto-scroll on initial page load.
@@ -75,40 +164,71 @@ export default function ChatUI() {
     }))
   }
 
-  const detectOutputType = (text: string): "IMAGE" | "VIDEO" | "STORY" => {
-    const normalized = text.toLowerCase()
+  const sendHeadlessRequest = async ({
+    description,
+    target,
+    historyItems,
+  }: {
+    description: string
+    target: GenerationTarget
+    historyItems: Message[]
+  }) => {
+    const res = await fetch("/api/nsfw-gpt/headless", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mode,
+        description,
+        output_type: targetToOutputType(target),
+        generation_target: target,
+        history: buildHistory(historyItems),
+      }),
+    })
 
-    const videoSignals = [
-      "video",
-      "scene",
-      "camera movement",
-      "camera move",
-      "slow pan",
-      "dolly",
-      "tracking shot",
-      "shot list",
-      "motion",
-      "animate",
-      "animation",
-      "20 second",
-      "25 second",
-      "text-to-video",
-      "image-to-video",
-    ]
+    const data = (await res.json()) as
+      | HeadlessSuccessResponse
+      | HeadlessRefusalResponse
+      | HeadlessErrorResponse
 
-    const storySignals = [
-      "write a scene",
-      "write this as",
-      "story",
-      "prose",
-      "narrative",
-      "story beat",
-      "dialogue scene",
-    ]
+    await new Promise((r) => setTimeout(r, 350))
 
-    if (videoSignals.some((s) => normalized.includes(s))) return "VIDEO"
-    if (storySignals.some((s) => normalized.includes(s))) return "STORY"
-    return "IMAGE"
+    if ("status" in data && data.status === "ok") {
+      appendMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: data.prompt,
+      })
+      return
+    }
+
+    if ("error_code" in data) {
+      appendMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: `${data.error_code}: ${data.reason}`,
+        isError: true,
+      })
+      return
+    }
+
+    if ("error" in data) {
+      appendMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: data.reason || data.message || data.error,
+        isError: true,
+      })
+      return
+    }
+
+    appendMessage({
+      id: crypto.randomUUID(),
+      role: "assistant",
+      content: "SYSTEM_ERROR: Invalid response format.",
+      isError: true,
+    })
   }
 
   const handleStarterClick = (starter: string) => {
@@ -116,75 +236,112 @@ export default function ChatUI() {
   }
 
   const handleSend = async (userText: string) => {
-    if (!userText.trim()) return
+    const trimmed = userText.trim()
+    if (!trimmed) return
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: userText,
-    }
-
-    const nextMessages = [...messages, userMessage]
-    setMessages(nextMessages)
-    setIsTyping(true)
-
-    try {
-      const outputType = detectOutputType(userText)
-
-      const res = await fetch("/api/nsfw-gpt/headless", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          mode,
-          description: userText,
-          output_type: outputType,
-          history: buildHistory(nextMessages),
-        }),
-      })
-
-      const data = (await res.json()) as
-        | HeadlessSuccessResponse
-        | HeadlessRefusalResponse
-        | HeadlessErrorResponse
-
-      await new Promise((r) => setTimeout(r, 350))
-
-      if ("status" in data && data.status === "ok") {
-        appendMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.prompt,
-        })
-        return
+    if (awaitingGenerationTarget) {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: trimmed,
       }
 
-      if ("error_code" in data) {
+      setMessages((prev) => [...prev, userMessage])
+
+      const resolvedTarget = parseGenerationTarget(trimmed)
+
+      if (!resolvedTarget) {
         appendMessage({
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `${data.error_code}: ${data.reason}`,
+          content:
+            "Choose one so I can shape it correctly: text-to-image, text-to-video, or image-to-video.",
           isError: true,
         })
         return
       }
 
-      if ("error" in data) {
-        appendMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: data.reason || data.message || data.error,
-          isError: true,
-        })
-        return
-      }
+      setGenerationTarget(resolvedTarget)
+      setAwaitingGenerationTarget(false)
 
       appendMessage({
         id: crypto.randomUUID(),
         role: "assistant",
-        content: "SYSTEM_ERROR: Invalid response format.",
-        isError: true,
+        content: `Got it — I’ll use ${targetToLabel(resolvedTarget)} for this thread.`,
+      })
+
+      const descriptionToSend = pendingDescription
+      const historyBase = pendingHistoryBase
+
+      setPendingDescription(null)
+      setPendingHistoryBase(null)
+
+      if (!descriptionToSend) {
+        return
+      }
+
+      const syntheticPendingUserMessage: Message = {
+        id: "pending-description",
+        role: "user",
+        content: descriptionToSend,
+      }
+
+      const historyItems = [...(historyBase ?? []), syntheticPendingUserMessage]
+
+      setIsTyping(true)
+
+      try {
+        await sendHeadlessRequest({
+          description: descriptionToSend,
+          target: resolvedTarget,
+          historyItems,
+        })
+      } catch (err) {
+        console.error("Chat error:", err)
+
+        appendMessage({
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: "SYSTEM_ERROR: Failed to reach prompt engine.",
+          isError: true,
+        })
+      } finally {
+        setIsTyping(false)
+      }
+
+      return
+    }
+
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: trimmed,
+    }
+
+    const baseMessages = [...messages, userMessage]
+    setMessages(baseMessages)
+
+    if (!generationTarget) {
+      setPendingDescription(trimmed)
+      setPendingHistoryBase(messages)
+      setAwaitingGenerationTarget(true)
+
+      appendMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: TARGET_SELECTION_PROMPT,
+      })
+
+      return
+    }
+
+    setIsTyping(true)
+
+    try {
+      await sendHeadlessRequest({
+        description: trimmed,
+        target: generationTarget,
+        historyItems: baseMessages,
       })
     } catch (err) {
       console.error("Chat error:", err)
