@@ -19,7 +19,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,6 @@ const supabase = createBrowserClient(
 );
 
 const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff";
-
 const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs";
 
@@ -88,6 +87,14 @@ interface GeneratedItem {
   createdAt: string;
 }
 
+type HandoffPayload = {
+  prompt?: string;
+  negative_prompt?: string;
+  output_type?: string;
+  generation_target?: string;
+  created_at?: number;
+};
+
 function inferKindFromOutput(output: any): MediaKind {
   if (typeof output === "string") {
     const url = output.toLowerCase();
@@ -120,6 +127,34 @@ async function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error("Failed to read uploaded image."));
     reader.readAsDataURL(file);
   });
+}
+
+function normalizeGenerationMode(value?: string | null): GenerationMode {
+  const gt = String(value || "").trim().toLowerCase();
+
+  if (
+    gt === "image_to_video" ||
+    gt === "image-to-video" ||
+    gt === "image to video"
+  ) {
+    return "image_to_video";
+  }
+
+  if (
+    gt === "text_to_video" ||
+    gt === "text-to-video" ||
+    gt === "text to video" ||
+    gt === "video"
+  ) {
+    return "text_to_video";
+  }
+
+  return "text_to_image";
+}
+
+function normalizeOutputType(value?: string | null): "IMAGE" | "STORY" {
+  const ot = String(value || "").trim().toUpperCase();
+  return ot === "STORY" ? "STORY" : "IMAGE";
 }
 
 interface SubscriptionModalProps {
@@ -1253,7 +1288,8 @@ function HistorySidebar(props: {
 
 export default function GeneratePage() {
   const router = useRouter();
-  const hasHydratedFromHandoff = useRef(false);
+  const searchParams = useSearchParams();
+  const hasHydratedHandoffRef = useRef(false);
 
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
@@ -1355,74 +1391,65 @@ export default function GeneratePage() {
   }, []);
 
   useEffect(() => {
-    if (hasHydratedFromHandoff.current) return;
+    if (hasHydratedHandoffRef.current) return;
+
+    let payload: HandoffPayload | null = null;
+
+    const promptFromQuery = searchParams.get("prompt");
+    const negativeFromQuery = searchParams.get("negative_prompt");
+    const outputTypeFromQuery = searchParams.get("output_type");
+    const generationTargetFromQuery = searchParams.get("generation_target");
+
+    if (promptFromQuery || negativeFromQuery || outputTypeFromQuery || generationTargetFromQuery) {
+      payload = {
+        prompt: promptFromQuery || undefined,
+        negative_prompt: negativeFromQuery || undefined,
+        output_type: outputTypeFromQuery || undefined,
+        generation_target: generationTargetFromQuery || undefined,
+      };
+    } else {
+      try {
+        const raw = window.sessionStorage.getItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
+        if (raw) {
+          payload = JSON.parse(raw) as HandoffPayload;
+        }
+      } catch (err) {
+        console.error("Failed to read Siren’s Mind handoff:", err);
+      }
+    }
+
+    if (!payload) return;
+
+    const incomingPrompt =
+      typeof payload.prompt === "string" ? payload.prompt : "";
+    const incomingNegative =
+      typeof payload.negative_prompt === "string"
+        ? payload.negative_prompt
+        : "";
+
+    if (incomingPrompt.trim().length > 0) {
+      setPrompt(incomingPrompt);
+    }
+
+    if (incomingNegative.trim().length > 0) {
+      setNegativePrompt(incomingNegative);
+    }
+
+    setOutputType(normalizeOutputType(payload.output_type));
+    setMode(normalizeGenerationMode(payload.generation_target));
+
+    hasHydratedHandoffRef.current = true;
 
     try {
-      const raw = window.sessionStorage.getItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
-      if (!raw) return;
-
-      const detail = JSON.parse(raw) as {
-        prompt?: string;
-        negative_prompt?: string;
-        output_type?: string;
-        generation_target?: string;
-        created_at?: number;
-      };
-
-      const incomingPrompt =
-        typeof detail.prompt === "string" ? detail.prompt : "";
-      const incomingNegative =
-        typeof detail.negative_prompt === "string"
-          ? detail.negative_prompt
-          : "";
-
-      if (incomingPrompt.trim().length > 0) {
-        setPrompt(incomingPrompt);
-      }
-
-      if (incomingNegative.trim().length > 0) {
-        setNegativePrompt(incomingNegative);
-      }
-
-      const otRaw =
-        typeof detail.output_type === "string" ? detail.output_type : "";
-      const ot = otRaw.trim().toUpperCase();
-
-      if (ot === "STORY") {
-        setOutputType("STORY");
-      } else {
-        setOutputType("IMAGE");
-      }
-
-      const gtRaw =
-        typeof detail.generation_target === "string"
-          ? detail.generation_target
-          : "";
-      const gt = gtRaw.trim().toLowerCase();
-
-      if (
-        gt === "image_to_video" ||
-        gt === "image-to-video" ||
-        gt === "image to video"
-      ) {
-        setMode("image_to_video");
-      } else if (
-        gt === "text_to_video" ||
-        gt === "text-to-video" ||
-        gt === "text to video" ||
-        gt === "video"
-      ) {
-        setMode("text_to_video");
-      } else {
-        setMode("text_to_image");
-      }
-
-      hasHydratedFromHandoff.current = true;
       window.sessionStorage.removeItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
     } catch (err) {
-      console.error("Failed to restore Siren’s Mind handoff:", err);
+      console.error("Failed to clear Siren’s Mind handoff:", err);
     }
-  }, []);
+
+    if (promptFromQuery || negativeFromQuery || outputTypeFromQuery || generationTargetFromQuery) {
+      router.replace("/generate");
+    }
+  }, [router, searchParams]);
 
   useEffect(() => {
     if (!imageFile) {

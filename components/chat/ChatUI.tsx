@@ -177,22 +177,32 @@ export default function ChatUI({
   const handleUsePrompt = (msg: Message) => {
     if (!msg.meta?.canUseInGenerator) return
 
+    const handoffPayload = {
+      prompt: msg.content,
+      negative_prompt: msg.meta.negativePrompt || DEFAULT_NEGATIVE_PROMPT,
+      output_type: msg.meta.outputType || "IMAGE",
+      generation_target: msg.meta.generationTarget || "text_to_image",
+      created_at: Date.now(),
+    }
+
     try {
       window.sessionStorage.setItem(
         SIREN_MIND_HANDOFF_STORAGE_KEY,
-        JSON.stringify({
-          prompt: msg.content,
-          negative_prompt: msg.meta.negativePrompt || DEFAULT_NEGATIVE_PROMPT,
-          output_type: msg.meta.outputType || "IMAGE",
-          generation_target: msg.meta.generationTarget || "text_to_image",
-          created_at: Date.now(),
-        }),
+        JSON.stringify(handoffPayload),
       )
     } catch (err) {
       console.error("Failed to store Siren’s Mind handoff:", err)
     }
 
-    router.push("/generate")
+    const params = new URLSearchParams({
+      prompt: handoffPayload.prompt,
+      negative_prompt: handoffPayload.negative_prompt,
+      output_type: handoffPayload.output_type,
+      generation_target: handoffPayload.generation_target,
+      source: "siren_mind",
+    })
+
+    router.push(`/generate?${params.toString()}`)
   }
 
   const sendHeadlessRequest = async ({
