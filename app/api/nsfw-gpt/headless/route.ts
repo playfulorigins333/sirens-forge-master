@@ -126,11 +126,17 @@ function buildOutputTypeSystem(outputType: OutputType): string {
       "- No text before or after JSON.",
       "- No markdown. No explanations. No prose outside the object.",
       '- JSON schema: { "prompt": string, "negative_prompt": string, "motion": string, "camera": string, "notes": string }',
-      "- `prompt` must describe the visual scene clearly for video generation.",
-      "- `motion` must describe subject and environment motion.",
-      "- `camera` must describe camera movement or lens behavior.",
+      "- `prompt` must describe ONE short-form video scene only.",
+      "- `prompt` must stay compact and production-ready for a 20–25 second clip.",
+      "- `motion` must describe subject and environment motion in one short line.",
+      "- `camera` must describe camera movement or lens behavior in one short line.",
       "- `negative_prompt` should be concise and quality-focused.",
       "- `notes` should briefly state what was emphasized.",
+      "- Keep to a single subject, single environment, single emotional beat.",
+      "- No screenplay formatting.",
+      "- No dialogue blocks.",
+      "- No multi-scene progression.",
+      "- No long atmospheric paragraphs.",
       "- The JSON must be complete and valid.",
     ].join("\n")
   }
@@ -216,6 +222,21 @@ function coercePromptFromResponse(
 
   if (structured && typeof structured === "object") {
     if (typeof structured.prompt === "string" && structured.prompt.trim()) {
+      if (outputType === "VIDEO") {
+        const motion =
+          typeof structured.motion === "string" ? structured.motion.trim() : ""
+        const camera =
+          typeof structured.camera === "string" ? structured.camera.trim() : ""
+
+        const pieces = [
+          structured.prompt.trim() && `Prompt: ${structured.prompt.trim()}`,
+          motion && `Motion: ${motion}`,
+          camera && `Camera: ${camera}`,
+        ].filter(Boolean)
+
+        if (pieces.length > 0) return pieces.join("\n")
+      }
+
       return structured.prompt.trim()
     }
 
