@@ -52,13 +52,12 @@ export default function ChatUI() {
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
 
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
-  const hasMountedRef = useRef(false)
 
   useEffect(() => {
-    if (!hasMountedRef.current) {
-      hasMountedRef.current = true
-      return
-    }
+    // Do NOT auto-scroll on initial page load.
+    // Only scroll after the conversation actually grows beyond the initial assistant message
+    // or while the assistant typing state is active.
+    if (messages.length <= 1 && !isTyping) return
 
     const id = window.setTimeout(() => {
       const el = scrollContainerRef.current
@@ -76,14 +75,49 @@ export default function ChatUI() {
     setMessages((prev) => [...prev, msg])
   }
 
-  /**
-   * 🔥 FIX: Do NOT include the latest user message twice
-   */
   const buildHistory = (items: Message[]): HeadlessHistoryMessage[] => {
+    // Keep prior thread only.
+    // The newest user message is passed separately as `description`.
     return items.slice(0, -1).map((m) => ({
       role: m.role,
       content: m.content,
     }))
+  }
+
+  const detectOutputType = (text: string): "IMAGE" | "VIDEO" | "STORY" => {
+    const normalized = text.toLowerCase()
+
+    const videoSignals = [
+      "video",
+      "scene",
+      "camera movement",
+      "camera move",
+      "slow pan",
+      "dolly",
+      "tracking shot",
+      "shot list",
+      "motion",
+      "animate",
+      "animation",
+      "20 second",
+      "25 second",
+      "text-to-video",
+      "image-to-video",
+    ]
+
+    const storySignals = [
+      "write a scene",
+      "write this as",
+      "story",
+      "prose",
+      "narrative",
+      "story beat",
+      "dialogue scene",
+    ]
+
+    if (videoSignals.some((s) => normalized.includes(s))) return "VIDEO"
+    if (storySignals.some((s) => normalized.includes(s))) return "STORY"
+    return "IMAGE"
   }
 
   const handleStarterClick = (starter: string) => {
@@ -104,6 +138,8 @@ export default function ChatUI() {
     setIsTyping(true)
 
     try {
+      const outputType = detectOutputType(userText)
+
       const res = await fetch("/api/nsfw-gpt/headless", {
         method: "POST",
         headers: {
@@ -112,8 +148,8 @@ export default function ChatUI() {
         body: JSON.stringify({
           mode,
           description: userText,
-          output_type: "IMAGE",
-          history: buildHistory(nextMessages), // 🔥 FIXED
+          output_type: outputType,
+          history: buildHistory(nextMessages),
         }),
       })
 
