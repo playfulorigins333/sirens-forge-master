@@ -1,7 +1,6 @@
 "use client"
 
 import React, { useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 
@@ -121,8 +120,6 @@ function parseGenerationTarget(input: string): GenerationTarget | null {
 export default function ChatUI({
   initialGenerationTarget = null,
 }: ChatUIProps) {
-  const router = useRouter()
-
   const [messages, setMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
@@ -202,7 +199,7 @@ export default function ChatUI({
       source: "siren_mind",
     })
 
-    router.push(`/generate?${params.toString()}`)
+    window.location.assign(`/generate?${params.toString()}`)
   }
 
   const sendHeadlessRequest = async ({
