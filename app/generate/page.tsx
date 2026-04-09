@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -46,6 +46,9 @@ const supabase = createBrowserClient(
 );
 
 const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff";
+
+const DEFAULT_NEGATIVE_PROMPT =
+  "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs";
 
 type GenerationMode =
   | "text_to_image"
@@ -1250,13 +1253,12 @@ function HistorySidebar(props: {
 
 export default function GeneratePage() {
   const router = useRouter();
+  const hasHydratedFromHandoff = useRef(false);
 
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
-  const [negativePrompt, setNegativePrompt] = useState(
-    "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
-  );
+  const [negativePrompt, setNegativePrompt] = useState(DEFAULT_NEGATIVE_PROMPT);
   const [identityOptions, setIdentityOptions] = useState<
     { id: string; name: string | null }[]
   >([]);
@@ -1346,9 +1348,26 @@ export default function GeneratePage() {
       if (session) loadIdentities();
     });
 
-    const handler = (e: Event) => {
-      const ce = e as CustomEvent<any>;
-      const detail = (ce as any)?.detail ?? {};
+    return () => {
+      cancelled = true;
+      authListener?.subscription?.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (hasHydratedFromHandoff.current) return;
+
+    try {
+      const raw = window.sessionStorage.getItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
+      if (!raw) return;
+
+      const detail = JSON.parse(raw) as {
+        prompt?: string;
+        negative_prompt?: string;
+        output_type?: string;
+        generation_target?: string;
+        created_at?: number;
+      };
 
       const incomingPrompt =
         typeof detail.prompt === "string" ? detail.prompt : "";
@@ -1357,8 +1376,13 @@ export default function GeneratePage() {
           ? detail.negative_prompt
           : "";
 
-      if (incomingPrompt) setPrompt(incomingPrompt);
-      if (incomingNegative) setNegativePrompt(incomingNegative);
+      if (incomingPrompt.trim().length > 0) {
+        setPrompt(incomingPrompt);
+      }
+
+      if (incomingNegative.trim().length > 0) {
+        setNegativePrompt(incomingNegative);
+      }
 
       const otRaw =
         typeof detail.output_type === "string" ? detail.output_type : "";
@@ -1376,83 +1400,28 @@ export default function GeneratePage() {
           : "";
       const gt = gtRaw.trim().toLowerCase();
 
-      if (gt === "image_to_video" || gt === "image-to-video" || gt === "image to video") {
+      if (
+        gt === "image_to_video" ||
+        gt === "image-to-video" ||
+        gt === "image to video"
+      ) {
         setMode("image_to_video");
-      } else if (gt === "text_to_video" || gt === "text-to-video" || gt === "text to video" || gt === "video") {
+      } else if (
+        gt === "text_to_video" ||
+        gt === "text-to-video" ||
+        gt === "text to video" ||
+        gt === "video"
+      ) {
         setMode("text_to_video");
       } else {
         setMode("text_to_image");
       }
-    };
 
-    window.addEventListener("siren_mind_generate", handler as EventListener);
-
-    try {
-      const raw = window.sessionStorage.getItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
-
-      if (raw) {
-        const detail = JSON.parse(raw) as {
-          prompt?: string;
-          negative_prompt?: string;
-          output_type?: string;
-          generation_target?: string;
-          created_at?: number;
-        };
-
-        const incomingPrompt =
-          typeof detail.prompt === "string" ? detail.prompt : "";
-        const incomingNegative =
-          typeof detail.negative_prompt === "string"
-            ? detail.negative_prompt
-            : "";
-
-        if (incomingPrompt) setPrompt(incomingPrompt);
-        if (incomingNegative) setNegativePrompt(incomingNegative);
-
-        const otRaw =
-          typeof detail.output_type === "string" ? detail.output_type : "";
-        const ot = otRaw.trim().toUpperCase();
-
-        if (ot === "STORY") {
-          setOutputType("STORY");
-        } else {
-          setOutputType("IMAGE");
-        }
-
-        const gtRaw =
-          typeof detail.generation_target === "string"
-            ? detail.generation_target
-            : "";
-        const gt = gtRaw.trim().toLowerCase();
-
-        if (
-          gt === "image_to_video" ||
-          gt === "image-to-video" ||
-          gt === "image to video"
-        ) {
-          setMode("image_to_video");
-        } else if (
-          gt === "text_to_video" ||
-          gt === "text-to-video" ||
-          gt === "text to video" ||
-          gt === "video"
-        ) {
-          setMode("text_to_video");
-        } else {
-          setMode("text_to_image");
-        }
-
-        window.sessionStorage.removeItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
-      }
+      hasHydratedFromHandoff.current = true;
+      window.sessionStorage.removeItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
     } catch (err) {
       console.error("Failed to restore Siren’s Mind handoff:", err);
     }
-
-    return () => {
-      cancelled = true;
-      authListener?.subscription?.unsubscribe();
-      window.removeEventListener("siren_mind_generate", handler as EventListener);
-    };
   }, []);
 
   useEffect(() => {
