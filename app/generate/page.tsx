@@ -45,6 +45,8 @@ const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
 );
 
+const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff";
+
 type GenerationMode =
   | "text_to_image"
   | "image_to_image"
@@ -1384,6 +1386,68 @@ export default function GeneratePage() {
     };
 
     window.addEventListener("siren_mind_generate", handler as EventListener);
+
+    try {
+      const raw = window.sessionStorage.getItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
+
+      if (raw) {
+        const detail = JSON.parse(raw) as {
+          prompt?: string;
+          negative_prompt?: string;
+          output_type?: string;
+          generation_target?: string;
+          created_at?: number;
+        };
+
+        const incomingPrompt =
+          typeof detail.prompt === "string" ? detail.prompt : "";
+        const incomingNegative =
+          typeof detail.negative_prompt === "string"
+            ? detail.negative_prompt
+            : "";
+
+        if (incomingPrompt) setPrompt(incomingPrompt);
+        if (incomingNegative) setNegativePrompt(incomingNegative);
+
+        const otRaw =
+          typeof detail.output_type === "string" ? detail.output_type : "";
+        const ot = otRaw.trim().toUpperCase();
+
+        if (ot === "STORY") {
+          setOutputType("STORY");
+        } else {
+          setOutputType("IMAGE");
+        }
+
+        const gtRaw =
+          typeof detail.generation_target === "string"
+            ? detail.generation_target
+            : "";
+        const gt = gtRaw.trim().toLowerCase();
+
+        if (
+          gt === "image_to_video" ||
+          gt === "image-to-video" ||
+          gt === "image to video"
+        ) {
+          setMode("image_to_video");
+        } else if (
+          gt === "text_to_video" ||
+          gt === "text-to-video" ||
+          gt === "text to video" ||
+          gt === "video"
+        ) {
+          setMode("text_to_video");
+        } else {
+          setMode("text_to_image");
+        }
+
+        window.sessionStorage.removeItem(SIREN_MIND_HANDOFF_STORAGE_KEY);
+      }
+    } catch (err) {
+      console.error("Failed to restore Siren’s Mind handoff:", err);
+    }
+
     return () => {
       cancelled = true;
       authListener?.subscription?.unsubscribe();

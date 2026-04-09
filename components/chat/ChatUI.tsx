@@ -58,6 +58,8 @@ const TARGET_SELECTION_PROMPT =
 const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
 
+const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff"
+
 function targetToOutputType(target: GenerationTarget): OutputType {
   if (target === "text_to_image") return "IMAGE"
   return "VIDEO"
@@ -175,17 +177,20 @@ export default function ChatUI({
   const handleUsePrompt = (msg: Message) => {
     if (!msg.meta?.canUseInGenerator) return
 
-    window.dispatchEvent(
-      new CustomEvent("siren_mind_generate", {
-        detail: {
+    try {
+      window.sessionStorage.setItem(
+        SIREN_MIND_HANDOFF_STORAGE_KEY,
+        JSON.stringify({
           prompt: msg.content,
-          negative_prompt:
-            msg.meta.negativePrompt || DEFAULT_NEGATIVE_PROMPT,
+          negative_prompt: msg.meta.negativePrompt || DEFAULT_NEGATIVE_PROMPT,
           output_type: msg.meta.outputType || "IMAGE",
           generation_target: msg.meta.generationTarget || "text_to_image",
-        },
-      }),
-    )
+          created_at: Date.now(),
+        }),
+      )
+    } catch (err) {
+      console.error("Failed to store Siren’s Mind handoff:", err)
+    }
 
     router.push("/generate")
   }
