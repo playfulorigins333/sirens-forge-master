@@ -1348,22 +1348,39 @@ export default function GeneratePage() {
       const ce = e as CustomEvent<any>;
       const detail = (ce as any)?.detail ?? {};
 
-      const incomingPrompt = typeof detail.prompt === "string" ? detail.prompt : "";
+      const incomingPrompt =
+        typeof detail.prompt === "string" ? detail.prompt : "";
       const incomingNegative =
-        typeof detail.negative_prompt === "string" ? detail.negative_prompt : "";
+        typeof detail.negative_prompt === "string"
+          ? detail.negative_prompt
+          : "";
 
       if (incomingPrompt) setPrompt(incomingPrompt);
       if (incomingNegative) setNegativePrompt(incomingNegative);
 
-      const otRaw = typeof detail.output_type === "string" ? detail.output_type : "";
+      const otRaw =
+        typeof detail.output_type === "string" ? detail.output_type : "";
       const ot = otRaw.trim().toUpperCase();
+
       if (ot === "STORY") {
         setOutputType("STORY");
-      } else if (ot === "IMAGE") {
+      } else {
         setOutputType("IMAGE");
       }
 
-      setMode("text_to_image");
+      const gtRaw =
+        typeof detail.generation_target === "string"
+          ? detail.generation_target
+          : "";
+      const gt = gtRaw.trim().toLowerCase();
+
+      if (gt === "image_to_video" || gt === "image-to-video" || gt === "image to video") {
+        setMode("image_to_video");
+      } else if (gt === "text_to_video" || gt === "text-to-video" || gt === "text to video" || gt === "video") {
+        setMode("text_to_video");
+      } else {
+        setMode("text_to_image");
+      }
     };
 
     window.addEventListener("siren_mind_generate", handler as EventListener);

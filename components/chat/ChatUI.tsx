@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 
@@ -11,6 +12,12 @@ type Message = {
   role: Role
   content: string
   isError?: boolean
+  meta?: {
+    generationTarget?: GenerationTarget
+    outputType?: OutputType
+    negativePrompt?: string
+    canUseInGenerator?: boolean
+  }
 }
 
 type HeadlessHistoryMessage = {
@@ -47,6 +54,9 @@ type ChatUIProps = {
 
 const TARGET_SELECTION_PROMPT =
   "What are we building this for — text-to-image, text-to-video, or image-to-video?"
+
+const DEFAULT_NEGATIVE_PROMPT =
+  "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
 
 function targetToOutputType(target: GenerationTarget): OutputType {
   if (target === "text_to_image") return "IMAGE"
@@ -109,6 +119,8 @@ function parseGenerationTarget(input: string): GenerationTarget | null {
 export default function ChatUI({
   initialGenerationTarget = null,
 }: ChatUIProps) {
+  const router = useRouter()
+
   const [messages, setMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
@@ -135,8 +147,6 @@ export default function ChatUI({
   }, [initialGenerationTarget])
 
   useEffect(() => {
-    // Do NOT auto-scroll on initial page load.
-    // Only scroll after real conversation begins or while typing is active.
     if (messages.length === 0 && !isTyping) return
 
     const id = window.setTimeout(() => {
@@ -156,12 +166,28 @@ export default function ChatUI({
   }
 
   const buildHistory = (items: Message[]): HeadlessHistoryMessage[] => {
-    // Keep prior thread only.
-    // The newest user message is passed separately as `description`.
     return items.slice(0, -1).map((m) => ({
       role: m.role,
       content: m.content,
     }))
+  }
+
+  const handleUsePrompt = (msg: Message) => {
+    if (!msg.meta?.canUseInGenerator) return
+
+    window.dispatchEvent(
+      new CustomEvent("siren_mind_generate", {
+        detail: {
+          prompt: msg.content,
+          negative_prompt:
+            msg.meta.negativePrompt || DEFAULT_NEGATIVE_PROMPT,
+          output_type: msg.meta.outputType || "IMAGE",
+          generation_target: msg.meta.generationTarget || "text_to_image",
+        },
+      }),
+    )
+
+    router.push("/generate")
   }
 
   const sendHeadlessRequest = async ({
@@ -173,6 +199,8 @@ export default function ChatUI({
     target: GenerationTarget
     historyItems: Message[]
   }) => {
+    const resolvedOutputType = targetToOutputType(target)
+
     const res = await fetch("/api/nsfw-gpt/headless", {
       method: "POST",
       headers: {
@@ -181,7 +209,7 @@ export default function ChatUI({
       body: JSON.stringify({
         mode,
         description,
-        output_type: targetToOutputType(target),
+        output_type: resolvedOutputType,
         generation_target: target,
         history: buildHistory(historyItems),
       }),
@@ -199,6 +227,12 @@ export default function ChatUI({
         id: crypto.randomUUID(),
         role: "assistant",
         content: data.prompt,
+        meta: {
+          generationTarget: target,
+          outputType: resolvedOutputType,
+          negativePrompt: DEFAULT_NEGATIVE_PROMPT,
+          canUseInGenerator: true,
+        },
       })
       return
     }
@@ -426,6 +460,12 @@ export default function ChatUI({
                     role={msg.role}
                     content={msg.content}
                     isError={msg.isError}
+                    showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
+                    onUsePrompt={
+                      msg.meta?.canUseInGenerator
+                        ? () => handleUsePrompt(msg)
+                        : undefined
+                    }
                   />
                 ))}
 

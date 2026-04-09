@@ -7,6 +7,8 @@ type ChatMessageProps = {
   content: string
   isError?: boolean
   isTyping?: boolean
+  onUsePrompt?: () => void
+  showUsePrompt?: boolean
 }
 
 export function ChatMessage({
@@ -14,6 +16,8 @@ export function ChatMessage({
   content,
   isError = false,
   isTyping = false,
+  onUsePrompt,
+  showUsePrompt = false,
 }: ChatMessageProps) {
   const isAssistant = role === "assistant"
 
@@ -60,6 +64,18 @@ export function ChatMessage({
           >
             {content}
           </div>
+
+          {showUsePrompt && onUsePrompt && !isError && (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={onUsePrompt}
+                className="rounded-2xl border border-fuchsia-400/20 bg-gradient-to-r from-violet-500/20 via-fuchsia-500/20 to-cyan-500/20 px-4 py-2 text-[12px] font-semibold text-white transition hover:border-fuchsia-300/40 hover:from-violet-500/30 hover:via-fuchsia-500/30 hover:to-cyan-500/30"
+              >
+                Use Prompt in Generator
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )
