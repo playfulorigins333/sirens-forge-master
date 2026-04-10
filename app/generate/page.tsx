@@ -600,7 +600,7 @@ function HandoffConfidencePanel(props: {
   );
 }
 
-function evaluatePromptStrength(prompt: string) {
+function getPromptStrengthScore(prompt: string): number {
   const text = prompt.toLowerCase();
 
   let score = 0;
@@ -634,6 +634,12 @@ function evaluatePromptStrength(prompt: string) {
 
   // MOOD / TONE
   if (/(moody|sensual|erotic|dark|cinematic|atmosphere|sultry|seductive)/.test(text)) score += 1;
+
+  return score;
+}
+
+function evaluatePromptStrength(prompt: string) {
+  const score = getPromptStrengthScore(prompt);
 
   if (score <= 3) {
     return {
@@ -1419,6 +1425,7 @@ function GenerateButton(props: {
 function RefineChoicesPanel(props: {
   choices: string[] | null;
   onApply: (value: string) => void;
+  recommendedIndex: number | null;
 }) {
   if (!props.choices || props.choices.length === 0) return null;
 
@@ -1434,19 +1441,37 @@ function RefineChoicesPanel(props: {
       </CardHeader>
 
       <CardContent className="space-y-3">
-        {props.choices.map((choice, index) => (
-          <button
-            key={`${index}-${choice.slice(0, 24)}`}
-            type="button"
-            onClick={() => props.onApply(choice)}
-            className="w-full rounded-xl border border-cyan-500/20 bg-black/30 px-4 py-3 text-left text-[12px] text-zinc-200 transition-all hover:border-cyan-400/40 hover:bg-cyan-500/10 hover:text-white"
-          >
-            <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
-              Option {String.fromCharCode(65 + index)}
-            </div>
-            <div className="leading-5">{choice}</div>
-          </button>
-        ))}
+        {props.choices.map((choice, index) => {
+          const isRecommended = props.recommendedIndex === index;
+
+          return (
+            <button
+              key={`${index}-${choice.slice(0, 24)}`}
+              type="button"
+              onClick={() => props.onApply(choice)}
+              className={`w-full rounded-xl border px-4 py-3 text-left text-[12px] text-zinc-200 transition-all hover:text-white ${
+                isRecommended
+                  ? "border-fuchsia-400/50 bg-fuchsia-500/10 shadow-[0_0_0_1px_rgba(232,121,249,0.24),0_0_30px_rgba(217,70,239,0.16)] hover:border-fuchsia-300/60 hover:bg-fuchsia-500/14"
+                  : "border-cyan-500/20 bg-black/30 hover:border-cyan-400/40 hover:bg-cyan-500/10"
+              }`}
+            >
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <div className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${
+                  isRecommended ? "text-fuchsia-300" : "text-cyan-300"
+                }`}>
+                  Option {String.fromCharCode(65 + index)}
+                </div>
+
+                {isRecommended && (
+                  <span className="rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-fuchsia-200">
+                    Recommended
+                  </span>
+                )}
+              </div>
+              <div className="leading-5">{choice}</div>
+            </button>
+          );
+        })}
       </CardContent>
     </Card>
   );
@@ -1776,6 +1801,23 @@ export default function GeneratePage() {
 
     return match.name && match.name.trim().length > 0 ? match.name : match.id;
   }, [identityOptions, loraSelection.selected]);
+
+  const recommendedRefineIndex = useMemo(() => {
+    if (!refineChoices || refineChoices.length === 0) return null;
+
+    let bestIndex = 0;
+    let bestScore = -Infinity;
+
+    refineChoices.forEach((choice, index) => {
+      const score = getPromptStrengthScore(choice);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    });
+
+    return bestIndex;
+  }, [refineChoices]);
 
   const canGenerate =
     !isGenerating &&
@@ -2326,6 +2368,7 @@ ${basePrompt}`,
               <RefineChoicesPanel
                 choices={refineChoices}
                 onApply={handleApplyRefineChoice}
+                recommendedIndex={recommendedRefineIndex}
               />
 
               {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
