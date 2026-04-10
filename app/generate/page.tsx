@@ -2309,11 +2309,6 @@ ${basePrompt}`,
             </div>
 
             <div className="space-y-4 xl:col-span-1">
-              <RefineChoicesPanel
-                choices={refineChoices}
-                onApply={handleApplyRefineChoice}
-              />
-
               <Card className="h-full border-gray-800 bg-gray-900/80">
                 <CardContent className="h-full p-4">
                   <OutputPanel items={items} loading={isGenerating} />
