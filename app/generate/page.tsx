@@ -684,9 +684,7 @@ function PromptSection(props: {
   onPromptChange: (value: string) => void;
   onNegativePromptChange: (value: string) => void;
   onRefine: (variant: RefineVariant) => void;
-  onApplyRefineChoice: (value: string) => void;
   refiningVariant: RefineVariant | null;
-  refineChoices: string[] | null;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   highlight?: boolean;
 }) {
@@ -796,33 +794,6 @@ function PromptSection(props: {
               {props.refiningVariant === "photoreal" ? "Refining..." : "📸 Photoreal"}
             </button>
           </div>
-
-          {props.refineChoices && props.refineChoices.length > 0 && (
-            <div className="mt-3 space-y-2">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
-                Choose Your Refined Prompt
-              </div>
-              <div className="text-[10px] text-zinc-400">
-                Select one of the AI-generated prompt options below.
-              </div>
-
-              <div className="grid grid-cols-1 gap-2">
-                {props.refineChoices.map((choice, index) => (
-                  <button
-                    key={`${index}-${choice.slice(0, 24)}`}
-                    type="button"
-                    onClick={() => props.onApplyRefineChoice(choice)}
-                    className="rounded-xl border border-cyan-500/20 bg-black/30 px-3 py-3 text-left text-[11px] text-zinc-200 transition-all hover:border-cyan-400/40 hover:bg-cyan-500/10 hover:text-white"
-                  >
-                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
-                      Option {String.fromCharCode(65 + index)}
-                    </div>
-                    <div className="leading-5">{choice}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
 
           {props.prompt.trim().length > 0 && (() => {
             const strength = evaluatePromptStrength(props.prompt);
@@ -1421,6 +1392,43 @@ function GenerateButton(props: {
           </Button>
         </motion.div>
         <p className="mt-2 text-center text-[11px] text-gray-300">{subtext}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+
+function RefineChoicesPanel(props: {
+  choices: string[] | null;
+  onApply: (value: string) => void;
+}) {
+  if (!props.choices || props.choices.length === 0) return null;
+
+  return (
+    <Card className="border-cyan-500/20 bg-black/40 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm text-cyan-300 md:text-base">
+          Choose Your Refined Prompt
+        </CardTitle>
+        <CardDescription className="text-xs text-zinc-400">
+          Select the option that fits your vision best.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {props.choices.map((choice, index) => (
+          <button
+            key={`${index}-${choice.slice(0, 24)}`}
+            type="button"
+            onClick={() => props.onApply(choice)}
+            className="w-full rounded-xl border border-cyan-500/20 bg-black/30 px-4 py-3 text-left text-[12px] text-zinc-200 transition-all hover:border-cyan-400/40 hover:bg-cyan-500/10 hover:text-white"
+          >
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
+              Option {String.fromCharCode(65 + index)}
+            </div>
+            <div className="leading-5">{choice}</div>
+          </button>
+        ))}
       </CardContent>
     </Card>
   );
@@ -2235,9 +2243,7 @@ ${basePrompt}`,
                 }}
                 onNegativePromptChange={setNegativePrompt}
                 onRefine={handleAiRefine}
-                onApplyRefineChoice={handleApplyRefineChoice}
                 refiningVariant={refiningVariant}
-                refineChoices={refineChoices}
                 textareaRef={promptTextareaRef}
                 highlight={highlightPrompt}
               />
@@ -2303,6 +2309,11 @@ ${basePrompt}`,
             </div>
 
             <div className="space-y-4 xl:col-span-1">
+              <RefineChoicesPanel
+                choices={refineChoices}
+                onApply={handleApplyRefineChoice}
+              />
+
               <Card className="h-full border-gray-800 bg-gray-900/80">
                 <CardContent className="h-full p-4">
                   <OutputPanel items={items} loading={isGenerating} />
