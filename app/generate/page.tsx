@@ -1896,9 +1896,13 @@ export default function GeneratePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "ULTRA",
-          description: `${refineInstruction}\n\nPrompt:\n${basePrompt}`,
+          description: `${refineInstruction}
+
+Prompt:
+${basePrompt}`,
           generation_target: mode,
           task: "refine_prompt",
+          refine_type: variant,
         }),
       });
 
