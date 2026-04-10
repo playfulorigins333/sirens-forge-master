@@ -41,6 +41,7 @@ const HEADLESS_CONTRACT = loadPrompt(
  */
 type OutputType = "IMAGE" | "VIDEO" | "STORY"
 type GenerationTarget = "text_to_image" | "text_to_video" | "image_to_video"
+type RefineVariant = "cinematic" | "explicit" | "photoreal"
 
 function normalizeOutputType(v: unknown): OutputType | null {
   const s = String(v || "")
@@ -113,6 +114,7 @@ type HeadlessBody = {
   macro_ids?: string[]
   history?: HistoryMessage[]
   task?: "refine_prompt"
+  refine_type?: RefineVariant | string
 }
 
 type HeadlessError = {
@@ -140,6 +142,7 @@ type HeadlessSuccess = {
     blocked_macros: string[]
     missing_macro_files: string[]
     contract_parse: "ok" | "fallback_text"
+    refine_variant?: RefineVariant | null
   }
 }
 
@@ -202,9 +205,50 @@ function buildOutputTypeSystem(outputType: OutputType): string {
  * - text_to_video => optimize for short-form text-driven video
  * - image_to_video => optimize for continuity from a provided source image
  */
+function normalizeRefineVariant(v: unknown): RefineVariant | null {
+  const s = String(v || "")
+    .trim()
+    .toLowerCase()
+
+  if (s === "cinematic") return "cinematic"
+  if (s === "explicit") return "explicit"
+  if (s === "photoreal" || s === "photo" || s === "photorealistic") {
+    return "photoreal"
+  }
+
+  return null
+}
+
 function buildRefineSystem(
-  generationTarget: GenerationTarget | null
+  generationTarget: GenerationTarget | null,
+  refineVariant: RefineVariant | null
 ): string {
+  const variantLayer =
+    refineVariant === "cinematic"
+      ? [
+          "# REFINE STYLE: CINEMATIC",
+          "- Emphasize dramatic lighting, composition, atmosphere, color grading, and premium visual storytelling.",
+          "- Make the result feel elevated, polished, and filmic.",
+          "- For video targets, favor elegant camera language and controlled cinematic motion.",
+        ]
+      : refineVariant === "explicit"
+      ? [
+          "# REFINE STYLE: EXPLICIT",
+          "- Emphasize erotic intensity, sexual detail, physical focus, and bolder sensual phrasing.",
+          "- Preserve coherence and generator usability.",
+          "- Do not become conversational or verbose.",
+        ]
+      : refineVariant === "photoreal"
+      ? [
+          "# REFINE STYLE: PHOTOREAL",
+          "- Emphasize realism, believable anatomy, natural lighting, realistic skin and textures, and photographic clarity.",
+          "- Favor authenticity over fantasy stylization.",
+        ]
+      : [
+          "# REFINE STYLE: GENERAL",
+          "- Improve the prompt in a balanced, generator-ready way.",
+        ]
+
   return [
     "# TASK: PROMPT REFINEMENT",
     "",
@@ -225,6 +269,7 @@ function buildRefineSystem(
     "- Rewrite and improve the prompt.",
     "- Preserve subject and intent.",
     "- Make it more detailed, structured, and generator-ready.",
+    ...variantLayer,
     "",
     generationTarget === "text_to_image"
       ? "- Optimize for still-image generation (lighting, detail, composition)."
@@ -488,6 +533,7 @@ export async function POST(req: NextRequest) {
 
     const generationTarget = normalizeGenerationTarget(body.generation_target)
     const task = body.task || null
+    const refineVariant = normalizeRefineVariant(body.refine_type)
 
     const outputType: OutputType =
       outputTypeFromGenerationTarget(generationTarget) ??
@@ -548,7 +594,7 @@ export async function POST(req: NextRequest) {
       OUTPUT_ENFORCER,
       HEADLESS_CONTRACT,
       ...(task === "refine_prompt"
-        ? [buildRefineSystem(generationTarget)]
+        ? [buildRefineSystem(generationTarget, refineVariant)]
         : []),
       OUTPUT_TYPE_SYSTEM,
       GENERATION_TARGET_SYSTEM,
@@ -637,6 +683,7 @@ export async function POST(req: NextRequest) {
             : structured
             ? "ok"
             : "fallback_text",
+        refine_variant: task === "refine_prompt" ? refineVariant : null,
       },
     }
 
