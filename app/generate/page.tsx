@@ -2305,6 +2305,11 @@ ${basePrompt}`,
                 onClick={handleGenerate}
               />
 
+              <RefineChoicesPanel
+                choices={refineChoices}
+                onApply={handleApplyRefineChoice}
+              />
+
               {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
             </div>
 
