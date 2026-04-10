@@ -1684,20 +1684,30 @@ export default function GeneratePage() {
       router.replace("/generate", { scroll: false });
     }
 
-    const focusTimer = window.setTimeout(() => {
-      promptTextareaRef.current?.focus();
-      promptTextareaRef.current?.setSelectionRange(
-        promptTextareaRef.current.value.length,
-        promptTextareaRef.current.value.length,
-      );
-    }, 120);
+    const cinematicArrivalTimer = window.setTimeout(() => {
+      const textarea = promptTextareaRef.current;
+      if (!textarea) return;
+
+      textarea.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+
+      window.setTimeout(() => {
+        textarea.focus({ preventScroll: true });
+        textarea.setSelectionRange(
+          textarea.value.length,
+          textarea.value.length,
+        );
+      }, 360);
+    }, 1100);
 
     const highlightTimer = window.setTimeout(() => {
       setHighlightPrompt(false);
-    }, 1800);
+    }, 2600);
 
     return () => {
-      window.clearTimeout(focusTimer);
+      window.clearTimeout(cinematicArrivalTimer);
       window.clearTimeout(highlightTimer);
     };
   }, [incomingQueryPayload, router]);
