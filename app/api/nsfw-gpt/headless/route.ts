@@ -113,7 +113,7 @@ type HeadlessBody = {
   vault_ids?: string[]
   macro_ids?: string[]
   history?: HistoryMessage[]
-  task?: "refine_prompt"
+  task?: "refine_prompt" | "refine_prompt_variants"
   refine_type?: RefineVariant | string
 }
 
@@ -129,6 +129,7 @@ type HeadlessSuccess = {
   output_type: OutputType
   generation_target: GenerationTarget | null
   prompt: string
+  variants?: string[] | null
   structured: any | null
   raw_text: string
   metadata: {
@@ -221,7 +222,8 @@ function normalizeRefineVariant(v: unknown): RefineVariant | null {
 
 function buildRefineSystem(
   generationTarget: GenerationTarget | null,
-  refineVariant: RefineVariant | null
+  refineVariant: RefineVariant | null,
+  multiVariant: boolean
 ): string {
   const variantLayer =
     refineVariant === "cinematic"
@@ -249,6 +251,28 @@ function buildRefineSystem(
           "- Improve the prompt in a balanced, generator-ready way.",
         ]
 
+  const outputLayer = multiVariant
+    ? [
+        "# OUTPUT FORMAT:",
+        "- Return EXACTLY 3 refined prompt variations.",
+        '- Return ONLY valid JSON in this shape: { "variants": ["...", "...", "..."] }',
+        "- No markdown.",
+        "- No explanations.",
+        "- No extra keys.",
+        "- Each variant must be materially distinct while preserving the same subject and core intent.",
+      ]
+    : [
+        "# OUTPUT FORMAT:",
+        "- Output ONLY the refined prompt.",
+        "- DO NOT say 'here is your prompt'.",
+        "- DO NOT say 'here’s your refined prompt'.",
+        "- DO NOT explain anything.",
+        "- DO NOT add commentary.",
+        "- DO NOT use quotes.",
+        "- DO NOT use markdown.",
+        "- DO NOT prefix or suffix anything.",
+      ]
+
   return [
     "# TASK: PROMPT REFINEMENT",
     "",
@@ -256,14 +280,7 @@ function buildRefineSystem(
     "You are a prompt rewriting engine.",
     "",
     "# HARD OUTPUT RULES (DO NOT BREAK):",
-    "- Output ONLY the refined prompt.",
-    "- DO NOT say 'here is your prompt'.",
-    "- DO NOT say 'here’s your refined prompt'.",
-    "- DO NOT explain anything.",
-    "- DO NOT add commentary.",
-    "- DO NOT use quotes.",
-    "- DO NOT use markdown.",
-    "- DO NOT prefix or suffix anything.",
+    ...outputLayer,
     "",
     "# BEHAVIOR:",
     "- Rewrite and improve the prompt.",
@@ -419,6 +436,27 @@ function sanitizeRefineOutput(text: string): string {
   return cleaned
 }
 
+function parseRefineVariants(rawText: string): string[] | null {
+  const parsed = tryParseJsonObject(rawText)
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    Array.isArray((parsed as any).variants)
+  ) {
+    const variants = (parsed as any).variants
+      .map((item: any) => String(item || "").trim())
+      .filter(Boolean)
+    return variants.length ? variants.slice(0, 3) : null
+  }
+
+  const fallback = rawText
+    .split(/\n+/)
+    .map((line) => line.replace(/^[A-C][\.)]\s*/i, "").trim())
+    .filter(Boolean)
+
+  return fallback.length >= 2 ? fallback.slice(0, 3) : null
+}
+
 function coercePromptFromResponse(
   outputType: OutputType,
   structured: any | null,
@@ -541,7 +579,9 @@ export async function POST(req: NextRequest) {
       "IMAGE"
 
     const finalOutputType: OutputType =
-      task === "refine_prompt" ? "IMAGE" : outputType
+      task === "refine_prompt" || task === "refine_prompt_variants"
+        ? "IMAGE"
+        : outputType
 
     const apiKey = getEnv("OPENAI_COMPAT_API_KEY")
     const baseUrl = getEnv("OPENAI_COMPAT_BASE_URL")
@@ -593,8 +633,14 @@ export async function POST(req: NextRequest) {
       ROUTER,
       OUTPUT_ENFORCER,
       HEADLESS_CONTRACT,
-      ...(task === "refine_prompt"
-        ? [buildRefineSystem(generationTarget, refineVariant)]
+      ...(task === "refine_prompt" || task === "refine_prompt_variants"
+        ? [
+            buildRefineSystem(
+              generationTarget,
+              refineVariant,
+              task === "refine_prompt_variants"
+            ),
+          ]
         : []),
       OUTPUT_TYPE_SYSTEM,
       GENERATION_TARGET_SYSTEM,
@@ -650,12 +696,29 @@ export async function POST(req: NextRequest) {
     const rawText = String(raw?.choices?.[0]?.message?.content || "").trim()
 
     const structured =
-      finalOutputType === "IMAGE" ? null : tryParseJsonObject(rawText)
+      finalOutputType === "IMAGE" && task !== "refine_prompt_variants"
+        ? null
+        : tryParseJsonObject(rawText)
 
     let prompt = coercePromptFromResponse(finalOutputType, structured, rawText)
+    let variants: string[] | null = null
 
     if (task === "refine_prompt") {
       prompt = sanitizeRefineOutput(prompt)
+    }
+
+    if (task === "refine_prompt_variants") {
+      const parsedVariants = parseRefineVariants(rawText)
+      variants = parsedVariants
+        ? parsedVariants.map(sanitizeRefineOutput).filter(Boolean)
+        : null
+
+      if (!variants || variants.length === 0) {
+        const fallbackPrompt = sanitizeRefineOutput(prompt)
+        variants = [fallbackPrompt].filter(Boolean)
+      }
+
+      prompt = variants[0] || ""
     }
 
     const out: HeadlessSuccess = {
@@ -665,6 +728,7 @@ export async function POST(req: NextRequest) {
       output_type: finalOutputType,
       generation_target: generationTarget,
       prompt,
+      variants,
       structured,
       raw_text: rawText,
       metadata: {
@@ -683,7 +747,10 @@ export async function POST(req: NextRequest) {
             : structured
             ? "ok"
             : "fallback_text",
-        refine_variant: task === "refine_prompt" ? refineVariant : null,
+        refine_variant:
+          task === "refine_prompt" || task === "refine_prompt_variants"
+            ? refineVariant
+            : null,
       },
     }
 
