@@ -684,7 +684,9 @@ function PromptSection(props: {
   onPromptChange: (value: string) => void;
   onNegativePromptChange: (value: string) => void;
   onRefine: (variant: RefineVariant) => void;
+  onApplyRefineChoice: (value: string) => void;
   refiningVariant: RefineVariant | null;
+  refineChoices: string[] | null;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   highlight?: boolean;
 }) {
@@ -794,6 +796,33 @@ function PromptSection(props: {
               {props.refiningVariant === "photoreal" ? "Refining..." : "📸 Photoreal"}
             </button>
           </div>
+
+          {props.refineChoices && props.refineChoices.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
+                Choose Your Refined Prompt
+              </div>
+              <div className="text-[10px] text-zinc-400">
+                Select one of the AI-generated prompt options below.
+              </div>
+
+              <div className="grid grid-cols-1 gap-2">
+                {props.refineChoices.map((choice, index) => (
+                  <button
+                    key={`${index}-${choice.slice(0, 24)}`}
+                    type="button"
+                    onClick={() => props.onApplyRefineChoice(choice)}
+                    className="rounded-xl border border-cyan-500/20 bg-black/30 px-3 py-3 text-left text-[11px] text-zinc-200 transition-all hover:border-cyan-400/40 hover:bg-cyan-500/10 hover:text-white"
+                  >
+                    <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
+                      Option {String.fromCharCode(65 + index)}
+                    </div>
+                    <div className="leading-5">{choice}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {props.prompt.trim().length > 0 && (() => {
             const strength = evaluatePromptStrength(props.prompt);
@@ -1684,6 +1713,7 @@ export default function GeneratePage() {
   const [showArrivalBanner, setShowArrivalBanner] = useState(false);
   const [highlightPrompt, setHighlightPrompt] = useState(false);
   const [refiningVariant, setRefiningVariant] = useState<RefineVariant | null>(null);
+  const [refineChoices, setRefineChoices] = useState<string[] | null>(null);
 
   const incomingQueryPayload = useMemo<HandoffPayload | null>(() => {
     const promptParam = searchParams.get("prompt");
@@ -1889,6 +1919,7 @@ export default function GeneratePage() {
 
     setErrorMessage(null);
     setRefiningVariant(variant);
+    setRefineChoices(null);
 
     try {
       const res = await fetch("/api/nsfw-gpt/headless", {
@@ -1901,7 +1932,7 @@ export default function GeneratePage() {
 Prompt:
 ${basePrompt}`,
           generation_target: mode,
-          task: "refine_prompt",
+          task: "refine_prompt_variants",
           refine_type: variant,
         }),
       });
@@ -1920,16 +1951,41 @@ ${basePrompt}`,
         throw new Error(message);
       }
 
-      if (!data || typeof data.prompt !== "string" || !data.prompt.trim()) {
-        throw new Error("Auto-refine returned an invalid prompt.");
+      const variants = Array.isArray(data?.variants)
+        ? data.variants
+            .map((item: unknown) => String(item || "").trim())
+            .filter(Boolean)
+            .slice(0, 3)
+        : [];
+
+      if (variants.length > 0) {
+        setRefineChoices(variants);
+        return;
       }
 
-      setPrompt(data.prompt.trim());
+      if (typeof data?.prompt === "string" && data.prompt.trim()) {
+        setPrompt(data.prompt.trim());
+        setRefineChoices(null);
+        return;
+      }
+
+      throw new Error("Auto-refine returned no usable prompt options.");
     } catch (err: any) {
       console.error("Auto-refine error:", err);
       setErrorMessage(err?.message || "Auto-refine failed.");
+      setRefineChoices(null);
     } finally {
       setRefiningVariant(null);
+    }
+  };
+
+  const handleApplyRefineChoice = (value: string) => {
+    setPrompt(value);
+    setRefineChoices(null);
+
+    if (promptTextareaRef.current) {
+      promptTextareaRef.current.focus({ preventScroll: true });
+      promptTextareaRef.current.setSelectionRange(value.length, value.length);
     }
   };
 
@@ -2173,10 +2229,15 @@ ${basePrompt}`,
                 mode={mode}
                 prompt={prompt}
                 negativePrompt={negativePrompt}
-                onPromptChange={setPrompt}
+                onPromptChange={(value) => {
+                  setPrompt(value);
+                  setRefineChoices(null);
+                }}
                 onNegativePromptChange={setNegativePrompt}
                 onRefine={handleAiRefine}
+                onApplyRefineChoice={handleApplyRefineChoice}
                 refiningVariant={refiningVariant}
+                refineChoices={refineChoices}
                 textareaRef={promptTextareaRef}
                 highlight={highlightPrompt}
               />
