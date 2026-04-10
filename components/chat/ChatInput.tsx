@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 
 type Mode = "SAFE" | "NSFW" | "ULTRA"
 
@@ -17,10 +17,26 @@ export function ChatInput({
 }: ChatInputProps) {
   const [value, setValue] = useState("")
   const [sending, setSending] = useState(false)
+  const [localMode, setLocalMode] = useState<Mode>(mode)
+
+  useEffect(() => {
+    setLocalMode(mode)
+  }, [mode])
+
+  const handleModeChange = (nextMode: Mode) => {
+    setLocalMode(nextMode)
+    onModeChange(nextMode)
+  }
 
   const submit = async () => {
     const trimmed = value.trim()
     if (!trimmed || sending) return
+
+    // Force parent to receive the latest selected mode before send
+    if (mode !== localMode) {
+      onModeChange(localMode)
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    }
 
     setSending(true)
     try {
@@ -41,12 +57,12 @@ export function ChatInput({
   }
 
   const modeButton = (label: Mode) => {
-    const active = mode === label
+    const active = localMode === label
 
     return (
       <button
         type="button"
-        onClick={() => onModeChange(label)}
+        onClick={() => handleModeChange(label)}
         className={`rounded-full border px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] transition-all duration-200 ${
           active
             ? "border-transparent bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 text-white shadow-[0_0_18px_rgba(168,85,247,0.16)]"
