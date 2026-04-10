@@ -467,6 +467,138 @@ function HandoffArrivalBanner(props: {
   );
 }
 
+
+function HandoffConfidencePanel(props: {
+  visible: boolean;
+  mode: GenerationMode;
+  selectedIdentityLabel: string;
+  prompt: string;
+  onPromptChange: (value: string) => void;
+}) {
+  if (!props.visible) return null;
+
+  const suggestionChips =
+    props.mode === "text_to_image"
+      ? [
+          {
+            label: "More photorealistic",
+            addition: "photorealistic, realistic skin texture, natural lighting, lifelike detail",
+          },
+          {
+            label: "More cinematic",
+            addition: "cinematic composition, dramatic lighting, filmic mood, premium visual storytelling",
+          },
+          {
+            label: "Sharpen anatomy",
+            addition: "accurate anatomy, proportional body structure, natural hands, clean body detail",
+          },
+          {
+            label: "More explicit",
+            addition: "more explicit sexual detail, stronger erotic intensity, bolder sensual focus",
+          },
+        ]
+      : [
+          {
+            label: "More motion",
+            addition: "stronger motion, more dynamic movement, visible body motion",
+          },
+          {
+            label: "More cinematic lighting",
+            addition: "cinematic lighting, moody highlights, dramatic contrast, filmic glow",
+          },
+          {
+            label: "Slower pacing",
+            addition: "slow sensual pacing, controlled movement, unhurried rhythm",
+          },
+          {
+            label: "Stronger camera movement",
+            addition: "stronger camera movement, smooth dolly motion, cinematic camera drift",
+          },
+        ];
+
+  const applySuggestion = (addition: string) => {
+    const trimmedPrompt = props.prompt.trim();
+    const trimmedAddition = addition.trim();
+
+    if (!trimmedPrompt) {
+      props.onPromptChange(trimmedAddition);
+      return;
+    }
+
+    const normalizedPrompt = trimmedPrompt.toLowerCase();
+    const normalizedAddition = trimmedAddition.toLowerCase();
+
+    if (normalizedPrompt.includes(normalizedAddition)) {
+      return;
+    }
+
+    props.onPromptChange(`${trimmedPrompt}, ${trimmedAddition}`);
+  };
+
+  return (
+    <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)]">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm md:text-base">
+          <Sparkles className="h-4 w-4 text-fuchsia-300" />
+          Ready to Generate
+        </CardTitle>
+        <CardDescription className="text-xs text-zinc-300">
+          Quick status check before you hit Generate.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <div className="rounded-xl border border-fuchsia-500/20 bg-black/30 px-3 py-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              Mode
+            </div>
+            <div className="mt-1 text-sm font-semibold text-white">
+              {modeLabel(props.mode)}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-fuchsia-500/20 bg-black/30 px-3 py-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              Identity
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-white">
+              {props.selectedIdentityLabel}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-fuchsia-500/20 bg-black/30 px-3 py-3">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+              Prompt source
+            </div>
+            <div className="mt-1 text-sm font-semibold text-white">
+              A Siren’s Mind
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
+            Smart Suggestions
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {suggestionChips.map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                onClick={() => applySuggestion(chip.addition)}
+                className="rounded-full border border-fuchsia-500/20 bg-fuchsia-500/8 px-3 py-1.5 text-[11px] font-medium text-fuchsia-100 transition-all hover:border-fuchsia-400/40 hover:bg-fuchsia-500/15 hover:text-white"
+              >
+                + {chip.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function PromptSection(props: {
   mode: GenerationMode;
   prompt: string;
@@ -1436,6 +1568,16 @@ export default function GeneratePage() {
     };
   }, [searchParams]);
 
+  const selectedIdentityLabel = useMemo(() => {
+    const selectedId = loraSelection.selected[0];
+    if (!selectedId) return "Not selected";
+
+    const match = identityOptions.find((item) => item.id === selectedId);
+    if (!match) return "Not selected";
+
+    return match.name && match.name.trim().length > 0 ? match.name : match.id;
+  }, [identityOptions, loraSelection.selected]);
+
   const canGenerate =
     !isGenerating &&
     (mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim())) &&
@@ -1787,6 +1929,14 @@ export default function GeneratePage() {
               onDismiss={() => setShowArrivalBanner(false)}
             />
           </AnimatePresence>
+
+          <HandoffConfidencePanel
+            visible={showArrivalBanner}
+            mode={mode}
+            selectedIdentityLabel={selectedIdentityLabel}
+            prompt={prompt}
+            onPromptChange={setPrompt}
+          />
 
           <ModeTabs activeMode={mode} onChange={setMode} />
 
