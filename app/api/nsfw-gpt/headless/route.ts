@@ -207,19 +207,30 @@ function buildRefineSystem(
 ): string {
   return [
     "# TASK: PROMPT REFINEMENT",
-    "- Rewrite and improve the user's prompt for AI generation.",
-    "- Preserve the user's core subject and intent.",
-    "- Make it more detailed, more structured, and more generator-ready.",
-    "- Return ONLY the final refined prompt.",
-    "- No JSON.",
-    "- No markdown.",
-    "- No commentary.",
-    "- No headings.",
+    "",
+    "You are NOT a chatbot.",
+    "You are a prompt rewriting engine.",
+    "",
+    "# HARD OUTPUT RULES (DO NOT BREAK):",
+    "- Output ONLY the refined prompt.",
+    "- DO NOT say 'here is your prompt'.",
+    "- DO NOT say 'here’s your refined prompt'.",
+    "- DO NOT explain anything.",
+    "- DO NOT add commentary.",
+    "- DO NOT use quotes.",
+    "- DO NOT use markdown.",
+    "- DO NOT prefix or suffix anything.",
+    "",
+    "# BEHAVIOR:",
+    "- Rewrite and improve the prompt.",
+    "- Preserve subject and intent.",
+    "- Make it more detailed, structured, and generator-ready.",
+    "",
     generationTarget === "text_to_image"
-      ? "- Optimize for still-image generation with stronger detail, composition, lighting, and visual clarity."
+      ? "- Optimize for still-image generation (lighting, detail, composition)."
       : generationTarget === "text_to_video"
-      ? "- Optimize for short-form cinematic video with stronger motion, pacing, and camera language."
-      : "- Optimize for image-to-video continuity with natural motion, continuity, and subtle cinematic movement.",
+      ? "- Optimize for cinematic video (motion, pacing, camera)."
+      : "- Optimize for image-to-video continuity and motion realism.",
   ].join("\n")
 }
 
@@ -343,6 +354,24 @@ function tryParseJsonObject(text: string): any | null {
   } catch {
     return null
   }
+}
+
+function sanitizeRefineOutput(text: string): string {
+  let cleaned = text.trim()
+
+  cleaned = cleaned.replace(/^here'?s your refined prompt[:\-]?\s*/i, "")
+  cleaned = cleaned.replace(/^here’s your refined prompt[:\-]?\s*/i, "")
+  cleaned = cleaned.replace(/^refined prompt[:\-]?\s*/i, "")
+  cleaned = cleaned.replace(/^prompt[:\-]?\s*/i, "")
+
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim()
+  }
+
+  return cleaned
 }
 
 function coercePromptFromResponse(
@@ -577,7 +606,11 @@ export async function POST(req: NextRequest) {
     const structured =
       finalOutputType === "IMAGE" ? null : tryParseJsonObject(rawText)
 
-    const prompt = coercePromptFromResponse(finalOutputType, structured, rawText)
+    let prompt = coercePromptFromResponse(finalOutputType, structured, rawText)
+
+    if (task === "refine_prompt") {
+      prompt = sanitizeRefineOutput(prompt)
+    }
 
     const out: HeadlessSuccess = {
       status: "ok",
