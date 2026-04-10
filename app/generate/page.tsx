@@ -67,6 +67,7 @@ type StylePreset =
 
 type QualityPreset = "fast" | "balanced" | "quality" | "ultra";
 type ConsistencyPreset = "low" | "medium" | "high" | "perfect";
+type RefineVariant = "cinematic" | "explicit" | "photoreal";
 
 type LoraMode = "single" | "advanced";
 
@@ -599,17 +600,6 @@ function HandoffConfidencePanel(props: {
   );
 }
 
-
-
-
-function autoRefinePrompt(prompt: string, mode: string) {
-  if (!prompt.trim()) return prompt;
-  if (mode === "text_to_video" || mode === "image_to_video") {
-    return prompt + ", cinematic motion, smooth camera movement, controlled pacing, atmospheric lighting, high detail";
-  }
-  return prompt + ", highly detailed, cinematic lighting, realistic textures, professional composition, sharp focus";
-}
-
 function evaluatePromptStrength(prompt: string) {
   const text = prompt.toLowerCase();
 
@@ -661,12 +651,40 @@ function evaluatePromptStrength(prompt: string) {
   };
 }
 
+
+function SirensMindCTA(props: { onOpen: () => void }) {
+  return (
+    <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)]">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm md:text-base">
+          <Sparkles className="h-4 w-4 text-fuchsia-300" />
+          A Siren’s Mind
+        </CardTitle>
+        <CardDescription className="text-xs text-zinc-300">
+          Turn rough ideas into polished, generator-ready prompts with AI guidance before you generate.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        <Button
+          type="button"
+          onClick={props.onOpen}
+          className="h-10 w-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-xs font-semibold text-white hover:brightness-110"
+        >
+          Open Siren’s Mind
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 function PromptSection(props: {
   mode: GenerationMode;
   prompt: string;
   negativePrompt: string;
   onPromptChange: (value: string) => void;
   onNegativePromptChange: (value: string) => void;
+  onRefine: (variant: RefineVariant) => void;
+  refiningVariant: RefineVariant | null;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   highlight?: boolean;
 }) {
@@ -735,16 +753,36 @@ function PromptSection(props: {
           />
           <p className="mt-1 text-[10px] text-gray-400">
             {props.prompt.length} characters
-
-<button
-  type="button"
-  onClick={() => props.onPromptChange(autoRefinePrompt(props.prompt, props.mode))}
-  className="mt-3 w-full rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 py-2 text-xs font-semibold text-white hover:brightness-110"
->
-  ✨ Auto-Refine Prompt
-</button>
-
           </p>
+
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={() => props.onRefine("cinematic")}
+              disabled={props.refiningVariant !== null}
+              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-purple-500/90 via-fuchsia-500/90 to-cyan-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {props.refiningVariant === "cinematic" ? "Refining..." : "🎬 Cinematic"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => props.onRefine("explicit")}
+              disabled={props.refiningVariant !== null}
+              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-rose-500/90 via-pink-500/90 to-fuchsia-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {props.refiningVariant === "explicit" ? "Refining..." : "🔥 Explicit"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => props.onRefine("photoreal")}
+              disabled={props.refiningVariant !== null}
+              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-cyan-500/90 via-sky-500/90 to-blue-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {props.refiningVariant === "photoreal" ? "Refining..." : "📸 Photoreal"}
+            </button>
+          </div>
 
           {props.prompt.trim().length > 0 && (() => {
             const strength = evaluatePromptStrength(props.prompt);
@@ -1634,6 +1672,7 @@ export default function GeneratePage() {
 
   const [showArrivalBanner, setShowArrivalBanner] = useState(false);
   const [highlightPrompt, setHighlightPrompt] = useState(false);
+  const [refiningVariant, setRefiningVariant] = useState<RefineVariant | null>(null);
 
   const incomingQueryPayload = useMemo<HandoffPayload | null>(() => {
     const promptParam = searchParams.get("prompt");
@@ -1824,6 +1863,60 @@ export default function GeneratePage() {
       label: l.name && l.name.trim().length > 0 ? l.name : l.id,
     })),
   ];
+
+
+  const handleAiRefine = async (variant: RefineVariant) => {
+    const basePrompt = prompt.trim();
+    if (!basePrompt || refiningVariant) return;
+
+    const refineInstruction =
+      variant === "cinematic"
+        ? "Refine this prompt to feel more cinematic, visually dramatic, and premium while preserving the core subject and intent."
+        : variant === "explicit"
+        ? "Refine this prompt to feel more erotic, explicit, and intense while preserving the core subject and intent."
+        : "Refine this prompt to feel more photorealistic, natural, and believable while preserving the core subject and intent.";
+
+    setErrorMessage(null);
+    setRefiningVariant(variant);
+
+    try {
+      const res = await fetch("/api/nsfw-gpt/headless", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "ULTRA",
+          description: `${refineInstruction}\n\nPrompt:\n${basePrompt}`,
+          generation_target: mode,
+          task: "refine_prompt",
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        const message =
+          typeof data?.reason === "string"
+            ? data.reason
+            : typeof data?.message === "string"
+            ? data.message
+            : typeof data?.error === "string"
+            ? data.error
+            : "Auto-refine failed.";
+        throw new Error(message);
+      }
+
+      if (!data || typeof data.prompt !== "string" || !data.prompt.trim()) {
+        throw new Error("Auto-refine returned an invalid prompt.");
+      }
+
+      setPrompt(data.prompt.trim());
+    } catch (err: any) {
+      console.error("Auto-refine error:", err);
+      setErrorMessage(err?.message || "Auto-refine failed.");
+    } finally {
+      setRefiningVariant(null);
+    }
+  };
 
   const handleGenerate = async () => {
     const bodyModeMap: Record<string, string> = {
@@ -2059,12 +2152,16 @@ export default function GeneratePage() {
                 options={identitySelectOptions}
               />
 
+              <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
+
               <PromptSection
                 mode={mode}
                 prompt={prompt}
                 negativePrompt={negativePrompt}
                 onPromptChange={setPrompt}
                 onNegativePromptChange={setNegativePrompt}
+                onRefine={handleAiRefine}
+                refiningVariant={refiningVariant}
                 textareaRef={promptTextareaRef}
                 highlight={highlightPrompt}
               />
