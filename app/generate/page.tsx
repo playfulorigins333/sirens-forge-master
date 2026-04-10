@@ -605,40 +605,59 @@ function evaluatePromptStrength(prompt: string) {
 
   let score = 0;
 
-  if (text.length > 30) score += 1;
-  if (text.length > 80) score += 1;
-  if (text.length > 140) score += 1;
+  // LENGTH
+  if (text.length > 40) score += 1;
+  if (text.length > 100) score += 1;
+  if (text.length > 180) score += 1;
 
-  if (text.includes("lighting")) score += 1;
-  if (text.includes("camera")) score += 1;
-  if (text.includes("cinematic")) score += 1;
-  if (text.includes("detailed")) score += 1;
-  if (text.includes("realistic")) score += 1;
-  if (text.includes("close up") || text.includes("portrait")) score += 1;
+  // SUBJECT DETAIL
+  if (/(woman|man|girl|boy|subject|figure|person|character)/.test(text)) score += 1;
+  if (/(eyes|lips|hair|face|body|skin|physique|curves|features)/.test(text)) score += 1;
 
-  if (score <= 2) {
+  // CLOTHING / STYLE
+  if (/(dress|lingerie|outfit|clothing|fashion|style|sheer|lace|leather)/.test(text)) score += 1;
+
+  // POSE / ACTION
+  if (/(posing|posed|standing|sitting|lying|leaning|movement|motion|gaze)/.test(text)) score += 1;
+
+  // ENVIRONMENT
+  if (/(room|studio|background|environment|scene|location|backdrop|setting)/.test(text)) score += 1;
+
+  // LIGHTING
+  if (/(lighting|light|glow|shadows|golden hour|neon|dramatic|rim light|soft light)/.test(text)) score += 1;
+
+  // CAMERA / COMPOSITION
+  if (/(camera|angle|depth of field|close up|close-up|portrait|wide shot|framing|composition)/.test(text)) score += 1;
+
+  // REALISM / TEXTURE
+  if (/(realistic|photorealistic|texture|skin detail|high detail|lifelike|natural)/.test(text)) score += 1;
+
+  // MOOD / TONE
+  if (/(moody|sensual|erotic|dark|cinematic|atmosphere|sultry|seductive)/.test(text)) score += 1;
+
+  if (score <= 3) {
     return {
       label: "Weak",
       color: "bg-red-500",
-      hint: "Add more detail about subject, lighting, and composition.",
+      hint: "Add subject detail, environment, and lighting.",
       percent: 25,
-    };
-  }
-
-  if (score <= 4) {
-    return {
-      label: "Decent",
-      color: "bg-yellow-500",
-      hint: "Try adding camera, lighting, or mood for stronger results.",
-      percent: 50,
     };
   }
 
   if (score <= 6) {
     return {
+      label: "Decent",
+      color: "bg-yellow-500",
+      hint: "Good start. Add composition, lighting, and realism.",
+      percent: 50,
+    };
+  }
+
+  if (score <= 9) {
+    return {
       label: "Strong",
       color: "bg-green-500",
-      hint: "Good structure. Add fine detail or style to push it further.",
+      hint: "Well-structured prompt. Minor refinements can push it further.",
       percent: 75,
     };
   }
@@ -646,11 +665,10 @@ function evaluatePromptStrength(prompt: string) {
   return {
     label: "Elite",
     color: "bg-gradient-to-r from-purple-500 to-cyan-500",
-    hint: "This prompt is highly refined and generation-ready.",
+    hint: "Highly refined, production-ready prompt.",
     percent: 100,
   };
 }
-
 
 function SirensMindCTA(props: { onOpen: () => void }) {
   return (
