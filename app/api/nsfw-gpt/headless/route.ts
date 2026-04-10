@@ -112,6 +112,7 @@ type HeadlessBody = {
   vault_ids?: string[]
   macro_ids?: string[]
   history?: HistoryMessage[]
+  task?: "refine_prompt"
 }
 
 type HeadlessError = {
@@ -201,6 +202,27 @@ function buildOutputTypeSystem(outputType: OutputType): string {
  * - text_to_video => optimize for short-form text-driven video
  * - image_to_video => optimize for continuity from a provided source image
  */
+function buildRefineSystem(
+  generationTarget: GenerationTarget | null
+): string {
+  return [
+    "# TASK: PROMPT REFINEMENT",
+    "- Rewrite and improve the user's prompt for AI generation.",
+    "- Preserve the user's core subject and intent.",
+    "- Make it more detailed, more structured, and more generator-ready.",
+    "- Return ONLY the final refined prompt.",
+    "- No JSON.",
+    "- No markdown.",
+    "- No commentary.",
+    "- No headings.",
+    generationTarget === "text_to_image"
+      ? "- Optimize for still-image generation with stronger detail, composition, lighting, and visual clarity."
+      : generationTarget === "text_to_video"
+      ? "- Optimize for short-form cinematic video with stronger motion, pacing, and camera language."
+      : "- Optimize for image-to-video continuity with natural motion, continuity, and subtle cinematic movement.",
+  ].join("\n")
+}
+
 function buildGenerationTargetSystem(
   generationTarget: GenerationTarget | null
 ): string {
@@ -436,11 +458,15 @@ export async function POST(req: NextRequest) {
     }
 
     const generationTarget = normalizeGenerationTarget(body.generation_target)
+    const task = body.task || null
 
     const outputType: OutputType =
       outputTypeFromGenerationTarget(generationTarget) ??
       normalizeOutputType(body.output_type) ??
       "IMAGE"
+
+    const finalOutputType: OutputType =
+      task === "refine_prompt" ? "IMAGE" : outputType
 
     const apiKey = getEnv("OPENAI_COMPAT_API_KEY")
     const baseUrl = getEnv("OPENAI_COMPAT_BASE_URL")
@@ -482,7 +508,7 @@ export async function POST(req: NextRequest) {
       })
       .filter((x): x is string => Boolean(x))
 
-    const OUTPUT_TYPE_SYSTEM = buildOutputTypeSystem(outputType)
+    const OUTPUT_TYPE_SYSTEM = buildOutputTypeSystem(finalOutputType)
     const GENERATION_TARGET_SYSTEM =
       buildGenerationTargetSystem(generationTarget)
     const history = sanitizeHistory(body.history)
@@ -492,6 +518,9 @@ export async function POST(req: NextRequest) {
       ROUTER,
       OUTPUT_ENFORCER,
       HEADLESS_CONTRACT,
+      ...(task === "refine_prompt"
+        ? [buildRefineSystem(generationTarget)]
+        : []),
       OUTPUT_TYPE_SYSTEM,
       GENERATION_TARGET_SYSTEM,
       ...(vaultTexts.length
@@ -546,15 +575,15 @@ export async function POST(req: NextRequest) {
     const rawText = String(raw?.choices?.[0]?.message?.content || "").trim()
 
     const structured =
-      outputType === "IMAGE" ? null : tryParseJsonObject(rawText)
+      finalOutputType === "IMAGE" ? null : tryParseJsonObject(rawText)
 
-    const prompt = coercePromptFromResponse(outputType, structured, rawText)
+    const prompt = coercePromptFromResponse(finalOutputType, structured, rawText)
 
     const out: HeadlessSuccess = {
       status: "ok",
       mode,
       model,
-      output_type: outputType,
+      output_type: finalOutputType,
       generation_target: generationTarget,
       prompt,
       structured,
@@ -570,7 +599,7 @@ export async function POST(req: NextRequest) {
         blocked_macros: m.blocked_ids,
         missing_macro_files: missingMacroFiles,
         contract_parse:
-          outputType === "IMAGE"
+          finalOutputType === "IMAGE"
             ? "ok"
             : structured
             ? "ok"
