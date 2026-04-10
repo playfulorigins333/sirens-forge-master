@@ -755,7 +755,18 @@ function PromptSection(props: {
             {props.prompt.length} characters
           </p>
 
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          
+<div className="mt-3">
+  <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fuchsia-300">
+    AI Refine Modes
+  </div>
+  <div className="text-[10px] text-zinc-400 mb-2">
+    Choose how Siren’s Mind should rewrite your prompt
+  </div>
+</div>
+
+<div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+
             <button
               type="button"
               onClick={() => props.onRefine("cinematic")}
