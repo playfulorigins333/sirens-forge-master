@@ -601,6 +601,15 @@ function HandoffConfidencePanel(props: {
 
 
 
+
+function autoRefinePrompt(prompt: string, mode: string) {
+  if (!prompt.trim()) return prompt;
+  if (mode === "text_to_video" || mode === "image_to_video") {
+    return prompt + ", cinematic motion, smooth camera movement, controlled pacing, atmospheric lighting, high detail";
+  }
+  return prompt + ", highly detailed, cinematic lighting, realistic textures, professional composition, sharp focus";
+}
+
 function evaluatePromptStrength(prompt: string) {
   const text = prompt.toLowerCase();
 
@@ -726,6 +735,15 @@ function PromptSection(props: {
           />
           <p className="mt-1 text-[10px] text-gray-400">
             {props.prompt.length} characters
+
+<button
+  type="button"
+  onClick={() => props.onPromptChange(autoRefinePrompt(props.prompt, props.mode))}
+  className="mt-3 w-full rounded-lg bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 py-2 text-xs font-semibold text-white hover:brightness-110"
+>
+  ✨ Auto-Refine Prompt
+</button>
+
           </p>
 
           {props.prompt.trim().length > 0 && (() => {
