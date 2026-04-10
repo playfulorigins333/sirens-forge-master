@@ -599,6 +599,59 @@ function HandoffConfidencePanel(props: {
   );
 }
 
+
+
+function evaluatePromptStrength(prompt: string) {
+  const text = prompt.toLowerCase();
+
+  let score = 0;
+
+  if (text.length > 30) score += 1;
+  if (text.length > 80) score += 1;
+  if (text.length > 140) score += 1;
+
+  if (text.includes("lighting")) score += 1;
+  if (text.includes("camera")) score += 1;
+  if (text.includes("cinematic")) score += 1;
+  if (text.includes("detailed")) score += 1;
+  if (text.includes("realistic")) score += 1;
+  if (text.includes("close up") || text.includes("portrait")) score += 1;
+
+  if (score <= 2) {
+    return {
+      label: "Weak",
+      color: "bg-red-500",
+      hint: "Add more detail about subject, lighting, and composition.",
+      percent: 25,
+    };
+  }
+
+  if (score <= 4) {
+    return {
+      label: "Decent",
+      color: "bg-yellow-500",
+      hint: "Try adding camera, lighting, or mood for stronger results.",
+      percent: 50,
+    };
+  }
+
+  if (score <= 6) {
+    return {
+      label: "Strong",
+      color: "bg-green-500",
+      hint: "Good structure. Add fine detail or style to push it further.",
+      percent: 75,
+    };
+  }
+
+  return {
+    label: "Elite",
+    color: "bg-gradient-to-r from-purple-500 to-cyan-500",
+    hint: "This prompt is highly refined and generation-ready.",
+    percent: 100,
+  };
+}
+
 function PromptSection(props: {
   mode: GenerationMode;
   prompt: string;
@@ -674,6 +727,28 @@ function PromptSection(props: {
           <p className="mt-1 text-[10px] text-gray-400">
             {props.prompt.length} characters
           </p>
+
+          {props.prompt.trim().length > 0 && (() => {
+            const strength = evaluatePromptStrength(props.prompt);
+
+            return (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-gray-400">Prompt Strength</span>
+                  <span className="font-semibold text-white">{strength.label}</span>
+                </div>
+
+                <div className="h-2 w-full overflow-hidden rounded-full bg-gray-800">
+                  <div
+                    className={`h-full transition-all duration-500 ${strength.color}`}
+                    style={{ width: `${strength.percent}%` }}
+                  />
+                </div>
+
+                <div className="text-[10px] text-gray-400">{strength.hint}</div>
+              </div>
+            );
+          })()}
           <div className="mt-2 rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
             Tip: Describe the subject clearly for better repeatability. Example:{" "}
             <span className="font-medium text-gray-100">
