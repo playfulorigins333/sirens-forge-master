@@ -8,22 +8,51 @@ function mustEnv(name: string): string {
   return v;
 }
 
+const PUBLIC_PATHS = new Set([
+  "/",
+  "/login",
+  "/pricing",
+  "/faq",
+  "/terms",
+  "/privacy",
+  "/acceptable-use",
+  "/favicon.ico",
+  "/robots.txt",
+  "/sitemap.xml",
+]);
+
+const PUBLIC_PREFIXES = [
+  "/api",
+  "/_next",
+  "/auth",
+];
+
+const PROTECTED_PREFIXES = [
+  "/generate",
+  "/sirens-mind",
+  "/library",
+  "/identities",
+  "/affiliate",
+  "/autopost",
+  "/lora",
+];
+
+function isPublicPath(pathname: string): boolean {
+  if (PUBLIC_PATHS.has(pathname)) return true;
+  return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
+function isProtectedPath(pathname: string): boolean {
+  return PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 export async function middleware(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
-  // Always allow API, auth, and static/internal assets through.
-  if (
-    pathname.startsWith("/api") ||
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/auth") ||
-    pathname === "/favicon.ico" ||
-    pathname === "/robots.txt" ||
-    pathname === "/sitemap.xml"
-  ) {
+  if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
-  // Create a response so Supabase can refresh/set auth cookies.
   const res = NextResponse.next();
 
   const supabase = createServerClient(
@@ -44,13 +73,16 @@ export async function middleware(req: NextRequest) {
     }
   );
 
-  // Keep Supabase session cookies alive in production.
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  // Launch mode:
-  // Middleware is now session-preservation only.
-  // Public/private access control should happen in layouts/routes,
-  // not here via broad redirect funnels.
+  if (isProtectedPath(pathname) && !user) {
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(loginUrl);
+  }
+
   return res;
 }
 
