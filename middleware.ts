@@ -22,28 +22,14 @@ const PUBLIC_PATHS = new Set([
 ]);
 
 const PUBLIC_PREFIXES = [
-  "/api",
   "/_next",
+  "/api",
   "/auth",
-];
-
-const PROTECTED_PREFIXES = [
-  "/generate",
-  "/sirens-mind",
-  "/library",
-  "/identities",
-  "/affiliate",
-  "/autopost",
-  "/lora",
 ];
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
   return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-}
-
-function isProtectedPath(pathname: string): boolean {
-  return PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
 export async function middleware(req: NextRequest) {
@@ -77,10 +63,10 @@ export async function middleware(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (isProtectedPath(pathname) && !user) {
-    const loginUrl = new URL("/login", req.url);
-    loginUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(loginUrl);
+  if (!user) {
+    const landingUrl = new URL("/", req.url);
+    landingUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(landingUrl);
   }
 
   return res;
