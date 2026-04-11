@@ -1,4 +1,3 @@
-// middleware.ts
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
@@ -21,18 +20,14 @@ const PUBLIC_PATHS = new Set([
   "/sitemap.xml",
 ]);
 
-const PUBLIC_PREFIXES = [
-  "/_next",
-  "/api",
-  "/auth",
-];
+const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"];
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
   return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
   if (isPublicPath(pathname)) {
