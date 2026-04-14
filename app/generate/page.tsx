@@ -19,6 +19,8 @@ import {
   Upload,
   X,
   CheckCircle2,
+  Copy,
+  UserPlus,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
@@ -1477,7 +1479,11 @@ function RefineChoicesPanel(props: {
   );
 }
 
-function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
+function OutputPanel(props: {
+  items: GeneratedItem[];
+  loading: boolean;
+  onGenerateMore: () => void;
+}) {
   const [selected, setSelected] = useState<GeneratedItem | null>(null);
 
   if (props.loading) {
@@ -1508,6 +1514,29 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
       </div>
     );
   }
+
+  const latestItem = props.items[0];
+
+  const handleDownloadLatest = () => {
+    if (!latestItem?.url) return;
+    const link = document.createElement("a");
+    link.href = latestItem.url;
+    link.download = latestItem.kind === "video" ? "sirens-forge-output.mp4" : "sirens-forge-output.png";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleCopyPrompt = async () => {
+    if (!latestItem?.prompt) return;
+    try {
+      await navigator.clipboard.writeText(latestItem.prompt);
+    } catch {}
+  };
+
+  const handleTrainTwin = () => {
+    window.location.href = "/lora/train";
+  };
 
   return (
     <>
@@ -1552,6 +1581,59 @@ function OutputPanel(props: { items: GeneratedItem[]; loading: boolean }) {
               </div>
             </motion.div>
           ))}
+        </div>
+
+        <div className="rounded-2xl border border-gray-800 bg-gray-950/80 p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-white md:text-base">Next Actions</h3>
+              <p className="text-[11px] text-gray-400">Keep the momentum going from your latest generation.</p>
+            </div>
+            <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-purple-200">
+              Latest Output
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              onClick={handleDownloadLatest}
+              className="justify-start gap-2 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-semibold text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+            >
+              <DownloadIcon />
+              Download
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCopyPrompt}
+              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+            >
+              <Copy className="h-4 w-4" />
+              Copy Prompt
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={props.onGenerateMore}
+              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+            >
+              <Sparkles className="h-4 w-4" />
+              Generate More Like This
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleTrainTwin}
+              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+            >
+              <UserPlus className="h-4 w-4" />
+              Train AI Twin
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -2377,7 +2459,7 @@ ${basePrompt}`,
             <div className="space-y-4 xl:col-span-1">
               <Card className="h-full border-gray-800 bg-gray-900/80">
                 <CardContent className="h-full p-4">
-                  <OutputPanel items={items} loading={isGenerating} />
+                  <OutputPanel items={items} loading={isGenerating} onGenerateMore={handleGenerate} />
                 </CardContent>
               </Card>
             </div>
