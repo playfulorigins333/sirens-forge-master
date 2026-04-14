@@ -154,7 +154,7 @@ export default function HomePage() {
               >
                 <Sparkles className="h-8 w-8 text-purple-400" />
               </motion.div>
-              <h2 className="text-3xl font-light tracking-wide text-gray-200 sm:text-4xl md:text-5xl">
+              <h2 className="text-3xl font-medium tracking-wide text-gray-100 sm:text-4xl md:text-5xl">
                 Forge Your AI Muse. Create Without Limits.
               </h2>
               <motion.div
@@ -164,7 +164,7 @@ export default function HomePage() {
                 <Sparkles className="h-8 w-8 text-pink-400" />
               </motion.div>
             </div>
-            <p className="mx-auto max-w-5xl text-lg leading-relaxed font-light text-gray-400 sm:text-xl md:text-2xl">
+            <p className="mx-auto max-w-5xl text-lg leading-relaxed font-medium text-gray-300 sm:text-xl md:text-2xl">
               Generate high-end images, shape stronger prompts with Siren&apos;s Mind,
               and build repeatable identity-driven workflows inside one premium creative platform.
             </p>
@@ -273,7 +273,7 @@ export default function HomePage() {
                   <item.icon className="h-7 w-7 text-white" />
                 </div>
                 <h3 className="mb-2 text-xl font-bold text-white">{item.title}</h3>
-                <p className="text-sm leading-relaxed font-light text-gray-400">{item.desc}</p>
+                <p className="text-base leading-relaxed font-medium text-gray-300">{item.desc}</p>
               </motion.div>
             ))}
           </motion.div>
@@ -324,7 +324,7 @@ export default function HomePage() {
                     <feature.icon className="h-8 w-8 text-white" />
                   </div>
                   <h3 className="mb-2 text-2xl font-bold text-white">{feature.title}</h3>
-                  <p className="leading-relaxed font-light text-gray-400">{feature.desc}</p>
+                  <p className="text-base leading-relaxed font-medium text-gray-300">{feature.desc}</p>
                   <div className="absolute right-0 bottom-0 left-0 h-1 bg-gradient-to-r from-transparent via-white/20 to-transparent" />
                 </div>
               </motion.div>
@@ -351,7 +351,7 @@ export default function HomePage() {
                 How It Works
               </span>
             </h2>
-            <p className="text-xl font-light text-gray-400">
+            <p className="text-xl font-medium text-gray-300">
               Start guided or go direct. Identity is optional, not required.
             </p>
           </motion.div>
@@ -391,7 +391,7 @@ export default function HomePage() {
                   {step.number}
                 </div>
                 <h3 className="mb-3 text-xl font-semibold text-white">{step.title}</h3>
-                <p className="leading-relaxed font-light text-gray-400">{step.desc}</p>
+                <p className="text-base leading-relaxed font-medium text-gray-300">{step.desc}</p>
               </motion.div>
             ))}
           </div>
@@ -413,7 +413,7 @@ export default function HomePage() {
                   </div>
                   <div>
                     <h3 className="text-3xl font-bold text-yellow-300">OG Founder</h3>
-                    <p className="text-sm font-light text-yellow-500/80">Elite early access tier</p>
+                    <p className="text-sm font-medium text-yellow-300/90">Elite early access tier</p>
                   </div>
                 </div>
 
@@ -421,13 +421,13 @@ export default function HomePage() {
                   10 OF 35 LEFT
                 </div>
 
-                <p className="mb-6 text-lg leading-relaxed font-light text-gray-300">
+                <p className="mb-6 text-lg leading-relaxed font-medium text-gray-300">
                   Lock in the strongest early positioning, premium affiliate benefits, and your highest-value seat inside the platform.
                 </p>
 
                 <div className="mb-6 flex items-baseline gap-2">
                   <span className="text-6xl font-bold text-yellow-300">$1,333</span>
-                  <span className="text-xl font-light text-gray-400">one-time</span>
+                  <span className="text-xl font-medium text-gray-300">one-time</span>
                 </div>
 
                 <Link
@@ -449,7 +449,7 @@ export default function HomePage() {
                   </div>
                   <div>
                     <h3 className="text-3xl font-bold text-green-300">Early Bird</h3>
-                    <p className="text-sm font-light text-green-500/80">Subscription tier</p>
+                    <p className="text-sm font-medium text-green-300/90">Subscription tier</p>
                   </div>
                 </div>
 
@@ -459,13 +459,13 @@ export default function HomePage() {
                   </div>
                 )}
 
-                <p className="mb-6 text-lg leading-relaxed font-light text-gray-300">
+                <p className="mb-6 text-lg leading-relaxed font-medium text-gray-300">
                   Enter the platform now with live subscription access and grow into stronger image, prompt, and identity workflows.
                 </p>
 
                 <div className="mb-6 flex items-baseline gap-2">
                   <span className="text-6xl font-bold text-green-300">$29.99</span>
-                  <span className="text-xl font-light text-gray-400">/month</span>
+                  <span className="text-xl font-medium text-gray-300">/month</span>
                 </div>
 
                 <Link
@@ -488,7 +488,7 @@ export default function HomePage() {
             className="rounded-3xl border border-cyan-500/20 bg-cyan-900/10 p-8 text-center backdrop-blur-xl"
           >
             <h3 className="mb-3 text-2xl font-semibold text-cyan-300">Trust Layer in Place</h3>
-            <p className="mx-auto max-w-3xl text-lg leading-relaxed font-light text-gray-400">
+            <p className="mx-auto max-w-3xl text-lg leading-relaxed font-medium text-gray-300">
               Pricing is live, subscriptions are wired, and Terms, Privacy, Acceptable Use,
               and FAQ are now part of the product shell before compute comes back online.
             </p>
