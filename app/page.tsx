@@ -10,7 +10,6 @@ import {
   Check,
   Infinity,
   LogIn,
-  UserPlus,
   Video,
   Zap,
   Sparkles,
@@ -19,6 +18,7 @@ import {
   Brain,
   Wand2,
   Shield,
+  Layers3,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 
@@ -90,7 +90,7 @@ export default function HomePage() {
       )}
 
       {/* HERO */}
-      <section className="relative z-10 flex min-h-screen flex-col items-center justify-center p-4 pt-20 sm:p-8">
+      <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 pt-20 pb-16 sm:px-8">
         <motion.div style={{ y: y1, opacity }} className="mx-auto w-full max-w-7xl">
           <div className="absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-purple-500/30 via-pink-500/30 to-cyan-500/30 blur-[100px] animate-pulse" />
 
@@ -98,7 +98,7 @@ export default function HomePage() {
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 1.2, ease: 'easeOut' }}
-            className="relative mb-10 text-center"
+            className="relative mb-8 text-center"
           >
             <motion.div
               animate={{
@@ -144,10 +144,10 @@ export default function HomePage() {
           <motion.div
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4, duration: 1 }}
+            transition={{ delay: 0.35, duration: 1 }}
             className="mb-10 text-center"
           >
-            <div className="mb-6 flex items-center justify-center gap-3">
+            <div className="mb-5 flex items-center justify-center gap-3">
               <motion.div
                 animate={{ rotate: [0, 360] }}
                 transition={{ duration: 4, repeat: 999999, ease: 'linear' }}
@@ -155,7 +155,7 @@ export default function HomePage() {
                 <Sparkles className="h-8 w-8 text-purple-400" />
               </motion.div>
               <h2 className="text-3xl font-light tracking-wide text-gray-200 sm:text-4xl md:text-5xl">
-                Identity-First AI Creation
+                Forge Your AI Muse. Create Without Limits.
               </h2>
               <motion.div
                 animate={{ rotate: [0, -360] }}
@@ -164,29 +164,28 @@ export default function HomePage() {
                 <Sparkles className="h-8 w-8 text-pink-400" />
               </motion.div>
             </div>
-            <p className="mx-auto max-w-4xl text-lg leading-relaxed font-light text-gray-400 sm:text-xl md:text-2xl">
-              Create images now, shape prompts with Siren&apos;s Mind, and build toward
-              consistent identity-driven workflows without forcing every user to start
-              with a LoRA.
+            <p className="mx-auto max-w-5xl text-lg leading-relaxed font-light text-gray-400 sm:text-xl md:text-2xl">
+              Generate high-end images, shape stronger prompts with Siren&apos;s Mind,
+              and build repeatable identity-driven workflows inside one premium creative platform.
             </p>
           </motion.div>
 
-          {/* PRIMARY ENTRY CTA */}
+          {/* PRIMARY CTA */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.55, duration: 1 }}
-            className="mb-6 flex flex-col items-center justify-center gap-4 sm:flex-row"
+            className="mb-5 flex flex-col items-center justify-center gap-4 sm:flex-row"
           >
             <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.98 }}>
               <div className="group relative">
                 <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 opacity-60 blur-xl transition-opacity group-hover:opacity-100" />
                 <Link
                   href="/sirens-mind"
-                  className="relative flex min-w-[240px] items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 px-8 py-5 text-lg font-semibold text-white shadow-lg transition-all hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+                  className="relative flex min-w-[250px] items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 px-8 py-5 text-lg font-semibold text-white shadow-lg transition-all hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
                 >
                   <Brain className="h-5 w-5" />
-                  Start with Siren&apos;s Mind
+                  Start Creating
                   <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
                 </Link>
               </div>
@@ -194,11 +193,11 @@ export default function HomePage() {
 
             <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.98 }}>
               <Link
-                href="/generate"
-                className="group flex min-w-[240px] items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 px-8 py-5 text-lg font-semibold text-white shadow-lg shadow-white/5 backdrop-blur-xl transition-all hover:border-white/30 hover:bg-white/20"
+                href="/pricing"
+                className="group flex min-w-[250px] items-center justify-center gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-8 py-5 text-lg font-semibold text-cyan-200 shadow-lg backdrop-blur-xl transition-all hover:border-cyan-400/40 hover:bg-cyan-500/15"
               >
-                <Wand2 className="h-5 w-5" />
-                Go to Generator
+                <Zap className="h-5 w-5" />
+                View Pricing
                 <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
               </Link>
             </motion.div>
@@ -209,8 +208,19 @@ export default function HomePage() {
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.65, duration: 1 }}
-            className="mb-16 flex flex-col items-center justify-center gap-4 sm:flex-row"
+            className="mb-14 flex flex-col items-center justify-center gap-4 sm:flex-row"
           >
+            <motion.div whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.98 }}>
+              <Link
+                href="/generate"
+                className="group flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-white/5 backdrop-blur-xl transition-all hover:border-white/30 hover:bg-white/20"
+              >
+                <Wand2 className="h-5 w-5" />
+                Go to Generator
+                <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+              </Link>
+            </motion.div>
+
             <motion.div whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.98 }}>
               <Link
                 href="/login"
@@ -218,17 +228,6 @@ export default function HomePage() {
               >
                 <LogIn className="h-5 w-5" />
                 Login
-                <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-              </Link>
-            </motion.div>
-
-            <motion.div whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.98 }}>
-              <Link
-                href="/pricing"
-                className="group flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-8 py-4 text-base font-semibold text-cyan-200 transition-all hover:border-cyan-400/40 hover:bg-cyan-500/15"
-              >
-                <Zap className="h-5 w-5" />
-                View Pricing
                 <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
               </Link>
             </motion.div>
@@ -244,20 +243,20 @@ export default function HomePage() {
             {[
               {
                 icon: Wand2,
-                title: 'Start without an identity',
-                desc: 'You do not need a LoRA to begin creating.',
+                title: 'Create without a LoRA',
+                desc: 'Start generating immediately. Identity training is optional, not required.',
                 gradient: 'from-purple-500 to-pink-500',
               },
               {
                 icon: Brain,
                 title: 'Use Siren’s Mind first',
-                desc: 'Get guided help shaping better prompts before generation.',
+                desc: 'Turn rough ideas into stronger prompts before you ever hit generate.',
                 gradient: 'from-pink-500 to-cyan-500',
               },
               {
-                icon: Shield,
-                title: 'Scale into identity later',
-                desc: 'Train and reuse identities when you want consistency.',
+                icon: Layers3,
+                title: 'Build consistency later',
+                desc: 'Train identities and scale into repeatable creative control when you are ready.',
                 gradient: 'from-cyan-500 to-blue-500',
               },
             ].map((item, index) => (
@@ -289,20 +288,20 @@ export default function HomePage() {
             {[
               {
                 icon: ImageIcon,
-                title: 'Image Generation',
-                desc: 'Prompt-driven creation with SDXL + identity-aware direction.',
+                title: 'High-End Image Generation',
+                desc: 'Prompt-driven creation built for premium visuals, stronger control, and identity-aware direction.',
                 gradient: 'from-purple-500 to-pink-500',
               },
               {
-                icon: Coins,
-                title: 'Subscription Access',
-                desc: 'Pricing is live so users can already subscribe and enter the platform.',
-                gradient: 'from-yellow-500 to-orange-500',
+                icon: Brain,
+                title: 'Guided Prompt Intelligence',
+                desc: 'Siren’s Mind helps creators sharpen mood, character, scene, and output intent before generation.',
+                gradient: 'from-pink-500 to-cyan-500',
               },
               {
                 icon: Video,
-                title: 'Video-Ready Frontend',
-                desc: 'UI and contracts are being locked before compute goes live.',
+                title: 'Video-Ready Direction',
+                desc: 'The frontend is being shaped for image now and stronger cinematic workflows as compute scales back online.',
                 gradient: 'from-cyan-500 to-blue-500',
               },
             ].map((feature, index) => (
@@ -353,7 +352,7 @@ export default function HomePage() {
               </span>
             </h2>
             <p className="text-xl font-light text-gray-400">
-              Enter guided or direct. Identity is optional, not required.
+              Start guided or go direct. Identity is optional, not required.
             </p>
           </motion.div>
 
@@ -362,22 +361,22 @@ export default function HomePage() {
               {
                 number: '01',
                 title: 'Choose your path',
-                desc: 'Start with Siren’s Mind for guided prompt creation or go directly to Generator.',
+                desc: 'Start with Siren’s Mind for guided prompt building or jump straight into Generator.',
               },
               {
                 number: '02',
                 title: 'Describe what you want',
-                desc: 'Mood, character, scene, or polished concept — the workflow starts with intent.',
+                desc: 'Mood, scene, character, style, or polished concept — the workflow starts with intent.',
               },
               {
                 number: '03',
                 title: 'Generate now',
-                desc: 'Create without a LoRA or select an identity when you want consistency.',
+                desc: 'Create without a LoRA, or select an identity when you want stronger repeatability.',
               },
               {
                 number: '04',
-                title: 'Scale later',
-                desc: 'Train identities and build toward stronger repeatable creative control over time.',
+                title: 'Scale into identity',
+                desc: 'Train identities later and build toward more advanced, controlled creative output.',
               },
             ].map((step, index) => (
               <motion.div
@@ -423,7 +422,7 @@ export default function HomePage() {
                 </div>
 
                 <p className="mb-6 text-lg leading-relaxed font-light text-gray-300">
-                  Lock in the strongest early position, elite affiliate benefits, and enhanced launch advantages.
+                  Lock in the strongest early positioning, premium affiliate benefits, and your highest-value seat inside the platform.
                 </p>
 
                 <div className="mb-6 flex items-baseline gap-2">
@@ -461,7 +460,7 @@ export default function HomePage() {
                 )}
 
                 <p className="mb-6 text-lg leading-relaxed font-light text-gray-300">
-                  Active subscription access with platform entry, future video direction, and identity-based growth path.
+                  Enter the platform now with live subscription access and grow into stronger image, prompt, and identity workflows.
                 </p>
 
                 <div className="mb-6 flex items-baseline gap-2">
