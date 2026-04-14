@@ -39,7 +39,7 @@ export default function LoginPage() {
           return
         }
 
-        router.replace("/generate")
+        router.replace("/dashboard")
         return
       }
 
@@ -55,7 +55,7 @@ export default function LoginPage() {
           return
         }
 
-        router.replace("/generate")
+        router.replace("/dashboard")
         return
       }
     } catch (err: any) {
@@ -86,7 +86,6 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex items-center justify-center p-4">
       <div className="w-full max-w-6xl grid lg:grid-cols-2 gap-8 items-center">
-
         {/* LEFT SIDE — BRANDING */}
         <motion.div
           initial={{ opacity: 0, x: -50 }}
@@ -139,7 +138,6 @@ export default function LoginPage() {
             </CardHeader>
 
             <CardContent className="space-y-6">
-
               {/* SOCIAL LOGIN */}
               <div className="grid grid-cols-2 gap-4">
                 <Button onClick={handleGoogleLogin} variant="outline" className="bg-white text-gray-900">
