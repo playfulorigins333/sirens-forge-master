@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server"
 import { supabaseServer } from "@/lib/supabaseServer"
 
-export async function GET(req: Request) {
+export async function GET(_req: Request) {
   try {
     const supabase = await supabaseServer()
 
-    // 1️⃣ Get the logged-in user (from cookies)
     const {
       data: { user },
       error: userErr,
@@ -17,7 +16,6 @@ export async function GET(req: Request) {
 
     const userId = user.id
 
-    // 2️⃣ Fetch profile (tier + referral code)
     const { data: profile, error: profileErr } = await supabase
       .from("profiles")
       .select("referral_code, tier, email")
@@ -26,15 +24,13 @@ export async function GET(req: Request) {
 
     if (profileErr) throw profileErr
 
-    // 3️⃣ Fetch referrals (people they brought in)
     const { data: referrals, error: referralErr } = await supabase
       .from("referrals")
-      .select("referred_user_id, used_at, status")
+      .select("referred_user_id, status")
       .eq("referrer_user_id", userId)
 
     if (referralErr) throw referralErr
 
-    // 4️⃣ Fetch commission earnings (paid + pending)
     const { data: commissions, error: commissionErr } = await supabase
       .from("commission_earnings")
       .select("*")
@@ -42,40 +38,42 @@ export async function GET(req: Request) {
 
     if (commissionErr) throw commissionErr
 
-    // Calculate earnings
-    const totalEarnings = commissions.reduce(
+    const safeCommissions = commissions || []
+    const safeReferrals = referrals || []
+
+    const totalEarnings = safeCommissions.reduce(
       (acc, c) => acc + Number(c.commission_amount || 0),
       0
     )
 
-    const pendingEarnings = commissions
+    const pendingEarnings = safeCommissions
       .filter((c) => c.status === "pending")
       .reduce((acc, c) => acc + Number(c.commission_amount || 0), 0)
 
-    const paidEarnings = commissions
+    const paidEarnings = safeCommissions
       .filter((c) => c.status === "paid")
       .reduce((acc, c) => acc + Number(c.commission_amount || 0), 0)
 
-    // 5️⃣ Pull total clicks from referral_codes metadata
-    const { data: codeData } = await supabase
+    const { data: codeData, error: codeErr } = await supabase
       .from("referral_codes")
       .select("total_uses")
       .eq("user_id", userId)
-      .single()
+      .maybeSingle()
+
+    if (codeErr) throw codeErr
 
     const clicks = codeData?.total_uses || 0
 
-    // 6️⃣ Build API response
     return NextResponse.json({
       referral_code: profile.referral_code,
       tier: profile.tier,
-      total_referrals: referrals.length,
-      referrals,
+      total_referrals: safeReferrals.length,
+      referrals: safeReferrals,
       total_earnings: totalEarnings,
       pending: pendingEarnings,
       paid: paidEarnings,
       clicks,
-      commissions,
+      commissions: safeCommissions,
     })
   } catch (err: any) {
     console.error("AFFILIATE SUMMARY ERROR:", err)
