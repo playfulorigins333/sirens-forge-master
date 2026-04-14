@@ -1,51 +1,57 @@
-import Link from "next/link"
+"use client";
+
+import Link from "next/link";
 
 export default function Footer() {
   return (
-    <footer className="border-t border-white/10 bg-black">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-8 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-2">
-          <p className="text-sm font-semibold tracking-wide text-white">
+    <footer className="w-full mt-20 border-t border-white/10 bg-black/40 backdrop-blur-md">
+      <div className="max-w-6xl mx-auto px-6 py-10 flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left">
+
+        {/* Brand / Description */}
+        <div className="text-sm text-gray-300 max-w-md">
+          <div className="font-semibold text-white mb-2">
             Sirens Forge
-          </p>
-          <p className="max-w-xl text-sm leading-relaxed text-white/60">
-            Identity-first AI generation for images, video, and guided creative workflows.
+          </div>
+          <p className="text-gray-400">
+            The next evolution of AI generation for images, video, and
+            creator-driven workflows.
           </p>
         </div>
 
-        <nav
-          aria-label="Footer"
-          className="flex flex-wrap items-center gap-x-5 gap-y-3 text-sm text-white/70"
-        >
-          <Link
-            href="/terms"
-            className="transition hover:text-white"
-          >
-            Terms
-          </Link>
-
+        {/* Links */}
+        <div className="flex gap-6 text-sm font-medium">
           <Link
             href="/privacy"
-            className="transition hover:text-white"
+            className="text-gray-300 hover:text-cyan-400 transition"
           >
             Privacy
           </Link>
-
           <Link
             href="/acceptable-use"
-            className="transition hover:text-white"
+            className="text-gray-300 hover:text-cyan-400 transition"
           >
             Acceptable Use
           </Link>
-
-          <a
-            href="mailto:admin@sirensforge.com"
-            className="transition hover:text-white"
+          <Link
+            href="/terms"
+            className="text-gray-300 hover:text-cyan-400 transition"
+          >
+            Terms
+          </Link>
+          <Link
+            href="/faq"
+            className="text-gray-300 hover:text-cyan-400 transition"
+          >
+            FAQ
+          </Link>
+          <Link
+            href="/contact"
+            className="text-gray-300 hover:text-cyan-400 transition"
           >
             Contact
-          </a>
-        </nav>
+          </Link>
+        </div>
       </div>
     </footer>
-  )
+  );
 }
