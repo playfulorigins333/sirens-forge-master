@@ -16,8 +16,12 @@ import {
   CheckCircle,
   Loader2,
   Clock3,
+  Wallet,
+  CalendarClock,
 } from "lucide-react"
 import { motion } from "framer-motion"
+
+const MIN_PAYOUT_THRESHOLD = 50
 
 type AffiliateSummary = {
   referral_code: string | null
@@ -25,7 +29,7 @@ type AffiliateSummary = {
   total_referrals: number
   referrals: Array<{
     referred_user_id: string
-    used_at: string | null
+    used_at?: string | null
     status: string | null
   }>
   total_earnings: number
@@ -232,6 +236,23 @@ export default function AffiliateDashboard() {
     : ""
 
   const stripeConnected = Boolean(profile?.stripe_connect_onboarded)
+  const pendingAmount = Number(summary?.pending ?? 0)
+  const paidAmount = Number(summary?.paid ?? 0)
+  const totalEarnedAmount = Number(summary?.total_earnings ?? 0)
+  const remainingToThreshold = Math.max(0, MIN_PAYOUT_THRESHOLD - pendingAmount)
+  const thresholdMet = pendingAmount >= MIN_PAYOUT_THRESHOLD
+
+  const nextPayoutEstimate = useMemo(() => {
+    if (!stripeConnected) {
+      return "Connect Stripe first to receive payouts once you qualify."
+    }
+
+    if (thresholdMet) {
+      return "Eligible on the next payout run."
+    }
+
+    return `${formatCurrency(remainingToThreshold)} away from payout eligibility.`
+  }, [stripeConnected, thresholdMet, remainingToThreshold])
 
   const recentCommissions = useMemo(() => {
     return [...(summary?.commissions || [])]
@@ -313,7 +334,9 @@ export default function AffiliateDashboard() {
             Track referrals, commissions, and payouts from one place.
           </p>
 
-          <div className={`mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${tierGradient} px-4 py-2 text-sm font-bold text-white shadow-lg`}>
+          <div
+            className={`mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-r ${tierGradient} px-4 py-2 text-sm font-bold text-white shadow-lg`}
+          >
             <Crown className="w-4 h-4" />
             {prettifyTier(tierName)}
           </div>
@@ -427,20 +450,71 @@ export default function AffiliateDashboard() {
           <MetricCard
             icon={<DollarSign className="w-5 h-5" />}
             title="Total Earnings"
-            value={formatCurrency(Number(summary?.total_earnings ?? 0))}
+            value={formatCurrency(totalEarnedAmount)}
+            subtext="Paid commissions only"
           />
           <MetricCard
             icon={<Clock3 className="w-5 h-5" />}
             title="Pending"
-            value={formatCurrency(Number(summary?.pending ?? 0))}
+            value={formatCurrency(pendingAmount)}
             subtext="Awaiting payout or processing"
           />
           <MetricCard
             icon={<CheckCircle className="w-5 h-5" />}
             title="Paid"
-            value={formatCurrency(Number(summary?.paid ?? 0))}
+            value={formatCurrency(paidAmount)}
             subtext="Already paid out"
           />
+        </div>
+
+        <div className="grid gap-6 xl:grid-cols-2 mb-10">
+          <Card className="border-gray-700 bg-gray-800/60 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-3 text-white">
+                <Wallet className="w-5 h-5 text-cyan-300" />
+                Minimum Payout Threshold
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-3xl font-bold text-white">
+                {formatCurrency(MIN_PAYOUT_THRESHOLD)}
+              </div>
+              <p className="text-sm text-gray-300">
+                Affiliates become payout-eligible once pending commissions reach the minimum threshold.
+              </p>
+              <div className="rounded-xl border border-gray-700 bg-gray-900/70 px-4 py-3 text-sm text-gray-300">
+                {thresholdMet
+                  ? "You have reached the minimum threshold."
+                  : `${formatCurrency(remainingToThreshold)} remaining until you reach the threshold.`}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-700 bg-gray-800/60 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-3 text-white">
+                <CalendarClock className="w-5 h-5 text-cyan-300" />
+                Next Payout Estimate
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-xl font-semibold text-white">
+                {thresholdMet && stripeConnected
+                  ? "Next payout run"
+                  : "Not yet scheduled"}
+              </div>
+              <p className="text-sm text-gray-300">
+                {nextPayoutEstimate}
+              </p>
+              <div className="rounded-xl border border-gray-700 bg-gray-900/70 px-4 py-3 text-sm text-gray-300">
+                {!stripeConnected
+                  ? "Payouts cannot be sent until Stripe Connect is completed."
+                  : thresholdMet
+                  ? "You are payout-eligible based on current pending balance."
+                  : "Once your pending balance reaches the threshold, you become eligible for the next payout run."}
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid gap-6 xl:grid-cols-2">
