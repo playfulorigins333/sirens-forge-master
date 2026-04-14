@@ -207,17 +207,6 @@ export default function HomePage() {
           >
             <motion.div whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.98 }}>
               <Link
-                href="/pricing"
-                className="relative flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-8 py-4 text-base font-semibold text-cyan-200 transition-all hover:border-cyan-400/40 hover:bg-cyan-500/15"
-              >
-                <Crown className="h-5 w-5" />
-                Explore Membership
-                <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-              </Link>
-            </motion.div>
-
-            <motion.div whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.98 }}>
-              <Link
                 href="/terms"
                 className="relative flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-white/15 bg-black/30 px-8 py-4 text-base font-semibold text-white transition-all hover:border-white/25 hover:bg-white/5"
               >
@@ -256,13 +245,9 @@ export default function HomePage() {
                   <h4 className="mb-2 text-xl font-bold text-white">
                     Siren&apos;s Mind
                   </h4>
-                  <p className="mb-5 text-base leading-relaxed font-medium text-gray-300">
+                  <p className="text-base leading-relaxed font-medium text-gray-300">
                     Guided prompt creation for brainstorming, refining mood, sharpening concepts, and turning rough ideas into stronger output direction.
                   </p>
-                  <div className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200">
-                    Guided creative workflow
-                    <ChevronRight className="h-4 w-4" />
-                  </div>
                 </div>
 
                 <div className="relative overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-cyan-950/20 via-black/40 to-purple-950/30 p-6">
@@ -272,13 +257,9 @@ export default function HomePage() {
                   <h4 className="mb-2 text-xl font-bold text-white">
                     Generator
                   </h4>
-                  <p className="mb-5 text-base leading-relaxed font-medium text-gray-300">
+                  <p className="text-base leading-relaxed font-medium text-gray-300">
                     Direct creation workflow for members who already know what they want and want to jump straight into image generation and control settings.
                   </p>
-                  <div className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200">
-                    Direct creation workflow
-                    <ChevronRight className="h-4 w-4" />
-                  </div>
                 </div>
               </div>
             </div>
