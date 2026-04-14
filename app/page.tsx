@@ -4,20 +4,14 @@ import Link from 'next/link';
 import { motion, useScroll, useTransform } from 'framer-motion';
 import {
   Crown,
-  Users,
-  TrendingUp,
   ChevronRight,
-  Check,
-  Infinity,
   LogIn,
   Video,
   Zap,
   Sparkles,
   Image as ImageIcon,
-  Coins,
   Brain,
   Wand2,
-  Shield,
   Layers3,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
@@ -92,7 +86,7 @@ export default function HomePage() {
       {/* HERO */}
       <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 pt-20 pb-16 sm:px-8">
         <motion.div style={{ y: y1, opacity }} className="mx-auto w-full max-w-7xl">
-          <div className="absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-purple-500/30 via-pink-500/30 to-cyan-500/30 blur-[100px] animate-pulse" />
+          <div className="pointer-events-none absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-purple-500/30 via-pink-500/30 to-cyan-500/30 blur-[100px] animate-pulse" />
 
           <motion.div
             initial={{ opacity: 0, y: 50 }}
@@ -175,11 +169,11 @@ export default function HomePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.55, duration: 1 }}
-            className="mb-5 flex flex-col items-center justify-center gap-4 sm:flex-row"
+            className="relative z-20 mb-5 flex flex-col items-center justify-center gap-4 sm:flex-row"
           >
             <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.98 }}>
               <div className="group relative">
-                <div className="absolute inset-0 rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 opacity-60 blur-xl transition-opacity group-hover:opacity-100" />
+                <div className="pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 opacity-60 blur-xl transition-opacity group-hover:opacity-100" />
                 <Link
                   href="/sirens-mind"
                   className="relative flex min-w-[250px] items-center justify-center gap-3 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 px-8 py-5 text-lg font-semibold text-white shadow-lg transition-all hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
@@ -194,7 +188,7 @@ export default function HomePage() {
             <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.98 }}>
               <Link
                 href="/pricing"
-                className="group flex min-w-[250px] items-center justify-center gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-8 py-5 text-lg font-semibold text-cyan-200 shadow-lg backdrop-blur-xl transition-all hover:border-cyan-400/40 hover:bg-cyan-500/15"
+                className="relative flex min-w-[250px] items-center justify-center gap-3 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-8 py-5 text-lg font-semibold text-cyan-200 shadow-lg backdrop-blur-xl transition-all hover:border-cyan-400/40 hover:bg-cyan-500/15"
               >
                 <Zap className="h-5 w-5" />
                 View Pricing
@@ -208,12 +202,12 @@ export default function HomePage() {
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.65, duration: 1 }}
-            className="mb-14 flex flex-col items-center justify-center gap-4 sm:flex-row"
+            className="relative z-20 mb-14 flex flex-col items-center justify-center gap-4 sm:flex-row"
           >
             <motion.div whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.98 }}>
               <Link
                 href="/generate"
-                className="group flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-white/5 backdrop-blur-xl transition-all hover:border-white/30 hover:bg-white/20"
+                className="relative flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-white/5 backdrop-blur-xl transition-all hover:border-white/30 hover:bg-white/20"
               >
                 <Wand2 className="h-5 w-5" />
                 Go to Generator
@@ -224,13 +218,75 @@ export default function HomePage() {
             <motion.div whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.98 }}>
               <Link
                 href="/login"
-                className="group flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-white/15 bg-black/30 px-8 py-4 text-base font-semibold text-white transition-all hover:border-white/25 hover:bg-white/5"
+                className="relative flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-white/15 bg-black/30 px-8 py-4 text-base font-semibold text-white transition-all hover:border-white/25 hover:bg-white/5"
               >
                 <LogIn className="h-5 w-5" />
                 Login
                 <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
               </Link>
             </motion.div>
+          </motion.div>
+
+          {/* FIRST STEP GUIDANCE BLOCK */}
+          <motion.div
+            initial={{ opacity: 0, y: 22 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.72, duration: 1 }}
+            className="relative z-10 mx-auto mb-16 max-w-5xl px-4"
+          >
+            <div className="overflow-hidden rounded-[30px] border border-white/15 bg-gradient-to-br from-white/10 to-white/5 p-6 backdrop-blur-xl sm:p-8">
+              <div className="mb-6 text-center">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">
+                  New Here?
+                </p>
+                <h3 className="text-2xl font-bold text-white sm:text-3xl">
+                  Start with the path that fits how you create
+                </h3>
+                <p className="mx-auto mt-3 max-w-3xl text-base leading-relaxed font-medium text-gray-300">
+                  Want help shaping the idea first? Use Siren&apos;s Mind. Already know what you want? Jump straight into Generator.
+                </p>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <Link
+                  href="/sirens-mind"
+                  className="group relative overflow-hidden rounded-3xl border border-purple-400/20 bg-gradient-to-br from-purple-950/40 via-black/40 to-cyan-950/20 p-6 transition-all hover:border-purple-300/40 hover:bg-white/10"
+                >
+                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg">
+                    <Brain className="h-7 w-7 text-white" />
+                  </div>
+                  <h4 className="mb-2 text-xl font-bold text-white">
+                    Use Siren&apos;s Mind
+                  </h4>
+                  <p className="mb-5 text-base leading-relaxed font-medium text-gray-300">
+                    Best for brainstorming, sharpening prompts, refining mood, and turning rough ideas into stronger creative direction.
+                  </p>
+                  <div className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition group-hover:text-white">
+                    Start guided
+                    <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </div>
+                </Link>
+
+                <Link
+                  href="/generate"
+                  className="group relative overflow-hidden rounded-3xl border border-cyan-400/20 bg-gradient-to-br from-cyan-950/20 via-black/40 to-purple-950/30 p-6 transition-all hover:border-cyan-300/40 hover:bg-white/10"
+                >
+                  <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-500 shadow-lg">
+                    <Wand2 className="h-7 w-7 text-white" />
+                  </div>
+                  <h4 className="mb-2 text-xl font-bold text-white">
+                    Go to Generator
+                  </h4>
+                  <p className="mb-5 text-base leading-relaxed font-medium text-gray-300">
+                    Best for creators who already know what they want and want to jump directly into image generation and control settings.
+                  </p>
+                  <div className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition group-hover:text-white">
+                    Start direct
+                    <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </div>
+                </Link>
+              </div>
+            </div>
           </motion.div>
 
           {/* QUICK CLARITY */}
