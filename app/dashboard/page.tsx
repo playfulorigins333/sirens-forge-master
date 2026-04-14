@@ -6,6 +6,8 @@ import {
   Library,
   ChevronRight,
   Sparkles,
+  Shield,
+  Image as ImageIcon,
 } from "lucide-react";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
 
@@ -24,8 +26,11 @@ export default async function DashboardPage() {
     }
   }
 
+  const userEmail = auth.user?.email ?? null;
+
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
+      {/* Background */}
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-br from-purple-950/60 via-black to-pink-950/60" />
         <div className="absolute top-0 left-0 h-[1000px] w-[1000px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-600/20 blur-[140px]" />
@@ -34,6 +39,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-7xl flex-col px-4 pt-24 pb-16 sm:px-8">
+        {/* Header */}
         <div className="mb-12 max-w-4xl">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300 backdrop-blur-xl">
             <Sparkles className="h-4 w-4" />
@@ -41,15 +47,25 @@ export default async function DashboardPage() {
           </div>
 
           <h1 className="mb-4 text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
-            Welcome to <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">Sirens Forge</span>
+            Welcome to{" "}
+            <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
+              Sirens Forge
+            </span>
           </h1>
 
           <p className="max-w-3xl text-lg leading-relaxed font-medium text-gray-300 sm:text-xl">
             Start with guided prompt creation in Siren&apos;s Mind, jump straight into Generator,
             or review your existing creations in the Vault.
           </p>
+
+          {userEmail && (
+            <p className="mt-3 text-sm font-medium text-gray-400">
+              Signed in as <span className="text-gray-200">{userEmail}</span>
+            </p>
+          )}
         </div>
 
+        {/* Main action cards */}
         <div className="grid gap-6 lg:grid-cols-3">
           <Link
             href="/sirens-mind"
@@ -59,6 +75,10 @@ export default async function DashboardPage() {
             <div className="relative">
               <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 shadow-lg">
                 <Brain className="h-8 w-8 text-white" />
+              </div>
+
+              <div className="mb-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                Guided Start
               </div>
 
               <h2 className="mb-3 text-2xl font-bold text-white">
@@ -86,6 +106,10 @@ export default async function DashboardPage() {
                 <Wand2 className="h-8 w-8 text-white" />
               </div>
 
+              <div className="mb-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                Direct Creation
+              </div>
+
               <h2 className="mb-3 text-2xl font-bold text-white">
                 Generator
               </h2>
@@ -111,6 +135,10 @@ export default async function DashboardPage() {
                 <Library className="h-8 w-8 text-white" />
               </div>
 
+              <div className="mb-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                Your History
+              </div>
+
               <h2 className="mb-3 text-2xl font-bold text-white">
                 Vault
               </h2>
@@ -125,6 +153,53 @@ export default async function DashboardPage() {
               </div>
             </div>
           </Link>
+        </div>
+
+        {/* Secondary section */}
+        <div className="mt-10 grid gap-6 lg:grid-cols-2">
+          <div className="rounded-[28px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-500 to-cyan-500 shadow-lg">
+              <ImageIcon className="h-7 w-7 text-white" />
+            </div>
+
+            <h3 className="mb-3 text-2xl font-bold text-white">
+              Best place to start
+            </h3>
+
+            <p className="mb-5 text-base leading-relaxed font-medium text-gray-300">
+              If you&apos;re new, start in Siren&apos;s Mind first. It helps you turn rough ideas into better prompts before you move into generation.
+            </p>
+
+            <Link
+              href="/sirens-mind"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-white"
+            >
+              Start with Siren&apos;s Mind
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
+
+          <div className="rounded-[28px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
+            <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-pink-500 to-purple-500 shadow-lg">
+              <Shield className="h-7 w-7 text-white" />
+            </div>
+
+            <h3 className="mb-3 text-2xl font-bold text-white">
+              Protected member access
+            </h3>
+
+            <p className="mb-5 text-base leading-relaxed font-medium text-gray-300">
+              Your dashboard is the clean entry point into the platform. From here, you can move into tools without confusion or dead-end navigation.
+            </p>
+
+            <Link
+              href="/pricing"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition hover:text-white"
+            >
+              Review membership
+              <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
         </div>
       </div>
     </main>
