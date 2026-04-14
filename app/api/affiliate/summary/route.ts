@@ -41,18 +41,15 @@ export async function GET(_req: Request) {
     const safeCommissions = commissions || []
     const safeReferrals = referrals || []
 
-    const totalEarnings = safeCommissions.reduce(
-      (acc, c) => acc + Number(c.commission_amount || 0),
-      0
-    )
+    const paidEarnings = safeCommissions
+      .filter((c) => c.status === "paid")
+      .reduce((acc, c) => acc + Number(c.commission_amount || 0), 0)
 
     const pendingEarnings = safeCommissions
       .filter((c) => c.status === "pending")
       .reduce((acc, c) => acc + Number(c.commission_amount || 0), 0)
 
-    const paidEarnings = safeCommissions
-      .filter((c) => c.status === "paid")
-      .reduce((acc, c) => acc + Number(c.commission_amount || 0), 0)
+    const totalEarnings = paidEarnings
 
     const { data: codeData, error: codeErr } = await supabase
       .from("referral_codes")
