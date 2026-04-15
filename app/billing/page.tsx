@@ -183,16 +183,15 @@ export default async function BillingPage() {
         <div className="mb-10 max-w-4xl">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300 backdrop-blur-xl">
             <Sparkles className="h-4 w-4" />
-            Billing & Subscription
+            Your Plan & Access
           </div>
 
           <h1 className="mb-4 text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
-            Your plan, access, and renewal details
+            Manage your plan, access, and billing cycle
           </h1>
 
           <p className="max-w-3xl text-lg leading-relaxed font-medium text-gray-300 sm:text-xl">
-            Review your current membership, billing status, and what your active
-            plan unlocks inside Sirens Forge.
+            Review your membership, track your renewal date, and see exactly what your active plan unlocks inside Sirens Forge.
           </p>
 
           <p className="mt-3 text-sm text-gray-400">
@@ -207,10 +206,9 @@ export default async function BillingPage() {
                 <AlertTriangle className="h-6 w-6 text-black" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-white">No active subscription found</h2>
+                <h2 className="text-xl font-bold text-white">No active plan found</h2>
                 <p className="mt-2 max-w-2xl text-sm text-gray-300">
-                  Your account does not currently show an active paid plan. Visit pricing
-                  to unlock access or restore your membership state.
+                  Your account does not currently show an active paid plan. Choose a plan to unlock access and continue creating.
                 </p>
                 <div className="mt-4">
                   <Link
@@ -237,21 +235,21 @@ export default async function BillingPage() {
           <InfoCard
             title="Status"
             value={currentStatus}
-            subtext="Current billing / access state"
+            subtext="Your current billing and access status"
             icon={<CheckCircle2 className="h-6 w-6 text-white" />}
           />
 
           <InfoCard
             title="Current Period Ends"
             value={formatDate(currentSubscription?.current_period_end)}
-            subtext="Renewal or billing cycle end"
+            subtext="Your next renewal date"
             icon={<CalendarClock className="h-6 w-6 text-white" />}
           />
 
           <InfoCard
             title="Tokens"
             value={String(profile?.tokens ?? 0)}
-            subtext="Current token balance on account"
+            subtext="Available balance on your account"
             icon={<BadgeDollarSign className="h-6 w-6 text-white" />}
           />
         </div>
@@ -262,7 +260,7 @@ export default async function BillingPage() {
               <CreditCard className="h-7 w-7 text-white" />
             </div>
 
-            <h2 className="mb-4 text-2xl font-bold text-white">Subscription details</h2>
+            <h2 className="mb-4 text-2xl font-bold text-white">Plan Details</h2>
 
             {currentSubscription ? (
               <div className="grid gap-5 sm:grid-cols-2">
@@ -340,7 +338,7 @@ export default async function BillingPage() {
               <Shield className="h-7 w-7 text-white" />
             </div>
 
-            <h2 className="mb-4 text-2xl font-bold text-white">Plan actions</h2>
+            <h2 className="mb-4 text-2xl font-bold text-white">Manage Plan</h2>
 
             <div className="space-y-3">
               <Link
@@ -369,8 +367,7 @@ export default async function BillingPage() {
             </div>
 
             <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-              Stripe customer portal controls can be added here later for:
-              upgrade, cancel, and billing management.
+              Manage your subscription, review your plan, and keep your access active.
             </div>
           </section>
         </div>
@@ -382,15 +379,15 @@ export default async function BillingPage() {
             </div>
 
             <h3 className="mb-3 text-2xl font-bold text-white">
-              What your plan unlocks
+              What Your Plan Unlocks
             </h3>
 
             <ul className="space-y-3 text-sm text-gray-300">
-              <li>Dashboard access and member routing</li>
-              <li>Generator access for image and future video workflows</li>
-              <li>Siren&apos;s Mind prompt workflow</li>
-              <li>Vault access for saved outputs</li>
-              <li>AI Twin / LoRA training access based on your product structure</li>
+              <li>Create content on demand from your prompts</li>
+              <li>Build and train your AI Twin for more consistent results</li>
+              <li>Save, review, and reuse your best content in the Vault</li>
+              <li>Use Siren&apos;s Mind to sharpen prompts before you generate</li>
+              <li>Access the creator workflow tied to your active plan</li>
             </ul>
           </section>
 
@@ -400,17 +397,15 @@ export default async function BillingPage() {
             </div>
 
             <h3 className="mb-3 text-2xl font-bold text-white">
-              Billing notes
+              Billing Overview
             </h3>
 
             <div className="space-y-3 text-sm text-gray-300">
               <p>
-                This page is pulling your live subscription details from Supabase so
-                users can clearly see what plan they are on and when their period ends.
+                Your subscription controls access to generation, AI Twin training, and the core tools inside Sirens Forge.
               </p>
               <p>
-                The next future upgrade here is Stripe portal management for
-                self-serve billing changes.
+                Your plan renews automatically based on your billing cycle so your access stays uninterrupted.
               </p>
               <p>
                 Badge: <span className="text-gray-200">{profile?.badge || "—"}</span>
