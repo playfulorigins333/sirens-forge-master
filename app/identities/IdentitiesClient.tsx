@@ -85,7 +85,7 @@ function statusTone(status: string) {
       return "bg-rose-500/15 text-rose-200 border-rose-500/30";
     default:
       return "bg-purple-500/15 text-purple-200 border-purple-500/30";
-  }
+    }
 }
 
 function IdentityHeader() {
@@ -97,7 +97,7 @@ function IdentityHeader() {
             My Identities
           </h1>
           <p className="text-xs md:text-sm text-gray-300 mt-1">
-            Build characters you own. Organize the assets they create.
+            Train and manage your AI Twins for consistent, on-demand content.
           </p>
         </div>
 
@@ -216,7 +216,7 @@ function IdentityToolbar(props: {
           Identity Controls
         </CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Search, sort, and organize the characters you’ve trained.
+          Search, sort, and organize the AI Twins you’ve trained.
         </CardDescription>
       </CardHeader>
 
@@ -276,8 +276,7 @@ function EmptyState() {
               No identities yet
             </h2>
             <p className="text-sm text-gray-400 mt-2 max-w-xl mx-auto">
-              Train your first identity to unlock character-based creation and
-              build assets around the personas you own.
+              Train your AI Twin once — then generate content that looks like you anytime you want.
             </p>
           </div>
 

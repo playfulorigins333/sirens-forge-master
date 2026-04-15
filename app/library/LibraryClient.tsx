@@ -10,7 +10,6 @@ import {
   Maximize2,
   Download,
   Play,
-  Clock,
   Filter,
   Crown,
   Star,
@@ -93,7 +92,7 @@ function LibraryHeader() {
       <div className="flex items-center justify-between px-6 py-4">
         <div>
           <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
-            SirensForge Vault
+            Your Content Vault
           </h1>
           <p className="text-xs md:text-sm text-gray-300 mt-1">
             Your creations. Your identities. Your power.
@@ -213,8 +212,7 @@ function EmptyState() {
               Your vault is empty
             </h2>
             <p className="text-sm text-gray-400 mt-2 max-w-xl mx-auto">
-              Generate your first creation to begin building your private library
-              of images and videos.
+              Start generating content and it will appear here — ready to reuse, download, and build from anytime.
             </p>
           </div>
 
@@ -517,7 +515,7 @@ function VaultModal(props: {
                     className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
                   >
                     <Sparkles className="w-4 h-4 mr-2" />
-                    Create More
+                    Generate More Like This
                   </Button>
                 </Link>
 
