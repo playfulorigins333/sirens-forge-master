@@ -433,78 +433,113 @@ export default function HomePage() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.8 }}
-            className="grid gap-6 lg:grid-cols-2"
+            className="space-y-10"
           >
-            <div className="relative group">
-              <div className="absolute inset-0 rounded-3xl bg-gradient-to-r from-yellow-500/20 to-orange-500/20 blur-3xl opacity-50 transition-opacity group-hover:opacity-70" />
-              <div className="relative rounded-3xl border border-yellow-500/30 bg-gradient-to-br from-yellow-950/30 via-black/90 to-orange-950/30 p-8 backdrop-blur-xl">
-                <div className="mb-6 flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-yellow-400 to-orange-500 shadow-lg shadow-yellow-500/40">
-                    <Crown className="h-7 w-7 text-white" />
+            <div className="grid gap-6 lg:grid-cols-2">
+              <div className="relative group">
+                <div className="absolute inset-0 rounded-3xl bg-gradient-to-r from-yellow-500/20 to-orange-500/20 blur-3xl opacity-50 transition-opacity group-hover:opacity-70" />
+                <div className="relative rounded-3xl border border-yellow-500/30 bg-gradient-to-br from-yellow-950/30 via-black/90 to-orange-950/30 p-8 backdrop-blur-xl">
+                  <div className="mb-6 flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-yellow-400 to-orange-500 shadow-lg shadow-yellow-500/40">
+                      <Crown className="h-7 w-7 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-3xl font-bold text-yellow-300">OG Founder</h3>
+                      <p className="text-sm font-medium text-yellow-300/90">Elite early access tier</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-3xl font-bold text-yellow-300">OG Founder</h3>
-                    <p className="text-sm font-medium text-yellow-300/90">Elite early access tier</p>
+
+                  <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
+                    10 OF 35 LEFT
                   </div>
+
+                  <p className="mb-4 text-lg leading-relaxed font-medium text-gray-300">
+                    Lock in the strongest early positioning, premium affiliate benefits, and your highest-value seat inside the platform.
+                  </p>
+
+                  <p className="mb-6 text-sm leading-relaxed font-medium text-yellow-100/85">
+                    Includes the strongest affiliate upside, lifetime founder status, and locked-in lifetime access.
+                  </p>
+
+                  <div className="mb-6 flex items-baseline gap-2">
+                    <span className="text-6xl font-bold text-yellow-300">$1,333</span>
+                    <span className="text-xl font-medium text-gray-300">one-time</span>
+                  </div>
+
+                  <Link
+                    href="/pricing"
+                    className="group inline-flex items-center gap-3 rounded-2xl bg-gradient-to-r from-yellow-500 to-orange-500 px-6 py-4 text-lg font-semibold text-black transition-all hover:from-yellow-400 hover:to-orange-400"
+                  >
+                    View Full Pricing
+                    <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                  </Link>
                 </div>
+              </div>
 
-                <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
-                  10 OF 35 LEFT
+              <div className="relative group">
+                <div className="absolute inset-0 rounded-3xl bg-gradient-to-r from-green-500/20 to-emerald-500/20 blur-3xl opacity-50 transition-opacity group-hover:opacity-70" />
+                <div className="relative rounded-3xl border border-green-500/30 bg-gradient-to-br from-green-950/30 via-black/90 to-emerald-950/30 p-8 backdrop-blur-xl">
+                  <div className="mb-6 flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 shadow-lg shadow-green-500/40">
+                      <Zap className="h-7 w-7 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-3xl font-bold text-green-300">Early Bird</h3>
+                      <p className="text-sm font-medium text-green-300/90">Subscription tier</p>
+                    </div>
+                  </div>
+
+                  {mounted && (
+                    <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
+                      {seatsRemaining}/120 LEFT
+                    </div>
+                  )}
+
+                  <p className="mb-4 text-lg leading-relaxed font-medium text-gray-300">
+                    Enter the platform now with live subscription access and grow into stronger image, prompt, and identity workflows.
+                  </p>
+
+                  <p className="mb-6 text-sm leading-relaxed font-medium text-green-100/85">
+                    Includes recurring platform access, affiliate earning potential, and creator status perks.
+                  </p>
+
+                  <div className="mb-6 flex items-baseline gap-2">
+                    <span className="text-6xl font-bold text-green-300">$29.99</span>
+                    <span className="text-xl font-medium text-gray-300">/month</span>
+                  </div>
+
+                  <Link
+                    href="/pricing"
+                    className="group inline-flex items-center gap-3 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-500 px-6 py-4 text-lg font-semibold text-white transition-all hover:from-green-400 hover:to-emerald-400"
+                  >
+                    Explore Pricing
+                    <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                  </Link>
                 </div>
-
-                <p className="mb-6 text-lg leading-relaxed font-medium text-gray-300">
-                  Lock in the strongest early positioning, premium affiliate benefits, and your highest-value seat inside the platform.
-                </p>
-
-                <div className="mb-6 flex items-baseline gap-2">
-                  <span className="text-6xl font-bold text-yellow-300">$1,333</span>
-                  <span className="text-xl font-medium text-gray-300">one-time</span>
-                </div>
-
-                <Link
-                  href="/pricing"
-                  className="group inline-flex items-center gap-3 rounded-2xl bg-gradient-to-r from-yellow-500 to-orange-500 px-6 py-4 text-lg font-semibold text-black transition-all hover:from-yellow-400 hover:to-orange-400"
-                >
-                  View Full Pricing
-                  <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
-                </Link>
               </div>
             </div>
 
-            <div className="relative group">
-              <div className="absolute inset-0 rounded-3xl bg-gradient-to-r from-green-500/20 to-emerald-500/20 blur-3xl opacity-50 transition-opacity group-hover:opacity-70" />
-              <div className="relative rounded-3xl border border-green-500/30 bg-gradient-to-br from-green-950/30 via-black/90 to-emerald-950/30 p-8 backdrop-blur-xl">
-                <div className="mb-6 flex items-center gap-3">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-400 to-emerald-500 shadow-lg shadow-green-500/40">
-                    <Zap className="h-7 w-7 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-3xl font-bold text-green-300">Early Bird</h3>
-                    <p className="text-sm font-medium text-green-300/90">Subscription tier</p>
-                  </div>
-                </div>
-
-                {mounted && (
-                  <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
-                    {seatsRemaining}/120 LEFT
-                  </div>
-                )}
-
-                <p className="mb-6 text-lg leading-relaxed font-medium text-gray-300">
-                  Enter the platform now with live subscription access and grow into stronger image, prompt, and identity workflows.
-                </p>
-
-                <div className="mb-6 flex items-baseline gap-2">
-                  <span className="text-6xl font-bold text-green-300">$29.99</span>
-                  <span className="text-xl font-medium text-gray-300">/month</span>
-                </div>
-
+            {/* AFFILIATE HINT */}
+            <div className="mx-auto max-w-4xl rounded-3xl border border-white/15 bg-gradient-to-br from-white/10 to-white/5 p-6 text-center backdrop-blur-xl sm:p-8">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">
+                Creator Upside Built In
+              </p>
+              <h3 className="text-2xl font-bold text-white sm:text-3xl">
+                More than access
+              </h3>
+              <p className="mx-auto mt-3 max-w-2xl text-base leading-relaxed font-medium text-gray-300">
+                Both tiers include affiliate earning potential, creator status perks, and long-term upside inside the platform.
+              </p>
+              <p className="mt-3 text-sm font-medium text-gray-400">
+                Founder tier unlocks the strongest commission structure and lifetime positioning. Full details are on the pricing page.
+              </p>
+              <div className="mt-6">
                 <Link
                   href="/pricing"
-                  className="group inline-flex items-center gap-3 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-500 px-6 py-4 text-lg font-semibold text-white transition-all hover:from-green-400 hover:to-emerald-400"
+                  className="group inline-flex items-center gap-2 rounded-2xl border border-white/20 bg-white/5 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/30 hover:bg-white/10"
                 >
-                  Explore Pricing
-                  <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
+                  View commission details
+                  <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Link>
               </div>
             </div>
