@@ -143,7 +143,6 @@ async function bestEffortLogGeneration(args: {
     logged_at: now,
   };
 
-  // 🚨 STRICT CONTRACT ENFORCEMENT
   const payload = {
     user_id: args.userId,
     prompt: args.prompt,
@@ -151,7 +150,7 @@ async function bestEffortLogGeneration(args: {
     kind: "image",
     image_url: isRealAsset ? args.imageUrl : null,
     output_url: isRealAsset ? args.imageUrl : null,
-    lora_used: authoritativeLinkedLora, // ONLY valid when real asset
+    lora_used: authoritativeLinkedLora,
     metadata,
   };
 
@@ -194,9 +193,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const supabase = createClient(publicSupabaseUrl, publicSupabaseAnon, {
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const supabase = getAdminClient();
+
+    if (!supabase) {
+      return NextResponse.json(
+        { error: "SUPABASE_ADMIN_MISSING" },
+        { status: 500 }
+      );
+    }
 
     const body = (await req.json()) as GenerateImageRequest;
 

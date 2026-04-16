@@ -120,7 +120,6 @@ async function bestEffortLogGeneration(args: {
   const now = new Date().toISOString();
   const status = "completed";
 
-  // 🚨 VIDEO IS ALWAYS PLACEHOLDER RIGHT NOW
   const isRealAsset = false;
 
   const authoritativeLinkedLora =
@@ -139,20 +138,19 @@ async function bestEffortLogGeneration(args: {
     placeholder_url: args.placeholderUrl,
     video: args.video,
     body_mode: args.bodyMode,
-    identity_lora: args.identityLora, // legacy only
+    identity_lora: args.identityLora,
     negative_prompt: args.negativePrompt,
     logged_at: now,
   };
 
-  // 🔥 STRICT CONTRACT PAYLOAD (NO FALLBACK INSERT SPAM)
   const payload = {
     user_id: args.userId,
     prompt: args.prompt,
     status,
     kind: "video",
-    video_url: null, // NOT a real video yet
+    video_url: null,
     output_url: null,
-    lora_used: authoritativeLinkedLora, // always null for now
+    lora_used: authoritativeLinkedLora,
     metadata,
   };
 
@@ -225,7 +223,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       {
-        status: "ok",
+        status: "completed",
         mode,
         generation_id: logged?.id ?? null,
         video_url: placeholderUrl,
