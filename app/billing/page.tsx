@@ -7,7 +7,6 @@ import {
   ChevronRight,
   CalendarClock,
   Shield,
-  BadgeDollarSign,
   CheckCircle2,
   AlertTriangle,
 } from "lucide-react"
@@ -224,7 +223,7 @@ export default async function BillingPage() {
           </section>
         ) : null}
 
-        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           <InfoCard
             title="Current Plan"
             value={currentTier}
@@ -244,13 +243,6 @@ export default async function BillingPage() {
             value={formatDate(currentSubscription?.current_period_end)}
             subtext="Your next renewal date"
             icon={<CalendarClock className="h-6 w-6 text-white" />}
-          />
-
-          <InfoCard
-            title="Tokens"
-            value={String(profile?.tokens ?? 0)}
-            subtext="Available balance on your account"
-            icon={<BadgeDollarSign className="h-6 w-6 text-white" />}
           />
         </div>
 
@@ -393,7 +385,7 @@ export default async function BillingPage() {
 
           <section className="rounded-[28px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
             <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-500 shadow-lg">
-              <BadgeDollarSign className="h-7 w-7 text-white" />
+              <Shield className="h-7 w-7 text-white" />
             </div>
 
             <h3 className="mb-3 text-2xl font-bold text-white">
