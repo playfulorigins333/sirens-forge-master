@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabaseBrowser } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
@@ -18,8 +18,47 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [checkingSession, setCheckingSession] = useState(true)
   const [mode, setMode] = useState<"login" | "signup">("login")
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let isMounted = true
+
+    const checkSession = async () => {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (!isMounted) return
+
+        if (user) {
+          router.replace("/dashboard")
+          return
+        }
+      } finally {
+        if (isMounted) {
+          setCheckingSession(false)
+        }
+      }
+    }
+
+    checkSession()
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        router.replace("/dashboard")
+      }
+    })
+
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
+    }
+  }, [router, supabase])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -83,10 +122,17 @@ export default function LoginPage() {
     })
   }
 
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex items-center justify-center p-4">
+        <div className="text-sm text-gray-300">Checking your session...</div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex items-center justify-center p-4">
       <div className="w-full max-w-6xl grid lg:grid-cols-2 gap-8 items-center">
-        {/* LEFT SIDE — BRANDING */}
         <motion.div
           initial={{ opacity: 0, x: -50 }}
           animate={{ opacity: 1, x: 0 }}
@@ -121,7 +167,6 @@ export default function LoginPage() {
           </div>
         </motion.div>
 
-        {/* RIGHT SIDE — LOGIN FORM */}
         <motion.div
           initial={{ opacity: 0, x: 50 }}
           animate={{ opacity: 1, x: 0 }}
@@ -138,7 +183,6 @@ export default function LoginPage() {
             </CardHeader>
 
             <CardContent className="space-y-6">
-              {/* SOCIAL LOGIN */}
               <div className="grid grid-cols-2 gap-4">
                 <Button onClick={handleGoogleLogin} variant="outline" className="bg-white text-gray-900">
                   Google
@@ -150,7 +194,6 @@ export default function LoginPage() {
 
               <Divider />
 
-              {/* AUTH FORM */}
               <form onSubmit={handleSubmit} className="space-y-4">
                 {error && <p className="text-red-400 text-sm">{error}</p>}
 
@@ -186,6 +229,7 @@ export default function LoginPage() {
               <div className="text-center text-sm text-gray-400">
                 {mode === "login" ? "Don't have an account? " : "Already have an account? "}
                 <button
+                  type="button"
                   className="text-purple-400 hover:underline"
                   onClick={() => setMode(mode === "login" ? "signup" : "login")}
                 >
@@ -199,8 +243,6 @@ export default function LoginPage() {
     </div>
   )
 }
-
-/* Helper Components */
 
 function Feature({ icon, title, desc }: any) {
   return (
