@@ -29,7 +29,6 @@ export default function HomePage() {
 
   const y1 = useTransform(scrollYProgress, [0, 1], [0, -200]);
   const y2 = useTransform(scrollYProgress, [0, 1], [0, -250]);
-  const opacity = useTransform(scrollYProgress, [0, 0.5], [1, 0]);
 
   useEffect(() => {
     setMounted(true);
@@ -86,7 +85,7 @@ export default function HomePage() {
 
       {/* HERO */}
       <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 pt-20 pb-16 sm:px-8">
-        <motion.div style={{ y: y1, opacity }} className="mx-auto w-full max-w-7xl">
+        <motion.div style={{ y: y1 }} className="mx-auto w-full max-w-7xl">
           <div className="pointer-events-none absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-purple-500/30 via-pink-500/30 to-cyan-500/30 blur-[100px] animate-pulse" />
 
           <motion.div
@@ -189,7 +188,7 @@ export default function HomePage() {
             <motion.div whileHover={{ scale: 1.05, y: -2 }} whileTap={{ scale: 0.98 }}>
               <Link
                 href="/login"
-                className="relative flex min-w-[250px] items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 px-8 py-5 text-lg font-semibold text-white shadow-lg backdrop-blur-xl transition-all hover:border-white/30 hover:bg-white/20"
+                className="group relative flex min-w-[250px] items-center justify-center gap-3 rounded-2xl border border-white/20 bg-white/10 px-8 py-5 text-lg font-semibold text-white shadow-lg backdrop-blur-xl transition-all hover:border-white/30 hover:bg-white/20"
               >
                 <LogIn className="h-5 w-5" />
                 Login
@@ -208,7 +207,7 @@ export default function HomePage() {
             <motion.div whileHover={{ scale: 1.03, y: -2 }} whileTap={{ scale: 0.98 }}>
               <Link
                 href="/terms"
-                className="relative flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-white/15 bg-black/30 px-8 py-4 text-base font-semibold text-white transition-all hover:border-white/25 hover:bg-white/5"
+                className="group relative flex min-w-[220px] items-center justify-center gap-3 rounded-2xl border border-white/15 bg-black/30 px-8 py-4 text-base font-semibold text-white transition-all hover:border-white/25 hover:bg-white/5"
               >
                 <Shield className="h-5 w-5" />
                 Review Terms
@@ -509,21 +508,6 @@ export default function HomePage() {
                 </Link>
               </div>
             </div>
-          </motion.div>
-
-          {/* TRUST STRIP */}
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-            className="rounded-3xl border border-cyan-500/20 bg-cyan-900/10 p-8 text-center backdrop-blur-xl"
-          >
-            <h3 className="mb-3 text-2xl font-semibold text-cyan-300">Trust Layer in Place</h3>
-            <p className="mx-auto max-w-3xl text-lg leading-relaxed font-medium text-gray-300">
-              Pricing is live, subscriptions are wired, and Terms, Privacy, Acceptable Use,
-              and FAQ are now part of the product shell before compute comes back online.
-            </p>
           </motion.div>
         </div>
       </motion.section>
