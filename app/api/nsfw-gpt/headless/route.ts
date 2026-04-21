@@ -282,6 +282,11 @@ function buildRefineSystem(
         "# TARGET:",
         "- Each output should feel like a HIGH-QUALITY, generator-ready prompt",
         "- Aim for strong or elite prompt quality, not just acceptable",
+        "",
+        "# REQUIRED ORDER:",
+        '- Variant 1 = clean / stable / clear version ("Option A")',
+        '- Variant 2 = best balanced / strongest overall version ("Option B" / recommended)',
+        '- Variant 3 = bolder / more stylized / more cinematic version ("Option C")',
       ]
     : [
         "# OUTPUT FORMAT:",
@@ -447,6 +452,8 @@ function sanitizeRefineOutput(text: string): string {
   cleaned = cleaned.replace(/^here’s your refined prompt[:\-]?\s*/i, "")
   cleaned = cleaned.replace(/^refined prompt[:\-]?\s*/i, "")
   cleaned = cleaned.replace(/^prompt[:\-]?\s*/i, "")
+  cleaned = cleaned.replace(/^option\s*[abc][:\-]?\s*/i, "")
+  cleaned = cleaned.replace(/^\d+[\.\)]\s*/, "")
 
   if (
     (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
@@ -460,23 +467,52 @@ function sanitizeRefineOutput(text: string): string {
 
 function parseRefineVariants(rawText: string): string[] | null {
   const parsed = tryParseJsonObject(rawText)
+
   if (
     parsed &&
     typeof parsed === "object" &&
     Array.isArray((parsed as any).variants)
   ) {
     const variants = (parsed as any).variants
-      .map((item: any) => String(item || "").trim())
+      .map((item: any) => sanitizeRefineOutput(String(item || "")))
       .filter(Boolean)
+
     return variants.length ? variants.slice(0, 3) : null
   }
 
-  const fallback = rawText
-    .split(/\n+/)
-    .map((line) => line.replace(/^[A-C][\.)]\s*/i, "").trim())
+  const blockMatches = rawText.match(
+    /(?:^|\n)\s*(?:option\s*)?([abc123])[\.\):\-]\s*([\s\S]*?)(?=(?:\n\s*(?:option\s*)?[abc123][\.\):\-]\s*)|$)/gi
+  )
+
+  if (blockMatches && blockMatches.length > 0) {
+    const extracted = blockMatches
+      .map((block) =>
+        sanitizeRefineOutput(
+          block.replace(/^(?:\s*option\s*)?[abc123][\.\):\-]\s*/i, "").trim()
+        )
+      )
+      .filter(Boolean)
+
+    if (extracted.length) return extracted.slice(0, 3)
+  }
+
+  const paragraphFallback = rawText
+    .split(/\n{2,}/)
+    .map((chunk) => sanitizeRefineOutput(chunk))
     .filter(Boolean)
 
-  return fallback.length >= 2 ? fallback.slice(0, 3) : null
+  if (paragraphFallback.length >= 2) {
+    return paragraphFallback.slice(0, 3)
+  }
+
+  const lineFallback = rawText
+    .split(/\n+/)
+    .map((line) =>
+      sanitizeRefineOutput(line.replace(/^[A-C1-3][\.)\:\-]\s*/i, "").trim())
+    )
+    .filter(Boolean)
+
+  return lineFallback.length >= 2 ? lineFallback.slice(0, 3) : null
 }
 
 function coercePromptFromResponse(
@@ -557,6 +593,86 @@ function sanitizeHistory(history: unknown): HistoryMessage[] {
       role: item.role,
       content: item.content.trim(),
     }))
+}
+
+function uniqueStrings(items: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+
+  for (const item of items) {
+    const cleaned = sanitizeRefineOutput(item)
+      .replace(/\s+/g, " ")
+      .trim()
+
+    if (!cleaned) continue
+
+    const key = cleaned.toLowerCase()
+    if (seen.has(key)) continue
+
+    seen.add(key)
+    out.push(cleaned)
+  }
+
+  return out
+}
+
+function buildFallbackRefineVariants(
+  basePrompt: string,
+  refineVariant: RefineVariant | null,
+  generationTarget: GenerationTarget | null
+): string[] {
+  const cleanBase = sanitizeRefineOutput(basePrompt).replace(/\s+/g, " ").trim()
+
+  const targetHint =
+    generationTarget === "text_to_video"
+      ? "short-form cinematic video moment, natural motion, coherent camera language"
+      : generationTarget === "image_to_video"
+      ? "continuity-friendly motion, subtle realism, source-image consistency"
+      : "still image, strong composition, detailed lighting, high visual clarity"
+
+  const styleHint =
+    refineVariant === "cinematic"
+      ? "filmic atmosphere, dramatic lighting, premium composition, cinematic color grading"
+      : refineVariant === "explicit"
+      ? "bolder sensual intensity, erotic detail, physical focus, generator-safe coherence"
+      : refineVariant === "photoreal"
+      ? "photorealistic detail, believable anatomy, natural skin texture, realistic lighting"
+      : "balanced detail, polished structure, generator-ready clarity"
+
+  const optionA = `${cleanBase}, refined and clarified, ${targetHint}, clean composition, clear subject detail, strong environment detail, polished lighting, realistic textures`
+  const optionB = `${cleanBase}, elevated and fully polished, ${targetHint}, ${styleHint}, premium composition, rich visual detail, strong focal subject, immersive atmosphere, high-end generator-ready prompt`
+  const optionC = `${cleanBase}, bold stylized upgrade, ${targetHint}, intensified mood, dramatic framing, deeper atmosphere, striking lighting contrast, more cinematic visual impact, richer texture and scene depth`
+
+  return uniqueStrings([optionA, optionB, optionC]).slice(0, 3)
+}
+
+function ensureThreeRefineVariants(
+  parsedVariants: string[] | null,
+  fallbackPrompt: string,
+  refineVariant: RefineVariant | null,
+  generationTarget: GenerationTarget | null
+): string[] {
+  const cleanedParsed = uniqueStrings(parsedVariants || [])
+  const fallbackThree = buildFallbackRefineVariants(
+    fallbackPrompt,
+    refineVariant,
+    generationTarget
+  )
+
+  const merged = uniqueStrings([...cleanedParsed, ...fallbackThree])
+
+  if (merged.length >= 3) {
+    return merged.slice(0, 3)
+  }
+
+  const base = sanitizeRefineOutput(fallbackPrompt).replace(/\s+/g, " ").trim()
+
+  while (merged.length < 3) {
+    const index = merged.length + 1
+    merged.push(`${base}, refined variant ${index}, polished generator-ready detail`)
+  }
+
+  return merged.slice(0, 3)
 }
 
 export async function POST(req: NextRequest) {
@@ -731,16 +847,25 @@ export async function POST(req: NextRequest) {
 
     if (task === "refine_prompt_variants") {
       const parsedVariants = parseRefineVariants(rawText)
-      variants = parsedVariants
-        ? parsedVariants.map(sanitizeRefineOutput).filter(Boolean)
-        : null
+      const fallbackPrompt = sanitizeRefineOutput(prompt || description)
 
-      if (!variants || variants.length === 0) {
-        const fallbackPrompt = sanitizeRefineOutput(prompt)
-        variants = [fallbackPrompt].filter(Boolean)
-      }
+      variants = ensureThreeRefineVariants(
+        parsedVariants,
+        fallbackPrompt,
+        refineVariant,
+        generationTarget
+      )
 
-      prompt = variants[0] || ""
+      /**
+       * Keep the existing contract:
+       * - variants[0] => Option A
+       * - variants[1] => Option B (recommended)
+       * - variants[2] => Option C
+       *
+       * Mirror prompt to the recommended middle option so any existing
+       * single-prompt readers get the best version by default.
+       */
+      prompt = variants[1] || variants[0] || fallbackPrompt
     }
 
     const out: HeadlessSuccess = {
