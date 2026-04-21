@@ -1472,43 +1472,41 @@ function RefineChoicesPanel(props: {
 
   return (
     <Card className="border-cyan-500/20 bg-black/40 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
-      <CardHeader className="pb-3">
-        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-          <div>
-            <CardTitle className="text-sm text-cyan-300 md:text-base">
-              Choose Your Refined Prompt
-            </CardTitle>
-            <CardDescription className="mt-1 text-xs text-zinc-400">
-              Option B is auto-applied as the recommended starting point. You can still swap to any option below.
-            </CardDescription>
-          </div>
-
-          {recommendedChoice && (
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                onClick={() =>
-                  props.onApply(
-                    recommendedChoice,
-                    props.recommendedIndex ?? 0
-                  )
-                }
-                variant="outline"
-                className="h-8 border-fuchsia-400/30 bg-fuchsia-500/10 px-3 text-[11px] font-semibold text-fuchsia-100 hover:bg-fuchsia-500/15 hover:text-white"
-              >
-                Use Recommended
-              </Button>
-              <Button
-                type="button"
-                onClick={props.onGenerateRecommended}
-                disabled={props.generatingRecommended}
-                className="h-8 bg-gradient-to-r from-fuchsia-500 via-pink-500 to-cyan-500 px-3 text-[11px] font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {props.generatingRecommended ? "Generating…" : "✨ Generate Recommended"}
-              </Button>
-            </div>
-          )}
+      <CardHeader className="space-y-3 pb-3">
+        <div>
+          <CardTitle className="text-sm text-cyan-300 md:text-base">
+            Choose Your Refined Prompt
+          </CardTitle>
+          <CardDescription className="mt-1 max-w-none text-xs leading-5 text-zinc-400">
+            Option B is auto-applied as the recommended starting point. You can still swap to any option below.
+          </CardDescription>
         </div>
+
+        {recommendedChoice && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              onClick={() =>
+                props.onApply(
+                  recommendedChoice,
+                  props.recommendedIndex ?? 0
+                )
+              }
+              variant="outline"
+              className="h-8 border-fuchsia-400/30 bg-fuchsia-500/10 px-3 text-[11px] font-semibold text-fuchsia-100 hover:bg-fuchsia-500/15 hover:text-white"
+            >
+              Use Recommended
+            </Button>
+            <Button
+              type="button"
+              onClick={props.onGenerateRecommended}
+              disabled={props.generatingRecommended}
+              className="h-8 bg-gradient-to-r from-fuchsia-500 via-pink-500 to-cyan-500 px-3 text-[11px] font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {props.generatingRecommended ? "Generating…" : "✨ Generate Recommended"}
+            </Button>
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="space-y-3">
