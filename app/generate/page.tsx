@@ -1887,6 +1887,17 @@ export default function GeneratePage() {
   const recommendedRefineIndex = useMemo(() => {
     if (!refineChoices || refineChoices.length === 0) return null;
 
+    /**
+     * Backend contract for refine variants is locked:
+     * - variants[0] => Option A (clean / stable)
+     * - variants[1] => Option B (best / recommended)
+     * - variants[2] => Option C (stylized / bold)
+     *
+     * Keep the UI aligned to that production contract so Option B is always
+     * labeled Recommended when all three variants are present.
+     */
+    if (refineChoices.length >= 3) return 1;
+
     let bestIndex = 0;
     let bestScore = -Infinity;
 
