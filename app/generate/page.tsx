@@ -1426,35 +1426,67 @@ function GenerateButton(props: {
 
 function RefineChoicesPanel(props: {
   choices: string[] | null;
-  onApply: (value: string) => void;
+  onApply: (value: string, index: number) => void;
   recommendedIndex: number | null;
+  appliedIndex: number | null;
 }) {
   if (!props.choices || props.choices.length === 0) return null;
+
+  const recommendedChoice =
+    props.recommendedIndex !== null &&
+    props.recommendedIndex >= 0 &&
+    props.recommendedIndex < props.choices.length
+      ? props.choices[props.recommendedIndex]
+      : null;
 
   return (
     <Card className="border-cyan-500/20 bg-black/40 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm text-cyan-300 md:text-base">
-          Choose Your Refined Prompt
-        </CardTitle>
-        <CardDescription className="text-xs text-zinc-400">
-          Select the option that fits your vision best.
-        </CardDescription>
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle className="text-sm text-cyan-300 md:text-base">
+              Choose Your Refined Prompt
+            </CardTitle>
+            <CardDescription className="mt-1 text-xs text-zinc-400">
+              Option B is auto-applied as the recommended starting point. You can still swap to any option below.
+            </CardDescription>
+          </div>
+
+          {recommendedChoice && (
+            <Button
+              type="button"
+              onClick={() =>
+                props.onApply(
+                  recommendedChoice,
+                  props.recommendedIndex ?? 0
+                )
+              }
+              className="h-8 shrink-0 bg-gradient-to-r from-fuchsia-500 via-pink-500 to-cyan-500 px-3 text-[11px] font-semibold text-white hover:brightness-110"
+            >
+              Use Recommended
+            </Button>
+          )}
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-3">
         {props.choices.map((choice, index) => {
           const isRecommended = props.recommendedIndex === index;
+          const isApplied = props.appliedIndex === index;
 
           return (
             <button
               key={`${index}-${choice.slice(0, 24)}`}
               type="button"
-              onClick={() => props.onApply(choice)}
+              onClick={() => props.onApply(choice, index)}
               className={`w-full rounded-xl border px-4 py-3 text-left text-[12px] text-zinc-200 transition-all hover:text-white ${
                 isRecommended
                   ? "border-fuchsia-400/50 bg-fuchsia-500/10 shadow-[0_0_0_1px_rgba(232,121,249,0.24),0_0_30px_rgba(217,70,239,0.16)] hover:border-fuchsia-300/60 hover:bg-fuchsia-500/14"
                   : "border-cyan-500/20 bg-black/30 hover:border-cyan-400/40 hover:bg-cyan-500/10"
+              } ${
+                isApplied
+                  ? "ring-1 ring-cyan-300/40 shadow-[0_0_0_1px_rgba(34,211,238,0.2),0_0_22px_rgba(34,211,238,0.12)]"
+                  : ""
               }`}
             >
               <div className="mb-1 flex items-center justify-between gap-2">
@@ -1464,11 +1496,18 @@ function RefineChoicesPanel(props: {
                   Option {String.fromCharCode(65 + index)}
                 </div>
 
-                {isRecommended && (
-                  <span className="rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-fuchsia-200">
-                    Recommended
-                  </span>
-                )}
+                <div className="flex items-center gap-1.5">
+                  {isApplied && (
+                    <span className="rounded-full border border-cyan-400/40 bg-cyan-500/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
+                      Applied
+                    </span>
+                  )}
+                  {isRecommended && (
+                    <span className="rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-fuchsia-200">
+                      Recommended
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="leading-5">{choice}</div>
             </button>
@@ -1847,6 +1886,7 @@ export default function GeneratePage() {
   const [highlightPrompt, setHighlightPrompt] = useState(false);
   const [refiningVariant, setRefiningVariant] = useState<RefineVariant | null>(null);
   const [refineChoices, setRefineChoices] = useState<string[] | null>(null);
+  const [appliedRefineIndex, setAppliedRefineIndex] = useState<number | null>(null);
 
   const incomingQueryPayload = useMemo<HandoffPayload | null>(() => {
     const promptParam = searchParams.get("prompt");
@@ -2081,6 +2121,7 @@ export default function GeneratePage() {
     setErrorMessage(null);
     setRefiningVariant(variant);
     setRefineChoices(null);
+    setAppliedRefineIndex(null);
 
     try {
       const res = await fetch("/api/nsfw-gpt/headless", {
@@ -2120,12 +2161,32 @@ ${basePrompt}`,
         : [];
 
       if (variants.length > 0) {
+        const recommendedIndex = variants.length >= 3 ? 1 : 0;
+        const recommendedChoice = variants[recommendedIndex] || variants[0];
+
         setRefineChoices(variants);
+        setAppliedRefineIndex(recommendedIndex);
+
+        if (recommendedChoice) {
+          setPrompt(recommendedChoice);
+
+          requestAnimationFrame(() => {
+            if (promptTextareaRef.current) {
+              promptTextareaRef.current.focus({ preventScroll: true });
+              promptTextareaRef.current.setSelectionRange(
+                recommendedChoice.length,
+                recommendedChoice.length
+              );
+            }
+          });
+        }
+
         return;
       }
 
       if (typeof data?.prompt === "string" && data.prompt.trim()) {
         setPrompt(data.prompt.trim());
+        setAppliedRefineIndex(null);
         setRefineChoices(null);
         return;
       }
@@ -2135,14 +2196,15 @@ ${basePrompt}`,
       console.error("Auto-refine error:", err);
       setErrorMessage(err?.message || "Auto-refine failed.");
       setRefineChoices(null);
+      setAppliedRefineIndex(null);
     } finally {
       setRefiningVariant(null);
     }
   };
 
-  const handleApplyRefineChoice = (value: string) => {
+  const handleApplyRefineChoice = (value: string, index: number) => {
     setPrompt(value);
-    setRefineChoices(null);
+    setAppliedRefineIndex(index);
 
     if (promptTextareaRef.current) {
       promptTextareaRef.current.focus({ preventScroll: true });
@@ -2462,6 +2524,7 @@ ${basePrompt}`,
                 choices={refineChoices}
                 onApply={handleApplyRefineChoice}
                 recommendedIndex={recommendedRefineIndex}
+                appliedIndex={appliedRefineIndex}
               />
 
               {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
