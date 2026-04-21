@@ -678,6 +678,29 @@ function evaluatePromptStrength(prompt: string) {
   };
 }
 
+function getPromptValidationMessage(
+  mode: GenerationMode,
+  prompt: string,
+  imageFile: File | null
+): string | null {
+  const trimmed = prompt.trim();
+
+  if (mode === "image_to_video") {
+    if (!imageFile) return "Upload a source image before generating video.";
+    return null;
+  }
+
+  if (!trimmed) {
+    return "Enter a prompt before generating.";
+  }
+
+  if (trimmed.length < 10) {
+    return "Prompt is too short. Add a little more detail before generating.";
+  }
+
+  return null;
+}
+
 function SirensMindCTA(props: { onOpen: () => void }) {
   return (
     <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)]">
@@ -713,6 +736,8 @@ function PromptSection(props: {
   refiningVariant: RefineVariant | null;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   highlight?: boolean;
+  disabled?: boolean;
+  validationMessage?: string | null;
 }) {
   const [showNegative, setShowNegative] = useState(false);
 
@@ -773,7 +798,8 @@ function PromptSection(props: {
             value={props.prompt}
             onChange={(e) => props.onPromptChange(e.target.value)}
             placeholder={placeholder}
-            className={`min-h-32 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500 transition-all ${
+            disabled={props.disabled}
+            className={`min-h-32 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500 transition-all disabled:cursor-not-allowed disabled:opacity-70 ${
               props.highlight ? "ring-1 ring-fuchsia-400/35" : ""
             }`}
           />
@@ -796,7 +822,7 @@ function PromptSection(props: {
             <button
               type="button"
               onClick={() => props.onRefine("cinematic")}
-              disabled={props.refiningVariant !== null}
+              disabled={props.refiningVariant !== null || props.disabled}
               className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-purple-500/90 via-fuchsia-500/90 to-cyan-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "cinematic" ? "Refining..." : "🎬 Cinematic"}
@@ -805,7 +831,7 @@ function PromptSection(props: {
             <button
               type="button"
               onClick={() => props.onRefine("explicit")}
-              disabled={props.refiningVariant !== null}
+              disabled={props.refiningVariant !== null || props.disabled}
               className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-rose-500/90 via-pink-500/90 to-fuchsia-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "explicit" ? "Refining..." : "🔥 Explicit"}
@@ -814,7 +840,7 @@ function PromptSection(props: {
             <button
               type="button"
               onClick={() => props.onRefine("photoreal")}
-              disabled={props.refiningVariant !== null}
+              disabled={props.refiningVariant !== null || props.disabled}
               className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-cyan-500/90 via-sky-500/90 to-blue-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "photoreal" ? "Refining..." : "📸 Photoreal"}
@@ -857,7 +883,8 @@ function PromptSection(props: {
               key={chip}
               type="button"
               onClick={() => addChip(chip)}
-              className="rounded-full bg-gray-800 px-3 py-1.5 text-[11px] text-gray-200 transition-colors hover:bg-purple-500/20 hover:text-purple-200"
+              disabled={props.disabled}
+              className="rounded-full bg-gray-800 px-3 py-1.5 text-[11px] text-gray-200 transition-colors hover:bg-purple-500/20 hover:text-purple-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
               + {chip}
             </button>
@@ -867,7 +894,8 @@ function PromptSection(props: {
         <Button
           type="button"
           onClick={() => setShowNegative((v) => !v)}
-          className="w-full justify-between border border-gray-800 bg-gray-950 text-xs text-gray-100 hover:bg-gray-900 hover:text-white"
+          disabled={props.disabled}
+          className="w-full justify-between border border-gray-800 bg-gray-950 text-xs text-gray-100 hover:bg-gray-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span>Refine & filter (negative prompt) ✨</span>
           {showNegative ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -885,7 +913,8 @@ function PromptSection(props: {
                 value={props.negativePrompt}
                 onChange={(e) => props.onNegativePromptChange(e.target.value)}
                 placeholder="What to avoid (e.g. bad anatomy, extra limbs, blurry, etc.)"
-                className="mt-2 min-h-24 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500"
+                disabled={props.disabled}
+                className="mt-2 min-h-24 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
               />
             </motion.div>
           )}
@@ -1938,6 +1967,11 @@ export default function GeneratePage() {
     return match.name && match.name.trim().length > 0 ? match.name : match.id;
   }, [identityOptions, loraSelection.selected]);
 
+  const promptValidationMessage = useMemo(
+    () => getPromptValidationMessage(mode, prompt, imageFile),
+    [mode, prompt, imageFile]
+  );
+
   const recommendedRefineIndex = useMemo(() => {
     if (!refineChoices || refineChoices.length === 0) return null;
 
@@ -1978,7 +2012,7 @@ export default function GeneratePage() {
 
   const canGenerate =
     !isGenerating &&
-    (mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim())) &&
+    !promptValidationMessage &&
     Boolean(baseModel);
 
   useEffect(() => {
@@ -2240,12 +2274,19 @@ ${basePrompt}`,
 
   const handleGenerate = async (overridePrompt?: string) => {
     const bodyModeMap: Record<string, string> = {
+
       feminine: "body_feminine",
       masculine: "body_masculine",
     };
 
     const selectedLoraId = loraSelection.selected[0] ?? null;
     const promptToUse = typeof overridePrompt === "string" ? overridePrompt : prompt;
+    const validationMessage = getPromptValidationMessage(mode, promptToUse, imageFile);
+
+    if (validationMessage) {
+      setErrorMessage(validationMessage);
+      return;
+    }
 
     setErrorMessage(null);
     setIsGenerating(true);
@@ -2426,11 +2467,15 @@ ${basePrompt}`,
 
   const handleGenerateRecommended = async () => {
     if (!refineChoices || refineChoices.length === 0 || recommendedRefineIndex === null) {
+      void handleGenerate(prompt);
       return;
     }
 
-    const recommendedChoice = refineChoices[recommendedRefineIndex];
-    if (!recommendedChoice) return;
+    const recommendedChoice = refineChoices[recommendedRefineIndex] || prompt;
+    if (!recommendedChoice?.trim()) {
+      void handleGenerate(prompt);
+      return;
+    }
 
     handleApplyRefineChoice(recommendedChoice, recommendedRefineIndex);
 
