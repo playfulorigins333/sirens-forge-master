@@ -1427,8 +1427,10 @@ function GenerateButton(props: {
 function RefineChoicesPanel(props: {
   choices: string[] | null;
   onApply: (value: string, index: number) => void;
+  onGenerateRecommended: () => void;
   recommendedIndex: number | null;
   appliedIndex: number | null;
+  generatingRecommended?: boolean;
 }) {
   if (!props.choices || props.choices.length === 0) return null;
 
@@ -1453,18 +1455,29 @@ function RefineChoicesPanel(props: {
           </div>
 
           {recommendedChoice && (
-            <Button
-              type="button"
-              onClick={() =>
-                props.onApply(
-                  recommendedChoice,
-                  props.recommendedIndex ?? 0
-                )
-              }
-              className="h-8 shrink-0 bg-gradient-to-r from-fuchsia-500 via-pink-500 to-cyan-500 px-3 text-[11px] font-semibold text-white hover:brightness-110"
-            >
-              Use Recommended
-            </Button>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                onClick={() =>
+                  props.onApply(
+                    recommendedChoice,
+                    props.recommendedIndex ?? 0
+                  )
+                }
+                variant="outline"
+                className="h-8 border-fuchsia-400/30 bg-fuchsia-500/10 px-3 text-[11px] font-semibold text-fuchsia-100 hover:bg-fuchsia-500/15 hover:text-white"
+              >
+                Use Recommended
+              </Button>
+              <Button
+                type="button"
+                onClick={props.onGenerateRecommended}
+                disabled={props.generatingRecommended}
+                className="h-8 bg-gradient-to-r from-fuchsia-500 via-pink-500 to-cyan-500 px-3 text-[11px] font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {props.generatingRecommended ? "Generating…" : "✨ Generate Recommended"}
+              </Button>
+            </div>
           )}
         </div>
       </CardHeader>
@@ -1887,6 +1900,7 @@ export default function GeneratePage() {
   const [refiningVariant, setRefiningVariant] = useState<RefineVariant | null>(null);
   const [refineChoices, setRefineChoices] = useState<string[] | null>(null);
   const [appliedRefineIndex, setAppliedRefineIndex] = useState<number | null>(null);
+  const [refineFeedback, setRefineFeedback] = useState<string | null>(null);
 
   const incomingQueryPayload = useMemo<HandoffPayload | null>(() => {
     const promptParam = searchParams.get("prompt");
@@ -1951,6 +1965,16 @@ export default function GeneratePage() {
 
     return bestIndex;
   }, [refineChoices]);
+
+  useEffect(() => {
+    if (!refineFeedback) return;
+
+    const timer = window.setTimeout(() => {
+      setRefineFeedback(null);
+    }, 1600);
+
+    return () => window.clearTimeout(timer);
+  }, [refineFeedback]);
 
   const canGenerate =
     !isGenerating &&
@@ -2169,6 +2193,7 @@ ${basePrompt}`,
 
         if (recommendedChoice) {
           setPrompt(recommendedChoice);
+          setRefineFeedback("✓ Best prompt applied");
 
           requestAnimationFrame(() => {
             if (promptTextareaRef.current) {
@@ -2205,6 +2230,7 @@ ${basePrompt}`,
   const handleApplyRefineChoice = (value: string, index: number) => {
     setPrompt(value);
     setAppliedRefineIndex(index);
+    setRefineFeedback(index === recommendedRefineIndex ? "✓ Best prompt applied" : `✓ Option ${String.fromCharCode(65 + index)} applied`);
 
     if (promptTextareaRef.current) {
       promptTextareaRef.current.focus({ preventScroll: true });
@@ -2212,13 +2238,14 @@ ${basePrompt}`,
     }
   };
 
-  const handleGenerate = async () => {
+  const handleGenerate = async (overridePrompt?: string) => {
     const bodyModeMap: Record<string, string> = {
       feminine: "body_feminine",
       masculine: "body_masculine",
     };
 
     const selectedLoraId = loraSelection.selected[0] ?? null;
+    const promptToUse = typeof overridePrompt === "string" ? overridePrompt : prompt;
 
     setErrorMessage(null);
     setIsGenerating(true);
@@ -2233,7 +2260,7 @@ ${basePrompt}`,
       const baseParams = {
         engine: "comfyui",
         template: "sirens_image_v3_production",
-        prompt,
+        prompt: promptToUse,
         negative_prompt: negativePrompt,
         body_mode: bodyModeMap[baseModel],
         width: parsedWidth,
@@ -2301,7 +2328,7 @@ ${basePrompt}`,
             id: `${now}-${Math.random().toString(36).slice(2)}`,
             kind: inferKindFromOutput(output),
             url: getOutputUrl(output),
-            prompt,
+            prompt: promptToUse,
             settings: runPayload,
             createdAt: now,
           }));
@@ -2368,7 +2395,7 @@ ${basePrompt}`,
             id: `${now}-${Math.random().toString(36).slice(2)}`,
             kind: "video",
             url: getOutputUrl(output),
-            prompt: prompt || "(Image-driven video)",
+            prompt: promptToUse || "(Image-driven video)",
             settings: videoPayload,
             createdAt: now,
           }));
@@ -2395,6 +2422,21 @@ ${basePrompt}`,
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleGenerateRecommended = async () => {
+    if (!refineChoices || refineChoices.length === 0 || recommendedRefineIndex === null) {
+      return;
+    }
+
+    const recommendedChoice = refineChoices[recommendedRefineIndex];
+    if (!recommendedChoice) return;
+
+    handleApplyRefineChoice(recommendedChoice, recommendedRefineIndex);
+
+    window.setTimeout(() => {
+      void handleGenerate(recommendedChoice);
+    }, 0);
   };
 
   const handleHistorySelect = (item: GeneratedItem) => {
@@ -2520,11 +2562,26 @@ ${basePrompt}`,
                 onClick={handleGenerate}
               />
 
+              <AnimatePresence>
+                {refineFeedback && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-200 shadow-[0_0_18px_rgba(16,185,129,0.12)]"
+                  >
+                    {refineFeedback}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <RefineChoicesPanel
                 choices={refineChoices}
                 onApply={handleApplyRefineChoice}
+                onGenerateRecommended={handleGenerateRecommended}
                 recommendedIndex={recommendedRefineIndex}
                 appliedIndex={appliedRefineIndex}
+                generatingRecommended={isGenerating}
               />
 
               {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
