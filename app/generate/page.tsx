@@ -2488,6 +2488,8 @@ ${basePrompt}`,
                 options={identitySelectOptions}
               />
 
+              <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
+
               <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
                 <div className="font-semibold text-gray-100">Ultra add-on</div>
                 <div className="mt-1">
@@ -2497,8 +2499,6 @@ ${basePrompt}`,
                   masturbation, vaginal.
                 </div>
               </div>
-
-              <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
 
               <PromptSection
                 mode={mode}
