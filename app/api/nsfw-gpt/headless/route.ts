@@ -448,10 +448,17 @@ function tryParseJsonObject(text: string): any | null {
 function sanitizeRefineOutput(text: string): string {
   let cleaned = text.trim()
 
-  cleaned = cleaned.replace(/^here'?s your refined prompt[:\-]?\s*/i, "")
-  cleaned = cleaned.replace(/^here’s your refined prompt[:\-]?\s*/i, "")
-  cleaned = cleaned.replace(/^refined prompt[:\-]?\s*/i, "")
-  cleaned = cleaned.replace(/^prompt[:\-]?\s*/i, "")
+  cleaned = cleaned.replace(
+    /^here(?:'s| is)?\s+(your\s+)?refined\s+prompt.*?:?\s*/i,
+    ""
+  )
+  cleaned = cleaned.replace(/^here’s\s+(your\s+)?refined\s+prompt.*?:?\s*/i, "")
+  cleaned = cleaned.replace(/^refined\s+prompt.*?:?\s*/i, "")
+  cleaned = cleaned.replace(/^prompt.*?:?\s*/i, "")
+
+  cleaned = cleaned.replace(/^here\s+is\s+/i, "")
+  cleaned = cleaned.replace(/^this\s+is\s+/i, "")
+
   cleaned = cleaned.replace(/^option\s*[abc][:\-]?\s*/i, "")
   cleaned = cleaned.replace(/^\d+[\.\)]\s*/, "")
 
