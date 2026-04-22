@@ -383,7 +383,7 @@ function ModeTabs(props: {
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
       {modes.map((mode) => {
         const Icon = mode.icon;
         const isActive = props.activeMode === mode.id;
@@ -393,13 +393,13 @@ function ModeTabs(props: {
             onClick={() => props.onChange(mode.id)}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className={`relative rounded-lg border-2 px-3 py-2.5 transition-all ${
+            className={`relative rounded-xl border-2 p-3 transition-all ${
               isActive
                 ? "border-purple-500 bg-purple-500/10"
                 : "border-gray-800 bg-gray-900/70 hover:border-gray-700"
             }`}
           >
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex flex-col items-center gap-1.5">
               <Icon
                 className={`h-5 w-5 ${
                   isActive ? "text-purple-400" : "text-gray-300"
@@ -540,7 +540,7 @@ function HandoffConfidencePanel(props: {
 
   return (
     <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)]">
-      <CardHeader className="pb-2 pt-4">
+      <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm md:text-base">
           <Sparkles className="h-4 w-4 text-fuchsia-300" />
           Ready to Generate
@@ -584,7 +584,7 @@ function HandoffConfidencePanel(props: {
           <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-400">
             Smart Suggestions
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-2">
             {suggestionChips.map((chip) => (
               <button
                 key={chip.label}
@@ -678,33 +678,10 @@ function evaluatePromptStrength(prompt: string) {
   };
 }
 
-function getPromptValidationMessage(
-  mode: GenerationMode,
-  prompt: string,
-  imageFile: File | null
-): string | null {
-  const trimmed = prompt.trim();
-
-  if (mode === "image_to_video") {
-    if (!imageFile) return "Upload a source image before generating video.";
-    return null;
-  }
-
-  if (!trimmed) {
-    return "Enter a prompt before generating.";
-  }
-
-  if (trimmed.length < 10) {
-    return "Prompt is too short. Add a little more detail before generating.";
-  }
-
-  return null;
-}
-
 function SirensMindCTA(props: { onOpen: () => void }) {
   return (
     <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)]">
-      <CardHeader className="pb-2 pt-4">
+      <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm md:text-base">
           <Sparkles className="h-4 w-4 text-fuchsia-300" />
           A Siren’s Mind
@@ -736,8 +713,6 @@ function PromptSection(props: {
   refiningVariant: RefineVariant | null;
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   highlight?: boolean;
-  disabled?: boolean;
-  validationMessage?: string | null;
 }) {
   const [showNegative, setShowNegative] = useState(false);
 
@@ -798,8 +773,7 @@ function PromptSection(props: {
             value={props.prompt}
             onChange={(e) => props.onPromptChange(e.target.value)}
             placeholder={placeholder}
-            disabled={props.disabled}
-            className={`min-h-32 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500 transition-all disabled:cursor-not-allowed disabled:opacity-70 ${
+            className={`min-h-32 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500 transition-all ${
               props.highlight ? "ring-1 ring-fuchsia-400/35" : ""
             }`}
           />
@@ -822,7 +796,7 @@ function PromptSection(props: {
             <button
               type="button"
               onClick={() => props.onRefine("cinematic")}
-              disabled={props.refiningVariant !== null || props.disabled}
+              disabled={props.refiningVariant !== null}
               className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-purple-500/90 via-fuchsia-500/90 to-cyan-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "cinematic" ? "Refining..." : "🎬 Cinematic"}
@@ -831,7 +805,7 @@ function PromptSection(props: {
             <button
               type="button"
               onClick={() => props.onRefine("explicit")}
-              disabled={props.refiningVariant !== null || props.disabled}
+              disabled={props.refiningVariant !== null}
               className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-rose-500/90 via-pink-500/90 to-fuchsia-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "explicit" ? "Refining..." : "🔥 Explicit"}
@@ -840,7 +814,7 @@ function PromptSection(props: {
             <button
               type="button"
               onClick={() => props.onRefine("photoreal")}
-              disabled={props.refiningVariant !== null || props.disabled}
+              disabled={props.refiningVariant !== null}
               className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-cyan-500/90 via-sky-500/90 to-blue-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "photoreal" ? "Refining..." : "📸 Photoreal"}
@@ -883,8 +857,7 @@ function PromptSection(props: {
               key={chip}
               type="button"
               onClick={() => addChip(chip)}
-              disabled={props.disabled}
-              className="rounded-full bg-gray-800 px-3 py-1.5 text-[11px] text-gray-200 transition-colors hover:bg-purple-500/20 hover:text-purple-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-full bg-gray-800 px-3 py-1.5 text-[11px] text-gray-200 transition-colors hover:bg-purple-500/20 hover:text-purple-200"
             >
               + {chip}
             </button>
@@ -894,8 +867,7 @@ function PromptSection(props: {
         <Button
           type="button"
           onClick={() => setShowNegative((v) => !v)}
-          disabled={props.disabled}
-          className="w-full justify-between border border-gray-800 bg-gray-950 text-xs text-gray-100 hover:bg-gray-900 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+          className="w-full justify-between border border-gray-800 bg-gray-950 text-xs text-gray-100 hover:bg-gray-900 hover:text-white"
         >
           <span>Refine & filter (negative prompt) ✨</span>
           {showNegative ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -913,85 +885,12 @@ function PromptSection(props: {
                 value={props.negativePrompt}
                 onChange={(e) => props.onNegativePromptChange(e.target.value)}
                 placeholder="What to avoid (e.g. bad anatomy, extra limbs, blurry, etc.)"
-                disabled={props.disabled}
-                className="mt-2 min-h-24 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500 disabled:cursor-not-allowed disabled:opacity-70"
+                className="mt-2 min-h-24 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500"
               />
             </motion.div>
           )}
         </AnimatePresence>
       </CardContent>
-    </Card>
-  );
-}
-
-
-function UltraAddOnHelper() {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Card className="border-cyan-500/20 bg-[linear-gradient(180deg,rgba(12,18,28,0.92),rgba(10,10,14,0.96))] shadow-[0_0_20px_rgba(34,211,238,0.08)]">
-      <CardHeader className="pb-2">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => setOpen((v) => !v)}
-          className="w-full justify-between px-0 text-left text-gray-100 hover:bg-transparent hover:text-white"
-        >
-          <div className="pr-3">
-            <CardTitle className="text-sm md:text-base">Ultra Add-On</CardTitle>
-            <CardDescription className="mt-1 text-xs text-gray-300">
-              Add dildo or sex toy to activate the insertion helper.
-            </CardDescription>
-          </div>
-          {open ? (
-            <ChevronUp className="h-4 w-4 shrink-0 text-cyan-300" />
-          ) : (
-            <ChevronDown className="h-4 w-4 shrink-0 text-cyan-300" />
-          )}
-        </Button>
-      </CardHeader>
-
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <CardContent className="space-y-3 pt-0 text-[11px] text-gray-300">
-              <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
-                Activate with <span className="font-semibold text-white">dildo</span> or{" "}
-                <span className="font-semibold text-white">sex toy</span>.
-              </div>
-
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
-                    Positioning
-                  </div>
-                  <div className="leading-5 text-gray-300">
-                    on back, on side, doggystyle, lying, spread legs, close-up, solo
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
-                    Action & Placement
-                  </div>
-                  <div className="leading-5 text-gray-300">
-                    masturbation, object insertion, vaginal, anal, female masturbation
-                  </div>
-                </div>
-              </div>
-
-              <p className="text-[10px] leading-5 text-gray-400">
-                Best used with clear subject, pose, and framing language for stronger composition control.
-              </p>
-            </CardContent>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </Card>
   );
 }
@@ -1079,15 +978,15 @@ function ModelStyleSection(props: {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          bigLust_v16 with body-shaping LoRA.
+          SDXL core model (bigLust_v16) with body-specific LoRA shaping.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4 pt-0">
+      <CardContent className="space-y-5">
         <div>
           <p className="mb-2 text-xs font-semibold text-gray-200">
             Base Model (Body Type)
           </p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             {baseModels.map((bm) => {
               const isActive = props.baseModel === bm.id;
               return (
@@ -1095,7 +994,7 @@ function ModelStyleSection(props: {
                   key={bm.id}
                   type="button"
                   onClick={() => props.onBaseModelChange(bm.id)}
-                  className={`rounded-lg border-2 px-3 py-2 text-xs font-semibold transition-all ${
+                  className={`rounded-lg border-2 p-3 text-xs font-semibold transition-all ${
                     isActive
                       ? "border-purple-500 bg-purple-500/10 text-white"
                       : "border-gray-800 bg-gray-950 text-gray-300 hover:border-gray-700"
@@ -1118,7 +1017,7 @@ function ModelStyleSection(props: {
                   key={preset}
                   type="button"
                   onClick={() => props.onStylePresetChange(preset)}
-                  className={`rounded-lg px-2.5 py-1 text-[10px] font-medium transition-all ${
+                  className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all ${
                     isActive
                       ? "bg-purple-500 text-white"
                       : "bg-gray-800 text-gray-300 hover:bg-gray-700"
@@ -1153,15 +1052,15 @@ function LoraIdentitySection(props: {
     });
 
   return (
-    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_18px_rgba(168,85,247,0.10)]">
+    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_24px_rgba(168,85,247,0.12)]">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Identity Control</CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Keep the same person consistent across generations and video.
+          Use a trained identity LoRA to keep the same person consistent across generations and video.
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-2.5 pt-0 text-xs">
+      <CardContent className="space-y-3 text-xs">
         {props.options.length === 0 && (
           <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
             No trained LoRAs yet. Create one on{" "}
@@ -1184,7 +1083,7 @@ function LoraIdentitySection(props: {
         </Select>
 
         {!hasIdentity && (
-          <div className="rounded-lg border border-purple-900/50 bg-purple-500/5 px-3 py-1.5 text-[10px] leading-5 text-gray-300">
+          <div className="rounded-lg border border-purple-900/50 bg-purple-500/5 px-3 py-2 text-[11px] text-gray-300">
             <span className="font-semibold text-purple-300">New here?</span>{" "}
             Generate once, then train an identity LoRA for more consistent results across images and video.
           </div>
@@ -1480,27 +1379,29 @@ function GenerateButton(props: {
       ? "Generate Cinematic Video"
       : "Generate";
 
-  const subtext = `${props.batchSize} ${props.batchSize > 1 ? "outputs" : "output"} • ${props.qualityPreset} • ${props.consistencyPreset}`;
+  const subtext = `This will create ${props.batchSize} ${
+    props.batchSize > 1 ? "outputs" : "output"
+  } at ${props.qualityPreset} quality with ${props.consistencyPreset} consistency.`;
 
   return (
     <Card className="border-gray-800 bg-gray-900/80">
-      <CardContent className="px-4 py-3">
+      <CardContent className="p-4">
         <motion.div
           whileHover={{
-            scale: props.disabled || props.isGenerating ? 1 : 1.01,
+            scale: props.disabled || props.isGenerating ? 1 : 1.02,
           }}
           whileTap={{
-            scale: props.disabled || props.isGenerating ? 1 : 0.99,
+            scale: props.disabled || props.isGenerating ? 1 : 0.98,
           }}
         >
           <Button
             type="button"
             onClick={props.onClick}
             disabled={props.disabled || props.isGenerating}
-            className={`h-11 w-full text-sm font-semibold transition-all md:text-base ${
+            className={`h-12 w-full text-sm font-semibold transition-all md:text-base ${
               props.disabled || props.isGenerating
                 ? "cursor-not-allowed bg-gray-700 text-gray-300"
-                : "bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 shadow-lg shadow-purple-500/20 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+                : "bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 shadow-lg shadow-purple-500/30 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
             }`}
           >
             {props.isGenerating ? (
@@ -1516,7 +1417,7 @@ function GenerateButton(props: {
             )}
           </Button>
         </motion.div>
-        <p className="mt-2 text-center text-[10px] text-gray-400">{subtext}</p>
+        <p className="mt-2 text-center text-[11px] text-gray-300">{subtext}</p>
       </CardContent>
     </Card>
   );
@@ -1542,41 +1443,43 @@ function RefineChoicesPanel(props: {
 
   return (
     <Card className="border-cyan-500/20 bg-black/40 shadow-[0_0_30px_rgba(34,211,238,0.08)]">
-      <CardHeader className="space-y-3 pb-3">
-        <div>
-          <CardTitle className="text-sm text-cyan-300 md:text-base">
-            Choose Your Refined Prompt
-          </CardTitle>
-          <CardDescription className="mt-1 max-w-none text-xs leading-5 text-zinc-400">
-            Option B is auto-applied as the recommended starting point. You can still swap to any option below.
-          </CardDescription>
-        </div>
-
-        {recommendedChoice && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              onClick={() =>
-                props.onApply(
-                  recommendedChoice,
-                  props.recommendedIndex ?? 0
-                )
-              }
-              variant="outline"
-              className="h-8 border-fuchsia-400/30 bg-fuchsia-500/10 px-3 text-[11px] font-semibold text-fuchsia-100 hover:bg-fuchsia-500/15 hover:text-white"
-            >
-              Use Recommended
-            </Button>
-            <Button
-              type="button"
-              onClick={props.onGenerateRecommended}
-              disabled={props.generatingRecommended}
-              className="h-8 bg-gradient-to-r from-fuchsia-500 via-pink-500 to-cyan-500 px-3 text-[11px] font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {props.generatingRecommended ? "Generating…" : "✨ Generate Recommended"}
-            </Button>
+      <CardHeader className="pb-3">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <CardTitle className="text-sm text-cyan-300 md:text-base">
+              Choose Your Refined Prompt
+            </CardTitle>
+            <CardDescription className="mt-1 text-xs text-zinc-400">
+              Option B is auto-applied as the recommended starting point. You can still swap to any option below.
+            </CardDescription>
           </div>
-        )}
+
+          {recommendedChoice && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                onClick={() =>
+                  props.onApply(
+                    recommendedChoice,
+                    props.recommendedIndex ?? 0
+                  )
+                }
+                variant="outline"
+                className="h-8 border-fuchsia-400/30 bg-fuchsia-500/10 px-3 text-[11px] font-semibold text-fuchsia-100 hover:bg-fuchsia-500/15 hover:text-white"
+              >
+                Use Recommended
+              </Button>
+              <Button
+                type="button"
+                onClick={props.onGenerateRecommended}
+                disabled={props.generatingRecommended}
+                className="h-8 bg-gradient-to-r from-fuchsia-500 via-pink-500 to-cyan-500 px-3 text-[11px] font-semibold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {props.generatingRecommended ? "Generating…" : "✨ Generate Recommended"}
+              </Button>
+            </div>
+          )}
+        </div>
       </CardHeader>
 
       <CardContent className="space-y-3">
@@ -2035,11 +1938,6 @@ export default function GeneratePage() {
     return match.name && match.name.trim().length > 0 ? match.name : match.id;
   }, [identityOptions, loraSelection.selected]);
 
-  const promptValidationMessage = useMemo(
-    () => getPromptValidationMessage(mode, prompt, imageFile),
-    [mode, prompt, imageFile]
-  );
-
   const recommendedRefineIndex = useMemo(() => {
     if (!refineChoices || refineChoices.length === 0) return null;
 
@@ -2080,7 +1978,7 @@ export default function GeneratePage() {
 
   const canGenerate =
     !isGenerating &&
-    !promptValidationMessage &&
+    (mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim())) &&
     Boolean(baseModel);
 
   useEffect(() => {
@@ -2342,19 +2240,12 @@ ${basePrompt}`,
 
   const handleGenerate = async (overridePrompt?: string) => {
     const bodyModeMap: Record<string, string> = {
-
       feminine: "body_feminine",
       masculine: "body_masculine",
     };
 
     const selectedLoraId = loraSelection.selected[0] ?? null;
     const promptToUse = typeof overridePrompt === "string" ? overridePrompt : prompt;
-    const validationMessage = getPromptValidationMessage(mode, promptToUse, imageFile);
-
-    if (validationMessage) {
-      setErrorMessage(validationMessage);
-      return;
-    }
 
     setErrorMessage(null);
     setIsGenerating(true);
@@ -2535,15 +2426,11 @@ ${basePrompt}`,
 
   const handleGenerateRecommended = async () => {
     if (!refineChoices || refineChoices.length === 0 || recommendedRefineIndex === null) {
-      void handleGenerate(prompt);
       return;
     }
 
-    const recommendedChoice = refineChoices[recommendedRefineIndex] || prompt;
-    if (!recommendedChoice?.trim()) {
-      void handleGenerate(prompt);
-      return;
-    }
+    const recommendedChoice = refineChoices[recommendedRefineIndex];
+    if (!recommendedChoice) return;
 
     handleApplyRefineChoice(recommendedChoice, recommendedRefineIndex);
 
@@ -2585,8 +2472,8 @@ ${basePrompt}`,
 
           <ModeTabs activeMode={mode} onChange={setMode} />
 
-          <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-            <div className="space-y-3 xl:col-span-1">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+            <div className="space-y-4 xl:col-span-1">
               {mode === "image_to_video" && (
                 <ImageToVideoUploadSection
                   imageFile={imageFile}
@@ -2600,6 +2487,18 @@ ${basePrompt}`,
                 onChange={(next) => setLoraSelection(next)}
                 options={identitySelectOptions}
               />
+
+              <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
+                <div className="font-semibold text-gray-100">Ultra add-on</div>
+                <div className="mt-1">
+                  Type{" "}
+                  <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
+                  Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
+                  masturbation, vaginal.
+                </div>
+              </div>
+
+              <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
 
               <PromptSection
                 mode={mode}
@@ -2616,13 +2515,9 @@ ${basePrompt}`,
                 highlight={highlightPrompt}
               />
 
-              <UltraAddOnHelper />
-
-              <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
-
             </div>
 
-            <div className="space-y-3 xl:col-span-1">
+            <div className="space-y-4 xl:col-span-1">
               <ModelStyleSection
                 baseModel={baseModel}
                 stylePreset={stylePreset}
@@ -2693,7 +2588,7 @@ ${basePrompt}`,
               {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
             </div>
 
-            <div className="space-y-3 xl:col-span-1">
+            <div className="space-y-4 xl:col-span-1">
               <Card className="h-full border-gray-800 bg-gray-900/80">
                 <CardContent className="h-full p-4">
                   <OutputPanel items={items} loading={isGenerating} onGenerateMore={handleGenerate} />
