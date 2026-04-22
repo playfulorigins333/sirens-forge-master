@@ -2534,12 +2534,19 @@ ${basePrompt}`,
               <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
 
               <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
-                <div className="font-semibold text-gray-100">Ultra add-on</div>
-                <div className="mt-1">
-                  Type{" "}
-                  <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
-                  Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
-                  masturbation, vaginal.
+                <div className="font-semibold text-gray-100">Ultra Add-On (Object Insertion)</div>
+                <div className="mt-1 leading-5">
+                  Activate this add-on by including{" "}
+                  <span className="font-mono text-gray-100">dildo</span> or{" "}
+                  <span className="font-mono text-gray-100">sex toy</span> in your prompt.
+                </div>
+                <div className="mt-2 leading-5">
+                  For stronger results, combine with positioning and action cues like{" "}
+                  <span className="text-gray-100">on back, on side, doggystyle, spread legs, close-up, solo, masturbation</span>.
+                </div>
+                <div className="mt-2 leading-5">
+                  For more control, you can also use{" "}
+                  <span className="text-gray-100">vaginal, anal, object insertion, female masturbation</span>.
                 </div>
               </div>
 
