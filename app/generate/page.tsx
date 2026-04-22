@@ -924,6 +924,78 @@ function PromptSection(props: {
   );
 }
 
+
+function UltraAddOnHelper() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Card className="border-cyan-500/20 bg-[linear-gradient(180deg,rgba(12,18,28,0.92),rgba(10,10,14,0.96))] shadow-[0_0_20px_rgba(34,211,238,0.08)]">
+      <CardHeader className="pb-2">
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={() => setOpen((v) => !v)}
+          className="w-full justify-between px-0 text-left text-gray-100 hover:bg-transparent hover:text-white"
+        >
+          <div className="pr-3">
+            <CardTitle className="text-sm md:text-base">Ultra Add-On</CardTitle>
+            <CardDescription className="mt-1 text-xs text-gray-300">
+              Add dildo or sex toy to activate the insertion helper.
+            </CardDescription>
+          </div>
+          {open ? (
+            <ChevronUp className="h-4 w-4 shrink-0 text-cyan-300" />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0 text-cyan-300" />
+          )}
+        </Button>
+      </CardHeader>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden"
+          >
+            <CardContent className="space-y-3 pt-0 text-[11px] text-gray-300">
+              <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2">
+                Activate with <span className="font-semibold text-white">dildo</span> or{" "}
+                <span className="font-semibold text-white">sex toy</span>.
+              </div>
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
+                    Positioning
+                  </div>
+                  <div className="leading-5 text-gray-300">
+                    on back, on side, doggystyle, lying, spread legs, close-up, solo
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
+                    Action & Placement
+                  </div>
+                  <div className="leading-5 text-gray-300">
+                    masturbation, object insertion, vaginal, anal, female masturbation
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[10px] leading-5 text-gray-400">
+                Best used with clear subject, pose, and framing language for stronger composition control.
+              </p>
+            </CardContent>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </Card>
+  );
+}
+
 function ImageToVideoUploadSection(props: {
   imageFile: File | null;
   previewUrl: string | null;
@@ -2564,6 +2636,8 @@ ${basePrompt}`,
                 textareaRef={promptTextareaRef}
                 highlight={highlightPrompt}
               />
+
+              <UltraAddOnHelper />
 
             </div>
 
