@@ -291,6 +291,54 @@ function SubscriptionModal({
   );
 }
 
+
+function IdleGlow(props: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <motion.div
+      className={props.className}
+      animate={{
+        boxShadow: [
+          "0 0 0 rgba(168,85,247,0.00)",
+          "0 0 24px rgba(168,85,247,0.10)",
+          "0 0 0 rgba(168,85,247,0.00)",
+        ],
+      }}
+      transition={{
+        duration: 4.8,
+        repeat: Infinity,
+        ease: "easeInOut",
+      }}
+    >
+      {props.children}
+    </motion.div>
+  );
+}
+
+function GradientDrift(props: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <motion.div
+      className={props.className}
+      animate={{
+        backgroundPosition: ["0% 50%", "100% 50%", "0% 50%"],
+      }}
+      transition={{
+        duration: 10,
+        repeat: Infinity,
+        ease: "linear",
+      }}
+      style={{ backgroundSize: "200% 200%" }}
+    >
+      {props.children}
+    </motion.div>
+  );
+}
+
 function GeneratorHeader(props: { activeMode: GenerationMode }) {
   const userName = "Creator";
   const userAvatar = "";
@@ -329,7 +377,7 @@ function GeneratorHeader(props: { activeMode: GenerationMode }) {
     <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-950/70 backdrop-blur">
       <div className="flex items-center justify-between px-6 py-4">
         <div>
-          <h1 className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-2xl font-bold text-transparent">
+          <h1 className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-[length:200%_200%] bg-clip-text text-2xl font-bold text-transparent">
             SirensForge Generator
           </h1>
           <p className="mt-1 text-xs text-gray-300 md:text-sm">{subtitle}</p>
@@ -680,6 +728,7 @@ function evaluatePromptStrength(prompt: string) {
 
 function SirensMindCTA(props: { onOpen: () => void }) {
   return (
+    <IdleGlow>
     <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
     <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)] transition-all duration-300 hover:shadow-[0_0_36px_rgba(192,38,211,0.14)]">
       <CardHeader className="pb-3">
@@ -692,16 +741,19 @@ function SirensMindCTA(props: { onOpen: () => void }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">
+        <GradientDrift>
         <Button
           type="button"
           onClick={props.onOpen}
-          className="h-10 w-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_28px_rgba(192,38,211,0.24)]"
+          className="h-10 w-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 bg-[length:200%_200%] text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_28px_rgba(192,38,211,0.24)]"
         >
           Open Siren’s Mind
         </Button>
+        </GradientDrift>
       </CardContent>
     </Card>
     </motion.div>
+    </IdleGlow>
   );
 }
 
@@ -752,6 +804,7 @@ function PromptSection(props: {
       : "Describe the scene, style, mood, and details...";
 
   return (
+    <IdleGlow>
     <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
     <Card
       className={`border-gray-800 bg-gray-900/80 transition-all duration-500 hover:shadow-[0_12px_34px_rgba(0,0,0,0.22)] ${
@@ -905,6 +958,7 @@ function PromptSection(props: {
       </CardContent>
     </Card>
     </motion.div>
+    </IdleGlow>
   );
 }
 
@@ -1429,6 +1483,7 @@ function GenerateButton(props: {
   } at ${props.qualityPreset} quality with ${props.consistencyPreset} consistency.`;
 
   return (
+    <IdleGlow>
     <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
     <Card className="border-gray-800 bg-gray-900/80 transition-all duration-300 hover:shadow-[0_18px_38px_rgba(168,85,247,0.14)]">
       <CardContent className="p-4">
@@ -1440,6 +1495,7 @@ function GenerateButton(props: {
             scale: props.disabled || props.isGenerating ? 1 : 0.98,
           }}
         >
+          <GradientDrift>
           <Button
             type="button"
             onClick={props.onClick}
@@ -1447,7 +1503,7 @@ function GenerateButton(props: {
             className={`h-12 w-full text-sm font-semibold transition-all duration-200 md:text-base ${
               props.disabled || props.isGenerating
                 ? "cursor-not-allowed bg-gray-700 text-gray-300"
-                : "bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 shadow-lg shadow-purple-500/30 hover:-translate-y-0.5 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 hover:shadow-[0_14px_34px_rgba(168,85,247,0.28)]"
+                : "bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 bg-[length:200%_200%] shadow-lg shadow-purple-500/30 hover:-translate-y-0.5 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 hover:shadow-[0_14px_34px_rgba(168,85,247,0.28)]"
             }`}
           >
             {props.isGenerating ? (
@@ -1462,11 +1518,13 @@ function GenerateButton(props: {
               </span>
             )}
           </Button>
+          </GradientDrift>
         </motion.div>
         <p className="mt-2 text-center text-[11px] text-gray-300">{subtext}</p>
       </CardContent>
     </Card>
     </motion.div>
+    </IdleGlow>
   );
 }
 
