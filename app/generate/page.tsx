@@ -393,10 +393,10 @@ function ModeTabs(props: {
             onClick={() => props.onChange(mode.id)}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className={`relative rounded-xl border-2 p-3 transition-all ${
+            className={`relative overflow-hidden rounded-xl border-2 p-3 transition-all duration-300 ${
               isActive
-                ? "border-purple-500 bg-purple-500/10"
-                : "border-gray-800 bg-gray-900/70 hover:border-gray-700"
+                ? "border-purple-500 bg-purple-500/10 shadow-[0_0_22px_rgba(168,85,247,0.16)]"
+                : "border-gray-800 bg-gray-900/70 hover:-translate-y-0.5 hover:border-gray-700 hover:shadow-[0_10px_28px_rgba(0,0,0,0.28)]"
             }`}
           >
             <div className="flex flex-col items-center gap-1.5">
@@ -680,7 +680,8 @@ function evaluatePromptStrength(prompt: string) {
 
 function SirensMindCTA(props: { onOpen: () => void }) {
   return (
-    <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)]">
+    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
+    <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)] transition-all duration-300 hover:shadow-[0_0_36px_rgba(192,38,211,0.14)]">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm md:text-base">
           <Sparkles className="h-4 w-4 text-fuchsia-300" />
@@ -694,12 +695,13 @@ function SirensMindCTA(props: { onOpen: () => void }) {
         <Button
           type="button"
           onClick={props.onOpen}
-          className="h-10 w-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-xs font-semibold text-white hover:brightness-110"
+          className="h-10 w-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_28px_rgba(192,38,211,0.24)]"
         >
           Open Siren’s Mind
         </Button>
       </CardContent>
     </Card>
+    </motion.div>
   );
 }
 
@@ -750,8 +752,9 @@ function PromptSection(props: {
       : "Describe the scene, style, mood, and details...";
 
   return (
+    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
     <Card
-      className={`border-gray-800 bg-gray-900/80 transition-all duration-500 ${
+      className={`border-gray-800 bg-gray-900/80 transition-all duration-500 hover:shadow-[0_12px_34px_rgba(0,0,0,0.22)] ${
         props.highlight
           ? "border-fuchsia-400/50 shadow-[0_0_0_1px_rgba(232,121,249,0.25),0_0_34px_rgba(192,38,211,0.18)]"
           : ""
@@ -773,7 +776,7 @@ function PromptSection(props: {
             value={props.prompt}
             onChange={(e) => props.onPromptChange(e.target.value)}
             placeholder={placeholder}
-            className={`min-h-32 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500 transition-all ${
+            className={`min-h-32 resize-none border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500 transition-all duration-300 hover:border-gray-600 focus-visible:ring-2 focus-visible:ring-fuchsia-400/35 ${
               props.highlight ? "ring-1 ring-fuchsia-400/35" : ""
             }`}
           />
@@ -806,7 +809,7 @@ function PromptSection(props: {
               type="button"
               onClick={() => props.onRefine("cinematic")}
               disabled={props.refiningVariant !== null}
-              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-purple-500/90 via-fuchsia-500/90 to-cyan-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-purple-500/90 via-fuchsia-500/90 to-cyan-500/90 px-3 py-2 text-[11px] font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_10px_26px_rgba(168,85,247,0.28)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "cinematic" ? "Refining..." : "🎬 Cinematic"}
             </button>
@@ -815,7 +818,7 @@ function PromptSection(props: {
               type="button"
               onClick={() => props.onRefine("explicit")}
               disabled={props.refiningVariant !== null}
-              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-rose-500/90 via-pink-500/90 to-fuchsia-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-rose-500/90 via-pink-500/90 to-fuchsia-500/90 px-3 py-2 text-[11px] font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_10px_26px_rgba(244,114,182,0.26)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "explicit" ? "Refining..." : "🔥 Explicit"}
             </button>
@@ -824,7 +827,7 @@ function PromptSection(props: {
               type="button"
               onClick={() => props.onRefine("photoreal")}
               disabled={props.refiningVariant !== null}
-              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-cyan-500/90 via-sky-500/90 to-blue-500/90 px-3 py-2 text-[11px] font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-lg border border-fuchsia-500/20 bg-gradient-to-r from-cyan-500/90 via-sky-500/90 to-blue-500/90 px-3 py-2 text-[11px] font-semibold text-white transition duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_10px_26px_rgba(34,211,238,0.26)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {props.refiningVariant === "photoreal" ? "Refining..." : "📸 Photoreal"}
             </button>
@@ -866,7 +869,7 @@ function PromptSection(props: {
               key={chip}
               type="button"
               onClick={() => addChip(chip)}
-              className="rounded-full bg-gray-800 px-3 py-1.5 text-[11px] text-gray-200 transition-colors hover:bg-purple-500/20 hover:text-purple-200"
+              className="rounded-full bg-gray-800 px-3 py-1.5 text-[11px] text-gray-200 transition-all duration-200 hover:-translate-y-0.5 hover:bg-purple-500/20 hover:text-purple-200 hover:shadow-[0_8px_18px_rgba(168,85,247,0.16)]"
             >
               + {chip}
             </button>
@@ -901,6 +904,7 @@ function PromptSection(props: {
         </AnimatePresence>
       </CardContent>
     </Card>
+    </motion.div>
   );
 }
 
@@ -1007,7 +1011,8 @@ function ModelStyleSection(props: {
   ];
 
   return (
-    <Card className="border-gray-800 bg-gray-900/80">
+    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
+    <Card className="border-gray-800 bg-gray-900/80 transition-all duration-300 hover:shadow-[0_12px_30px_rgba(0,0,0,0.20)]">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
         <CardDescription className="text-xs text-gray-300">
@@ -1027,10 +1032,10 @@ function ModelStyleSection(props: {
                   key={bm.id}
                   type="button"
                   onClick={() => props.onBaseModelChange(bm.id)}
-                  className={`rounded-lg border-2 p-3 text-xs font-semibold transition-all ${
+                  className={`rounded-lg border-2 p-3 text-xs font-semibold transition-all duration-200 ${
                     isActive
                       ? "border-purple-500 bg-purple-500/10 text-white"
-                      : "border-gray-800 bg-gray-950 text-gray-300 hover:border-gray-700"
+                      : "border-gray-800 bg-gray-950 text-gray-300 hover:-translate-y-0.5 hover:border-gray-700 hover:shadow-[0_10px_20px_rgba(0,0,0,0.18)]"
                   }`}
                 >
                   {bm.label}
@@ -1050,10 +1055,10 @@ function ModelStyleSection(props: {
                   key={preset}
                   type="button"
                   onClick={() => props.onStylePresetChange(preset)}
-                  className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all ${
+                  className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all duration-200 ${
                     isActive
                       ? "bg-purple-500 text-white"
-                      : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                      : "bg-gray-800 text-gray-300 hover:-translate-y-0.5 hover:bg-gray-700 hover:shadow-[0_8px_18px_rgba(0,0,0,0.18)]"
                   }`}
                 >
                   {preset.replace("_", " ")}
@@ -1064,6 +1069,7 @@ function ModelStyleSection(props: {
         </div>
       </CardContent>
     </Card>
+    </motion.div>
   );
 }
 
@@ -1085,7 +1091,8 @@ function LoraIdentitySection(props: {
     });
 
   return (
-    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_24px_rgba(168,85,247,0.12)]">
+    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
+    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_24px_rgba(168,85,247,0.12)] transition-all duration-300 hover:shadow-[0_0_34px_rgba(168,85,247,0.18)]">
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Identity Control</CardTitle>
         <CardDescription className="text-xs text-gray-300">
@@ -1123,6 +1130,7 @@ function LoraIdentitySection(props: {
         )}
       </CardContent>
     </Card>
+    </motion.div>
   );
 }
 
@@ -1149,7 +1157,8 @@ function AdvancedSettings(props: {
   };
 
   return (
-    <Card className="border-gray-800 bg-gray-900/80">
+    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
+    <Card className="border-gray-800 bg-gray-900/80 transition-all duration-300 hover:shadow-[0_12px_30px_rgba(0,0,0,0.20)]">
       <CardHeader className="py-3">
         <Button
           variant="ghost"
@@ -1272,6 +1281,7 @@ function AdvancedSettings(props: {
         )}
       </AnimatePresence>
     </Card>
+    </motion.div>
   );
 }
 
@@ -1288,7 +1298,8 @@ function VideoSettings(props: {
   const [open, setOpen] = useState(false);
 
   return (
-    <Card className="border-gray-800 bg-gray-900/80">
+    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
+    <Card className="border-gray-800 bg-gray-900/80 transition-all duration-300 hover:shadow-[0_12px_30px_rgba(0,0,0,0.20)]">
       <CardHeader className="py-3">
         <Button
           variant="ghost"
@@ -1393,6 +1404,7 @@ function VideoSettings(props: {
         )}
       </AnimatePresence>
     </Card>
+    </motion.div>
   );
 }
 
@@ -1417,7 +1429,8 @@ function GenerateButton(props: {
   } at ${props.qualityPreset} quality with ${props.consistencyPreset} consistency.`;
 
   return (
-    <Card className="border-gray-800 bg-gray-900/80">
+    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
+    <Card className="border-gray-800 bg-gray-900/80 transition-all duration-300 hover:shadow-[0_18px_38px_rgba(168,85,247,0.14)]">
       <CardContent className="p-4">
         <motion.div
           whileHover={{
@@ -1431,10 +1444,10 @@ function GenerateButton(props: {
             type="button"
             onClick={props.onClick}
             disabled={props.disabled || props.isGenerating}
-            className={`h-12 w-full text-sm font-semibold transition-all md:text-base ${
+            className={`h-12 w-full text-sm font-semibold transition-all duration-200 md:text-base ${
               props.disabled || props.isGenerating
                 ? "cursor-not-allowed bg-gray-700 text-gray-300"
-                : "bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 shadow-lg shadow-purple-500/30 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+                : "bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 shadow-lg shadow-purple-500/30 hover:-translate-y-0.5 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 hover:shadow-[0_14px_34px_rgba(168,85,247,0.28)]"
             }`}
           >
             {props.isGenerating ? (
@@ -1453,6 +1466,7 @@ function GenerateButton(props: {
         <p className="mt-2 text-center text-[11px] text-gray-300">{subtext}</p>
       </CardContent>
     </Card>
+    </motion.div>
   );
 }
 
@@ -1634,7 +1648,7 @@ function OutputPanel(props: {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: index * 0.05 }}
-              className="group relative aspect-square overflow-hidden rounded-xl border border-gray-800 bg-gray-950"
+              className="group relative aspect-square overflow-hidden rounded-xl border border-gray-800 bg-gray-950 transition-all duration-300 hover:-translate-y-1 hover:border-gray-700 hover:shadow-[0_14px_30px_rgba(0,0,0,0.28)]"
             >
               {item.kind === "image" ? (
                 <img src={item.url} alt={item.prompt} className="h-full w-full object-cover" />
@@ -1683,7 +1697,7 @@ function OutputPanel(props: {
             <Button
               type="button"
               onClick={handleDownloadLatest}
-              className="justify-start gap-2 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-semibold text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+              className="justify-start gap-2 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 hover:shadow-[0_12px_28px_rgba(168,85,247,0.24)]"
             >
               <DownloadIcon />
               Download
@@ -1693,7 +1707,7 @@ function OutputPanel(props: {
               type="button"
               variant="outline"
               onClick={handleCopyPrompt}
-              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 transition-all duration-200 hover:-translate-y-0.5 hover:bg-gray-800 hover:shadow-[0_10px_20px_rgba(0,0,0,0.18)]"
             >
               <Copy className="h-4 w-4" />
               Copy Prompt
@@ -1703,7 +1717,7 @@ function OutputPanel(props: {
               type="button"
               variant="outline"
               onClick={props.onGenerateMore}
-              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 transition-all duration-200 hover:-translate-y-0.5 hover:bg-gray-800 hover:shadow-[0_10px_20px_rgba(0,0,0,0.18)]"
             >
               <Sparkles className="h-4 w-4" />
               Generate More Like This
@@ -1713,7 +1727,7 @@ function OutputPanel(props: {
               type="button"
               variant="outline"
               onClick={handleTrainTwin}
-              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 transition-all duration-200 hover:-translate-y-0.5 hover:bg-gray-800 hover:shadow-[0_10px_20px_rgba(0,0,0,0.18)]"
             >
               <UserPlus className="h-4 w-4" />
               Train AI Twin
@@ -1837,7 +1851,7 @@ function HistorySidebar(props: {
             key={item.id}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex cursor-pointer gap-2 rounded-lg border border-gray-800 bg-gray-900/80 p-2 hover:border-gray-700"
+            className="flex cursor-pointer gap-2 rounded-lg border border-gray-800 bg-gray-900/80 p-2 transition-all duration-200 hover:-translate-y-0.5 hover:border-gray-700 hover:shadow-[0_10px_18px_rgba(0,0,0,0.18)]"
             onClick={() => props.onSelect(item)}
           >
             {item.kind === "image" ? (
