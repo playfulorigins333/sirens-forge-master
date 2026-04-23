@@ -2482,24 +2482,6 @@ ${basePrompt}`,
                 />
               )}
 
-              <LoraIdentitySection
-                value={loraSelection}
-                onChange={(next) => setLoraSelection(next)}
-                options={identitySelectOptions}
-              />
-
-              <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
-                <div className="font-semibold text-gray-100">Ultra add-on</div>
-                <div className="mt-1">
-                  Type{" "}
-                  <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
-                  Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
-                  masturbation, vaginal.
-                </div>
-              </div>
-
-              <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
-
               <PromptSection
                 mode={mode}
                 prompt={prompt}
@@ -2515,16 +2497,36 @@ ${basePrompt}`,
                 highlight={highlightPrompt}
               />
 
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <LoraIdentitySection
+                  value={loraSelection}
+                  onChange={(next) => setLoraSelection(next)}
+                  options={identitySelectOptions}
+                />
+
+                <ModelStyleSection
+                  baseModel={baseModel}
+                  stylePreset={stylePreset}
+                  onBaseModelChange={setBaseModel}
+                  onStylePresetChange={setStylePreset}
+                />
+              </div>
+
+              <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
+                <div className="font-semibold text-gray-100">Ultra add-on</div>
+                <div className="mt-1">
+                  Type{" "}
+                  <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
+                  Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
+                  masturbation, vaginal.
+                </div>
+              </div>
+
+              <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
+
             </div>
 
             <div className="space-y-4 xl:col-span-1">
-              <ModelStyleSection
-                baseModel={baseModel}
-                stylePreset={stylePreset}
-                onBaseModelChange={setBaseModel}
-                onStylePresetChange={setStylePreset}
-              />
-
               {mode === "text_to_image" ? (
                 <AdvancedSettings
                   resolution={resolution}
