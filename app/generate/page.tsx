@@ -898,17 +898,12 @@ function PromptSection(props: {
 
 function InlineUltraAddOnHelper() {
   return (
-    <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[11px] text-gray-300">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-semibold text-white">Ultra Add-On (Toy Insertion)</span>
-        <span className="text-gray-400">•</span>
-        <span>
-          Required trigger keyword: <span className="font-mono text-gray-100">(dildo)</span>
-        </span>
-      </div>
-      <div className="mt-1 text-[10px] text-gray-400">
-        Add it anywhere in your prompt. Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up, masturbation, vaginal.
-      </div>
+    <div className="text-[11px] leading-5 text-gray-400">
+      <span className="font-semibold text-gray-200">Ultra (Toy Insertion):</span>{" "}
+      use <span className="font-mono text-white">(dildo)</span> in your prompt.
+      <span className="ml-2 text-[10px] text-gray-500">
+        Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up, masturbation, vaginal.
+      </span>
     </div>
   );
 }
