@@ -2511,7 +2511,35 @@ ${basePrompt}`,
                     textareaRef={promptTextareaRef}
                     highlight={highlightPrompt}
                   />
-</div>
+
+                  {mode === "text_to_image" ? (
+                    <AdvancedSettings
+                      resolution={resolution}
+                      guidance={guidance}
+                      steps={steps}
+                      seed={seed}
+                      lockSeed={lockSeed}
+                      batchSize={batchSize}
+                      onResolutionChange={setResolution}
+                      onGuidanceChange={setGuidance}
+                      onStepsChange={setSteps}
+                      onSeedChange={setSeed}
+                      onLockSeedChange={setLockSeed}
+                      onBatchSizeChange={setBatchSize}
+                    />
+                  ) : (
+                    <VideoSettings
+                      duration={videoDuration}
+                      fps={videoFps}
+                      motion={videoMotion}
+                      batchSize={videoBatchSize}
+                      onDurationChange={setVideoDuration}
+                      onFpsChange={setVideoFps}
+                      onMotionChange={setVideoMotion}
+                      onBatchSizeChange={setVideoBatchSize}
+                    />
+                  )}
+                </div>
 
                 <div className="space-y-4">
                   <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
@@ -2545,33 +2573,6 @@ ${basePrompt}`,
             </CardContent>
           </Card>
 
-          {mode === "text_to_image" ? (
-            <AdvancedSettings
-              resolution={resolution}
-              guidance={guidance}
-              steps={steps}
-              seed={seed}
-              lockSeed={lockSeed}
-              batchSize={batchSize}
-              onResolutionChange={setResolution}
-              onGuidanceChange={setGuidance}
-              onStepsChange={setSteps}
-              onSeedChange={setSeed}
-              onLockSeedChange={setLockSeed}
-              onBatchSizeChange={setBatchSize}
-            />
-          ) : (
-            <VideoSettings
-              duration={videoDuration}
-              fps={videoFps}
-              motion={videoMotion}
-              batchSize={videoBatchSize}
-              onDurationChange={setVideoDuration}
-              onFpsChange={setVideoFps}
-              onMotionChange={setVideoMotion}
-              onBatchSizeChange={setVideoBatchSize}
-            />
-          )}
 
           <AnimatePresence>
             {refineFeedback && (
