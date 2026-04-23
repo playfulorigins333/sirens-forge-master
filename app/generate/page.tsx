@@ -975,18 +975,18 @@ function ModelStyleSection(props: {
 
   return (
     <Card className="border-gray-800 bg-gray-900/80">
-      <CardHeader className="pb-2">
+      <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
-        <CardDescription className="text-[11px] text-gray-400">
-          Body type + style preset.
+        <CardDescription className="text-xs text-gray-300">
+          SDXL core model (bigLust_v16) with body-specific LoRA shaping.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3 pt-0">
+      <CardContent className="space-y-5">
         <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-300">
-            Body Type
+          <p className="mb-2 text-xs font-semibold text-gray-200">
+            Base Model (Body Type)
           </p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             {baseModels.map((bm) => {
               const isActive = props.baseModel === bm.id;
               return (
@@ -994,7 +994,7 @@ function ModelStyleSection(props: {
                   key={bm.id}
                   type="button"
                   onClick={() => props.onBaseModelChange(bm.id)}
-                  className={`rounded-lg border-2 px-3 py-2 text-xs font-semibold transition-all ${
+                  className={`rounded-lg border-2 p-3 text-xs font-semibold transition-all ${
                     isActive
                       ? "border-purple-500 bg-purple-500/10 text-white"
                       : "border-gray-800 bg-gray-950 text-gray-300 hover:border-gray-700"
@@ -1008,10 +1008,8 @@ function ModelStyleSection(props: {
         </div>
 
         <div>
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-300">
-            Style
-          </p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <p className="mb-2 text-xs font-semibold text-gray-200">Style Preset</p>
+          <div className="flex flex-wrap gap-2">
             {stylePresets.map((preset) => {
               const isActive = props.stylePreset === preset;
               return (
@@ -1019,7 +1017,7 @@ function ModelStyleSection(props: {
                   key={preset}
                   type="button"
                   onClick={() => props.onStylePresetChange(preset)}
-                  className={`rounded-lg px-2.5 py-1.5 text-[10px] font-medium transition-all ${
+                  className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all ${
                     isActive
                       ? "bg-purple-500 text-white"
                       : "bg-gray-800 text-gray-300 hover:bg-gray-700"
@@ -1042,6 +1040,7 @@ function LoraIdentitySection(props: {
   options: { id: string; label: string }[];
 }) {
   const v = props.value;
+  const hasIdentity = v.selected.length > 0;
 
   const setSelected = (id: string) =>
     props.onChange({
@@ -1053,17 +1052,25 @@ function LoraIdentitySection(props: {
     });
 
   return (
-    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_16px_rgba(168,85,247,0.10)]">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm md:text-base">Identity</CardTitle>
-        <CardDescription className="text-[11px] text-gray-400">
-          Select your trained LoRA.
+    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_24px_rgba(168,85,247,0.12)]">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm md:text-base">Identity Control</CardTitle>
+        <CardDescription className="text-xs text-gray-300">
+          Use a trained identity LoRA to keep the same person consistent across generations and video.
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-2 pt-0 text-xs">
+      <CardContent className="space-y-3 text-xs">
+        {props.options.length === 0 && (
+          <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
+            No trained LoRAs yet. Create one on{" "}
+            <span className="font-semibold text-gray-100">/lora/train</span>{" "}
+            then come back to select it here.
+          </div>
+        )}
+
         <Select value={v.selected[0] || "none"} onValueChange={setSelected}>
-          <SelectTrigger className="h-9 border-gray-800 bg-gray-950 text-xs text-gray-100">
+          <SelectTrigger className="h-8 border-gray-800 bg-gray-950 text-xs text-gray-100">
             <SelectValue placeholder="Select identity LoRA" />
           </SelectTrigger>
           <SelectContent className="border-gray-800 bg-gray-950 text-gray-100">
@@ -1075,10 +1082,11 @@ function LoraIdentitySection(props: {
           </SelectContent>
         </Select>
 
-        {props.options.length === 0 && (
-          <p className="text-[10px] leading-5 text-gray-400">
-            No trained LoRAs yet. Create one on <span className="font-semibold text-gray-200">/lora/train</span>.
-          </p>
+        {!hasIdentity && (
+          <div className="rounded-lg border border-purple-900/50 bg-purple-500/5 px-3 py-2 text-[11px] text-gray-300">
+            <span className="font-semibold text-purple-300">New here?</span>{" "}
+            Generate once, then train an identity LoRA for more consistent results across images and video.
+          </div>
         )}
       </CardContent>
     </Card>
@@ -1752,7 +1760,7 @@ function HistorySidebar(props: {
     });
 
   return (
-    <div className="h-full space-y-3 overflow-y-auto border-l border-gray-900 bg-gray-950/70 p-3 md:p-4">
+    <div className="space-y-3 overflow-y-auto rounded-xl bg-gray-950/70 p-3 md:p-4">
       <h3 className="text-sm font-bold text-gray-100 md:text-base">Session History</h3>
 
       <div className="space-y-2 text-xs">
@@ -2444,8 +2452,8 @@ ${basePrompt}`,
     <div className="flex min-h-screen flex-col bg-black text-gray-100">
       <GeneratorHeader activeMode={mode} />
 
-      <main className="flex flex-1 flex-col md:flex-row">
-        <div className="mx-auto w-full max-w-6xl flex-1 space-y-4 px-4 py-4 md:px-6 md:py-6">
+      <main className="flex flex-1 flex-col">
+        <div className="mx-auto w-full max-w-5xl flex-1 space-y-4 px-4 py-4 md:px-6 md:py-6">
           <AnimatePresence>
             <HandoffArrivalBanner
               visible={showArrivalBanner}
@@ -2464,136 +2472,129 @@ ${basePrompt}`,
 
           <ModeTabs activeMode={mode} onChange={setMode} />
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-            <div className="space-y-4 xl:col-span-1">
-              {mode === "image_to_video" && (
-                <ImageToVideoUploadSection
-                  imageFile={imageFile}
-                  previewUrl={imagePreviewUrl}
-                  onFileChange={setImageFile}
-                />
-              )}
+          {mode === "image_to_video" && (
+            <ImageToVideoUploadSection
+              imageFile={imageFile}
+              previewUrl={imagePreviewUrl}
+              onFileChange={setImageFile}
+            />
+          )}
 
-              <PromptSection
-                mode={mode}
-                prompt={prompt}
-                negativePrompt={negativePrompt}
-                onPromptChange={(value) => {
-                  setPrompt(value);
-                  setRefineChoices(null);
-                }}
-                onNegativePromptChange={setNegativePrompt}
-                onRefine={handleAiRefine}
-                refiningVariant={refiningVariant}
-                textareaRef={promptTextareaRef}
-                highlight={highlightPrompt}
-              />
+          <PromptSection
+            mode={mode}
+            prompt={prompt}
+            negativePrompt={negativePrompt}
+            onPromptChange={(value) => {
+              setPrompt(value);
+              setRefineChoices(null);
+            }}
+            onNegativePromptChange={setNegativePrompt}
+            onRefine={handleAiRefine}
+            refiningVariant={refiningVariant}
+            textareaRef={promptTextareaRef}
+            highlight={highlightPrompt}
+          />
 
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                <LoraIdentitySection
-                  value={loraSelection}
-                  onChange={(next) => setLoraSelection(next)}
-                  options={identitySelectOptions}
-                />
+          <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
 
-                <ModelStyleSection
-                  baseModel={baseModel}
-                  stylePreset={stylePreset}
-                  onBaseModelChange={setBaseModel}
-                  onStylePresetChange={setStylePreset}
-                />
-              </div>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <LoraIdentitySection
+              value={loraSelection}
+              onChange={(next) => setLoraSelection(next)}
+              options={identitySelectOptions}
+            />
 
-              <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
-                <div className="font-semibold text-gray-100">Ultra add-on</div>
-                <div className="mt-1">
-                  Type{" "}
-                  <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
-                  Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
-                  masturbation, vaginal.
-                </div>
-              </div>
+            <ModelStyleSection
+              baseModel={baseModel}
+              stylePreset={stylePreset}
+              onBaseModelChange={setBaseModel}
+              onStylePresetChange={setStylePreset}
+            />
+          </div>
 
-              <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
-
-            </div>
-
-            <div className="space-y-4 xl:col-span-1">
-              {mode === "text_to_image" ? (
-                <AdvancedSettings
-                  resolution={resolution}
-                  guidance={guidance}
-                  steps={steps}
-                  seed={seed}
-                  lockSeed={lockSeed}
-                  batchSize={batchSize}
-                  onResolutionChange={setResolution}
-                  onGuidanceChange={setGuidance}
-                  onStepsChange={setSteps}
-                  onSeedChange={setSeed}
-                  onLockSeedChange={setLockSeed}
-                  onBatchSizeChange={setBatchSize}
-                />
-              ) : (
-                <VideoSettings
-                  duration={videoDuration}
-                  fps={videoFps}
-                  motion={videoMotion}
-                  batchSize={videoBatchSize}
-                  onDurationChange={setVideoDuration}
-                  onFpsChange={setVideoFps}
-                  onMotionChange={setVideoMotion}
-                  onBatchSizeChange={setVideoBatchSize}
-                />
-              )}
-
-              <GenerateButton
-                mode={mode}
-                isGenerating={isGenerating}
-                batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
-                qualityPreset={qualityPreset}
-                consistencyPreset={consistencyPreset}
-                disabled={!canGenerate}
-                onClick={handleGenerate}
-              />
-
-              <AnimatePresence>
-                {refineFeedback && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-200 shadow-[0_0_18px_rgba(16,185,129,0.12)]"
-                  >
-                    {refineFeedback}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              <RefineChoicesPanel
-                choices={refineChoices}
-                onApply={handleApplyRefineChoice}
-                onGenerateRecommended={handleGenerateRecommended}
-                recommendedIndex={recommendedRefineIndex}
-                appliedIndex={appliedRefineIndex}
-                generatingRecommended={isGenerating}
-              />
-
-              {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
-            </div>
-
-            <div className="space-y-4 xl:col-span-1">
-              <Card className="h-full border-gray-800 bg-gray-900/80">
-                <CardContent className="h-full p-4">
-                  <OutputPanel items={items} loading={isGenerating} onGenerateMore={handleGenerate} />
-                </CardContent>
-              </Card>
+          <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
+            <div className="font-semibold text-gray-100">Ultra add-on</div>
+            <div className="mt-1">
+              Type{" "}
+              <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
+              Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
+              masturbation, vaginal.
             </div>
           </div>
-        </div>
 
-        <div className="w-full border-t border-gray-900 md:w-80 md:border-l md:border-t-0 lg:w-96">
-          <HistorySidebar history={history} onSelect={handleHistorySelect} onRerun={handleHistoryRerun} />
+          {mode === "text_to_image" ? (
+            <AdvancedSettings
+              resolution={resolution}
+              guidance={guidance}
+              steps={steps}
+              seed={seed}
+              lockSeed={lockSeed}
+              batchSize={batchSize}
+              onResolutionChange={setResolution}
+              onGuidanceChange={setGuidance}
+              onStepsChange={setSteps}
+              onSeedChange={setSeed}
+              onLockSeedChange={setLockSeed}
+              onBatchSizeChange={setBatchSize}
+            />
+          ) : (
+            <VideoSettings
+              duration={videoDuration}
+              fps={videoFps}
+              motion={videoMotion}
+              batchSize={videoBatchSize}
+              onDurationChange={setVideoDuration}
+              onFpsChange={setVideoFps}
+              onMotionChange={setVideoMotion}
+              onBatchSizeChange={setVideoBatchSize}
+            />
+          )}
+
+          <GenerateButton
+            mode={mode}
+            isGenerating={isGenerating}
+            batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
+            qualityPreset={qualityPreset}
+            consistencyPreset={consistencyPreset}
+            disabled={!canGenerate}
+            onClick={handleGenerate}
+          />
+
+          <AnimatePresence>
+            {refineFeedback && (
+              <motion.div
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-2 text-[11px] font-medium text-emerald-200 shadow-[0_0_18px_rgba(16,185,129,0.12)]"
+              >
+                {refineFeedback}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <RefineChoicesPanel
+            choices={refineChoices}
+            onApply={handleApplyRefineChoice}
+            onGenerateRecommended={handleGenerateRecommended}
+            recommendedIndex={recommendedRefineIndex}
+            appliedIndex={appliedRefineIndex}
+            generatingRecommended={isGenerating}
+          />
+
+          {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
+
+          <Card className="border-gray-800 bg-gray-900/80">
+            <CardContent className="p-4">
+              <OutputPanel items={items} loading={isGenerating} onGenerateMore={handleGenerate} />
+            </CardContent>
+          </Card>
+
+          <Card className="border-gray-800 bg-gray-900/80">
+            <CardContent className="p-0">
+              <HistorySidebar history={history} onSelect={handleHistorySelect} onRerun={handleHistoryRerun} />
+            </CardContent>
+          </Card>
         </div>
       </main>
 
