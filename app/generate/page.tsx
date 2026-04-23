@@ -550,7 +550,7 @@ function HandoffConfidencePanel(props: {
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="rounded-xl border border-fuchsia-500/20 bg-black/30 px-3 py-3">
             <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
@@ -781,7 +781,16 @@ function PromptSection(props: {
             {props.prompt.length} characters
           </p>
 
-          <InlineUltraAddOnHelper />
+          <InlineUltraAddOnHelper
+            onInsert={() => {
+              const hasKeyword = /\bdildo\b/i.test(props.prompt);
+              if (hasKeyword) return;
+              const next = props.prompt.trim()
+                ? `${props.prompt.trim()} dildo`
+                : "dildo";
+              props.onPromptChange(next);
+            }}
+          />
 <div className="mt-3">
   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fuchsia-300">
     AI Refine Modes
@@ -896,12 +905,23 @@ function PromptSection(props: {
 }
 
 
-function InlineUltraAddOnHelper() {
+function InlineUltraAddOnHelper(props: {
+  onInsert: () => void;
+}) {
   return (
-    <div className="text-[11px] leading-5 text-gray-400">
-      <span className="font-semibold text-gray-200">Ultra (Toy Insertion):</span>{" "}
-      use <span className="font-mono text-white">(dildo)</span> in your prompt.
-      <span className="ml-2 text-[10px] text-gray-500">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-5 text-gray-400">
+      <span className="font-semibold text-gray-200">Ultra (Toy Insertion):</span>
+      <span>
+        use <span className="font-mono text-white">(dildo)</span> in your prompt.
+      </span>
+      <button
+        type="button"
+        onClick={props.onInsert}
+        className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/15 hover:text-white"
+      >
+        + Insert
+      </button>
+      <span className="text-[10px] text-gray-500">
         Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up, masturbation, vaginal.
       </span>
     </div>
@@ -914,7 +934,7 @@ function ImageToVideoUploadSection(props: {
   onFileChange: (file: File | null) => void;
 }) {
   return (
-    <Card className="border-gray-800 bg-gray-900/80">
+    <Card className="sticky top-24 border-gray-800 bg-gray-900/80">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-sm md:text-base">
           <Upload className="h-5 w-5 text-cyan-400" />
@@ -2466,7 +2486,7 @@ ${basePrompt}`,
       <GeneratorHeader activeMode={mode} />
 
       <main className="flex flex-1 flex-col">
-        <div className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-4 md:px-6 md:py-6">
+        <div className="mx-auto w-full max-w-6xl flex-1 space-y-4 px-4 py-4 md:px-6 md:py-5">
           <AnimatePresence>
             <HandoffArrivalBanner
               visible={showArrivalBanner}
@@ -2494,9 +2514,9 @@ ${basePrompt}`,
           )}
 
           <Card className="border-gray-800 bg-gray-900/80 shadow-[0_0_30px_rgba(34,211,238,0.05)]">
-            <CardContent className="space-y-4 p-4 md:p-5">
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
-                <div className="space-y-4">
+            <CardContent className="space-y-3 p-4 md:p-4">
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
+                <div className="space-y-3">
                   <PromptSection
                     mode={mode}
                     prompt={prompt}
@@ -2541,10 +2561,10 @@ ${basePrompt}`,
                   )}
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3 xl:sticky xl:top-24 xl:self-start">
                   <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
 
-                  <div className="grid grid-cols-1 gap-4">
+                  <div className="grid grid-cols-1 gap-3">
                     <LoraIdentitySection
                       value={loraSelection}
                       onChange={(next) => setLoraSelection(next)}
