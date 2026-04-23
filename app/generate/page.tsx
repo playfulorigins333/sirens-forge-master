@@ -2519,10 +2519,15 @@ ${basePrompt}`,
                   </div>
 
                   <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
-                    <div className="font-semibold text-gray-100">Ultra add-on</div>
+                    <div className="font-semibold text-gray-100">Ultra Add-On (Toy Insertion)</div>
                     <div className="mt-1">
-                      Type{" "}
-                      <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
+                      <span className="font-semibold text-white">Required trigger keyword:</span>{" "}
+                      <span className="font-mono text-gray-100">(dildo)</span>
+                    </div>
+                    <div className="mt-1">
+                      Type it anywhere in your prompt to enable toy insertions.
+                    </div>
+                    <div className="mt-2 text-[10px] text-gray-400">
                       Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
                       masturbation, vaginal.
                     </div>
