@@ -2453,7 +2453,7 @@ ${basePrompt}`,
       <GeneratorHeader activeMode={mode} />
 
       <main className="flex flex-1 flex-col">
-        <div className="mx-auto w-full max-w-5xl flex-1 space-y-4 px-4 py-4 md:px-6 md:py-6">
+        <div className="mx-auto w-full max-w-6xl flex-1 space-y-5 px-4 py-4 md:px-6 md:py-6">
           <AnimatePresence>
             <HandoffArrivalBanner
               visible={showArrivalBanner}
@@ -2480,47 +2480,67 @@ ${basePrompt}`,
             />
           )}
 
-          <PromptSection
-            mode={mode}
-            prompt={prompt}
-            negativePrompt={negativePrompt}
-            onPromptChange={(value) => {
-              setPrompt(value);
-              setRefineChoices(null);
-            }}
-            onNegativePromptChange={setNegativePrompt}
-            onRefine={handleAiRefine}
-            refiningVariant={refiningVariant}
-            textareaRef={promptTextareaRef}
-            highlight={highlightPrompt}
-          />
+          <Card className="border-gray-800 bg-gray-900/80 shadow-[0_0_30px_rgba(34,211,238,0.05)]">
+            <CardContent className="space-y-4 p-4 md:p-5">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
+                <div className="space-y-4">
+                  <PromptSection
+                    mode={mode}
+                    prompt={prompt}
+                    negativePrompt={negativePrompt}
+                    onPromptChange={(value) => {
+                      setPrompt(value);
+                      setRefineChoices(null);
+                    }}
+                    onNegativePromptChange={setNegativePrompt}
+                    onRefine={handleAiRefine}
+                    refiningVariant={refiningVariant}
+                    textareaRef={promptTextareaRef}
+                    highlight={highlightPrompt}
+                  />
+                </div>
 
-          <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
+                <div className="space-y-4">
+                  <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <LoraIdentitySection
-              value={loraSelection}
-              onChange={(next) => setLoraSelection(next)}
-              options={identitySelectOptions}
-            />
+                  <div className="grid grid-cols-1 gap-4">
+                    <LoraIdentitySection
+                      value={loraSelection}
+                      onChange={(next) => setLoraSelection(next)}
+                      options={identitySelectOptions}
+                    />
 
-            <ModelStyleSection
-              baseModel={baseModel}
-              stylePreset={stylePreset}
-              onBaseModelChange={setBaseModel}
-              onStylePresetChange={setStylePreset}
-            />
-          </div>
+                    <ModelStyleSection
+                      baseModel={baseModel}
+                      stylePreset={stylePreset}
+                      onBaseModelChange={setBaseModel}
+                      onStylePresetChange={setStylePreset}
+                    />
+                  </div>
 
-          <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
-            <div className="font-semibold text-gray-100">Ultra add-on</div>
-            <div className="mt-1">
-              Type{" "}
-              <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
-              Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
-              masturbation, vaginal.
-            </div>
-          </div>
+                  <div className="rounded-xl border border-gray-800 bg-gray-950 px-4 py-3 text-[11px] text-gray-300">
+                    <div className="font-semibold text-gray-100">Ultra add-on</div>
+                    <div className="mt-1">
+                      Type{" "}
+                      <span className="font-mono text-gray-100">(d1ldo)</span> anywhere in your prompt to enable the dildo-play add-on.
+                      Helpful words: small dildo, medium dildo, big dildo, on back, on side, doggystyle, ass, close-up,
+                      masturbation, vaginal.
+                    </div>
+                  </div>
+
+                  <GenerateButton
+                    mode={mode}
+                    isGenerating={isGenerating}
+                    batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
+                    qualityPreset={qualityPreset}
+                    consistencyPreset={consistencyPreset}
+                    disabled={!canGenerate}
+                    onClick={handleGenerate}
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           {mode === "text_to_image" ? (
             <AdvancedSettings
@@ -2549,16 +2569,6 @@ ${basePrompt}`,
               onBatchSizeChange={setVideoBatchSize}
             />
           )}
-
-          <GenerateButton
-            mode={mode}
-            isGenerating={isGenerating}
-            batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
-            qualityPreset={qualityPreset}
-            consistencyPreset={consistencyPreset}
-            disabled={!canGenerate}
-            onClick={handleGenerate}
-          />
 
           <AnimatePresence>
             {refineFeedback && (
