@@ -781,7 +781,7 @@ function PromptSection(props: {
             {props.prompt.length} characters
           </p>
 
-          
+          <InlineUltraAddOnHelper />
 <div className="mt-3">
   <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-fuchsia-300">
     AI Refine Modes
@@ -2511,9 +2511,7 @@ ${basePrompt}`,
                     textareaRef={promptTextareaRef}
                     highlight={highlightPrompt}
                   />
-
-                  <InlineUltraAddOnHelper />
-                </div>
+</div>
 
                 <div className="space-y-4">
                   <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
