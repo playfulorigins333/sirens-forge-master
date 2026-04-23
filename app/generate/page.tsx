@@ -975,18 +975,18 @@ function ModelStyleSection(props: {
 
   return (
     <Card className="border-gray-800 bg-gray-900/80">
-      <CardHeader className="pb-3">
+      <CardHeader className="pb-2">
         <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
-        <CardDescription className="text-xs text-gray-300">
-          SDXL core model (bigLust_v16) with body-specific LoRA shaping.
+        <CardDescription className="text-[11px] text-gray-400">
+          Body type + style preset.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className="space-y-3 pt-0">
         <div>
-          <p className="mb-2 text-xs font-semibold text-gray-200">
-            Base Model (Body Type)
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-300">
+            Body Type
           </p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-2">
             {baseModels.map((bm) => {
               const isActive = props.baseModel === bm.id;
               return (
@@ -994,7 +994,7 @@ function ModelStyleSection(props: {
                   key={bm.id}
                   type="button"
                   onClick={() => props.onBaseModelChange(bm.id)}
-                  className={`rounded-lg border-2 p-3 text-xs font-semibold transition-all ${
+                  className={`rounded-lg border-2 px-3 py-2 text-xs font-semibold transition-all ${
                     isActive
                       ? "border-purple-500 bg-purple-500/10 text-white"
                       : "border-gray-800 bg-gray-950 text-gray-300 hover:border-gray-700"
@@ -1008,8 +1008,10 @@ function ModelStyleSection(props: {
         </div>
 
         <div>
-          <p className="mb-2 text-xs font-semibold text-gray-200">Style Preset</p>
-          <div className="flex flex-wrap gap-2">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-gray-300">
+            Style
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {stylePresets.map((preset) => {
               const isActive = props.stylePreset === preset;
               return (
@@ -1017,7 +1019,7 @@ function ModelStyleSection(props: {
                   key={preset}
                   type="button"
                   onClick={() => props.onStylePresetChange(preset)}
-                  className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all ${
+                  className={`rounded-lg px-2.5 py-1.5 text-[10px] font-medium transition-all ${
                     isActive
                       ? "bg-purple-500 text-white"
                       : "bg-gray-800 text-gray-300 hover:bg-gray-700"
@@ -1040,7 +1042,6 @@ function LoraIdentitySection(props: {
   options: { id: string; label: string }[];
 }) {
   const v = props.value;
-  const hasIdentity = v.selected.length > 0;
 
   const setSelected = (id: string) =>
     props.onChange({
@@ -1052,25 +1053,17 @@ function LoraIdentitySection(props: {
     });
 
   return (
-    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_24px_rgba(168,85,247,0.12)]">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm md:text-base">Identity Control</CardTitle>
-        <CardDescription className="text-xs text-gray-300">
-          Use a trained identity LoRA to keep the same person consistent across generations and video.
+    <Card className="border-purple-900/60 bg-gray-900/80 shadow-[0_0_16px_rgba(168,85,247,0.10)]">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm md:text-base">Identity</CardTitle>
+        <CardDescription className="text-[11px] text-gray-400">
+          Select your trained LoRA.
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="space-y-3 text-xs">
-        {props.options.length === 0 && (
-          <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
-            No trained LoRAs yet. Create one on{" "}
-            <span className="font-semibold text-gray-100">/lora/train</span>{" "}
-            then come back to select it here.
-          </div>
-        )}
-
+      <CardContent className="space-y-2 pt-0 text-xs">
         <Select value={v.selected[0] || "none"} onValueChange={setSelected}>
-          <SelectTrigger className="h-8 border-gray-800 bg-gray-950 text-xs text-gray-100">
+          <SelectTrigger className="h-9 border-gray-800 bg-gray-950 text-xs text-gray-100">
             <SelectValue placeholder="Select identity LoRA" />
           </SelectTrigger>
           <SelectContent className="border-gray-800 bg-gray-950 text-gray-100">
@@ -1082,11 +1075,10 @@ function LoraIdentitySection(props: {
           </SelectContent>
         </Select>
 
-        {!hasIdentity && (
-          <div className="rounded-lg border border-purple-900/50 bg-purple-500/5 px-3 py-2 text-[11px] text-gray-300">
-            <span className="font-semibold text-purple-300">New here?</span>{" "}
-            Generate once, then train an identity LoRA for more consistent results across images and video.
-          </div>
+        {props.options.length === 0 && (
+          <p className="text-[10px] leading-5 text-gray-400">
+            No trained LoRAs yet. Create one on <span className="font-semibold text-gray-200">/lora/train</span>.
+          </p>
         )}
       </CardContent>
     </Card>
@@ -2497,7 +2489,7 @@ ${basePrompt}`,
                 highlight={highlightPrompt}
               />
 
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <LoraIdentitySection
                   value={loraSelection}
                   onChange={(next) => setLoraSelection(next)}
