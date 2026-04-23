@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Sparkles,
   User,
+  Users,
 } from "lucide-react";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import LogoutButton from "@/components/LogoutButton";
@@ -48,7 +49,7 @@ export default async function DashboardPage() {
             </h1>
 
             <p className="max-w-3xl text-lg leading-relaxed font-medium text-gray-300 sm:text-xl">
-              Start with guided prompt creation, jump straight into generation, or build your AI Twin for consistent content.
+              Start with guided prompt creation, jump straight into generation, build your AI Twin, or grow with the affiliate program.
             </p>
           </div>
 
@@ -63,7 +64,7 @@ export default async function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-4">
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-5">
           <Link
             href="/lora/train"
             className="group relative overflow-hidden rounded-[28px] border border-pink-400/30 bg-gradient-to-br from-pink-950/40 via-black/50 to-purple-950/30 p-8 backdrop-blur-xl transition-all hover:border-pink-300/50 hover:bg-white/10"
@@ -179,6 +180,36 @@ export default async function DashboardPage() {
 
               <div className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition group-hover:text-white">
                 Open Vault
+                <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            href="/affiliate"
+            className="group relative overflow-hidden rounded-[28px] border border-emerald-400/20 bg-gradient-to-br from-emerald-950/30 via-black/50 to-cyan-950/20 p-8 backdrop-blur-xl transition-all hover:border-emerald-300/40 hover:bg-white/10"
+          >
+            <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/10 via-transparent to-cyan-500/10 opacity-0 transition-opacity group-hover:opacity-100" />
+
+            <div className="relative">
+              <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-cyan-500 shadow-lg">
+                <Users className="h-8 w-8 text-white" />
+              </div>
+
+              <div className="mb-3 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                Grow & Earn
+              </div>
+
+              <h2 className="mb-3 text-2xl font-bold text-white">
+                Affiliate Hub
+              </h2>
+
+              <p className="mb-6 text-base leading-relaxed font-medium text-gray-300">
+                Grab your referral link, track commissions, and grow your reach inside the platform.
+              </p>
+
+              <div className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition group-hover:text-white">
+                Open Affiliate Page
                 <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </div>
             </div>
