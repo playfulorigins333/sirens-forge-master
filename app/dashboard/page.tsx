@@ -9,12 +9,54 @@ import {
   User,
   Users,
   Flame,
+  Dna,
+  Image as ImageIcon,
+  Video as VideoIcon,
 } from "lucide-react";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { supabaseServer } from "@/lib/supabaseServer";
 import LogoutButton from "@/components/LogoutButton";
 
 export const metadata = {
   title: "Sirens Forge — Dashboard",
+};
+
+type GenerationRow = {
+  id: string;
+  user_id: string | null;
+  prompt: string | null;
+  image_url: string | null;
+  created_at: string | null;
+  updated_at?: string | null;
+  status: string | null;
+  metadata: Record<string, unknown> | null;
+  lora_used?: string | null;
+  job_type?: string | null;
+  mode?: string | null;
+};
+
+type LoraRow = {
+  id: string;
+  name: string | null;
+  preview_url: string | null;
+  status: string | null;
+  image_count: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+  trigger_token: string | null;
+};
+
+type ContinueIdentity = {
+  id: string;
+  name: string;
+  previewUrl: string | null;
+  previewKind: "image" | "video" | null;
+  lastPrompt: string;
+  lastCreatedAt: string | null;
+  totalAssets: number;
+  imageCount: number;
+  videoCount: number;
+  datasetImageCount: number | null;
 };
 
 const DAILY_SIREN_SCENES = [
@@ -47,6 +89,407 @@ const DAILY_SIREN_SCENES = [
   },
 ];
 
+function getMetadata(row: GenerationRow): Record<string, unknown> {
+  return row?.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+    ? row.metadata
+    : {};
+}
+
+function isCompletedStatus(row: GenerationRow): boolean {
+  return String(row?.status || "").trim().toLowerCase() === "completed";
+}
+
+function isPlaceholderRow(row: GenerationRow): boolean {
+  const metadata = getMetadata(row);
+  return metadata.placeholder === true;
+}
+
+function getRealAssetUrl(row: GenerationRow): string | null {
+  if (isPlaceholderRow(row)) {
+    return null;
+  }
+
+  const metadata = getMetadata(row);
+  const candidates = [row?.image_url, metadata.video_url, metadata.output_url];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function getAssetKind(url: string, row?: GenerationRow): "image" | "video" {
+  const clean = url.toLowerCase().split("?")[0].split("#")[0];
+  const metadata = row ? getMetadata(row) : {};
+  const mode = String(metadata.mode || row?.mode || row?.job_type || "").toLowerCase();
+
+  if (
+    clean.endsWith(".mp4") ||
+    clean.endsWith(".webm") ||
+    clean.endsWith(".mov") ||
+    clean.endsWith(".m4v") ||
+    mode.includes("video")
+  ) {
+    return "video";
+  }
+
+  return "image";
+}
+
+function isRealAsset(row: GenerationRow): boolean {
+  return isCompletedStatus(row) && !isPlaceholderRow(row) && !!getRealAssetUrl(row);
+}
+
+function getIdentityLora(row: GenerationRow): string | null {
+  return typeof row?.lora_used === "string" && row.lora_used.trim().length > 0
+    ? row.lora_used.trim()
+    : null;
+}
+
+function formatRelative(value?: string | null): string {
+  if (!value) return "Recently";
+
+  const time = new Date(value).getTime();
+  if (Number.isNaN(time)) return "Recently";
+
+  const diffMs = Date.now() - time;
+  const minutes = Math.floor(diffMs / 1000 / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+}
+
+function buildContinueIdentity(
+  lora: LoraRow | null,
+  linkedAssets: GenerationRow[]
+): ContinueIdentity | null {
+  if (!lora || linkedAssets.length === 0) {
+    return null;
+  }
+
+  const latestAsset = linkedAssets[0];
+  const latestUrl = getRealAssetUrl(latestAsset);
+
+  const latestImage = linkedAssets.find((row) => {
+    const url = getRealAssetUrl(row);
+    return url && getAssetKind(url, row) === "image";
+  });
+
+  const latestVideo = linkedAssets.find((row) => {
+    const url = getRealAssetUrl(row);
+    return url && getAssetKind(url, row) === "video";
+  });
+
+  const fallbackImageUrl = latestImage ? getRealAssetUrl(latestImage) : null;
+  const fallbackVideoUrl = latestVideo ? getRealAssetUrl(latestVideo) : null;
+
+  const previewUrl =
+    typeof lora.preview_url === "string" && lora.preview_url.trim().length > 0
+      ? lora.preview_url.trim()
+      : fallbackImageUrl || latestUrl || fallbackVideoUrl;
+
+  const previewKind = previewUrl ? getAssetKind(previewUrl, latestAsset) : null;
+
+  const imageCount = linkedAssets.filter((row) => {
+    const url = getRealAssetUrl(row);
+    return url && getAssetKind(url, row) === "image";
+  }).length;
+
+  const videoCount = linkedAssets.filter((row) => {
+    const url = getRealAssetUrl(row);
+    return url && getAssetKind(url, row) === "video";
+  }).length;
+
+  return {
+    id: lora.id,
+    name:
+      typeof lora.name === "string" && lora.name.trim().length > 0
+        ? lora.name.trim()
+        : typeof lora.trigger_token === "string" && lora.trigger_token.trim().length > 0
+          ? lora.trigger_token.trim()
+          : `Identity ${lora.id.slice(0, 8)}`,
+    previewUrl,
+    previewKind,
+    lastPrompt: latestAsset.prompt || "Continue building this identity with a fresh scene.",
+    lastCreatedAt: latestAsset.created_at || latestAsset.updated_at || null,
+    totalAssets: linkedAssets.length,
+    imageCount,
+    videoCount,
+    datasetImageCount: typeof lora.image_count === "number" ? lora.image_count : null,
+  };
+}
+
+async function getContinueIdentity(
+  authUserId: string,
+  profileId: string
+): Promise<ContinueIdentity | null> {
+  const supabase = await supabaseServer();
+
+  const { data: generations, error: generationError } = await supabase
+    .from("generations")
+    .select(
+      `
+        id,
+        user_id,
+        prompt,
+        image_url,
+        created_at,
+        updated_at,
+        status,
+        metadata,
+        lora_used,
+        job_type,
+        mode
+      `
+    )
+    .in("user_id", [authUserId, profileId])
+    .not("lora_used", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(60);
+
+  if (generationError) {
+    console.error("[dashboard] Failed to load identity-linked generations:", generationError);
+    return null;
+  }
+
+  const generationRows: GenerationRow[] = Array.isArray(generations)
+    ? (generations as GenerationRow[])
+    : [];
+
+  const realIdentityAssets = generationRows.filter((row) => isRealAsset(row) && getIdentityLora(row));
+
+  if (realIdentityAssets.length === 0) {
+    return null;
+  }
+
+  const latestIdentityId = getIdentityLora(realIdentityAssets[0]);
+
+  if (!latestIdentityId) {
+    return null;
+  }
+
+  const linkedAssets = realIdentityAssets.filter(
+    (row) => getIdentityLora(row) === latestIdentityId
+  );
+
+  const { data: lora, error: loraError } = await supabase
+    .from("user_loras")
+    .select(
+      `
+        id,
+        name,
+        preview_url,
+        status,
+        image_count,
+        created_at,
+        updated_at,
+        trigger_token
+      `
+    )
+    .eq("id", latestIdentityId)
+    .eq("user_id", authUserId)
+    .maybeSingle();
+
+  if (loraError) {
+    console.error("[dashboard] Failed to load latest identity:", loraError);
+    return null;
+  }
+
+  return buildContinueIdentity((lora as LoraRow | null) || null, linkedAssets);
+}
+
+function ContinueIdentityBlock({ identity }: { identity: ContinueIdentity | null }) {
+  if (!identity) {
+    return (
+      <section className="mb-8 overflow-hidden rounded-[32px] border border-purple-400/20 bg-gradient-to-br from-purple-950/25 via-black/50 to-pink-950/20 p-6 backdrop-blur-xl sm:p-8">
+        <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
+          <div>
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-purple-400/20 bg-purple-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-purple-200">
+              <Dna className="h-3.5 w-3.5" />
+              Continue Your Identity
+            </div>
+
+            <h2 className="text-2xl font-black tracking-tight text-white sm:text-3xl">
+              Your AI Twin is ready when you are
+            </h2>
+
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-300 sm:text-base">
+              Train an identity once, then build a repeatable character loop around it: generate, save, improve, and return.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row lg:justify-end">
+            <Link
+              href="/lora/train"
+              className="inline-flex h-11 items-center justify-center rounded-xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-5 text-sm font-bold text-white shadow-[0_0_26px_rgba(168,85,247,0.25)] transition hover:brightness-110"
+            >
+              Train Your First Identity
+              <ChevronRight className="ml-2 h-4 w-4" />
+            </Link>
+
+            <Link
+              href="/identities"
+              className="inline-flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-gray-100 transition hover:border-white/20 hover:bg-white/10"
+            >
+              View Identities
+            </Link>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  const generateHref = `/generate?identity=${encodeURIComponent(identity.id)}`;
+  const identityHref = `/identities/${identity.id}`;
+
+  return (
+    <section className="mb-8 overflow-hidden rounded-[32px] border border-purple-400/20 bg-gradient-to-br from-purple-950/30 via-black/55 to-pink-950/25 backdrop-blur-xl">
+      <div className="grid gap-0 lg:grid-cols-[0.72fr_1.28fr]">
+        <Link
+          href={identityHref}
+          className="group relative min-h-[260px] overflow-hidden bg-gray-950"
+        >
+          {identity.previewUrl ? (
+            identity.previewKind === "video" ? (
+              <video
+                src={identity.previewUrl}
+                className="h-full min-h-[260px] w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                muted
+                loop
+                playsInline
+                autoPlay
+              />
+            ) : (
+              <img
+                src={identity.previewUrl}
+                alt={identity.name}
+                className="h-full min-h-[260px] w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+              />
+            )
+          ) : (
+            <div className="flex h-full min-h-[260px] items-center justify-center bg-gradient-to-br from-purple-950/50 via-black to-pink-950/30">
+              <div className="flex h-24 w-24 items-center justify-center rounded-[32px] border border-white/10 bg-black/30">
+                <Dna className="h-12 w-12 text-purple-300" />
+              </div>
+            </div>
+          )}
+
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-transparent" />
+
+          <div className="absolute bottom-5 left-5 right-5">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/15 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-purple-100">
+              <Dna className="h-3.5 w-3.5" />
+              Last Used Identity
+            </div>
+
+            <h2 className="text-2xl font-black text-white">
+              {identity.name}
+            </h2>
+
+            <p className="mt-1 text-xs font-medium text-gray-300">
+              Last created {formatRelative(identity.lastCreatedAt)}
+            </p>
+          </div>
+        </Link>
+
+        <div className="p-6 sm:p-8">
+          <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-pink-200">
+                <Sparkles className="h-3.5 w-3.5" />
+                Continue Your Identity
+              </div>
+
+              <h2 className="text-2xl font-black tracking-tight text-white sm:text-3xl">
+                {identity.name} is waiting for the next scene
+              </h2>
+
+              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-300 sm:text-base">
+                Pick up where you left off. Keep the same identity active and push the character deeper into your Vault.
+              </p>
+            </div>
+
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row xl:flex-col">
+              <Link
+                href={generateHref}
+                className="inline-flex h-11 items-center justify-center rounded-xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-5 text-sm font-bold text-white shadow-[0_0_26px_rgba(168,85,247,0.25)] transition hover:brightness-110"
+              >
+                Continue Creating
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </Link>
+
+              <Link
+                href={identityHref}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 text-sm font-semibold text-gray-100 transition hover:border-white/20 hover:bg-white/10"
+              >
+                Open Identity
+              </Link>
+            </div>
+          </div>
+
+          <div className="mb-5 grid gap-3 sm:grid-cols-4">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
+                <Sparkles className="h-3.5 w-3.5 text-purple-300" />
+                Total
+              </div>
+              <p className="text-2xl font-black text-purple-100">
+                {identity.totalAssets}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
+                <ImageIcon className="h-3.5 w-3.5 text-pink-300" />
+                Images
+              </div>
+              <p className="text-2xl font-black text-pink-100">
+                {identity.imageCount}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
+                <VideoIcon className="h-3.5 w-3.5 text-cyan-300" />
+                Videos
+              </div>
+              <p className="text-2xl font-black text-cyan-100">
+                {identity.videoCount}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
+                <Dna className="h-3.5 w-3.5 text-yellow-300" />
+                Training
+              </div>
+              <p className="text-2xl font-black text-yellow-100">
+                {identity.datasetImageCount ?? 0}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-black/25 p-4">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-400">
+              Last Prompt
+            </div>
+            <p className="line-clamp-3 text-sm leading-relaxed text-gray-300">
+              {identity.lastPrompt}
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default async function DashboardPage() {
   const auth = await ensureActiveSubscription();
 
@@ -57,6 +500,11 @@ export default async function DashboardPage() {
       redirect("/pricing");
     }
   }
+
+  const authUserId = auth.user?.id;
+  const profileId = auth.profile?.id;
+  const continueIdentity =
+    authUserId && profileId ? await getContinueIdentity(authUserId, profileId) : null;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -94,6 +542,8 @@ export default async function DashboardPage() {
             <LogoutButton />
           </div>
         </div>
+
+        <ContinueIdentityBlock identity={continueIdentity} />
 
         <section className="mb-8 overflow-hidden rounded-[32px] border border-pink-400/20 bg-gradient-to-br from-pink-950/25 via-black/50 to-cyan-950/20 p-6 backdrop-blur-xl sm:p-8">
           <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
