@@ -470,20 +470,21 @@ function IdentityVariationPanel({
           const Icon = variation.icon;
 
           return (
-            <Link key={variation.key} href={variation.href}>
-              <Button
-                type="button"
-                variant="outline"
-                className={`h-auto min-h-[92px] w-full flex-col items-start justify-start gap-2 rounded-2xl p-4 text-left transition-all hover:-translate-y-0.5 ${variation.className}`}
-              >
-                <span className="flex items-center gap-2 text-sm font-bold">
-                  <Icon className="h-4 w-4" />
-                  {variation.label}
-                </span>
-                <span className="text-[11px] font-medium leading-4 opacity-80">
+            <Link
+              key={variation.key}
+              href={variation.href}
+              className={`group block min-h-[118px] rounded-2xl border p-4 text-left transition-all hover:-translate-y-0.5 ${variation.className}`}
+            >
+              <div className="flex h-full flex-col gap-2">
+                <div className="flex items-start gap-2 text-sm font-bold leading-5">
+                  <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span className="break-words">{variation.label}</span>
+                </div>
+
+                <p className="text-[11px] font-medium leading-5 opacity-80">
                   {variation.description}
-                </span>
-              </Button>
+                </p>
+              </div>
             </Link>
           );
         })}
