@@ -8,6 +8,7 @@ import {
   Sparkles,
   User,
   Users,
+  Flame,
 } from "lucide-react";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import LogoutButton from "@/components/LogoutButton";
@@ -15,6 +16,36 @@ import LogoutButton from "@/components/LogoutButton";
 export const metadata = {
   title: "Sirens Forge — Dashboard",
 };
+
+const DAILY_SIREN_SCENES = [
+  {
+    label: "Soft Glam",
+    title: "Velvet Mirror Moment",
+    prompt:
+      "photorealistic woman in a velvet robe standing near a mirror, soft glam makeup, warm bedroom lighting, confident seductive gaze, cinematic composition, realistic skin texture, high detail",
+    tone: "from-pink-950/50 via-black/60 to-purple-950/40",
+    border: "border-pink-400/30 hover:border-pink-300/60",
+    badge: "Soft starter",
+  },
+  {
+    label: "Spicy",
+    title: "After-Dark Neon Room",
+    prompt:
+      "photorealistic woman in a dark modern room with neon pink and purple lighting, sensual pose, intense eye contact, moody shadows, cinematic lighting, realistic skin texture, high detail",
+    tone: "from-purple-950/50 via-black/60 to-fuchsia-950/40",
+    border: "border-purple-400/30 hover:border-purple-300/60",
+    badge: "Higher heat",
+  },
+  {
+    label: "Cinematic",
+    title: "Luxury Balcony at Midnight",
+    prompt:
+      "photorealistic woman on a luxury balcony at midnight, city lights in the background, elegant pose, wind in hair, cinematic composition, dramatic lighting, premium editorial style, high detail",
+    tone: "from-cyan-950/40 via-black/60 to-purple-950/40",
+    border: "border-cyan-400/30 hover:border-cyan-300/60",
+    badge: "Story scene",
+  },
+];
 
 export default async function DashboardPage() {
   const auth = await ensureActiveSubscription();
@@ -63,6 +94,69 @@ export default async function DashboardPage() {
             <LogoutButton />
           </div>
         </div>
+
+        <section className="mb-8 overflow-hidden rounded-[32px] border border-pink-400/20 bg-gradient-to-br from-pink-950/25 via-black/50 to-cyan-950/20 p-6 backdrop-blur-xl sm:p-8">
+          <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-pink-200">
+                <Flame className="h-3.5 w-3.5" />
+                Daily Siren Loop
+              </div>
+
+              <h2 className="text-2xl font-black tracking-tight text-white sm:text-3xl">
+                Your Siren has 3 scenes for you today
+              </h2>
+
+              <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-300 sm:text-base">
+                Skip the blank prompt box. Pick a scene, send it to the Generator, then evolve it into your next Vault piece.
+              </p>
+            </div>
+
+            <Link
+              href="/sirens-mind"
+              className="inline-flex h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold text-gray-100 transition hover:border-pink-300/40 hover:bg-white/10"
+            >
+              Refine in Siren&apos;s Mind
+              <ChevronRight className="ml-2 h-4 w-4" />
+            </Link>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            {DAILY_SIREN_SCENES.map((scene) => (
+              <Link
+                key={scene.title}
+                href={`/generate?prompt=${encodeURIComponent(scene.prompt)}`}
+                className={`group relative overflow-hidden rounded-[24px] border ${scene.border} bg-gradient-to-br ${scene.tone} p-6 transition-all hover:-translate-y-1 hover:bg-white/10 hover:shadow-[0_0_34px_rgba(236,72,153,0.14)]`}
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-white/5 via-transparent to-pink-500/10 opacity-0 transition-opacity group-hover:opacity-100" />
+
+                <div className="relative">
+                  <div className="mb-4 flex items-center justify-between gap-3">
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-cyan-200">
+                      {scene.label}
+                    </span>
+                    <span className="rounded-full border border-pink-400/20 bg-pink-500/10 px-3 py-1 text-[11px] font-semibold text-pink-200">
+                      {scene.badge}
+                    </span>
+                  </div>
+
+                  <h3 className="mb-3 text-xl font-bold text-white">
+                    {scene.title}
+                  </h3>
+
+                  <p className="mb-5 line-clamp-3 text-sm leading-relaxed text-gray-300">
+                    {scene.prompt}
+                  </p>
+
+                  <div className="inline-flex items-center gap-2 text-sm font-semibold text-pink-200 transition group-hover:text-white">
+                    Use This Scene
+                    <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-5">
           <Link
