@@ -70,275 +70,275 @@ type DailySirenScene = {
 
 const DAILY_SIREN_SCENE_BANK: DailySirenScene[] = [
   {
-    label: "Soft Glam",
-    title: "Velvet Mirror Moment",
+    label: "Suggestive",
+    title: "Silk Sheet Tease",
     prompt:
-      "photorealistic woman in a velvet robe standing near a mirror, soft glam makeup, warm bedroom lighting, confident seductive gaze, cinematic composition, realistic skin texture, high detail",
-    tone: "from-pink-950/50 via-black/60 to-purple-950/40",
+      "photorealistic woman in silk sheets, teasing pose, soft bedroom lighting, direct eye contact, relaxed seductive expression, natural skin texture, cinematic composition, high detail",
+    tone: "from-pink-950/45 via-black/60 to-purple-950/35",
     border: "border-pink-400/30 hover:border-pink-300/60",
-    badge: "Soft starter",
+    badge: "Tease",
+  },
+  {
+    label: "Suggestive",
+    title: "After Hours Office",
+    prompt:
+      "photorealistic woman in a dim office after hours, slightly undone outfit, confident stance, soft shadows, moody lighting, teasing energy, high detail",
+    tone: "from-indigo-950/40 via-black/60 to-pink-950/30",
+    border: "border-indigo-400/30 hover:border-pink-300/60",
+    badge: "After hours",
+  },
+  {
+    label: "Suggestive",
+    title: "Window Light Linger",
+    prompt:
+      "photorealistic woman by a window in soft natural light, gentle pose, relaxed sensual expression, shallow depth of field, realistic skin detail",
+    tone: "from-cyan-950/30 via-black/60 to-pink-950/30",
+    border: "border-cyan-400/30 hover:border-pink-300/60",
+    badge: "Soft tension",
+  },
+  {
+    label: "Suggestive",
+    title: "Morning Glow",
+    prompt:
+      "photorealistic woman in soft morning light, loose clothing, natural pose, warm tones, intimate atmosphere, cinematic realism",
+    tone: "from-amber-950/35 via-black/60 to-rose-950/30",
+    border: "border-amber-400/30 hover:border-rose-300/60",
+    badge: "Morning tease",
+  },
+  {
+    label: "Suggestive",
+    title: "Mirror Confidence",
+    prompt:
+      "photorealistic woman standing in front of a mirror, confident body language, subtle teasing expression, soft lighting, high detail",
+    tone: "from-purple-950/40 via-black/60 to-pink-950/35",
+    border: "border-purple-400/30 hover:border-pink-300/60",
+    badge: "Mirror look",
+  },
+  {
+    label: "Suggestive",
+    title: "Oversized Hoodie",
+    prompt:
+      "photorealistic woman wearing an oversized hoodie, relaxed pose, teasing expression, warm indoor lighting, intimate lifestyle photography",
+    tone: "from-zinc-950/45 via-black/60 to-pink-950/25",
+    border: "border-zinc-400/30 hover:border-pink-300/60",
+    badge: "Cozy tease",
+  },
+  {
+    label: "Suggestive",
+    title: "Couch Lounge",
+    prompt:
+      "photorealistic woman lounging on a couch, relaxed but confident pose, soft shadows, cinematic lighting, natural skin detail",
+    tone: "from-rose-950/35 via-black/60 to-purple-950/25",
+    border: "border-rose-400/30 hover:border-purple-300/60",
+    badge: "Lounge",
+  },
+  {
+    label: "Suggestive",
+    title: "Rainy Window Mood",
+    prompt:
+      "photorealistic woman by a rainy window, soft reflections, intimate atmosphere, emotional expression, cinematic detail",
+    tone: "from-slate-950/45 via-black/60 to-purple-950/30",
+    border: "border-slate-400/30 hover:border-purple-300/60",
+    badge: "Rain mood",
+  },
+  {
+    label: "Suggestive",
+    title: "Bedroom Stretch",
+    prompt:
+      "photorealistic woman stretching in a bedroom, natural pose, subtle body emphasis, warm lighting, realistic detail",
+    tone: "from-orange-950/30 via-black/60 to-pink-950/30",
+    border: "border-orange-400/30 hover:border-pink-300/60",
+    badge: "Body tease",
+  },
+  {
+    label: "Suggestive",
+    title: "Soft Bed Edge",
+    prompt:
+      "photorealistic woman sitting at the edge of a bed, teasing posture, direct eye contact, moody lighting, high detail",
+    tone: "from-pink-950/40 via-black/60 to-fuchsia-950/30",
+    border: "border-pink-400/30 hover:border-fuchsia-300/60",
+    badge: "Bed edge",
   },
   {
     label: "Spicy",
-    title: "After-Dark Neon Room",
+    title: "Neon Heat",
     prompt:
-      "photorealistic woman in a dark modern room with neon pink and purple lighting, sensual pose, intense eye contact, moody shadows, cinematic lighting, realistic skin texture, high detail",
-    tone: "from-purple-950/50 via-black/60 to-fuchsia-950/40",
-    border: "border-purple-400/30 hover:border-purple-300/60",
-    badge: "Higher heat",
+      "photorealistic woman in neon-lit room, glowing skin, confident pose, intense eye contact, cinematic lighting, high detail",
+    tone: "from-fuchsia-950/45 via-black/60 to-cyan-950/35",
+    border: "border-fuchsia-400/30 hover:border-cyan-300/60",
+    badge: "Heat",
   },
   {
-    label: "Cinematic",
-    title: "Luxury Balcony at Midnight",
+    label: "Spicy",
+    title: "Private Suite Energy",
     prompt:
-      "photorealistic woman on a luxury balcony at midnight, city lights in the background, elegant pose, wind in hair, cinematic composition, dramatic lighting, premium editorial style, high detail",
-    tone: "from-cyan-950/40 via-black/60 to-purple-950/40",
-    border: "border-cyan-400/30 hover:border-cyan-300/60",
-    badge: "Story scene",
+      "photorealistic woman in a luxury suite, lingerie styling, confident stance, dramatic lighting, sensual energy, high detail",
+    tone: "from-purple-950/45 via-black/60 to-pink-950/35",
+    border: "border-purple-400/30 hover:border-pink-300/60",
+    badge: "Private suite",
   },
   {
-    label: "Editorial",
-    title: "Silk Sheets Morning Light",
+    label: "Spicy",
+    title: "Sweat Glow",
     prompt:
-      "photorealistic woman wrapped in silk sheets in soft morning window light, relaxed confident expression, natural skin texture, premium editorial photography, shallow depth of field, high detail",
+      "photorealistic woman with subtle sweat sheen, strong body emphasis, close framing, dramatic shadows, cinematic realism",
     tone: "from-rose-950/45 via-black/60 to-orange-950/30",
-    border: "border-rose-400/30 hover:border-rose-300/60",
-    badge: "Morning set",
+    border: "border-rose-400/30 hover:border-orange-300/60",
+    badge: "Body heat",
   },
   {
-    label: "Luxury",
-    title: "Penthouse Window Glow",
+    label: "Spicy",
+    title: "Dark Room Focus",
     prompt:
-      "photorealistic woman standing near a penthouse window at night, city skyline lights, elegant lingerie-inspired styling, cinematic rim light, confident pose, realistic skin texture, high detail",
-    tone: "from-indigo-950/45 via-black/60 to-pink-950/30",
-    border: "border-indigo-400/30 hover:border-indigo-300/60",
-    badge: "Premium vibe",
-  },
-  {
-    label: "Boudoir",
-    title: "Candlelit Dressing Room",
-    prompt:
-      "photorealistic woman in a candlelit dressing room, warm shadows, soft sensual styling, mirror reflections, intimate cinematic mood, realistic anatomy, high detail",
-    tone: "from-amber-950/40 via-black/60 to-rose-950/35",
-    border: "border-amber-400/30 hover:border-amber-300/60",
-    badge: "Warm mood",
-  },
-  {
-    label: "Fitness",
-    title: "Post-Workout Heat",
-    prompt:
-      "photorealistic woman after a workout in a private studio, subtle skin glow, athletic confident pose, soft dramatic lighting, clean background, high detail",
-    tone: "from-emerald-950/35 via-black/60 to-cyan-950/30",
-    border: "border-emerald-400/30 hover:border-emerald-300/60",
-    badge: "Body focus",
-  },
-  {
-    label: "Dark Glam",
-    title: "Black Lace Spotlight",
-    prompt:
-      "photorealistic woman in black lace-inspired styling under a single dramatic spotlight, dark background, powerful seductive gaze, cinematic shadows, high detail",
-    tone: "from-zinc-950/60 via-black/65 to-fuchsia-950/35",
-    border: "border-fuchsia-400/30 hover:border-fuchsia-300/60",
-    badge: "Bold look",
-  },
-  {
-    label: "Beach",
-    title: "Private Beach Sunset",
-    prompt:
-      "photorealistic woman on a private beach at sunset, golden hour lighting, wet hair, relaxed sensual pose, cinematic ocean background, realistic skin detail, high detail",
-    tone: "from-orange-950/35 via-black/60 to-pink-950/30",
-    border: "border-orange-400/30 hover:border-orange-300/60",
-    badge: "Golden hour",
-  },
-  {
-    label: "Goth",
-    title: "Velvet Noir Bedroom",
-    prompt:
-      "photorealistic woman in a gothic velvet bedroom, dark romantic styling, candle glow, deep shadows, confident expression, cinematic detail, realistic skin texture",
-    tone: "from-purple-950/55 via-black/65 to-zinc-950/45",
-    border: "border-violet-400/30 hover:border-violet-300/60",
-    badge: "Dark romance",
-  },
-  {
-    label: "Fantasy",
-    title: "Moonlit Garden Muse",
-    prompt:
-      "photorealistic woman in a moonlit garden, soft fantasy mood, glowing highlights, elegant pose, cinematic atmosphere, realistic skin texture, high detail",
-    tone: "from-blue-950/40 via-black/60 to-purple-950/35",
-    border: "border-blue-400/30 hover:border-blue-300/60",
-    badge: "Dream scene",
-  },
-  {
-    label: "Club",
-    title: "VIP Lounge Energy",
-    prompt:
-      "photorealistic woman in a private VIP lounge, neon reflections, moody club lighting, confident sensual body language, cinematic realism, high detail",
-    tone: "from-fuchsia-950/40 via-black/60 to-cyan-950/30",
-    border: "border-fuchsia-400/30 hover:border-cyan-300/60",
-    badge: "Nightlife",
-  },
-  {
-    label: "Romantic",
-    title: "Rainy Window Portrait",
-    prompt:
-      "photorealistic woman near a rainy window, soft reflection, intimate romantic mood, natural expression, cinematic lighting, realistic skin texture, high detail",
-    tone: "from-slate-950/50 via-black/60 to-purple-950/30",
-    border: "border-slate-400/30 hover:border-slate-300/60",
-    badge: "Soft story",
-  },
-  {
-    label: "Luxury",
-    title: "Marble Bathroom Glow",
-    prompt:
-      "photorealistic woman in a luxury marble bathroom, soft steam, warm vanity lighting, elegant sensual pose, realistic skin detail, cinematic composition",
-    tone: "from-stone-950/45 via-black/60 to-pink-950/25",
-    border: "border-stone-400/30 hover:border-stone-300/60",
-    badge: "Spa mood",
-  },
-  {
-    label: "Fashion",
-    title: "High-Fashion Hotel Suite",
-    prompt:
-      "photorealistic woman in a high-end hotel suite, luxury fashion styling, confident pose, editorial lighting, shallow depth of field, high detail",
-    tone: "from-purple-950/40 via-black/60 to-rose-950/30",
-    border: "border-purple-400/30 hover:border-rose-300/60",
-    badge: "Editorial",
-  },
-  {
-    label: "Cozy",
-    title: "Oversized Sweater Tease",
-    prompt:
-      "photorealistic woman in an oversized sweater in a cozy bedroom, soft warm lighting, natural seductive expression, intimate lifestyle photography, high detail",
-    tone: "from-amber-950/35 via-black/60 to-pink-950/25",
-    border: "border-amber-400/30 hover:border-pink-300/60",
-    badge: "Cozy hook",
-  },
-  {
-    label: "Cinematic",
-    title: "Red Light Hallway",
-    prompt:
-      "photorealistic woman in a red-lit hallway, cinematic shadows, slow-burn sensual energy, intense eye contact, realistic anatomy, high detail",
-    tone: "from-red-950/50 via-black/65 to-purple-950/30",
-    border: "border-red-400/30 hover:border-red-300/60",
-    badge: "Film mood",
-  },
-  {
-    label: "Boudoir",
-    title: "White Sheet Close-Up",
-    prompt:
-      "photorealistic close-up portrait of a woman in white sheets, soft natural light, detailed eyes and skin texture, intimate mood, shallow depth of field",
-    tone: "from-neutral-950/45 via-black/60 to-pink-950/25",
-    border: "border-neutral-400/30 hover:border-neutral-300/60",
-    badge: "Close-up",
-  },
-  {
-    label: "Cyber",
-    title: "Neon Cyber Muse",
-    prompt:
-      "photorealistic woman in futuristic neon environment, cyberpunk lighting, reflective surfaces, confident sensual pose, cinematic realism, high detail",
-    tone: "from-cyan-950/45 via-black/65 to-fuchsia-950/35",
-    border: "border-cyan-400/30 hover:border-fuchsia-300/60",
-    badge: "Cyber set",
-  },
-  {
-    label: "Nature",
-    title: "Forest Cabin Firelight",
-    prompt:
-      "photorealistic woman in a private forest cabin, fireplace glow, cozy sensual styling, cinematic shadows, natural skin detail, high detail",
-    tone: "from-lime-950/25 via-black/60 to-amber-950/35",
-    border: "border-lime-400/30 hover:border-amber-300/60",
-    badge: "Cabin mood",
-  },
-  {
-    label: "Poolside",
-    title: "Midnight Pool Glow",
-    prompt:
-      "photorealistic woman beside a midnight pool, blue water reflections, wet skin glow, luxury setting, cinematic composition, high detail",
-    tone: "from-blue-950/45 via-black/65 to-cyan-950/35",
-    border: "border-blue-400/30 hover:border-cyan-300/60",
-    badge: "Wet glow",
-  },
-  {
-    label: "Minimal",
-    title: "Clean Studio Confidence",
-    prompt:
-      "photorealistic woman in a clean studio setting, simple backdrop, premium softbox lighting, confident pose, realistic skin texture, editorial detail",
-    tone: "from-gray-950/55 via-black/65 to-purple-950/25",
-    border: "border-gray-400/30 hover:border-gray-300/60",
-    badge: "Clean set",
-  },
-  {
-    label: "Romance",
-    title: "Hotel Balcony Sunrise",
-    prompt:
-      "photorealistic woman on a hotel balcony at sunrise, soft golden light, robe styling, relaxed romantic expression, cinematic luxury mood, high detail",
-    tone: "from-yellow-950/30 via-black/60 to-pink-950/30",
-    border: "border-yellow-400/30 hover:border-yellow-300/60",
-    badge: "Sunrise",
-  },
-  {
-    label: "Moody",
-    title: "Shadow Play Portrait",
-    prompt:
-      "photorealistic woman in dramatic shadow play lighting, partial silhouette, intense gaze, dark elegant styling, cinematic realism, high detail",
+      "photorealistic woman in a dark room, spotlight lighting, intense gaze, strong pose, moody shadows, high detail",
     tone: "from-zinc-950/60 via-black/70 to-purple-950/30",
-    border: "border-zinc-400/30 hover:border-zinc-300/60",
-    badge: "Moody",
+    border: "border-zinc-400/30 hover:border-purple-300/60",
+    badge: "Spotlight",
   },
   {
-    label: "Playful",
-    title: "Pillow Talk Energy",
+    label: "Spicy",
+    title: "Balcony Night Look",
     prompt:
-      "photorealistic woman in a playful bedroom scene, soft pillows, natural smile, teasing eye contact, warm light, intimate lifestyle photography, high detail",
-    tone: "from-pink-950/35 via-black/60 to-rose-950/30",
-    border: "border-pink-400/30 hover:border-rose-300/60",
-    badge: "Playful",
+      "photorealistic woman on a balcony at night, city lights, confident pose, wind in hair, cinematic lighting",
+    tone: "from-indigo-950/45 via-black/60 to-cyan-950/30",
+    border: "border-indigo-400/30 hover:border-cyan-300/60",
+    badge: "Night look",
   },
   {
-    label: "Luxury",
-    title: "Champagne Suite Mood",
+    label: "Spicy",
+    title: "Club VIP",
     prompt:
-      "photorealistic woman in a luxury suite with champagne glass nearby, elegant evening styling, warm cinematic lighting, confident sensual pose, high detail",
-    tone: "from-yellow-950/25 via-black/60 to-purple-950/30",
-    border: "border-yellow-400/30 hover:border-purple-300/60",
-    badge: "Suite set",
+      "photorealistic woman in a VIP lounge, neon reflections, confident body language, close framing, high detail",
+    tone: "from-fuchsia-950/40 via-black/60 to-purple-950/35",
+    border: "border-fuchsia-400/30 hover:border-purple-300/60",
+    badge: "VIP",
   },
   {
-    label: "Drama",
-    title: "Blue Hour Rooftop",
+    label: "Spicy",
+    title: "Silhouette Drama",
     prompt:
-      "photorealistic woman on a rooftop during blue hour, city lights, dramatic wind, cinematic composition, confident expression, realistic skin texture, high detail",
-    tone: "from-sky-950/40 via-black/60 to-indigo-950/35",
-    border: "border-sky-400/30 hover:border-sky-300/60",
-    badge: "Blue hour",
+      "photorealistic woman in silhouette lighting, strong curves, dramatic contrast, cinematic composition",
+    tone: "from-red-950/35 via-black/65 to-zinc-950/45",
+    border: "border-red-400/30 hover:border-zinc-300/60",
+    badge: "Silhouette",
   },
   {
-    label: "Soft",
-    title: "Window Light Linger",
+    label: "Spicy",
+    title: "Red Light Mood",
     prompt:
-      "photorealistic woman sitting near a window with soft diffused light, gentle sensual mood, natural skin texture, elegant composition, high detail",
-    tone: "from-pink-950/30 via-black/60 to-cyan-950/20",
-    border: "border-pink-400/30 hover:border-cyan-300/60",
-    badge: "Soft light",
+      "photorealistic woman in red lighting, intense expression, close framing, cinematic shadows, high detail",
+    tone: "from-red-950/50 via-black/65 to-pink-950/30",
+    border: "border-red-400/30 hover:border-pink-300/60",
+    badge: "Red light",
   },
   {
-    label: "Power",
-    title: "CEO After Hours",
+    label: "Spicy",
+    title: "Luxury Bathroom",
     prompt:
-      "photorealistic woman in an upscale office after hours, high-fashion power styling, city lights, confident seductive gaze, cinematic lighting, high detail",
-    tone: "from-indigo-950/40 via-black/60 to-emerald-950/25",
-    border: "border-indigo-400/30 hover:border-emerald-300/60",
-    badge: "Power look",
+      "photorealistic woman in a luxury bathroom, steam, soft lighting, confident pose, realistic skin detail",
+    tone: "from-stone-950/45 via-black/60 to-pink-950/25",
+    border: "border-stone-400/30 hover:border-pink-300/60",
+    badge: "Steam",
   },
   {
-    label: "Video Ready",
-    title: "Slow Motion Silk Scene",
+    label: "Spicy",
+    title: "Late Night Energy",
     prompt:
-      "photorealistic woman in silk fabric with motion-ready styling, soft flowing fabric, cinematic lighting, natural movement feel, premium detail",
-    tone: "from-fuchsia-950/35 via-black/60 to-cyan-950/30",
-    border: "border-fuchsia-400/30 hover:border-cyan-300/60",
-    badge: "Motion idea",
-  }
+      "photorealistic woman in a dim bedroom, bold pose, intense gaze, cinematic lighting, high detail",
+    tone: "from-purple-950/45 via-black/60 to-rose-950/35",
+    border: "border-purple-400/30 hover:border-rose-300/60",
+    badge: "Late night",
+  },
+  {
+    label: "Unfiltered",
+    title: "Penthouse After Dark",
+    prompt:
+      "photorealistic woman in a penthouse at night, provocative pose, commanding eye contact, dramatic lighting, high detail",
+    tone: "from-purple-950/55 via-black/65 to-pink-950/35",
+    border: "border-purple-400/30 hover:border-pink-300/60",
+    badge: "Unlocked",
+  },
+  {
+    label: "Unfiltered",
+    title: "Dominant Energy",
+    prompt:
+      "photorealistic woman with dominant posture, intense gaze, strong body emphasis, cinematic shadows, high detail",
+    tone: "from-red-950/45 via-black/65 to-fuchsia-950/35",
+    border: "border-red-400/30 hover:border-fuchsia-300/60",
+    badge: "Dominant",
+  },
+  {
+    label: "Unfiltered",
+    title: "Close Proximity",
+    prompt:
+      "photorealistic woman in close framing, intimate positioning, direct eye contact, shallow depth of field, high detail",
+    tone: "from-pink-950/45 via-black/65 to-zinc-950/35",
+    border: "border-pink-400/30 hover:border-zinc-300/60",
+    badge: "Close frame",
+  },
+  {
+    label: "Unfiltered",
+    title: "Shadow Control",
+    prompt:
+      "photorealistic woman in deep shadows, controlled lighting, powerful stance, cinematic realism",
+    tone: "from-zinc-950/65 via-black/70 to-purple-950/35",
+    border: "border-zinc-400/30 hover:border-purple-300/60",
+    badge: "Control",
+  },
+  {
+    label: "Unfiltered",
+    title: "Dark Room Intensity",
+    prompt:
+      "photorealistic woman in a dark room, intense mood, strong pose, dramatic lighting, high detail",
+    tone: "from-purple-950/50 via-black/70 to-red-950/30",
+    border: "border-purple-400/30 hover:border-red-300/60",
+    badge: "Intensity",
+  },
+  {
+    label: "Unfiltered",
+    title: "Luxury Night Scene",
+    prompt:
+      "photorealistic woman in a high-end night setting, confident pose, cinematic lighting, high detail",
+    tone: "from-indigo-950/45 via-black/65 to-pink-950/35",
+    border: "border-indigo-400/30 hover:border-pink-300/60",
+    badge: "Night scene",
+  },
+  {
+    label: "Unfiltered",
+    title: "Midnight Focus",
+    prompt:
+      "photorealistic woman in a midnight setting, strong body language, intense gaze, dramatic shadows",
+    tone: "from-blue-950/45 via-black/65 to-purple-950/35",
+    border: "border-blue-400/30 hover:border-purple-300/60",
+    badge: "Midnight",
+  },
+  {
+    label: "Unfiltered",
+    title: "High Tension Frame",
+    prompt:
+      "photorealistic woman in a high tension scene, close framing, powerful pose, cinematic detail",
+    tone: "from-fuchsia-950/45 via-black/65 to-red-950/35",
+    border: "border-fuchsia-400/30 hover:border-red-300/60",
+    badge: "High tension",
+  },
+  {
+    label: "Unfiltered",
+    title: "Spotlight Control",
+    prompt:
+      "photorealistic woman under a single spotlight, dominant presence, dramatic lighting, high detail",
+    tone: "from-amber-950/35 via-black/70 to-zinc-950/45",
+    border: "border-amber-400/30 hover:border-zinc-300/60",
+    badge: "Spotlight",
+  },
+  {
+    label: "Unfiltered",
+    title: "After Hours Private",
+    prompt:
+      "photorealistic woman in a private after-hours setting, confident sensual posture, cinematic lighting",
+    tone: "from-pink-950/45 via-black/65 to-purple-950/35",
+    border: "border-pink-400/30 hover:border-purple-300/60",
+    badge: "Private",
+  },
 ];
 
 function getMetadata(row: GenerationRow): Record<string, unknown> {
