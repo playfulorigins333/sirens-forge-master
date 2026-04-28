@@ -445,10 +445,30 @@ function getDailySirenScenes(userKey: string): DailySirenScene[] {
   return pool.slice(0, 3);
 }
 
+function makeGeneratorReadyPrompt(prompt: string): string {
+  const basePrompt = String(prompt || "").trim();
+
+  const productionDetails =
+    "same woman, consistent face, detailed eyes, lips, hair, body, natural skin texture, flattering outfit styling, clear pose, cinematic scene, defined environment, premium background, soft dramatic lighting, camera angle, portrait composition, shallow depth of field, photorealistic, lifelike, high detail, moody sensual atmosphere";
+
+  if (!basePrompt) {
+    return productionDetails;
+  }
+
+  const normalizedBase = basePrompt.toLowerCase();
+  const normalizedDetails = productionDetails
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => !normalizedBase.includes(part.toLowerCase()));
+
+  return [basePrompt, ...normalizedDetails].join(", ");
+}
+
 function buildGenerateHref(prompt: string, source: string, identityId?: string | null): string {
   const params = new URLSearchParams();
 
-  params.set("prompt", prompt);
+  params.set("prompt", makeGeneratorReadyPrompt(prompt));
   params.set("generation_target", "text_to_image");
   params.set("output_type", "IMAGE");
   params.set("source", source);
