@@ -12,6 +12,7 @@ import {
   Flame,
   Heart,
   Image as ImageIcon,
+  MapPin,
   Maximize2,
   Play,
   Search,
@@ -187,18 +188,63 @@ function getIdentityStrength(identity: IdentityDetailData) {
   };
 }
 
-function buildGenerateHref(identity: IdentityDetailData, prompt?: string | null) {
+function makeGeneratorReadyPrompt(prompt: string): string {
+  const basePrompt = String(prompt || "").trim();
+
+  const productionDetails =
+    "same woman, consistent face, detailed eyes, lips, hair, body, natural skin texture, flattering outfit styling, clear pose, cinematic scene, defined environment, premium background, soft dramatic lighting, camera angle, portrait composition, shallow depth of field, photorealistic, lifelike, high detail, moody sensual atmosphere";
+
+  if (!basePrompt) {
+    return productionDetails;
+  }
+
+  const normalizedBase = basePrompt.toLowerCase();
+  const normalizedDetails = productionDetails
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => !normalizedBase.includes(part.toLowerCase()));
+
+  return [basePrompt, ...normalizedDetails].join(", ");
+}
+
+function buildGenerateHref(identity: IdentityDetailData, prompt?: string | null, source = "identity_detail") {
   const params = new URLSearchParams();
   params.set("identity", identity.id);
+  params.set("generation_target", "text_to_image");
+  params.set("output_type", "IMAGE");
+  params.set("source", source);
 
   const token = safeNullableString(identity.triggerToken);
   if (token) params.set("trigger", token);
 
   if (prompt && prompt.trim().length > 0) {
-    params.set("prompt", prompt.trim());
+    params.set("prompt", makeGeneratorReadyPrompt(prompt.trim()));
   }
 
   return `/generate?${params.toString()}`;
+}
+
+function buildVariationPrompt(basePrompt: string | null | undefined, variation: "hotter" | "location" | "cinematic" | "luxury" | "nude") {
+  const base =
+    typeof basePrompt === "string" && basePrompt.trim().length > 0
+      ? basePrompt.trim()
+      : "photorealistic nude woman, confident pose, direct eye contact, cinematic lighting, high detail";
+
+  const variationPrompts = {
+    hotter:
+      "make it hotter, nude woman, provocative pose, hips forward, arched posture, intense direct eye contact, teasing expression, parted lips, dramatic shadows, sensual tension",
+    location:
+      "change the location to a private luxury suite at night, nude woman, confident pose, body angled toward camera, warm cinematic lighting, premium background, intimate atmosphere",
+    cinematic:
+      "make it cinematic, nude woman, dramatic camera angle, close framing, moody shadows, shallow depth of field, film still composition, intense gaze, premium lighting",
+    luxury:
+      "luxury version, nude woman in a penthouse suite, expensive interior, city lights, elegant body positioning, confident expression, warm dramatic lighting, editorial realism",
+    nude:
+      "nude variation, fully nude woman, confident sensual posture, hips angled, direct eye contact, natural skin texture, tasteful cinematic framing, high detail",
+  } as const;
+
+  return `${base}, ${variationPrompts[variation]}`;
 }
 
 function buildShareHref(identity: IdentityDetailData) {
@@ -327,6 +373,125 @@ function HeroEmptyState({ identity }: { identity: IdentityDetailData }) {
   );
 }
 
+function IdentityVariationPanel({
+  identity,
+  basePrompt,
+}: {
+  identity: IdentityDetailData;
+  basePrompt: string | null;
+}) {
+  const variations = [
+    {
+      key: "hotter" as const,
+      label: "Make it hotter",
+      description: "More body language, tension, and direct camera energy.",
+      icon: Flame,
+      href: buildGenerateHref(
+        identity,
+        buildVariationPrompt(basePrompt, "hotter"),
+        "identity_variation_hotter"
+      ),
+      className:
+        "border-rose-500/30 bg-rose-500/10 text-rose-100 hover:bg-rose-500/20 hover:text-white",
+    },
+    {
+      key: "location" as const,
+      label: "Change location",
+      description: "Move the identity into a new private scene.",
+      icon: MapPin,
+      href: buildGenerateHref(
+        identity,
+        buildVariationPrompt(basePrompt, "location"),
+        "identity_variation_location"
+      ),
+      className:
+        "border-cyan-500/30 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 hover:text-white",
+    },
+    {
+      key: "cinematic" as const,
+      label: "Make cinematic",
+      description: "Film-still framing, mood, and premium lighting.",
+      icon: VideoIcon,
+      href: buildGenerateHref(
+        identity,
+        buildVariationPrompt(basePrompt, "cinematic"),
+        "identity_variation_cinematic"
+      ),
+      className:
+        "border-purple-500/30 bg-purple-500/10 text-purple-100 hover:bg-purple-500/20 hover:text-white",
+    },
+    {
+      key: "luxury" as const,
+      label: "Luxury version",
+      description: "Upscale suite, expensive background, editorial feel.",
+      icon: Crown,
+      href: buildGenerateHref(
+        identity,
+        buildVariationPrompt(basePrompt, "luxury"),
+        "identity_variation_luxury"
+      ),
+      className:
+        "border-yellow-500/30 bg-yellow-500/10 text-yellow-100 hover:bg-yellow-500/20 hover:text-white",
+    },
+    {
+      key: "nude" as const,
+      label: "Nude variation",
+      description: "Nude, pose-led, tasteful NSFW creator framing.",
+      icon: Zap,
+      href: buildGenerateHref(
+        identity,
+        buildVariationPrompt(basePrompt, "nude"),
+        "identity_variation_nude"
+      ),
+      className:
+        "border-pink-500/30 bg-pink-500/10 text-pink-100 hover:bg-pink-500/20 hover:text-white",
+    },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-pink-500/20 bg-gradient-to-br from-pink-500/10 via-purple-500/5 to-cyan-500/10 p-4">
+      <div className="mb-4 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-pink-500/25 bg-pink-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-pink-200">
+            <Sparkles className="h-3.5 w-3.5" />
+            1-Click Variations
+          </div>
+          <h3 className="text-base font-bold text-white">
+            Remix this identity without thinking
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-gray-300">
+            Each button keeps this AI Twin attached, strengthens the prompt, and sends it straight to the Generator.
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {variations.map((variation) => {
+          const Icon = variation.icon;
+
+          return (
+            <Link key={variation.key} href={variation.href}>
+              <Button
+                type="button"
+                variant="outline"
+                className={`h-auto min-h-[92px] w-full flex-col items-start justify-start gap-2 rounded-2xl p-4 text-left transition-all hover:-translate-y-0.5 ${variation.className}`}
+              >
+                <span className="flex items-center gap-2 text-sm font-bold">
+                  <Icon className="h-4 w-4" />
+                  {variation.label}
+                </span>
+                <span className="text-[11px] font-medium leading-4 opacity-80">
+                  {variation.description}
+                </span>
+              </Button>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function IdentityActionBar({ identity }: { identity: IdentityDetailData }) {
   const bestPrompt = identity.assets?.[0]?.prompt || null;
 
@@ -439,6 +604,11 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
           </div>
 
           <IdentityActionBar identity={identity} />
+
+          <IdentityVariationPanel
+            identity={identity}
+            basePrompt={identity.assets?.[0]?.prompt || null}
+          />
 
           <div className="rounded-2xl border border-purple-800/40 bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-cyan-500/10 p-4">
             <div className="flex items-center justify-between gap-4">
