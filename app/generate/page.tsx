@@ -734,15 +734,15 @@ function FloatingSirensMindDock(props: {
   onOpenBrain: () => void;
 }) {
   return (
-    <div className="fixed z-50 flex flex-col items-end gap-4 bottom-5 right-5 md:bottom-auto md:top-1/2 md:-translate-y-1/2 md:right-6">
+    <div className="relative z-10 flex w-full flex-col items-stretch gap-3">
       <AnimatePresence>
         {props.open && (
           <motion.div
-            initial={{ opacity: 0, y: 14, scale: 0.96 }}
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 14, scale: 0.96 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
             transition={{ duration: 0.18 }}
-            className="w-[min(calc(100vw-2rem),390px)] overflow-hidden rounded-3xl border border-fuchsia-500/25 bg-[linear-gradient(180deg,rgba(24,14,34,0.98),rgba(7,7,12,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.55),0_0_38px_rgba(192,38,211,0.18)] backdrop-blur-xl"
+            className="w-full overflow-hidden rounded-3xl border border-fuchsia-500/25 bg-[linear-gradient(180deg,rgba(24,14,34,0.98),rgba(7,7,12,0.98))] shadow-[0_18px_48px_rgba(0,0,0,0.35),0_0_30px_rgba(192,38,211,0.14)] backdrop-blur-xl"
           >
             <div className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-4">
               <div className="flex min-w-0 items-start gap-3">
@@ -815,14 +815,14 @@ function FloatingSirensMindDock(props: {
         onClick={props.onToggle}
         whileHover={{ y: -2, scale: 1.02 }}
         whileTap={{ scale: 0.98 }}
-        className="group relative flex h-14 items-center gap-3 rounded-full border border-fuchsia-400/30 bg-[linear-gradient(90deg,rgba(126,34,206,0.96),rgba(219,39,119,0.96),rgba(8,145,178,0.96))] px-4 text-white shadow-[0_18px_48px_rgba(192,38,211,0.35)]"
+        className="group relative flex h-14 w-full items-center justify-start gap-3 overflow-hidden rounded-2xl border border-fuchsia-400/30 bg-[linear-gradient(90deg,rgba(126,34,206,0.92),rgba(219,39,119,0.92),rgba(8,145,178,0.92))] px-4 text-white shadow-[0_14px_34px_rgba(192,38,211,0.22)]"
         aria-label="Open Siren’s Mind prompt assistant"
       >
         <span className="absolute -inset-1 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 opacity-30 blur-md transition group-hover:opacity-50" />
         <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-black/25">
           <Sparkles className="h-5 w-5" />
         </span>
-        <span className="relative hidden text-left sm:block">
+        <span className="relative block text-left">
           <span className="block text-xs font-bold leading-4">Siren’s Mind</span>
           <span className="block text-[10px] leading-3 text-white/75">Brain Mode</span>
         </span>
@@ -2747,6 +2747,13 @@ ${basePrompt}`,
 
                 <div className="space-y-3 xl:sticky xl:top-24 xl:self-start">
                   <div className="grid grid-cols-1 gap-3">
+                    <FloatingSirensMindDock
+                      open={sirensMindDockOpen}
+                      hasPrompt={Boolean(prompt.trim())}
+                      onToggle={() => setSirensMindDockOpen((value) => !value)}
+                      onOpenBrain={() => router.push("/sirens-mind")}
+                    />
+
                     <LoraIdentitySection
                       value={loraSelection}
                       onChange={(next) => setLoraSelection(next)}
@@ -2815,12 +2822,6 @@ ${basePrompt}`,
         </div>
       </main>
 
-      <FloatingSirensMindDock
-        open={sirensMindDockOpen}
-        hasPrompt={Boolean(prompt.trim())}
-        onToggle={() => setSirensMindDockOpen((value) => !value)}
-        onOpenBrain={() => router.push("/sirens-mind")}
-      />
 
       <SubscriptionModal
         open={showSubModal}
