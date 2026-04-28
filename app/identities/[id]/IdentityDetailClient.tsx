@@ -6,17 +6,23 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
   CheckCircle2,
+  Crown,
   Dna,
   Download,
+  Flame,
+  Heart,
   Image as ImageIcon,
   Maximize2,
   Play,
   Search,
+  Share2,
   Sparkles,
   Star,
+  TrendingUp,
   Video as VideoIcon,
   Wand2,
   X,
+  Zap,
 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -151,6 +157,54 @@ function getInitials(label: string) {
   return label.trim().charAt(0).toUpperCase() || "I";
 }
 
+function getIdentityStrength(identity: IdentityDetailData) {
+  const assetScore = Math.min(identity.totalAssets || 0, 12) * 5;
+  const trainingScore = Math.min(identity.datasetImageCount || 0, 24) * 1.5;
+  const completedBonus = safeString(identity.status).toLowerCase() === "completed" ? 18 : 0;
+  const progressScore = typeof identity.progress === "number" ? Math.min(identity.progress, 100) * 0.15 : 0;
+  const score = Math.round(Math.min(96, 22 + assetScore + trainingScore + completedBonus + progressScore));
+
+  if (score >= 85) {
+    return {
+      score,
+      label: "Strong",
+      message: "This identity has enough signal to feel consistent across new scenes.",
+    };
+  }
+
+  if (score >= 65) {
+    return {
+      score,
+      label: "Growing",
+      message: "Every saved generation gives this identity more creative momentum.",
+    };
+  }
+
+  return {
+    score,
+    label: "Building",
+    message: "Create more scenes to grow this identity into a reliable AI Twin.",
+  };
+}
+
+function buildGenerateHref(identity: IdentityDetailData, prompt?: string | null) {
+  const params = new URLSearchParams();
+  params.set("identity", identity.id);
+
+  const token = safeNullableString(identity.triggerToken);
+  if (token) params.set("trigger", token);
+
+  if (prompt && prompt.trim().length > 0) {
+    params.set("prompt", prompt.trim());
+  }
+
+  return `/generate?${params.toString()}`;
+}
+
+function buildShareHref(identity: IdentityDetailData) {
+  return `/identities/${identity.id}?share=1`;
+}
+
 function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
   const displayName = getDisplayName(identity);
   const initial = getInitials(displayName);
@@ -176,7 +230,7 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
                 {displayName}
               </h1>
               <p className="text-xs md:text-sm text-gray-300 mt-1">
-                Identity workspace • assets created with this character
+                Your AI Twin • identity vault and creative control center
               </p>
             </div>
           </div>
@@ -185,7 +239,7 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
         <div className="flex items-center gap-4">
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-black text-xs font-bold shadow-[0_0_20px_rgba(168,85,247,0.35)]">
             <Dna className="w-3 h-3" />
-            IDENTITY WORKSPACE
+            IDENTITY ENGINE
           </div>
 
           <div className="px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -228,15 +282,15 @@ function HeroEmptyState({ identity }: { identity: IdentityDetailData }) {
           </div>
 
           <h3 className="text-2xl font-bold text-white">
-            {status === "completed" ? "Identity Ready" : displayName}
+            {status === "completed" ? "AI Twin Ready" : displayName}
           </h3>
 
           <p className="mt-3 text-sm leading-6 text-gray-300">
             {identity.totalAssets > 0
-              ? "Preview media is not available for this identity yet, but linked assets are available below."
+              ? "Preview media is not available yet, but this identity already has saved creations below."
               : status === "completed"
-                ? "This identity has completed training, but no saved images or videos are linked to it yet."
-                : "This identity does not have preview media yet."}
+                ? "This identity is trained. Start creating scenes to build its visual history."
+                : "This identity is still becoming your reusable AI Twin."}
           </p>
 
           <div className="mt-6 grid grid-cols-2 gap-3 text-left">
@@ -251,7 +305,7 @@ function HeroEmptyState({ identity }: { identity: IdentityDetailData }) {
 
             <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3">
               <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400">
-                Saved Assets
+                Saved Creations
               </p>
               <p className="mt-1 text-lg font-semibold text-white">
                 {identity.totalAssets ?? 0}
@@ -262,7 +316,7 @@ function HeroEmptyState({ identity }: { identity: IdentityDetailData }) {
           {hasTrainingData && (
             <div className="mt-6 inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-4 py-2 text-xs font-medium text-emerald-200">
               <CheckCircle2 className="h-4 w-4" />
-              Training data is present — preview media just hasn’t been linked.
+              Training data is present — now build the identity’s creative vault.
             </div>
           )}
         </div>
@@ -273,11 +327,49 @@ function HeroEmptyState({ identity }: { identity: IdentityDetailData }) {
   );
 }
 
+function IdentityActionBar({ identity }: { identity: IdentityDetailData }) {
+  const bestPrompt = identity.assets?.[0]?.prompt || null;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <Link href={buildGenerateHref(identity, bestPrompt)}>
+        <Button className="w-full h-12 justify-center bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white shadow-[0_0_24px_rgba(168,85,247,0.35)]">
+          <Flame className="w-4 h-4 mr-2" />
+          Generate More Like This
+        </Button>
+      </Link>
+
+      <Link href={`/lora/train?identity=${encodeURIComponent(identity.id)}`}>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full h-12 justify-center border-purple-700/50 bg-purple-500/10 text-purple-100 hover:bg-purple-500/20 hover:text-white"
+        >
+          <Zap className="w-4 h-4 mr-2" />
+          Improve Identity
+        </Button>
+      </Link>
+
+      <Link href={buildShareHref(identity)}>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full h-12 justify-center border-cyan-700/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-500/20 hover:text-white"
+        >
+          <Share2 className="w-4 h-4 mr-2" />
+          Share Identity
+        </Button>
+      </Link>
+    </div>
+  );
+}
+
 function IdentityHero({ identity }: { identity: IdentityDetailData }) {
   const displayName = getDisplayName(identity);
   const previewUrl = safeNullableString(identity?.previewUrl);
   const previewKind = identity?.previewKind;
   const status = safeString(identity?.status, "unknown");
+  const strength = getIdentityStrength(identity);
 
   const hasPreview = Boolean(previewUrl && (previewKind === "image" || previewKind === "video"));
 
@@ -313,7 +405,7 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
           )}
 
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/10" />
-          <div className="absolute top-4 left-4 z-10">
+          <div className="absolute top-4 left-4 z-10 flex flex-wrap gap-2">
             <span
               className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border ${statusTone(
                 status
@@ -321,14 +413,57 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
             >
               {status.toUpperCase()}
             </span>
+            <span className="px-3 py-1.5 rounded-full text-[11px] font-semibold border border-pink-500/30 bg-pink-500/15 text-pink-200">
+              YOUR AI TWIN
+            </span>
           </div>
         </div>
 
         <CardContent className="p-5 md:p-6 space-y-5">
           <div>
-            <h2 className="text-2xl font-bold text-white">{displayName}</h2>
-            <p className="text-sm text-gray-400 mt-1">
-              This workspace organizes every saved image and video created with this identity.
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="inline-flex items-center rounded-full border border-purple-500/25 bg-purple-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-purple-200">
+                <Crown className="mr-1.5 h-3.5 w-3.5" />
+                Identity Engine
+              </span>
+              <span className="inline-flex items-center rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-200">
+                <TrendingUp className="mr-1.5 h-3.5 w-3.5" />
+                {strength.label}
+              </span>
+            </div>
+
+            <h2 className="text-2xl md:text-3xl font-bold text-white">{displayName}</h2>
+            <p className="text-sm text-gray-400 mt-2 leading-6">
+              This is the home base for your reusable AI Twin. Build the look, save the best creations, and keep generating from the same identity instead of starting from scratch.
+            </p>
+          </div>
+
+          <IdentityActionBar identity={identity} />
+
+          <div className="rounded-2xl border border-purple-800/40 bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-cyan-500/10 p-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.16em] text-purple-200">
+                  Identity Strength
+                </p>
+                <p className="mt-1 text-lg font-bold text-white">
+                  {strength.label} • {strength.score}%
+                </p>
+              </div>
+              <div className="h-12 w-12 rounded-2xl border border-white/10 bg-black/25 flex items-center justify-center">
+                <Heart className="h-5 w-5 text-pink-300" />
+              </div>
+            </div>
+
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-gray-950 border border-gray-800">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-400"
+                style={{ width: `${strength.score}%` }}
+              />
+            </div>
+
+            <p className="mt-3 text-xs leading-5 text-gray-300">
+              {strength.message}
             </p>
           </div>
 
@@ -357,7 +492,7 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
               <div className="flex items-center gap-2 mb-1">
                 <Sparkles className="w-4 h-4 text-purple-300" />
                 <span className="text-[11px] uppercase tracking-[0.12em] text-gray-400">
-                  Total
+                  Creations
                 </span>
               </div>
               <p className="text-xl font-bold text-purple-200">{identity.totalAssets ?? 0}</p>
@@ -394,47 +529,178 @@ function IdentityHero({ identity }: { identity: IdentityDetailData }) {
                 {formatDate(identity.createdAt)}
               </p>
             </div>
-
-            <div className="rounded-xl border border-gray-800 bg-gray-950 p-3">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
-                Artifact Key
-              </p>
-              <p className="text-gray-200 font-medium break-all">
-                {identity.artifactKey || "Not available"}
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-gray-800 bg-gray-950 p-3">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
-                Dataset Prefix
-              </p>
-              <p className="text-gray-200 font-medium break-all">
-                {identity.datasetPrefix || "Not available"}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            <Link href="/generate">
-              <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white shadow-[0_0_24px_rgba(168,85,247,0.35)]">
-                <Wand2 className="w-4 h-4 mr-2" />
-                Create With This Identity
-              </Button>
-            </Link>
-
-            <Link href="/library">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
-              >
-                <Sparkles className="w-4 h-4 mr-2" />
-                Open Vault
-              </Button>
-            </Link>
           </div>
         </CardContent>
       </div>
+    </Card>
+  );
+}
+
+function IdentityProgressionPanel({ identity }: { identity: IdentityDetailData }) {
+  const strength = getIdentityStrength(identity);
+  const tips = [
+    {
+      title: "Generate consistently",
+      detail: "Create more scenes with this same identity to build a stronger creative history.",
+      done: identity.totalAssets >= 3,
+    },
+    {
+      title: "Add more angles",
+      detail: "Future training uploads with varied angles will help the identity hold across poses.",
+      done: (identity.datasetImageCount ?? 0) >= 15,
+    },
+    {
+      title: "Save the best results",
+      detail: "The best creations become the user-facing proof that this AI Twin is worth keeping.",
+      done: identity.totalAssets >= 6,
+    },
+  ];
+
+  return (
+    <Card className="border-gray-800 bg-gray-900/80 overflow-hidden">
+      <div className="absolute pointer-events-none inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-cyan-500/5" />
+      <CardHeader className="relative pb-3">
+        <CardTitle className="text-base md:text-lg flex items-center gap-2 text-white">
+          <TrendingUp className="w-5 h-5 text-purple-300" />
+          Identity Progression
+        </CardTitle>
+        <CardDescription className="text-xs text-gray-300">
+          Make this feel like a living asset, not a one-off generation.
+        </CardDescription>
+      </CardHeader>
+
+      <CardContent className="relative grid grid-cols-1 lg:grid-cols-[0.75fr_1.25fr] gap-4">
+        <div className="rounded-2xl border border-purple-800/40 bg-gray-950 p-4">
+          <p className="text-[11px] uppercase tracking-[0.16em] text-gray-400">
+            Current Stage
+          </p>
+          <p className="mt-2 text-3xl font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-transparent">
+            {strength.label}
+          </p>
+          <p className="mt-2 text-sm leading-6 text-gray-300">
+            {strength.message}
+          </p>
+          <div className="mt-5 h-2 overflow-hidden rounded-full bg-black border border-gray-800">
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-400"
+              style={{ width: `${strength.score}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {tips.map((tip) => (
+            <div
+              key={tip.title}
+              className="rounded-2xl border border-gray-800 bg-gray-950 p-4"
+            >
+              <div
+                className={`mb-3 inline-flex h-8 w-8 items-center justify-center rounded-xl border ${
+                  tip.done
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                    : "border-purple-500/30 bg-purple-500/10 text-purple-300"
+                }`}
+              >
+                {tip.done ? <CheckCircle2 className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+              </div>
+              <h3 className="text-sm font-semibold text-white">{tip.title}</h3>
+              <p className="mt-2 text-xs leading-5 text-gray-400">{tip.detail}</p>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function BestOfIdentity(props: {
+  identity: IdentityDetailData;
+  items: IdentityDetailAsset[];
+  onOpen: (item: IdentityDetailAsset) => void;
+}) {
+  const displayName = getDisplayName(props.identity);
+  const bestItems = props.items.slice(0, 4);
+
+  if (bestItems.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card className="border-gray-800 bg-gray-900/80">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <CardTitle className="text-base md:text-lg flex items-center gap-2 text-white">
+              <Crown className="w-5 h-5 text-yellow-300" />
+              Best of {displayName}
+            </CardTitle>
+            <CardDescription className="text-xs text-gray-300 mt-1">
+              The strongest recent creations from this AI Twin.
+            </CardDescription>
+          </div>
+          <Link href={buildGenerateHref(props.identity, bestItems[0]?.prompt)}>
+            <Button
+              type="button"
+              size="sm"
+              className="hidden sm:inline-flex bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white"
+            >
+              <Wand2 className="w-4 h-4 mr-2" />
+              Make More
+            </Button>
+          </Link>
+        </div>
+      </CardHeader>
+
+      <CardContent>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {bestItems.map((item, index) => (
+            <motion.button
+              key={item.id}
+              type="button"
+              onClick={() => props.onOpen(item)}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.04 }}
+              className="group relative overflow-hidden rounded-2xl border border-gray-800 bg-gray-950 text-left hover:border-yellow-500/50 hover:shadow-[0_0_28px_rgba(234,179,8,0.12)] transition-all"
+            >
+              <div className="relative aspect-[4/5] overflow-hidden bg-black">
+                {item.kind === "image" ? (
+                  <img
+                    src={item.url}
+                    alt={item.prompt || "Best identity creation"}
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                  />
+                ) : (
+                  <>
+                    <video
+                      src={item.url}
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                      muted
+                      loop
+                      playsInline
+                    />
+                    <div className="absolute top-3 left-3 px-2 py-1 rounded-full bg-black/60 border border-white/10 text-[10px] font-semibold text-cyan-200 flex items-center gap-1">
+                      <Play className="w-3 h-3" />
+                      VIDEO
+                    </div>
+                  </>
+                )}
+
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
+                <div className="absolute top-3 right-3 rounded-full border border-yellow-500/30 bg-yellow-500/15 px-2 py-1 text-[10px] font-bold text-yellow-100">
+                  #{index + 1}
+                </div>
+                <div className="absolute bottom-0 left-0 right-0 p-3">
+                  <p className="line-clamp-2 text-xs font-medium text-gray-100">
+                    {item.prompt || "Saved identity creation"}
+                  </p>
+                  <p className="mt-2 text-[10px] text-gray-400">{formatRelative(item.createdAt)}</p>
+                </div>
+              </div>
+            </motion.button>
+          ))}
+        </div>
+      </CardContent>
     </Card>
   );
 }
@@ -452,7 +718,7 @@ function IdentityAssetToolbar(props: {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base flex items-center gap-2">
           <Search className="w-4 h-4 text-purple-300" />
-          Identity Asset Controls
+          AI Twin Creation Controls
         </CardTitle>
         <CardDescription className="text-xs text-gray-300">
           Filter the images and videos made with this identity.
@@ -476,7 +742,7 @@ function IdentityAssetToolbar(props: {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-              <SelectItem value="all">All Assets</SelectItem>
+              <SelectItem value="all">All Creations</SelectItem>
               <SelectItem value="images">Images Only</SelectItem>
               <SelectItem value="videos">Videos Only</SelectItem>
             </SelectContent>
@@ -520,7 +786,7 @@ function AssetGrid(props: {
               {item.kind === "image" ? (
                 <img
                   src={item.url}
-                  alt={item.prompt || "Identity asset"}
+                  alt={item.prompt || "Identity creation"}
                   className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                 />
               ) : (
@@ -579,6 +845,7 @@ function AssetGrid(props: {
 
 function AssetModal(props: {
   item: IdentityDetailAsset | null;
+  identity: IdentityDetailData;
   onClose: () => void;
 }) {
   if (!props.item) return null;
@@ -602,7 +869,7 @@ function AssetModal(props: {
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between border-b border-gray-800 px-4 py-3 xl:hidden">
-            <div className="text-sm font-semibold text-gray-100">Identity Asset</div>
+            <div className="text-sm font-semibold text-gray-100">AI Twin Creation</div>
             <Button
               type="button"
               variant="ghost"
@@ -619,7 +886,7 @@ function AssetModal(props: {
               {item.kind === "image" ? (
                 <img
                   src={item.url}
-                  alt={item.prompt || "Identity asset"}
+                  alt={item.prompt || "Identity creation"}
                   className="w-full h-full object-contain"
                 />
               ) : (
@@ -645,13 +912,19 @@ function AssetModal(props: {
                         : "bg-cyan-500/15 text-cyan-200 border-cyan-500/30"
                     }`}
                   >
-                    {item.kind === "image" ? "IMAGE ASSET" : "VIDEO ASSET"}
+                    {item.kind === "image" ? "IMAGE CREATION" : "VIDEO CREATION"}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold border bg-yellow-500/10 text-yellow-200 border-yellow-500/25">
+                    AI TWIN LINKED
                   </span>
                 </div>
 
                 <h2 className="text-lg font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-transparent">
-                  Identity Asset Details
+                  Identity Creation Details
                 </h2>
+                <p className="mt-1 text-xs text-gray-400">
+                  Use this result as inspiration for the next scene, or save it as part of this AI Twin’s visual story.
+                </p>
               </div>
 
               <div className="space-y-3 text-xs">
@@ -699,13 +972,24 @@ function AssetModal(props: {
                 <Button
                   type="button"
                   onClick={() =>
-                    downloadFile(item.url, `sirensforge-identity-asset-${item.id}`)
+                    downloadFile(item.url, `sirensforge-identity-creation-${item.id}`)
                   }
                   className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white"
                 >
                   <Download className="w-4 h-4 mr-2" />
                   Download
                 </Button>
+
+                <Link href={buildGenerateHref(props.identity, item.prompt)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
+                  >
+                    <Wand2 className="w-4 h-4 mr-2" />
+                    Generate More Like This
+                  </Button>
+                </Link>
 
                 <Button
                   type="button"
@@ -775,6 +1059,10 @@ export default function IdentityDetailClient({
       <main className="max-w-[1600px] mx-auto px-4 md:px-6 py-6 space-y-6">
         <IdentityHero identity={identity} />
 
+        <IdentityProgressionPanel identity={identity} />
+
+        <BestOfIdentity identity={identity} items={assets} onOpen={setSelected} />
+
         <IdentityAssetToolbar
           query={query}
           filter={filter}
@@ -794,18 +1082,18 @@ export default function IdentityDetailClient({
 
                 <div>
                   <h2 className="text-xl font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-transparent">
-                    No assets linked yet
+                    This AI Twin is ready for its first scene
                   </h2>
                   <p className="text-sm text-gray-400 mt-2 max-w-xl mx-auto">
-                    This identity is ready, but it has no saved generations attached to it yet.
+                    Start generating with this identity to build a private vault of reusable images and videos.
                   </p>
                 </div>
 
                 <div className="pt-2">
-                  <Link href="/generate">
+                  <Link href={buildGenerateHref(identity)}>
                     <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white shadow-[0_0_24px_rgba(168,85,247,0.35)]">
                       <Wand2 className="w-4 h-4 mr-2" />
-                      Create With This Identity
+                      Create With This AI Twin
                     </Button>
                   </Link>
                 </div>
@@ -820,7 +1108,7 @@ export default function IdentityDetailClient({
                   <Search className="w-6 h-6 text-gray-500" />
                 </div>
                 <h2 className="text-lg font-semibold text-gray-100">
-                  No identity assets match your filters
+                  No AI Twin creations match your filters
                 </h2>
                 <p className="text-sm text-gray-400">
                   Try a different search or switch your media filter.
@@ -833,7 +1121,7 @@ export default function IdentityDetailClient({
         )}
       </main>
 
-      <AssetModal item={selected} onClose={() => setSelected(null)} />
+      <AssetModal item={selected} identity={identity} onClose={() => setSelected(null)} />
     </div>
   );
 }
