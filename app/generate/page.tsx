@@ -98,6 +98,7 @@ type HandoffPayload = {
   generation_target?: string;
   created_at?: number;
   source?: string;
+  identity?: string;
 };
 
 function inferKindFromOutput(output: any): MediaKind {
@@ -1975,6 +1976,7 @@ export default function GeneratePage() {
     createNew: false,
     newName: "",
   });
+  const [pendingIdentityId, setPendingIdentityId] = useState<string | null>(null);
 
   const [resolution, setResolution] = useState("1024x1024");
   const [guidance, setGuidance] = useState(7.5);
@@ -2013,13 +2015,15 @@ export default function GeneratePage() {
     const outputTypeParam = searchParams.get("output_type");
     const generationTargetParam = searchParams.get("generation_target");
     const sourceParam = searchParams.get("source");
+    const identityParam = searchParams.get("identity");
 
     if (
       !promptParam &&
       !negativeParam &&
       !outputTypeParam &&
       !generationTargetParam &&
-      !sourceParam
+      !sourceParam &&
+      !identityParam
     ) {
       return null;
     }
@@ -2030,6 +2034,7 @@ export default function GeneratePage() {
       output_type: outputTypeParam || undefined,
       generation_target: generationTargetParam || undefined,
       source: sourceParam || undefined,
+      identity: identityParam || undefined,
     };
   }, [searchParams]);
 
@@ -2163,6 +2168,10 @@ export default function GeneratePage() {
         ? payload.output_type.trim().toUpperCase()
         : "";
     const incomingMode = parseGenerationMode(payload.generation_target);
+    const incomingIdentity =
+      typeof payload.identity === "string" && payload.identity.trim().length > 0
+        ? payload.identity.trim()
+        : "";
 
     if (incomingPrompt) setPrompt(incomingPrompt);
     if (incomingNegative) setNegativePrompt(incomingNegative);
@@ -2172,6 +2181,9 @@ export default function GeneratePage() {
       setOutputType("IMAGE");
     }
     setMode(incomingMode);
+    if (incomingIdentity) {
+      setPendingIdentityId(incomingIdentity);
+    }
 
     setShowArrivalBanner(true);
     setHighlightPrompt(true);
@@ -2214,6 +2226,22 @@ export default function GeneratePage() {
       window.clearTimeout(highlightTimer);
     };
   }, [incomingQueryPayload, router]);
+
+  useEffect(() => {
+    if (!pendingIdentityId) return;
+
+    const match = identityOptions.find((item) => item.id === pendingIdentityId);
+
+    if (!match) return;
+
+    setLoraSelection({
+      mode: "single",
+      selected: [pendingIdentityId],
+      createNew: false,
+      newName: "",
+    });
+    setPendingIdentityId(null);
+  }, [identityOptions, pendingIdentityId]);
 
   useEffect(() => {
     if (!imageFile) {
