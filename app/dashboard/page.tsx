@@ -59,7 +59,16 @@ type ContinueIdentity = {
   datasetImageCount: number | null;
 };
 
-const DAILY_SIREN_SCENES = [
+type DailySirenScene = {
+  label: string;
+  title: string;
+  prompt: string;
+  tone: string;
+  border: string;
+  badge: string;
+};
+
+const DAILY_SIREN_SCENE_BANK: DailySirenScene[] = [
   {
     label: "Soft Glam",
     title: "Velvet Mirror Moment",
@@ -87,6 +96,249 @@ const DAILY_SIREN_SCENES = [
     border: "border-cyan-400/30 hover:border-cyan-300/60",
     badge: "Story scene",
   },
+  {
+    label: "Editorial",
+    title: "Silk Sheets Morning Light",
+    prompt:
+      "photorealistic woman wrapped in silk sheets in soft morning window light, relaxed confident expression, natural skin texture, premium editorial photography, shallow depth of field, high detail",
+    tone: "from-rose-950/45 via-black/60 to-orange-950/30",
+    border: "border-rose-400/30 hover:border-rose-300/60",
+    badge: "Morning set",
+  },
+  {
+    label: "Luxury",
+    title: "Penthouse Window Glow",
+    prompt:
+      "photorealistic woman standing near a penthouse window at night, city skyline lights, elegant lingerie-inspired styling, cinematic rim light, confident pose, realistic skin texture, high detail",
+    tone: "from-indigo-950/45 via-black/60 to-pink-950/30",
+    border: "border-indigo-400/30 hover:border-indigo-300/60",
+    badge: "Premium vibe",
+  },
+  {
+    label: "Boudoir",
+    title: "Candlelit Dressing Room",
+    prompt:
+      "photorealistic woman in a candlelit dressing room, warm shadows, soft sensual styling, mirror reflections, intimate cinematic mood, realistic anatomy, high detail",
+    tone: "from-amber-950/40 via-black/60 to-rose-950/35",
+    border: "border-amber-400/30 hover:border-amber-300/60",
+    badge: "Warm mood",
+  },
+  {
+    label: "Fitness",
+    title: "Post-Workout Heat",
+    prompt:
+      "photorealistic woman after a workout in a private studio, subtle skin glow, athletic confident pose, soft dramatic lighting, clean background, high detail",
+    tone: "from-emerald-950/35 via-black/60 to-cyan-950/30",
+    border: "border-emerald-400/30 hover:border-emerald-300/60",
+    badge: "Body focus",
+  },
+  {
+    label: "Dark Glam",
+    title: "Black Lace Spotlight",
+    prompt:
+      "photorealistic woman in black lace-inspired styling under a single dramatic spotlight, dark background, powerful seductive gaze, cinematic shadows, high detail",
+    tone: "from-zinc-950/60 via-black/65 to-fuchsia-950/35",
+    border: "border-fuchsia-400/30 hover:border-fuchsia-300/60",
+    badge: "Bold look",
+  },
+  {
+    label: "Beach",
+    title: "Private Beach Sunset",
+    prompt:
+      "photorealistic woman on a private beach at sunset, golden hour lighting, wet hair, relaxed sensual pose, cinematic ocean background, realistic skin detail, high detail",
+    tone: "from-orange-950/35 via-black/60 to-pink-950/30",
+    border: "border-orange-400/30 hover:border-orange-300/60",
+    badge: "Golden hour",
+  },
+  {
+    label: "Goth",
+    title: "Velvet Noir Bedroom",
+    prompt:
+      "photorealistic woman in a gothic velvet bedroom, dark romantic styling, candle glow, deep shadows, confident expression, cinematic detail, realistic skin texture",
+    tone: "from-purple-950/55 via-black/65 to-zinc-950/45",
+    border: "border-violet-400/30 hover:border-violet-300/60",
+    badge: "Dark romance",
+  },
+  {
+    label: "Fantasy",
+    title: "Moonlit Garden Muse",
+    prompt:
+      "photorealistic woman in a moonlit garden, soft fantasy mood, glowing highlights, elegant pose, cinematic atmosphere, realistic skin texture, high detail",
+    tone: "from-blue-950/40 via-black/60 to-purple-950/35",
+    border: "border-blue-400/30 hover:border-blue-300/60",
+    badge: "Dream scene",
+  },
+  {
+    label: "Club",
+    title: "VIP Lounge Energy",
+    prompt:
+      "photorealistic woman in a private VIP lounge, neon reflections, moody club lighting, confident sensual body language, cinematic realism, high detail",
+    tone: "from-fuchsia-950/40 via-black/60 to-cyan-950/30",
+    border: "border-fuchsia-400/30 hover:border-cyan-300/60",
+    badge: "Nightlife",
+  },
+  {
+    label: "Romantic",
+    title: "Rainy Window Portrait",
+    prompt:
+      "photorealistic woman near a rainy window, soft reflection, intimate romantic mood, natural expression, cinematic lighting, realistic skin texture, high detail",
+    tone: "from-slate-950/50 via-black/60 to-purple-950/30",
+    border: "border-slate-400/30 hover:border-slate-300/60",
+    badge: "Soft story",
+  },
+  {
+    label: "Luxury",
+    title: "Marble Bathroom Glow",
+    prompt:
+      "photorealistic woman in a luxury marble bathroom, soft steam, warm vanity lighting, elegant sensual pose, realistic skin detail, cinematic composition",
+    tone: "from-stone-950/45 via-black/60 to-pink-950/25",
+    border: "border-stone-400/30 hover:border-stone-300/60",
+    badge: "Spa mood",
+  },
+  {
+    label: "Fashion",
+    title: "High-Fashion Hotel Suite",
+    prompt:
+      "photorealistic woman in a high-end hotel suite, luxury fashion styling, confident pose, editorial lighting, shallow depth of field, high detail",
+    tone: "from-purple-950/40 via-black/60 to-rose-950/30",
+    border: "border-purple-400/30 hover:border-rose-300/60",
+    badge: "Editorial",
+  },
+  {
+    label: "Cozy",
+    title: "Oversized Sweater Tease",
+    prompt:
+      "photorealistic woman in an oversized sweater in a cozy bedroom, soft warm lighting, natural seductive expression, intimate lifestyle photography, high detail",
+    tone: "from-amber-950/35 via-black/60 to-pink-950/25",
+    border: "border-amber-400/30 hover:border-pink-300/60",
+    badge: "Cozy hook",
+  },
+  {
+    label: "Cinematic",
+    title: "Red Light Hallway",
+    prompt:
+      "photorealistic woman in a red-lit hallway, cinematic shadows, slow-burn sensual energy, intense eye contact, realistic anatomy, high detail",
+    tone: "from-red-950/50 via-black/65 to-purple-950/30",
+    border: "border-red-400/30 hover:border-red-300/60",
+    badge: "Film mood",
+  },
+  {
+    label: "Boudoir",
+    title: "White Sheet Close-Up",
+    prompt:
+      "photorealistic close-up portrait of a woman in white sheets, soft natural light, detailed eyes and skin texture, intimate mood, shallow depth of field",
+    tone: "from-neutral-950/45 via-black/60 to-pink-950/25",
+    border: "border-neutral-400/30 hover:border-neutral-300/60",
+    badge: "Close-up",
+  },
+  {
+    label: "Cyber",
+    title: "Neon Cyber Muse",
+    prompt:
+      "photorealistic woman in futuristic neon environment, cyberpunk lighting, reflective surfaces, confident sensual pose, cinematic realism, high detail",
+    tone: "from-cyan-950/45 via-black/65 to-fuchsia-950/35",
+    border: "border-cyan-400/30 hover:border-fuchsia-300/60",
+    badge: "Cyber set",
+  },
+  {
+    label: "Nature",
+    title: "Forest Cabin Firelight",
+    prompt:
+      "photorealistic woman in a private forest cabin, fireplace glow, cozy sensual styling, cinematic shadows, natural skin detail, high detail",
+    tone: "from-lime-950/25 via-black/60 to-amber-950/35",
+    border: "border-lime-400/30 hover:border-amber-300/60",
+    badge: "Cabin mood",
+  },
+  {
+    label: "Poolside",
+    title: "Midnight Pool Glow",
+    prompt:
+      "photorealistic woman beside a midnight pool, blue water reflections, wet skin glow, luxury setting, cinematic composition, high detail",
+    tone: "from-blue-950/45 via-black/65 to-cyan-950/35",
+    border: "border-blue-400/30 hover:border-cyan-300/60",
+    badge: "Wet glow",
+  },
+  {
+    label: "Minimal",
+    title: "Clean Studio Confidence",
+    prompt:
+      "photorealistic woman in a clean studio setting, simple backdrop, premium softbox lighting, confident pose, realistic skin texture, editorial detail",
+    tone: "from-gray-950/55 via-black/65 to-purple-950/25",
+    border: "border-gray-400/30 hover:border-gray-300/60",
+    badge: "Clean set",
+  },
+  {
+    label: "Romance",
+    title: "Hotel Balcony Sunrise",
+    prompt:
+      "photorealistic woman on a hotel balcony at sunrise, soft golden light, robe styling, relaxed romantic expression, cinematic luxury mood, high detail",
+    tone: "from-yellow-950/30 via-black/60 to-pink-950/30",
+    border: "border-yellow-400/30 hover:border-yellow-300/60",
+    badge: "Sunrise",
+  },
+  {
+    label: "Moody",
+    title: "Shadow Play Portrait",
+    prompt:
+      "photorealistic woman in dramatic shadow play lighting, partial silhouette, intense gaze, dark elegant styling, cinematic realism, high detail",
+    tone: "from-zinc-950/60 via-black/70 to-purple-950/30",
+    border: "border-zinc-400/30 hover:border-zinc-300/60",
+    badge: "Moody",
+  },
+  {
+    label: "Playful",
+    title: "Pillow Talk Energy",
+    prompt:
+      "photorealistic woman in a playful bedroom scene, soft pillows, natural smile, teasing eye contact, warm light, intimate lifestyle photography, high detail",
+    tone: "from-pink-950/35 via-black/60 to-rose-950/30",
+    border: "border-pink-400/30 hover:border-rose-300/60",
+    badge: "Playful",
+  },
+  {
+    label: "Luxury",
+    title: "Champagne Suite Mood",
+    prompt:
+      "photorealistic woman in a luxury suite with champagne glass nearby, elegant evening styling, warm cinematic lighting, confident sensual pose, high detail",
+    tone: "from-yellow-950/25 via-black/60 to-purple-950/30",
+    border: "border-yellow-400/30 hover:border-purple-300/60",
+    badge: "Suite set",
+  },
+  {
+    label: "Drama",
+    title: "Blue Hour Rooftop",
+    prompt:
+      "photorealistic woman on a rooftop during blue hour, city lights, dramatic wind, cinematic composition, confident expression, realistic skin texture, high detail",
+    tone: "from-sky-950/40 via-black/60 to-indigo-950/35",
+    border: "border-sky-400/30 hover:border-sky-300/60",
+    badge: "Blue hour",
+  },
+  {
+    label: "Soft",
+    title: "Window Light Linger",
+    prompt:
+      "photorealistic woman sitting near a window with soft diffused light, gentle sensual mood, natural skin texture, elegant composition, high detail",
+    tone: "from-pink-950/30 via-black/60 to-cyan-950/20",
+    border: "border-pink-400/30 hover:border-cyan-300/60",
+    badge: "Soft light",
+  },
+  {
+    label: "Power",
+    title: "CEO After Hours",
+    prompt:
+      "photorealistic woman in an upscale office after hours, high-fashion power styling, city lights, confident seductive gaze, cinematic lighting, high detail",
+    tone: "from-indigo-950/40 via-black/60 to-emerald-950/25",
+    border: "border-indigo-400/30 hover:border-emerald-300/60",
+    badge: "Power look",
+  },
+  {
+    label: "Video Ready",
+    title: "Slow Motion Silk Scene",
+    prompt:
+      "photorealistic woman in silk fabric with motion-ready styling, soft flowing fabric, cinematic lighting, natural movement feel, premium detail",
+    tone: "from-fuchsia-950/35 via-black/60 to-cyan-950/30",
+    border: "border-fuchsia-400/30 hover:border-cyan-300/60",
+    badge: "Motion idea",
+  }
 ];
 
 function getMetadata(row: GenerationRow): Record<string, unknown> {
@@ -166,6 +418,48 @@ function formatRelative(value?: string | null): string {
   return `${days}d ago`;
 }
 
+function hashString(input: string): number {
+  let hash = 2166136261;
+
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function getDateKey(date = new Date()): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function getDailySirenScenes(userKey: string): DailySirenScene[] {
+  const pool = [...DAILY_SIREN_SCENE_BANK];
+  const seed = hashString(`${getDateKey()}:${userKey || "anonymous"}`);
+
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = (seed + i * 17 + (seed % (i + 1))) % (i + 1);
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+
+  return pool.slice(0, 3);
+}
+
+function buildGenerateHref(prompt: string, source: string, identityId?: string | null): string {
+  const params = new URLSearchParams();
+
+  params.set("prompt", prompt);
+  params.set("generation_target", "text_to_image");
+  params.set("output_type", "IMAGE");
+  params.set("source", source);
+
+  if (identityId) {
+    params.set("identity", identityId);
+  }
+
+  return `/generate?${params.toString()}`;
+}
+
 function buildContinueIdentity(
   lora: LoraRow | null,
   linkedAssets: GenerationRow[]
@@ -230,79 +524,86 @@ async function getContinueIdentity(
   authUserId: string,
   profileId: string
 ): Promise<ContinueIdentity | null> {
-  const supabase = await supabaseServer();
+  try {
+    const supabase = await supabaseServer();
 
-  const { data: generations, error: generationError } = await supabase
-    .from("generations")
-    .select(
-      `
-        id,
-        user_id,
-        prompt,
-        image_url,
-        created_at,
-        updated_at,
-        status,
-        metadata,
-        lora_used,
-        job_type,
-        mode
-      `
-    )
-    .in("user_id", [authUserId, profileId])
-    .not("lora_used", "is", null)
-    .order("created_at", { ascending: false })
-    .limit(60);
+    const { data: generations, error: generationError } = await supabase
+      .from("generations")
+      .select(
+        `
+          id,
+          user_id,
+          prompt,
+          image_url,
+          created_at,
+          updated_at,
+          status,
+          metadata,
+          lora_used,
+          job_type,
+          mode
+        `
+      )
+      .in("user_id", [authUserId, profileId])
+      .not("lora_used", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(80);
 
-  if (generationError) {
-    console.error("[dashboard] Failed to load identity-linked generations:", generationError);
+    if (generationError) {
+      console.error("[dashboard] Failed to load identity-linked generations:", generationError);
+      return null;
+    }
+
+    const generationRows: GenerationRow[] = Array.isArray(generations)
+      ? (generations as GenerationRow[])
+      : [];
+
+    const realIdentityAssets = generationRows.filter(
+      (row) => isRealAsset(row) && getIdentityLora(row)
+    );
+
+    if (realIdentityAssets.length === 0) {
+      return null;
+    }
+
+    const latestIdentityId = getIdentityLora(realIdentityAssets[0]);
+
+    if (!latestIdentityId) {
+      return null;
+    }
+
+    const linkedAssets = realIdentityAssets.filter(
+      (row) => getIdentityLora(row) === latestIdentityId
+    );
+
+    const { data: lora, error: loraError } = await supabase
+      .from("user_loras")
+      .select(
+        `
+          id,
+          name,
+          preview_url,
+          status,
+          image_count,
+          created_at,
+          updated_at,
+          trigger_token
+        `
+      )
+      .eq("id", latestIdentityId)
+      .eq("user_id", authUserId)
+      .maybeSingle();
+
+    if (loraError) {
+      console.error("[dashboard] Failed to load latest identity:", loraError);
+      return null;
+    }
+
+    return buildContinueIdentity((lora as LoraRow | null) || null, linkedAssets);
+  } catch (error) {
+    console.error("[dashboard] Continue identity block failed safely:", error);
     return null;
   }
-
-  const generationRows: GenerationRow[] = Array.isArray(generations)
-    ? (generations as GenerationRow[])
-    : [];
-
-  const realIdentityAssets = generationRows.filter((row) => isRealAsset(row) && getIdentityLora(row));
-
-  if (realIdentityAssets.length === 0) {
-    return null;
-  }
-
-  const latestIdentityId = getIdentityLora(realIdentityAssets[0]);
-
-  if (!latestIdentityId) {
-    return null;
-  }
-
-  const linkedAssets = realIdentityAssets.filter(
-    (row) => getIdentityLora(row) === latestIdentityId
-  );
-
-  const { data: lora, error: loraError } = await supabase
-    .from("user_loras")
-    .select(
-      `
-        id,
-        name,
-        preview_url,
-        status,
-        image_count,
-        created_at,
-        updated_at,
-        trigger_token
-      `
-    )
-    .eq("id", latestIdentityId)
-    .eq("user_id", authUserId)
-    .maybeSingle();
-
-  if (loraError) {
-    console.error("[dashboard] Failed to load latest identity:", loraError);
-    return null;
-  }
-
-  return buildContinueIdentity((lora as LoraRow | null) || null, linkedAssets);
 }
 
 function ContinueIdentityBlock({ identity }: { identity: ContinueIdentity | null }) {
@@ -346,7 +647,8 @@ function ContinueIdentityBlock({ identity }: { identity: ContinueIdentity | null
     );
   }
 
-  const generateHref = `/generate?identity=${encodeURIComponent(identity.id)}`;
+  const continuePrompt = identity.lastPrompt || "Continue this identity in a new cinematic scene.";
+  const generateHref = buildGenerateHref(continuePrompt, "dashboard_continue_identity", identity.id);
   const identityHref = `/identities/${identity.id}`;
 
   return (
@@ -502,9 +804,10 @@ export default async function DashboardPage() {
   }
 
   const authUserId = auth.user?.id;
-  const profileId = auth.profile?.id;
+  const profileId = auth.profile?.id || authUserId || "";
   const continueIdentity =
     authUserId && profileId ? await getContinueIdentity(authUserId, profileId) : null;
+  const dailyScenes = getDailySirenScenes(authUserId || profileId || "sirensforge");
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -558,7 +861,7 @@ export default async function DashboardPage() {
               </h2>
 
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-300 sm:text-base">
-                Skip the blank prompt box. Pick a scene, send it to the Generator, then evolve it into your next Vault piece.
+                Skip the blank prompt box. These rotate daily from a larger scene bank, then hand off cleanly to the Generator.
               </p>
             </div>
 
@@ -572,10 +875,10 @@ export default async function DashboardPage() {
           </div>
 
           <div className="grid gap-4 md:grid-cols-3">
-            {DAILY_SIREN_SCENES.map((scene) => (
+            {dailyScenes.map((scene) => (
               <Link
                 key={scene.title}
-                href={`/generate?prompt=${encodeURIComponent(scene.prompt)}`}
+                href={buildGenerateHref(scene.prompt, "daily_siren_loop", continueIdentity?.id || null)}
                 className={`group relative overflow-hidden rounded-[24px] border ${scene.border} bg-gradient-to-br ${scene.tone} p-6 transition-all hover:-translate-y-1 hover:bg-white/10 hover:shadow-[0_0_34px_rgba(236,72,153,0.14)]`}
               >
                 <div className="absolute inset-0 bg-gradient-to-br from-white/5 via-transparent to-pink-500/10 opacity-0 transition-opacity group-hover:opacity-100" />
