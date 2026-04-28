@@ -727,34 +727,107 @@ function evaluatePromptStrength(prompt: string) {
   };
 }
 
-function SirensMindCTA(props: { onOpen: () => void }) {
+function FloatingSirensMindDock(props: {
+  open: boolean;
+  hasPrompt: boolean;
+  onToggle: () => void;
+  onOpenBrain: () => void;
+}) {
   return (
-    <IdleGlow>
-    <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
-    <Card className="border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.92),rgba(10,10,14,0.96))] shadow-[0_0_30px_rgba(192,38,211,0.08)] transition-all duration-300 hover:shadow-[0_0_36px_rgba(192,38,211,0.14)]">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-sm md:text-base">
-          <Sparkles className="h-4 w-4 text-fuchsia-300" />
-          A Siren’s Mind
-        </CardTitle>
-        <CardDescription className="text-xs text-zinc-300">
-          Turn rough ideas into polished, generator-ready prompts with AI guidance before you generate.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <GradientDrift>
-        <Button
-          type="button"
-          onClick={props.onOpen}
-          className="h-10 w-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 bg-[length:200%_200%] text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:brightness-110 hover:shadow-[0_12px_28px_rgba(192,38,211,0.24)]"
-        >
-          Open Siren’s Mind
-        </Button>
-        </GradientDrift>
-      </CardContent>
-    </Card>
-    </motion.div>
-    </IdleGlow>
+    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
+      <AnimatePresence>
+        {props.open && (
+          <motion.div
+            initial={{ opacity: 0, y: 14, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 14, scale: 0.96 }}
+            transition={{ duration: 0.18 }}
+            className="w-[min(calc(100vw-2rem),390px)] overflow-hidden rounded-3xl border border-fuchsia-500/25 bg-[linear-gradient(180deg,rgba(24,14,34,0.98),rgba(7,7,12,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.55),0_0_38px_rgba(192,38,211,0.18)] backdrop-blur-xl"
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-white shadow-[0_0_24px_rgba(192,38,211,0.35)]">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-white">A Siren’s Mind</div>
+                  <div className="mt-1 text-[11px] leading-5 text-zinc-300">
+                    Brain Mode builds the scene. The Generator creates the content.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={props.onToggle}
+                className="rounded-full p-1.5 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+                aria-label="Close Siren’s Mind panel"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 px-4 py-4">
+              <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/8 px-3 py-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-fuchsia-300">
+                  Correct flow
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-center text-[10px] font-semibold text-zinc-200">
+                  <div className="rounded-xl border border-white/10 bg-black/30 px-2 py-2">Chat</div>
+                  <div className="rounded-xl border border-white/10 bg-black/30 px-2 py-2">Send</div>
+                  <div className="rounded-xl border border-white/10 bg-black/30 px-2 py-2">Generate</div>
+                </div>
+                <p className="mt-2 text-[11px] leading-5 text-zinc-400">
+                  Use Siren’s Mind for deeper prompt planning, then send the structured output back here to execute.
+                </p>
+              </div>
+
+              {props.hasPrompt ? (
+                <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/8 px-3 py-3 text-[11px] leading-5 text-cyan-100">
+                  You already have a prompt loaded. Open Brain Mode only if you want to refine the scene before generating.
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-zinc-800 bg-black/30 px-3 py-3 text-[11px] leading-5 text-zinc-300">
+                  Rough idea? Let Siren’s Mind shape it into a generator-ready IMAGE, VIDEO, or STORY output.
+                </div>
+              )}
+
+              <GradientDrift>
+                <Button
+                  type="button"
+                  onClick={props.onOpenBrain}
+                  className="h-11 w-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 bg-[length:200%_200%] text-xs font-bold text-white shadow-[0_12px_30px_rgba(192,38,211,0.24)] transition hover:-translate-y-0.5 hover:brightness-110"
+                >
+                  Open Siren’s Mind
+                </Button>
+              </GradientDrift>
+
+              <p className="text-center text-[10px] text-zinc-500">
+                Siren’s Mind never generates directly. It feeds this page.
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <motion.button
+        type="button"
+        onClick={props.onToggle}
+        whileHover={{ y: -2, scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        className="group relative flex h-14 items-center gap-3 rounded-full border border-fuchsia-400/30 bg-[linear-gradient(90deg,rgba(126,34,206,0.96),rgba(219,39,119,0.96),rgba(8,145,178,0.96))] px-4 text-white shadow-[0_18px_48px_rgba(192,38,211,0.35)]"
+        aria-label="Open Siren’s Mind prompt assistant"
+      >
+        <span className="absolute -inset-1 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 opacity-30 blur-md transition group-hover:opacity-50" />
+        <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-black/25">
+          <Sparkles className="h-5 w-5" />
+        </span>
+        <span className="relative hidden text-left sm:block">
+          <span className="block text-xs font-bold leading-4">Siren’s Mind</span>
+          <span className="block text-[10px] leading-3 text-white/75">Brain Mode</span>
+        </span>
+      </motion.button>
+    </div>
   );
 }
 
@@ -1470,6 +1543,7 @@ function GenerateButton(props: {
   qualityPreset: QualityPreset;
   consistencyPreset: ConsistencyPreset;
   disabled?: boolean;
+  highlight?: boolean;
   onClick: () => void;
 }) {
   const actionLabel =
@@ -1486,7 +1560,13 @@ function GenerateButton(props: {
   return (
     <IdleGlow>
     <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
-    <Card className="border-gray-800 bg-gray-900/80 transition-all duration-300 hover:shadow-[0_18px_38px_rgba(168,85,247,0.14)]">
+    <Card
+      className={`border-gray-800 bg-gray-900/80 transition-all duration-300 hover:shadow-[0_18px_38px_rgba(168,85,247,0.14)] ${
+        props.highlight
+          ? "border-fuchsia-400/50 shadow-[0_0_0_1px_rgba(232,121,249,0.25),0_0_40px_rgba(192,38,211,0.22)]"
+          : ""
+      }`}
+    >
       <CardContent className="p-4">
         <motion.div
           whileHover={{
@@ -2004,6 +2084,8 @@ export default function GeneratePage() {
 
   const [showArrivalBanner, setShowArrivalBanner] = useState(false);
   const [highlightPrompt, setHighlightPrompt] = useState(false);
+  const [highlightGenerate, setHighlightGenerate] = useState(false);
+  const [sirensMindDockOpen, setSirensMindDockOpen] = useState(false);
   const [refiningVariant, setRefiningVariant] = useState<RefineVariant | null>(null);
   const [refineChoices, setRefineChoices] = useState<string[] | null>(null);
   const [appliedRefineIndex, setAppliedRefineIndex] = useState<number | null>(null);
@@ -2187,6 +2269,7 @@ export default function GeneratePage() {
 
     setShowArrivalBanner(true);
     setHighlightPrompt(true);
+    setHighlightGenerate(true);
     hydratedFromHandoffRef.current = true;
 
     try {
@@ -2219,7 +2302,8 @@ export default function GeneratePage() {
 
     const highlightTimer = window.setTimeout(() => {
       setHighlightPrompt(false);
-    }, 2600);
+      setHighlightGenerate(false);
+    }, 3200);
 
     return () => {
       window.clearTimeout(cinematicArrivalTimer);
@@ -2662,8 +2746,6 @@ ${basePrompt}`,
                 </div>
 
                 <div className="space-y-3 xl:sticky xl:top-24 xl:self-start">
-                  <SirensMindCTA onOpen={() => router.push("/sirens-mind")} />
-
                   <div className="grid grid-cols-1 gap-3">
                     <LoraIdentitySection
                       value={loraSelection}
@@ -2686,6 +2768,7 @@ ${basePrompt}`,
                     qualityPreset={qualityPreset}
                     consistencyPreset={consistencyPreset}
                     disabled={!canGenerate}
+                    highlight={highlightGenerate}
                     onClick={handleGenerate}
                   />
                 </div>
@@ -2731,6 +2814,13 @@ ${basePrompt}`,
           </Card>
         </div>
       </main>
+
+      <FloatingSirensMindDock
+        open={sirensMindDockOpen}
+        hasPrompt={Boolean(prompt.trim())}
+        onToggle={() => setSirensMindDockOpen((value) => !value)}
+        onOpenBrain={() => router.push("/sirens-mind")}
+      />
 
       <SubscriptionModal
         open={showSubModal}
