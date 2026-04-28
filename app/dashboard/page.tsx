@@ -70,274 +70,274 @@ type DailySirenScene = {
 
 const DAILY_SIREN_SCENE_BANK: DailySirenScene[] = [
   {
-    label: "Suggestive",
-    title: "Silk Sheet Tease",
-    prompt:
-      "photorealistic woman in silk sheets, teasing pose, soft bedroom lighting, direct eye contact, relaxed seductive expression, natural skin texture, cinematic composition, high detail",
-    tone: "from-pink-950/45 via-black/60 to-purple-950/35",
-    border: "border-pink-400/30 hover:border-pink-300/60",
-    badge: "Tease",
-  },
-  {
-    label: "Suggestive",
-    title: "After Hours Office",
-    prompt:
-      "photorealistic woman in a dim office after hours, slightly undone outfit, confident stance, soft shadows, moody lighting, teasing energy, high detail",
-    tone: "from-indigo-950/40 via-black/60 to-pink-950/30",
-    border: "border-indigo-400/30 hover:border-pink-300/60",
-    badge: "After hours",
-  },
-  {
-    label: "Suggestive",
-    title: "Window Light Linger",
-    prompt:
-      "photorealistic woman by a window in soft natural light, gentle pose, relaxed sensual expression, shallow depth of field, realistic skin detail",
-    tone: "from-cyan-950/30 via-black/60 to-pink-950/30",
-    border: "border-cyan-400/30 hover:border-pink-300/60",
-    badge: "Soft tension",
-  },
-  {
-    label: "Suggestive",
-    title: "Morning Glow",
-    prompt:
-      "photorealistic woman in soft morning light, loose clothing, natural pose, warm tones, intimate atmosphere, cinematic realism",
-    tone: "from-amber-950/35 via-black/60 to-rose-950/30",
-    border: "border-amber-400/30 hover:border-rose-300/60",
-    badge: "Morning tease",
-  },
-  {
-    label: "Suggestive",
-    title: "Mirror Confidence",
-    prompt:
-      "photorealistic woman standing in front of a mirror, confident body language, subtle teasing expression, soft lighting, high detail",
-    tone: "from-purple-950/40 via-black/60 to-pink-950/35",
-    border: "border-purple-400/30 hover:border-pink-300/60",
-    badge: "Mirror look",
-  },
-  {
-    label: "Suggestive",
-    title: "Oversized Hoodie",
-    prompt:
-      "photorealistic woman wearing an oversized hoodie, relaxed pose, teasing expression, warm indoor lighting, intimate lifestyle photography",
-    tone: "from-zinc-950/45 via-black/60 to-pink-950/25",
-    border: "border-zinc-400/30 hover:border-pink-300/60",
-    badge: "Cozy tease",
-  },
-  {
-    label: "Suggestive",
-    title: "Couch Lounge",
-    prompt:
-      "photorealistic woman lounging on a couch, relaxed but confident pose, soft shadows, cinematic lighting, natural skin detail",
-    tone: "from-rose-950/35 via-black/60 to-purple-950/25",
-    border: "border-rose-400/30 hover:border-purple-300/60",
-    badge: "Lounge",
-  },
-  {
-    label: "Suggestive",
-    title: "Rainy Window Mood",
-    prompt:
-      "photorealistic woman by a rainy window, soft reflections, intimate atmosphere, emotional expression, cinematic detail",
-    tone: "from-slate-950/45 via-black/60 to-purple-950/30",
-    border: "border-slate-400/30 hover:border-purple-300/60",
-    badge: "Rain mood",
-  },
-  {
-    label: "Suggestive",
-    title: "Bedroom Stretch",
-    prompt:
-      "photorealistic woman stretching in a bedroom, natural pose, subtle body emphasis, warm lighting, realistic detail",
-    tone: "from-orange-950/30 via-black/60 to-pink-950/30",
-    border: "border-orange-400/30 hover:border-pink-300/60",
-    badge: "Body tease",
-  },
-  {
-    label: "Suggestive",
-    title: "Soft Bed Edge",
-    prompt:
-      "photorealistic woman sitting at the edge of a bed, teasing posture, direct eye contact, moody lighting, high detail",
-    tone: "from-pink-950/40 via-black/60 to-fuchsia-950/30",
-    border: "border-pink-400/30 hover:border-fuchsia-300/60",
-    badge: "Bed edge",
-  },
-  {
     label: "Spicy",
-    title: "Neon Heat",
+    title: "Neon Nude Heat",
     prompt:
-      "photorealistic woman in neon-lit room, glowing skin, confident pose, intense eye contact, cinematic lighting, high detail",
+      "photorealistic nude woman, provocative pose, body angled toward camera, hips slightly forward, direct intense eye contact, teasing expression, neon lighting, cinematic shadows, high detail",
     tone: "from-fuchsia-950/45 via-black/60 to-cyan-950/35",
     border: "border-fuchsia-400/30 hover:border-cyan-300/60",
     badge: "Heat",
   },
   {
     label: "Spicy",
-    title: "Private Suite Energy",
+    title: "Private Suite Nude",
     prompt:
-      "photorealistic woman in a luxury suite, lingerie styling, confident stance, dramatic lighting, sensual energy, high detail",
+      "photorealistic nude woman in a luxury suite, confident pose, arched posture, body visible, direct eye contact, soft dramatic lighting, cinematic realism, high detail",
     tone: "from-purple-950/45 via-black/60 to-pink-950/35",
     border: "border-purple-400/30 hover:border-pink-300/60",
-    badge: "Private suite",
+    badge: "Suite",
   },
   {
     label: "Spicy",
-    title: "Sweat Glow",
+    title: "Sweat Glow Nude",
     prompt:
-      "photorealistic woman with subtle sweat sheen, strong body emphasis, close framing, dramatic shadows, cinematic realism",
+      "photorealistic nude woman with light sweat sheen, close framing, strong body positioning, parted lips, intense gaze, dramatic shadows, cinematic lighting, high detail",
     tone: "from-rose-950/45 via-black/60 to-orange-950/30",
     border: "border-rose-400/30 hover:border-orange-300/60",
-    badge: "Body heat",
+    badge: "Glow",
   },
   {
     label: "Spicy",
-    title: "Dark Room Focus",
+    title: "Dark Room Nude",
     prompt:
-      "photorealistic woman in a dark room, spotlight lighting, intense gaze, strong pose, moody shadows, high detail",
+      "photorealistic nude woman in a dark room, spotlight lighting, strong pose, hips forward, direct eye contact, moody shadows, cinematic detail",
     tone: "from-zinc-950/60 via-black/70 to-purple-950/30",
     border: "border-zinc-400/30 hover:border-purple-300/60",
     badge: "Spotlight",
   },
   {
     label: "Spicy",
-    title: "Balcony Night Look",
+    title: "Balcony Night Nude",
     prompt:
-      "photorealistic woman on a balcony at night, city lights, confident pose, wind in hair, cinematic lighting",
+      "photorealistic nude woman on a balcony at night, city lights behind, confident stance, body angled toward camera, wind in hair, cinematic lighting",
     tone: "from-indigo-950/45 via-black/60 to-cyan-950/30",
     border: "border-indigo-400/30 hover:border-cyan-300/60",
-    badge: "Night look",
+    badge: "Night",
   },
   {
     label: "Spicy",
-    title: "Club VIP",
+    title: "Red Light Nude",
     prompt:
-      "photorealistic woman in a VIP lounge, neon reflections, confident body language, close framing, high detail",
-    tone: "from-fuchsia-950/40 via-black/60 to-purple-950/35",
-    border: "border-fuchsia-400/30 hover:border-purple-300/60",
-    badge: "VIP",
-  },
-  {
-    label: "Spicy",
-    title: "Silhouette Drama",
-    prompt:
-      "photorealistic woman in silhouette lighting, strong curves, dramatic contrast, cinematic composition",
-    tone: "from-red-950/35 via-black/65 to-zinc-950/45",
-    border: "border-red-400/30 hover:border-zinc-300/60",
-    badge: "Silhouette",
-  },
-  {
-    label: "Spicy",
-    title: "Red Light Mood",
-    prompt:
-      "photorealistic woman in red lighting, intense expression, close framing, cinematic shadows, high detail",
+      "photorealistic nude woman in red lighting, provocative pose, close framing, direct eye contact, intense expression, cinematic shadows, high detail",
     tone: "from-red-950/50 via-black/65 to-pink-950/30",
     border: "border-red-400/30 hover:border-pink-300/60",
     badge: "Red light",
   },
   {
     label: "Spicy",
-    title: "Luxury Bathroom",
+    title: "Steam Room Nude",
     prompt:
-      "photorealistic woman in a luxury bathroom, steam, soft lighting, confident pose, realistic skin detail",
+      "photorealistic nude woman in a luxury steam room, body angled toward camera, confident pose, warm mist, soft dramatic lighting, realistic skin texture",
     tone: "from-stone-950/45 via-black/60 to-pink-950/25",
     border: "border-stone-400/30 hover:border-pink-300/60",
     badge: "Steam",
   },
   {
     label: "Spicy",
-    title: "Late Night Energy",
+    title: "Late Night Nude Energy",
     prompt:
-      "photorealistic woman in a dim bedroom, bold pose, intense gaze, cinematic lighting, high detail",
+      "photorealistic nude woman in a dim bedroom, bold pose, hips forward, arched posture, direct eye contact, cinematic lighting, high detail",
     tone: "from-purple-950/45 via-black/60 to-rose-950/35",
     border: "border-purple-400/30 hover:border-rose-300/60",
     badge: "Late night",
   },
   {
-    label: "Unfiltered",
-    title: "Penthouse After Dark",
+    label: "Spicy",
+    title: "Silhouette Nude Drama",
     prompt:
-      "photorealistic woman in a penthouse at night, provocative pose, commanding eye contact, dramatic lighting, high detail",
-    tone: "from-purple-950/55 via-black/65 to-pink-950/35",
+      "photorealistic nude woman in silhouette lighting, strong curves, arched posture, dramatic contrast, cinematic composition, high detail",
+    tone: "from-red-950/35 via-black/65 to-zinc-950/45",
+    border: "border-red-400/30 hover:border-zinc-300/60",
+    badge: "Silhouette",
+  },
+  {
+    label: "Spicy",
+    title: "Mirror Nude Confidence",
+    prompt:
+      "photorealistic nude woman standing near a mirror, confident body language, body angled slightly, teasing expression, soft lighting, cinematic realism",
+    tone: "from-purple-950/40 via-black/60 to-pink-950/35",
     border: "border-purple-400/30 hover:border-pink-300/60",
-    badge: "Unlocked",
+    badge: "Mirror",
+  },
+  {
+    label: "Spicy",
+    title: "Bed Edge Nude Tease",
+    prompt:
+      "photorealistic nude woman sitting at the edge of a bed, legs angled, body leaning forward slightly, direct eye contact, soft moody lighting, high detail",
+    tone: "from-pink-950/40 via-black/60 to-fuchsia-950/30",
+    border: "border-pink-400/30 hover:border-fuchsia-300/60",
+    badge: "Bed edge",
+  },
+  {
+    label: "Spicy",
+    title: "Poolside Nude Glow",
+    prompt:
+      "photorealistic nude woman beside a midnight pool, wet skin glow, confident pose, body angled toward camera, blue water reflections, cinematic lighting",
+    tone: "from-blue-950/45 via-black/65 to-cyan-950/35",
+    border: "border-blue-400/30 hover:border-cyan-300/60",
+    badge: "Poolside",
+  },
+  {
+    label: "Spicy",
+    title: "Candlelit Nude",
+    prompt:
+      "photorealistic nude woman in candlelit bedroom, arched posture, direct eye contact, warm shadows, intimate cinematic mood, realistic skin texture, high detail",
+    tone: "from-amber-950/40 via-black/60 to-rose-950/35",
+    border: "border-amber-400/30 hover:border-amber-300/60",
+    badge: "Candlelight",
+  },
+  {
+    label: "Spicy",
+    title: "VIP Lounge Nude",
+    prompt:
+      "photorealistic nude woman in a VIP lounge, neon reflections, confident body language, close framing, direct eye contact, high detail",
+    tone: "from-fuchsia-950/40 via-black/60 to-purple-950/35",
+    border: "border-fuchsia-400/30 hover:border-purple-300/60",
+    badge: "VIP",
+  },
+  {
+    label: "Spicy",
+    title: "Beach Sunset Nude",
+    prompt:
+      "photorealistic nude woman on a private beach at sunset, relaxed provocative pose, body angled toward camera, wet hair, golden hour lighting, high detail",
+    tone: "from-orange-950/35 via-black/60 to-pink-950/30",
+    border: "border-orange-400/30 hover:border-orange-300/60",
+    badge: "Sunset",
   },
   {
     label: "Unfiltered",
-    title: "Dominant Energy",
+    title: "Dominant Nude Presence",
     prompt:
-      "photorealistic woman with dominant posture, intense gaze, strong body emphasis, cinematic shadows, high detail",
+      "photorealistic fully nude woman, dominant posture, hips forward, arched back, direct eye contact, confident expression, dramatic lighting, high detail",
     tone: "from-red-950/45 via-black/65 to-fuchsia-950/35",
     border: "border-red-400/30 hover:border-fuchsia-300/60",
     badge: "Dominant",
   },
   {
     label: "Unfiltered",
-    title: "Close Proximity",
+    title: "Close Proximity Nude",
     prompt:
-      "photorealistic woman in close framing, intimate positioning, direct eye contact, shallow depth of field, high detail",
+      "photorealistic fully nude woman in close framing, intimate positioning, direct eye contact, shallow depth of field, sensual tension, cinematic detail",
     tone: "from-pink-950/45 via-black/65 to-zinc-950/35",
     border: "border-pink-400/30 hover:border-zinc-300/60",
-    badge: "Close frame",
+    badge: "Close",
   },
   {
     label: "Unfiltered",
-    title: "Shadow Control",
+    title: "Shadow Control Nude",
     prompt:
-      "photorealistic woman in deep shadows, controlled lighting, powerful stance, cinematic realism",
+      "photorealistic fully nude woman in deep shadow lighting, controlled pose, powerful stance, cinematic realism, high detail",
     tone: "from-zinc-950/65 via-black/70 to-purple-950/35",
     border: "border-zinc-400/30 hover:border-purple-300/60",
     badge: "Control",
   },
   {
     label: "Unfiltered",
-    title: "Dark Room Intensity",
+    title: "Penthouse Nude",
     prompt:
-      "photorealistic woman in a dark room, intense mood, strong pose, dramatic lighting, high detail",
-    tone: "from-purple-950/50 via-black/70 to-red-950/30",
-    border: "border-purple-400/30 hover:border-red-300/60",
-    badge: "Intensity",
+      "photorealistic fully nude woman in a penthouse at night, confident pose, body angled forward, intense gaze, dramatic lighting, cinematic detail",
+    tone: "from-purple-950/55 via-black/65 to-pink-950/35",
+    border: "border-purple-400/30 hover:border-pink-300/60",
+    badge: "Penthouse",
   },
   {
     label: "Unfiltered",
-    title: "Luxury Night Scene",
+    title: "Midnight Nude Energy",
     prompt:
-      "photorealistic woman in a high-end night setting, confident pose, cinematic lighting, high detail",
-    tone: "from-indigo-950/45 via-black/65 to-pink-950/35",
-    border: "border-indigo-400/30 hover:border-pink-300/60",
-    badge: "Night scene",
-  },
-  {
-    label: "Unfiltered",
-    title: "Midnight Focus",
-    prompt:
-      "photorealistic woman in a midnight setting, strong body language, intense gaze, dramatic shadows",
+      "photorealistic fully nude woman at midnight, strong body language, hips forward, direct eye contact, dramatic shadows, high detail",
     tone: "from-blue-950/45 via-black/65 to-purple-950/35",
     border: "border-blue-400/30 hover:border-purple-300/60",
     badge: "Midnight",
   },
   {
     label: "Unfiltered",
-    title: "High Tension Frame",
+    title: "High Tension Nude Frame",
     prompt:
-      "photorealistic woman in a high tension scene, close framing, powerful pose, cinematic detail",
+      "photorealistic fully nude woman in a high tension pose, close framing, powerful posture, direct eye contact, cinematic detail, high detail",
     tone: "from-fuchsia-950/45 via-black/65 to-red-950/35",
     border: "border-fuchsia-400/30 hover:border-red-300/60",
-    badge: "High tension",
+    badge: "Tension",
   },
   {
     label: "Unfiltered",
-    title: "Spotlight Control",
+    title: "Spotlight Nude Control",
     prompt:
-      "photorealistic woman under a single spotlight, dominant presence, dramatic lighting, high detail",
+      "photorealistic fully nude woman under a single spotlight, dominant presence, controlled pose, direct intense eye contact, dramatic lighting, high detail",
     tone: "from-amber-950/35 via-black/70 to-zinc-950/45",
     border: "border-amber-400/30 hover:border-zinc-300/60",
     badge: "Spotlight",
   },
   {
     label: "Unfiltered",
-    title: "After Hours Private",
+    title: "After Hours Private Nude",
     prompt:
-      "photorealistic woman in a private after-hours setting, confident sensual posture, cinematic lighting",
+      "photorealistic fully nude woman in a private after-hours setting, confident sensual posture, body angled toward camera, cinematic lighting, high detail",
     tone: "from-pink-950/45 via-black/65 to-purple-950/35",
     border: "border-pink-400/30 hover:border-purple-300/60",
     badge: "Private",
+  },
+  {
+    label: "Unfiltered",
+    title: "Dark Room Intensity Nude",
+    prompt:
+      "photorealistic fully nude woman in a dark room, intense mood, strong pose, hips forward, direct eye contact, dramatic lighting, high detail",
+    tone: "from-purple-950/50 via-black/70 to-red-950/30",
+    border: "border-purple-400/30 hover:border-red-300/60",
+    badge: "Intensity",
+  },
+  {
+    label: "Unfiltered",
+    title: "Luxury Night Nude Scene",
+    prompt:
+      "photorealistic fully nude woman in a luxury night setting, confident pose, body angled toward camera, cinematic lighting, high detail",
+    tone: "from-indigo-950/45 via-black/65 to-pink-950/35",
+    border: "border-indigo-400/30 hover:border-pink-300/60",
+    badge: "Luxury",
+  },
+  {
+    label: "Unfiltered",
+    title: "Nude Power Pose",
+    prompt:
+      "photorealistic fully nude woman in a powerful stance, shoulders back, hips forward, dominant eye contact, dramatic cinematic lighting, high detail",
+    tone: "from-zinc-950/55 via-black/70 to-red-950/35",
+    border: "border-zinc-400/30 hover:border-red-300/60",
+    badge: "Power",
+  },
+  {
+    label: "Unfiltered",
+    title: "Rooftop Nude After Dark",
+    prompt:
+      "photorealistic fully nude woman on a rooftop at night, city lights, confident body positioning, wind in hair, direct eye contact, cinematic shadows",
+    tone: "from-sky-950/40 via-black/60 to-indigo-950/35",
+    border: "border-sky-400/30 hover:border-sky-300/60",
+    badge: "Rooftop",
+  },
+  {
+    label: "Unfiltered",
+    title: "Velvet Room Nude",
+    prompt:
+      "photorealistic fully nude woman in a dark velvet room, arched posture, body angled forward, commanding eye contact, warm shadows, high detail",
+    tone: "from-violet-950/55 via-black/65 to-zinc-950/45",
+    border: "border-violet-400/30 hover:border-violet-300/60",
+    badge: "Velvet",
+  },
+  {
+    label: "Unfiltered",
+    title: "White Sheet Nude Close-Up",
+    prompt:
+      "photorealistic fully nude woman partially framed with white sheets, close portrait composition, direct eye contact, parted lips, natural skin texture, high detail",
+    tone: "from-neutral-950/45 via-black/60 to-pink-950/25",
+    border: "border-neutral-400/30 hover:border-neutral-300/60",
+    badge: "Close-up",
+  },
+  {
+    label: "Unfiltered",
+    title: "Studio Nude Control",
+    prompt:
+      "photorealistic fully nude woman in a clean studio, controlled pose, hips angled, direct intense eye contact, premium softbox lighting, editorial detail",
+    tone: "from-gray-950/55 via-black/65 to-purple-950/25",
+    border: "border-gray-400/30 hover:border-gray-300/60",
+    badge: "Studio",
   },
 ];
 
