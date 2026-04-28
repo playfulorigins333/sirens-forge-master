@@ -734,7 +734,7 @@ function FloatingSirensMindDock(props: {
   onOpenBrain: () => void;
 }) {
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
+    <div className="fixed z-50 flex flex-col items-end gap-4 bottom-5 right-5 md:bottom-auto md:top-1/2 md:-translate-y-1/2 md:right-6">
       <AnimatePresence>
         {props.open && (
           <motion.div
