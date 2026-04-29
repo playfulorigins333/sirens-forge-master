@@ -1719,9 +1719,13 @@ function RefineChoicesPanel(props: {
 function OutputPanel(props: {
   items: GeneratedItem[];
   loading: boolean;
-  onGenerateMore: () => void;
+  onGenerateMore: (overridePrompt?: string) => void;
+  onApplyPrompt: (value: string) => void;
+  onTurnIntoVideo: (item: GeneratedItem) => void;
 }) {
   const [selected, setSelected] = useState<GeneratedItem | null>(null);
+  const [variationOpen, setVariationOpen] = useState(false);
+  const [savedLatestId, setSavedLatestId] = useState<string | null>(null);
 
   if (props.loading) {
     return (
@@ -1738,14 +1742,14 @@ function OutputPanel(props: {
 
   if (!props.items.length) {
     return (
-      <div className="flex h-full items-center justify-center">
+      <div className="flex min-h-[300px] items-center justify-center">
         <div className="space-y-3 text-center">
           <Sparkles className="mx-auto h-12 w-12 text-gray-700" />
           <h2 className="text-base font-semibold text-gray-300 md:text-lg">
             Your creations will appear here
           </h2>
           <p className="text-xs text-gray-400">
-            Describe something on the left and press Generate.
+            Describe something above, use Brain Mode if needed, then press Generate.
           </p>
         </div>
       </div>
@@ -1753,6 +1757,48 @@ function OutputPanel(props: {
   }
 
   const latestItem = props.items[0];
+  const latestIsSaved = savedLatestId === latestItem.id;
+
+  const cleanPrompt = latestItem.prompt.trim();
+  const promptWith = (addition: string) =>
+    cleanPrompt ? `${cleanPrompt}, ${addition}` : addition;
+
+  const variationPrompts = [
+    {
+      title: "Cinematic Alt",
+      label: "Lighting + camera",
+      prompt: promptWith("cinematic lighting, stronger composition, premium editorial framing, sharper visual storytelling"),
+    },
+    {
+      title: "Outfit Shift",
+      label: "Wardrobe change",
+      prompt: promptWith("same identity, new outfit, fresh styling, different wardrobe while preserving face and body consistency"),
+    },
+    {
+      title: "Pose Shift",
+      label: "New body language",
+      prompt: promptWith("same identity, alternate pose, natural body movement, changed posture, confident expression"),
+    },
+    {
+      title: "More Explicit",
+      label: "Higher intensity",
+      prompt: promptWith("same identity, more explicit erotic intensity, bolder sensual focus, stronger adult-content framing"),
+    },
+  ];
+
+  const suggestionChips = latestItem.kind === "video"
+    ? [
+        { label: "Slower pacing", addition: "slower sensual pacing, controlled motion, smoother camera drift" },
+        { label: "More cinematic", addition: "more cinematic lighting, stronger mood, premium adult creator clip style" },
+        { label: "Closer framing", addition: "closer framing, intimate composition, stronger focus on expression and body movement" },
+        { label: "Loop-friendly", addition: "seamless loop feeling, smooth beginning and ending motion, reusable clip structure" },
+      ]
+    : [
+        { label: "Make it more explicit", addition: "more explicit sexual detail, stronger erotic intensity, bolder sensual focus" },
+        { label: "Change outfit", addition: "same identity, different outfit, fresh wardrobe, new styling" },
+        { label: "Change pose", addition: "same identity, new pose, natural anatomy, changed body angle" },
+        { label: "More premium", addition: "premium creator content, polished lighting, high-end photorealistic finish" },
+      ];
 
   const handleDownloadLatest = () => {
     if (!latestItem?.url) return;
@@ -1775,10 +1821,26 @@ function OutputPanel(props: {
     window.location.href = "/lora/train";
   };
 
+  const handleGeneratePrompt = (nextPrompt: string) => {
+    props.onApplyPrompt(nextPrompt);
+    window.setTimeout(() => props.onGenerateMore(nextPrompt), 0);
+  };
+
   return (
     <>
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-gray-100">Latest Generation</h2>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-100">Latest Generation</h2>
+            <p className="text-xs text-gray-400">
+              Pick the next move while the idea is still hot.
+            </p>
+          </div>
+          <span className="w-fit rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-purple-200">
+            Loop Engine
+          </span>
+        </div>
+
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
           {props.items.map((item, index) => (
             <motion.div
@@ -1786,12 +1848,20 @@ function OutputPanel(props: {
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: index * 0.05 }}
-              className="group relative aspect-square overflow-hidden rounded-xl border border-gray-800 bg-gray-950 transition-all duration-300 hover:-translate-y-1 hover:border-gray-700 hover:shadow-[0_14px_30px_rgba(0,0,0,0.28)]"
+              className={`group relative aspect-square overflow-hidden rounded-xl border bg-gray-950 transition-all duration-300 hover:-translate-y-1 hover:border-gray-700 hover:shadow-[0_14px_30px_rgba(0,0,0,0.28)] ${
+                index === 0 ? "border-fuchsia-500/40" : "border-gray-800"
+              }`}
             >
               {item.kind === "image" ? (
                 <img src={item.url} alt={item.prompt} className="h-full w-full object-cover" />
               ) : (
                 <video src={item.url} className="h-full w-full object-cover" controls={false} muted loop />
+              )}
+
+              {index === 0 && (
+                <div className="absolute left-2 top-2 rounded-full border border-fuchsia-400/40 bg-black/70 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-fuchsia-200">
+                  Latest
+                </div>
               )}
 
               <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/60 opacity-0 transition-opacity group-hover:opacity-100">
@@ -1808,9 +1878,7 @@ function OutputPanel(props: {
                   size="icon"
                   variant="ghost"
                   type="button"
-                  onClick={() => {
-                    window.open(item.url, "_blank");
-                  }}
+                  onClick={() => window.open(item.url, "_blank")}
                   className="bg-white/10 hover:bg-white/20"
                 >
                   <DownloadIcon />
@@ -1820,22 +1888,142 @@ function OutputPanel(props: {
           ))}
         </div>
 
+        <div className="rounded-2xl border border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.72),rgba(8,8,13,0.96))] p-4 shadow-[0_0_30px_rgba(192,38,211,0.08)]">
+          <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-white md:text-base">Primary Next Actions</h3>
+              <p className="text-[11px] text-gray-400">These are the money-loop actions. Keep users moving.</p>
+            </div>
+            {latestIsSaved && (
+              <span className="w-fit rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200">
+                Saved
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+            <Button
+              type="button"
+              onClick={() => setVariationOpen((value) => !value)}
+              className="h-11 justify-start gap-2 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 hover:shadow-[0_12px_28px_rgba(168,85,247,0.24)]"
+            >
+              <Sparkles className="h-4 w-4" />
+              Make 4 Variations
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() => props.onTurnIntoVideo(latestItem)}
+              disabled={latestItem.kind !== "image"}
+              className="h-11 justify-start gap-2 bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(34,211,238,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <VideoIcon className="h-4 w-4" />
+              Turn into Video
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() => setSavedLatestId(latestItem.id)}
+              className="h-11 justify-start gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(16,185,129,0.18)]"
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              {latestIsSaved ? "Saved to Vault" : "Save to Vault"}
+            </Button>
+          </div>
+
+          <AnimatePresence>
+            {variationOpen && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
+                  {variationPrompts.map((variation, index) => (
+                    <div
+                      key={variation.title}
+                      className="rounded-2xl border border-white/10 bg-black/35 p-3 transition hover:border-fuchsia-400/30 hover:bg-fuchsia-500/5"
+                    >
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-semibold text-white">{variation.title}</div>
+                          <div className="text-[10px] text-zinc-400">{variation.label}</div>
+                        </div>
+                        <span className="rounded-full border border-fuchsia-400/20 bg-fuchsia-500/10 px-2 py-0.5 text-[9px] font-semibold text-fuchsia-200">
+                          V{index + 1}
+                        </span>
+                      </div>
+
+                      <p className="line-clamp-3 text-[11px] leading-5 text-zinc-300">
+                        {variation.prompt}
+                      </p>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => props.onApplyPrompt(variation.prompt)}
+                          className="h-8 border-gray-700 bg-gray-900 text-[10px] text-gray-100 hover:bg-gray-800"
+                        >
+                          Use This
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={() => handleGeneratePrompt(variation.prompt)}
+                          className="h-8 bg-fuchsia-600 text-[10px] font-semibold text-white hover:bg-fuchsia-500"
+                        >
+                          Generate
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
         <div className="rounded-2xl border border-gray-800 bg-gray-950/80 p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-white md:text-base">Next Actions</h3>
-              <p className="text-[11px] text-gray-400">Keep the momentum going from your latest generation.</p>
+              <h3 className="text-sm font-semibold text-white md:text-base">Try Next</h3>
+              <p className="text-[11px] text-gray-400">One-click prompt moves that restart the loop.</p>
             </div>
-            <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-purple-200">
-              Latest Output
+            <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
+              Suggestions
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="flex flex-wrap gap-2">
+            {suggestionChips.map((chip) => {
+              const nextPrompt = promptWith(chip.addition);
+              return (
+                <button
+                  key={chip.label}
+                  type="button"
+                  onClick={() => handleGeneratePrompt(nextPrompt)}
+                  className="rounded-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-[11px] font-medium text-gray-200 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-400/40 hover:bg-cyan-500/10 hover:text-white"
+                >
+                  + {chip.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-800 bg-gray-950/70 p-4">
+          <div className="mb-3 flex flex-col gap-1">
+            <h3 className="text-sm font-semibold text-white md:text-base">Secondary Tools</h3>
+            <p className="text-[11px] text-gray-400">Useful actions, kept lower so they do not compete with the loop.</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <Button
               type="button"
+              variant="outline"
               onClick={handleDownloadLatest}
-              className="justify-start gap-2 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 hover:shadow-[0_12px_28px_rgba(168,85,247,0.24)]"
+              className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 transition-all duration-200 hover:-translate-y-0.5 hover:bg-gray-800 hover:shadow-[0_10px_20px_rgba(0,0,0,0.18)]"
             >
               <DownloadIcon />
               Download
@@ -1854,11 +2042,11 @@ function OutputPanel(props: {
             <Button
               type="button"
               variant="outline"
-              onClick={props.onGenerateMore}
+              onClick={() => props.onGenerateMore(latestItem.prompt)}
               className="justify-start gap-2 border-gray-700 bg-gray-900 text-xs text-gray-100 transition-all duration-200 hover:-translate-y-0.5 hover:bg-gray-800 hover:shadow-[0_10px_20px_rgba(0,0,0,0.18)]"
             >
               <Sparkles className="h-4 w-4" />
-              Generate More Like This
+              More Like This
             </Button>
 
             <Button
@@ -1871,6 +2059,12 @@ function OutputPanel(props: {
               Train AI Twin
             </Button>
           </div>
+
+          {latestIsSaved && (
+            <div className="mt-3 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
+              Saved. Next money move: build a set by generating 4–8 matching images from this same identity and style.
+            </div>
+          )}
         </div>
       </div>
 
@@ -2809,7 +3003,20 @@ ${basePrompt}`,
 
           <Card className="border-gray-800 bg-gray-900/80">
             <CardContent className="p-4">
-              <OutputPanel items={items} loading={isGenerating} onGenerateMore={handleGenerate} />
+              <OutputPanel
+                items={items}
+                loading={isGenerating}
+                onGenerateMore={handleGenerate}
+                onApplyPrompt={(value) => {
+                  setPrompt(value);
+                  setRefineChoices(null);
+                }}
+                onTurnIntoVideo={(item) => {
+                  setPrompt(item.prompt);
+                  setMode("image_to_video");
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+              />
             </CardContent>
           </Card>
 
