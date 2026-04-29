@@ -1774,7 +1774,7 @@ function OutputPanel(props: {
   const [captionCopySuccess, setCaptionCopySuccess] = useState<string | null>(null);
   const [captionError, setCaptionError] = useState<string | null>(null);
   const [autopostPlatform, setAutopostPlatform] = useState("fanvue");
-  const [autopostLoadingAction, setAutopostLoadingAction] = useState<"post" | "schedule" | null>(null);
+  const [autopostLoadingAction, setAutopostLoadingAction] = useState<"preview" | null>(null);
   const [autopostError, setAutopostError] = useState<string | null>(null);
   const [autopostSuccess, setAutopostSuccess] = useState<string | null>(null);
 
@@ -2214,14 +2214,14 @@ function OutputPanel(props: {
     );
   };
 
-  const buildAutopostPayload = (action: "post_now" | "schedule") => {
+  const buildAutopostPayload = () => {
     const generationIds = getSelectedGenerationIdsForAutopost();
     const drafts = getCaptionDraftsForAutopost();
     const cleanPackName = packName.trim() || "Creator Content Pack";
 
     return {
-      action,
       source: "generate_pack_builder",
+      action: "prepare_autopost_draft",
       platform: autopostPlatform,
       platforms: [autopostPlatform],
       pack_name: cleanPackName,
@@ -2239,21 +2239,23 @@ function OutputPanel(props: {
     };
   };
 
-  const handlePostNow = async () => {
+  const handlePrepareAutopostDraft = async () => {
     setAutopostError(null);
     setAutopostSuccess(null);
 
     const generationIds = getSelectedGenerationIdsForAutopost();
     if (generationIds.length === 0) {
-      setAutopostError("Select at least one database-backed asset before posting.");
+      setAutopostError("Select at least one database-backed asset before preparing an Autopost draft.");
       return;
     }
 
-    setAutopostLoadingAction("post");
+    setAutopostLoadingAction("preview");
 
     try {
-      const payload = buildAutopostPayload("post_now");
-      const response = await fetch("/api/autopost/run", {
+      const drafts = getCaptionDraftsForAutopost();
+      const payload = buildAutopostPayload();
+
+      const response = await fetch("/api/autopost/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -2262,64 +2264,41 @@ function OutputPanel(props: {
       const result = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(result?.error || result?.message || "Autopost run failed.");
+        throw new Error(result?.error || result?.message || "Autopost preview failed.");
       }
 
       if (captionDrafts.length === 0) {
-        setCaptionDrafts(getCaptionDraftsForAutopost());
+        setCaptionDrafts(drafts);
       }
 
-      setAutopostSuccess(`Post request sent to ${autopostPlatform}.`);
+      try {
+        window.sessionStorage.setItem(
+          "sirensforge:autopost_pack_prefill",
+          JSON.stringify({
+            ...payload,
+            preview: result?.preview ?? result ?? null,
+            created_at: Date.now(),
+          })
+        );
+      } catch (storageError) {
+        console.warn("Autopost prefill storage failed:", storageError);
+      }
+
+      setAutopostSuccess("Autopost draft prepared. Open the Autopost dashboard to preview, save, and approve the rule.");
     } catch (err: any) {
-      console.error("Autopost run error:", err);
-      setAutopostError(err?.message || "Post Now failed.");
+      console.error("Autopost preview error:", err);
+      setAutopostError(err?.message || "Prepare Autopost Draft failed.");
     } finally {
       setAutopostLoadingAction(null);
     }
   };
 
-  const handleSchedulePost = async () => {
-    setAutopostError(null);
-    setAutopostSuccess(null);
-
-    const generationIds = getSelectedGenerationIdsForAutopost();
-    if (generationIds.length === 0) {
-      setAutopostError("Select at least one database-backed asset before scheduling.");
-      return;
-    }
-
-    setAutopostLoadingAction("schedule");
-
-    try {
-      const payload = {
-        ...buildAutopostPayload("schedule"),
-        status: "draft",
-        schedule_mode: "manual_review",
-      };
-
-      const response = await fetch("/api/autopost/rules", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const result = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(result?.error || result?.message || "Autopost schedule rule creation failed.");
-      }
-
-      if (captionDrafts.length === 0) {
-        setCaptionDrafts(getCaptionDraftsForAutopost());
-      }
-
-      setAutopostSuccess(`Schedule draft sent to Autopost for ${autopostPlatform}.`);
-    } catch (err: any) {
-      console.error("Autopost schedule error:", err);
-      setAutopostError(err?.message || "Schedule Post failed.");
-    } finally {
-      setAutopostLoadingAction(null);
-    }
+  const handleOpenAutopostDashboard = () => {
+    const query = new URLSearchParams({
+      from: "pack_builder",
+      platform: autopostPlatform,
+    });
+    window.location.href = `/autopost?${query.toString()}`;
   };
 
   return (
@@ -2821,9 +2800,9 @@ function OutputPanel(props: {
                 <div className="rounded-2xl border border-emerald-500/20 bg-[linear-gradient(180deg,rgba(6,78,59,0.24),rgba(8,8,13,0.94))] p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <h4 className="text-sm font-semibold text-white">Autopost Distribution</h4>
+                      <h4 className="text-sm font-semibold text-white">Autopost Handoff</h4>
                       <p className="mt-1 text-[11px] leading-5 text-gray-400">
-                        Send this selected pack into the existing Autopost engine. This does not generate fake media or post outside your configured platform adapters.
+                        Prepare this selected pack for the Autopost dashboard. This does not publish, schedule, or simulate a post.
                       </p>
                     </div>
                     <div className="w-full sm:w-44">
@@ -2846,35 +2825,31 @@ function OutputPanel(props: {
                   <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <Button
                       type="button"
-                      onClick={handlePostNow}
+                      onClick={handlePrepareAutopostDraft}
                       disabled={autopostLoadingAction !== null || selectedPackItems.length === 0}
                       className="h-10 bg-gradient-to-r from-emerald-500 to-green-400 text-xs font-bold text-black transition hover:-translate-y-0.5 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {autopostLoadingAction === "post" ? (
+                      {autopostLoadingAction === "preview" ? (
                         <span className="flex items-center gap-2">
                           <Clock className="h-4 w-4 animate-spin" />
-                          Sending…
+                          Preparing…
                         </span>
                       ) : (
-                        "Post Now"
+                        "Prepare Autopost Draft"
                       )}
                     </Button>
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={handleSchedulePost}
-                      disabled={autopostLoadingAction !== null || selectedPackItems.length === 0}
-                      className="h-10 border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={handleOpenAutopostDashboard}
+                      className="h-10 border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/15 hover:text-white"
                     >
-                      {autopostLoadingAction === "schedule" ? (
-                        <span className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 animate-spin" />
-                          Scheduling…
-                        </span>
-                      ) : (
-                        "Schedule Post"
-                      )}
+                      Open Autopost Dashboard
                     </Button>
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-[11px] leading-5 text-cyan-100">
+                    Autopost rules still require preview, save as draft, approval, and the scheduler. This panel only hands off selected pack data.
                   </div>
 
                   {autopostError && (
