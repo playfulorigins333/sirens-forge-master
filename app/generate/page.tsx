@@ -1757,6 +1757,12 @@ function OutputPanel(props: {
   const [savedLatestId, setSavedLatestId] = useState<string | null>(null);
   const [savingLatest, setSavingLatest] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [packBuilderOpen, setPackBuilderOpen] = useState(false);
+  const [selectedPackIds, setSelectedPackIds] = useState<string[]>([]);
+  const [packName, setPackName] = useState("Creator Content Pack");
+  const [packSaving, setPackSaving] = useState(false);
+  const [packError, setPackError] = useState<string | null>(null);
+  const [packSuccess, setPackSuccess] = useState<string | null>(null);
 
   if (props.loading) {
     return (
@@ -1790,6 +1796,14 @@ function OutputPanel(props: {
   const latestItem = props.items[0];
   const latestGenerationRecordId = latestItem.dbGenerationId || (isUuidLike(latestItem.id) ? latestItem.id : null);
   const latestIsSaved = savedLatestId === (latestGenerationRecordId || latestItem.id);
+
+  const getGenerationRecordId = (item: GeneratedItem) =>
+    item.dbGenerationId || (isUuidLike(item.id) ? item.id : null);
+
+  const selectablePackItems = props.items.filter((item) => Boolean(getGenerationRecordId(item)));
+  const selectedPackItems = selectablePackItems.filter((item) =>
+    selectedPackIds.includes(getGenerationRecordId(item) || "")
+  );
 
   const cleanPrompt = latestItem.prompt.trim();
   const promptWith = (addition: string) =>
@@ -1930,6 +1944,103 @@ function OutputPanel(props: {
       setSaveError(err?.message || "Save to Vault failed.");
     } finally {
       setSavingLatest(false);
+    }
+  };
+
+  const openPackBuilder = () => {
+    const latestId = getGenerationRecordId(latestItem);
+    setPackError(null);
+    setPackSuccess(null);
+    setPackBuilderOpen(true);
+
+    if (latestId && !selectedPackIds.includes(latestId)) {
+      setSelectedPackIds((prev) => [latestId, ...prev]);
+    }
+
+    if (!packName.trim() || packName === "Creator Content Pack") {
+      const date = new Date().toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+      setPackName(`Creator Content Pack - ${date}`);
+    }
+  };
+
+  const togglePackItem = (item: GeneratedItem) => {
+    const generationRecordId = getGenerationRecordId(item);
+    if (!generationRecordId) return;
+
+    setPackError(null);
+    setPackSuccess(null);
+    setSelectedPackIds((prev) =>
+      prev.includes(generationRecordId)
+        ? prev.filter((id) => id !== generationRecordId)
+        : [...prev, generationRecordId]
+    );
+  };
+
+  const handleCreateContentPack = async () => {
+    const selectedGenerationIds = selectedPackItems
+      .map((item) => getGenerationRecordId(item))
+      .filter(Boolean) as string[];
+
+    if (selectedGenerationIds.length === 0) {
+      setPackError("Select at least one saved generation to build a content pack.");
+      return;
+    }
+
+    const cleanPackName = packName.trim() || "Creator Content Pack";
+
+    setPackSaving(true);
+    setPackError(null);
+    setPackSuccess(null);
+
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      const user = authData?.user;
+
+      if (authError || !user) {
+        throw new Error("You must be logged in to build a content pack.");
+      }
+
+      const { data: createdCollection, error: createCollectionError } = await supabase
+        .from("collections")
+        .insert({
+          user_id: user.id,
+          name: cleanPackName,
+        })
+        .select("id")
+        .single();
+
+      if (createCollectionError) {
+        throw createCollectionError;
+      }
+
+      const collectionId = createdCollection?.id;
+
+      if (!collectionId) {
+        throw new Error("Content pack was created without a collection ID.");
+      }
+
+      const rows = selectedGenerationIds.map((generationId) => ({
+        collection_id: collectionId,
+        generation_id: generationId,
+      }));
+
+      const { error: insertItemsError } = await supabase
+        .from("collection_items")
+        .insert(rows);
+
+      if (insertItemsError) {
+        throw insertItemsError;
+      }
+
+      setPackSuccess(`${cleanPackName} created with ${rows.length} asset${rows.length === 1 ? "" : "s"}.`);
+    } catch (err: any) {
+      console.error("Content pack create error:", err);
+      setPackError(err?.message || "Content pack creation failed.");
+    } finally {
+      setPackSaving(false);
     }
   };
 
@@ -2175,12 +2286,229 @@ function OutputPanel(props: {
           </div>
 
           {latestIsSaved && (
-            <div className="mt-3 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-2 text-[11px] text-emerald-100">
-              Saved. Next money move: build a set by generating 4–8 matching images from this same identity and style.
+            <div className="mt-3 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-3 text-[11px] text-emerald-100">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="font-semibold text-emerald-100">Saved to Vault.</div>
+                  <div className="mt-1 text-emerald-100/80">
+                    Next money move: build a content pack from this output and matching variations.
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    onClick={openPackBuilder}
+                    className="h-9 bg-emerald-600 px-3 text-[11px] font-semibold text-white hover:bg-emerald-500"
+                  >
+                    Build Content Pack
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => props.onGenerateMore(latestItem.prompt)}
+                    className="h-9 border-emerald-400/30 bg-black/20 px-3 text-[11px] text-emerald-100 hover:bg-emerald-500/10 hover:text-white"
+                  >
+                    Add More Like This
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>
       </div>
+
+      <AnimatePresence>
+        {packBuilderOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm"
+            onClick={() => setPackBuilderOpen(false)}
+          >
+            <motion.aside
+              initial={{ x: 420 }}
+              animate={{ x: 0 }}
+              exit={{ x: 420 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              onClick={(event) => event.stopPropagation()}
+              className="h-full w-full max-w-xl overflow-y-auto border-l border-fuchsia-500/20 bg-gray-950 shadow-[0_0_60px_rgba(0,0,0,0.55)]"
+            >
+              <div className="sticky top-0 z-10 border-b border-gray-800 bg-gray-950/95 px-5 py-4 backdrop-blur">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fuchsia-300">
+                      Vault Pack Builder
+                    </div>
+                    <h3 className="mt-1 text-lg font-bold text-white">Build Content Pack</h3>
+                    <p className="mt-1 text-xs leading-5 text-gray-400">
+                      Select real generated assets and save them as a reusable pack in your Vault.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPackBuilderOpen(false)}
+                    className="rounded-full p-2 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                    aria-label="Close content pack builder"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-5 px-5 py-5">
+                <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-gray-400">
+                    Pack Name
+                  </label>
+                  <Input
+                    value={packName}
+                    onChange={(event) => setPackName(event.target.value)}
+                    placeholder="Creator Content Pack"
+                    className="mt-2 h-10 border-gray-700 bg-gray-950 text-sm text-gray-100 placeholder:text-gray-500"
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(24,14,34,0.68),rgba(8,8,13,0.94))] p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-white">Select Assets</h4>
+                      <p className="mt-1 text-[11px] text-gray-400">
+                        Uses database-backed generation IDs only. Nothing fake is added.
+                      </p>
+                    </div>
+                    <span className="rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-fuchsia-200">
+                      {selectedPackItems.length} selected
+                    </span>
+                  </div>
+
+                  {selectablePackItems.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {selectablePackItems.map((item) => {
+                        const generationRecordId = getGenerationRecordId(item);
+                        const checked = generationRecordId
+                          ? selectedPackIds.includes(generationRecordId)
+                          : false;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => togglePackItem(item)}
+                            className={`group relative overflow-hidden rounded-2xl border bg-gray-950 text-left transition-all hover:-translate-y-0.5 hover:border-fuchsia-400/40 ${
+                              checked
+                                ? "border-fuchsia-400/50 shadow-[0_0_0_1px_rgba(232,121,249,0.25),0_0_24px_rgba(192,38,211,0.14)]"
+                                : "border-gray-800"
+                            }`}
+                          >
+                            <div className="aspect-square overflow-hidden bg-gray-900">
+                              {item.kind === "image" ? (
+                                <img
+                                  src={item.url}
+                                  alt={item.prompt}
+                                  className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                                />
+                              ) : (
+                                <video
+                                  src={item.url}
+                                  className="h-full w-full object-cover"
+                                  controls={false}
+                                  muted
+                                  loop
+                                />
+                              )}
+                            </div>
+                            <div className="absolute left-2 top-2 rounded-full border border-white/15 bg-black/70 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-white">
+                              {checked ? "Selected" : item.kind}
+                            </div>
+                            <div className="p-2">
+                              <p className="line-clamp-2 text-[10px] leading-4 text-gray-300">
+                                {item.prompt}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-amber-400/20 bg-amber-500/10 px-3 py-3 text-[11px] leading-5 text-amber-100">
+                      No database-backed generated assets are available in this session yet. Generate and save real outputs before building a pack.
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-gray-800 bg-gray-900/70 p-4">
+                  <h4 className="text-sm font-semibold text-white">Pack Summary</h4>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-xl border border-gray-800 bg-gray-950 px-2 py-3">
+                      <div className="text-lg font-bold text-white">{selectedPackItems.length}</div>
+                      <div className="text-[10px] text-gray-500">Assets</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-800 bg-gray-950 px-2 py-3">
+                      <div className="text-lg font-bold text-white">
+                        {selectedPackItems.filter((item) => item.kind === "image").length}
+                      </div>
+                      <div className="text-[10px] text-gray-500">Images</div>
+                    </div>
+                    <div className="rounded-xl border border-gray-800 bg-gray-950 px-2 py-3">
+                      <div className="text-lg font-bold text-white">
+                        {selectedPackItems.filter((item) => item.kind === "video").length}
+                      </div>
+                      <div className="text-[10px] text-gray-500">Videos</div>
+                    </div>
+                  </div>
+
+                  {selectedPackItems.length > 0 && (
+                    <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-[11px] leading-5 text-cyan-100">
+                      This creates a real Vault collection using the selected generation records. Caption generation, ZIP export, and OF/Fanvue templates can be layered onto this pack next.
+                    </div>
+                  )}
+                </div>
+
+                {packError && (
+                  <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-3 text-[11px] leading-5 text-rose-200">
+                    {packError}
+                  </div>
+                )}
+
+                {packSuccess && (
+                  <div className="rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-3 text-[11px] leading-5 text-emerald-100">
+                    {packSuccess}
+                  </div>
+                )}
+
+                <div className="sticky bottom-0 -mx-5 border-t border-gray-800 bg-gray-950/95 px-5 py-4 backdrop-blur">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setPackBuilderOpen(false)}
+                      className="h-10 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+                    >
+                      Close
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleCreateContentPack}
+                      disabled={packSaving || selectedPackItems.length === 0}
+                      className="h-10 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-bold text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {packSaving ? (
+                        <span className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 animate-spin" />
+                          Creating Pack…
+                        </span>
+                      ) : (
+                        "Create Vault Pack"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </motion.aside>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {selected && (
