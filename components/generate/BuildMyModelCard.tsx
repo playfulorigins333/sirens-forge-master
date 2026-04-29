@@ -10,6 +10,7 @@ import {
   Flame,
   Gem,
   Heart,
+  Save,
   Sparkles,
   Stars,
   WandSparkles,
@@ -66,6 +67,7 @@ export interface BuildMyModelCompiledResult {
   negativePrompt: string;
   selection: BuildMyModelSelection;
   selectedPreviewImage?: string | null;
+  identityName?: string;
 }
 
 interface BuildMyModelCardProps {
@@ -75,6 +77,7 @@ interface BuildMyModelCardProps {
   onApplyPrompt: (result: BuildMyModelCompiledResult) => void;
   onBaseModelChange?: (baseModel: BuildModelBaseModel) => void;
   onGenerateNow?: (result: BuildMyModelCompiledResult) => void;
+  onSaveIdentity?: (result: BuildMyModelCompiledResult) => Promise<void> | void;
 }
 
 const DEFAULT_NEGATIVE_PROMPT =
@@ -145,6 +148,16 @@ const VIBE_OPTIONS: {
   },
 ];
 
+const VIBE_LABELS: Record<BuildModelVibe, string> = {
+  baddie: "Baddie",
+  goddess: "Goddess",
+  soft_girlfriend: "Soft Girlfriend",
+  goth_alt: "Goth Alt",
+  dominant: "Dominant",
+  luxury: "Luxury",
+  gamer: "Gamer",
+};
+
 const HAIR_PROMPTS: Record<BuildModelHair, string> = {
   blonde: "blonde hair, polished camera-ready styling",
   brunette: "brunette hair, rich natural tones, polished styling",
@@ -212,9 +225,16 @@ function joinPrompt(parts: string[]) {
     .replace(/\s+/g, " ");
 }
 
+function getDefaultIdentityName(selection: BuildMyModelSelection) {
+  const vibe = selection.vibes[0] ? VIBE_LABELS[selection.vibes[0]] : "Creator";
+  const body = selection.baseModel === "feminine" ? "Muse" : "Model";
+  return `${vibe} ${body}`;
+}
+
 export function compileBuildMyModelPrompt(
   selection: BuildMyModelSelection,
-  selectedPreviewImage?: string | null
+  selectedPreviewImage?: string | null,
+  identityName?: string
 ): BuildMyModelCompiledResult {
   const selectedVibes =
     selection.vibes.length > 0 ? selection.vibes : baseSelection.vibes;
@@ -242,6 +262,7 @@ export function compileBuildMyModelPrompt(
     negativePrompt: DEFAULT_NEGATIVE_PROMPT,
     selection,
     selectedPreviewImage: selectedPreviewImage || null,
+    identityName: identityName?.trim() || getDefaultIdentityName(selection),
   };
 }
 
@@ -326,26 +347,43 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
   const [step, setStep] = useState(0);
   const [selection, setSelection] =
     useState<BuildMyModelSelection>(baseSelection);
+  const [identityName, setIdentityName] = useState(getDefaultIdentityName(baseSelection));
   const [applied, setApplied] = useState(false);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [selectedPreviewImage, setSelectedPreviewImage] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [isSavingIdentity, setIsSavingIdentity] = useState(false);
+  const [identitySaved, setIdentitySaved] = useState(false);
+  const [identitySaveError, setIdentitySaveError] = useState<string | null>(null);
 
   const compiled = useMemo(
-    () => compileBuildMyModelPrompt(selection, selectedPreviewImage),
-    [selection, selectedPreviewImage]
+    () => compileBuildMyModelPrompt(selection, selectedPreviewImage, identityName),
+    [identityName, selection, selectedPreviewImage]
   );
 
   const resetPreviewState = () => {
     setApplied(false);
+    setIdentitySaved(false);
     setPreviewImages([]);
     setSelectedPreviewImage(null);
     setPreviewError(null);
+    setIdentitySaveError(null);
+  };
+
+  const updateSelection = (updater: (prev: BuildMyModelSelection) => BuildMyModelSelection) => {
+    setSelection((prev) => {
+      const next = updater(prev);
+      if (identityName === getDefaultIdentityName(prev)) {
+        setIdentityName(getDefaultIdentityName(next));
+      }
+      return next;
+    });
+    resetPreviewState();
   };
 
   const toggleVibe = (id: BuildModelVibe) => {
-    setSelection((prev) => {
+    updateSelection((prev) => {
       const alreadySelected = prev.vibes.includes(id);
 
       if (alreadySelected) {
@@ -356,13 +394,11 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
       const next = [...prev.vibes, id].slice(-2);
       return { ...prev, vibes: next };
     });
-    resetPreviewState();
   };
 
   const setBaseModel = (baseModel: BuildModelBaseModel) => {
-    setSelection((prev) => ({ ...prev, baseModel }));
+    updateSelection((prev) => ({ ...prev, baseModel }));
     props.onBaseModelChange?.(baseModel);
-    resetPreviewState();
   };
 
   const applyPrompt = () => {
@@ -376,11 +412,37 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
     props.onGenerateNow?.(compiled);
   };
 
+  const saveIdentity = async () => {
+    if (!props.onSaveIdentity) {
+      setIdentitySaveError("Identity save handler is not connected yet.");
+      return;
+    }
+
+    setIsSavingIdentity(true);
+    setIdentitySaveError(null);
+
+    try {
+      await props.onSaveIdentity(compiled);
+      setIdentitySaved(true);
+      setApplied(true);
+    } catch (error) {
+      console.error("Build My Model identity save failed", error);
+      setIdentitySaveError(
+        error instanceof Error
+          ? error.message
+          : "Identity save failed. You can still load the prompt and generate normally."
+      );
+    } finally {
+      setIsSavingIdentity(false);
+    }
+  };
+
   const previewModel = async () => {
     setIsPreviewing(true);
     setPreviewError(null);
     setPreviewImages([]);
     setSelectedPreviewImage(null);
+    setIdentitySaved(false);
 
     try {
       const response = await fetch("/api/generate", {
@@ -400,6 +462,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
           preview: true,
           source: "build_my_model",
           buildMyModelSelection: selection,
+          identityName: compiled.identityName,
         }),
       });
 
@@ -471,7 +534,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
               </span>
             </div>
             <CardDescription className="mt-1 text-xs leading-5 text-zinc-400">
-              Pick a vibe, look, and energy. Preview the model direction visually before loading it into Generate.
+              Pick a vibe, look, and energy. Preview the model direction visually, then save it as an identity starter.
             </CardDescription>
           </div>
         </div>
@@ -582,10 +645,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                           <button
                             key={hair}
                             type="button"
-                            onClick={() => {
-                              setSelection((prev) => ({ ...prev, hair }));
-                              resetPreviewState();
-                            }}
+                            onClick={() => updateSelection((prev) => ({ ...prev, hair }))}
                             className={`rounded-xl border px-3 py-2 text-xs font-semibold capitalize transition ${
                               selection.hair === hair
                                 ? "border-cyan-400/50 bg-cyan-500/15 text-white"
@@ -613,10 +673,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                           <button
                             key={style}
                             type="button"
-                            onClick={() => {
-                              setSelection((prev) => ({ ...prev, style }));
-                              resetPreviewState();
-                            }}
+                            onClick={() => updateSelection((prev) => ({ ...prev, style }))}
                             className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
                               selection.style === style
                                 ? "border-cyan-400/50 bg-cyan-500/15 text-white"
@@ -651,10 +708,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                         <button
                           key={energy}
                           type="button"
-                          onClick={() => {
-                            setSelection((prev) => ({ ...prev, energy }));
-                            resetPreviewState();
-                          }}
+                          onClick={() => updateSelection((prev) => ({ ...prev, energy }))}
                           className={`rounded-xl border px-3 py-3 text-xs font-semibold transition ${
                             selection.energy === energy
                               ? "border-fuchsia-400/50 bg-fuchsia-500/15 text-white"
@@ -681,10 +735,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                           <button
                             key={intensity}
                             type="button"
-                            onClick={() => {
-                              setSelection((prev) => ({ ...prev, intensity }));
-                              resetPreviewState();
-                            }}
+                            onClick={() => updateSelection((prev) => ({ ...prev, intensity }))}
                             className={`rounded-xl border px-3 py-2 text-xs font-semibold capitalize transition ${
                               selection.intensity === intensity
                                 ? "border-pink-400/50 bg-pink-500/15 text-white"
@@ -708,7 +759,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                         Visual Preview
                       </div>
                       <p className="mt-1 text-[11px] leading-5 text-zinc-400">
-                        Generate 4 preview images, pick the strongest direction, then load it into the main generator.
+                        Generate 4 preview images, pick the strongest direction, then save it as an identity starter.
                       </p>
                     </div>
 
@@ -737,7 +788,11 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                           <button
                             key={`${imageUrl}-${index}`}
                             type="button"
-                            onClick={() => setSelectedPreviewImage(imageUrl)}
+                            onClick={() => {
+                              setSelectedPreviewImage(imageUrl);
+                              setIdentitySaved(false);
+                              setIdentitySaveError(null);
+                            }}
                             className={`group relative overflow-hidden rounded-xl border transition hover:-translate-y-0.5 ${
                               selected
                                 ? "border-purple-300 shadow-[0_0_24px_rgba(168,85,247,0.25)]"
@@ -762,6 +817,69 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                           </button>
                         );
                       })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {step === 2 ? (
+                <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 px-3 py-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-200">
+                        Identity Starter
+                      </div>
+                      <p className="mt-1 text-[11px] leading-5 text-zinc-400">
+                        Save this direction so the creator can return to it later.
+                      </p>
+                    </div>
+                    {identitySaved ? (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/25 bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-200">
+                        <CheckCircle2 className="h-3.5 w-3.5" /> Saved
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      value={identityName}
+                      onChange={(event) => {
+                        setIdentityName(event.target.value);
+                        setIdentitySaved(false);
+                        setIdentitySaveError(null);
+                      }}
+                      placeholder="Identity name"
+                      className="h-10 flex-1 rounded-xl border border-zinc-800 bg-black/35 px-3 text-xs font-semibold text-white outline-none transition placeholder:text-zinc-600 focus:border-emerald-400/50"
+                    />
+                    <Button
+                      type="button"
+                      onClick={saveIdentity}
+                      disabled={props.disabled || isSavingIdentity || !props.onSaveIdentity}
+                      className="h-10 shrink-0 bg-emerald-500 px-4 text-xs font-bold text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSavingIdentity ? (
+                        "Saving..."
+                      ) : identitySaved ? (
+                        <span className="inline-flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4" /> Identity Saved
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2">
+                          <Save className="h-4 w-4" /> Save Identity
+                        </span>
+                      )}
+                    </Button>
+                  </div>
+
+                  {!props.onSaveIdentity ? (
+                    <p className="mt-2 text-[10px] leading-4 text-zinc-500">
+                      Save Identity is waiting for the Generate page save handler. Prompt loading still works.
+                    </p>
+                  ) : null}
+
+                  {identitySaveError ? (
+                    <div className="mt-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] leading-5 text-rose-100">
+                      {identitySaveError}
                     </div>
                   ) : null}
                 </div>
