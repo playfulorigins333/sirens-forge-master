@@ -1773,6 +1773,10 @@ function OutputPanel(props: {
   const [captionDrafts, setCaptionDrafts] = useState<PackCaptionDraft[]>([]);
   const [captionCopySuccess, setCaptionCopySuccess] = useState<string | null>(null);
   const [captionError, setCaptionError] = useState<string | null>(null);
+  const [autopostPlatform, setAutopostPlatform] = useState("fanvue");
+  const [autopostLoadingAction, setAutopostLoadingAction] = useState<"post" | "schedule" | null>(null);
+  const [autopostError, setAutopostError] = useState<string | null>(null);
+  const [autopostSuccess, setAutopostSuccess] = useState<string | null>(null);
 
   if (props.loading) {
     return (
@@ -2096,6 +2100,8 @@ function OutputPanel(props: {
     setPackSuccess(null);
     setCaptionError(null);
     setCaptionCopySuccess(null);
+    setAutopostError(null);
+    setAutopostSuccess(null);
     setPackBuilderOpen(true);
 
     if (latestId && !selectedPackIds.includes(latestId)) {
@@ -2119,6 +2125,8 @@ function OutputPanel(props: {
     setPackSuccess(null);
     setCaptionError(null);
     setCaptionCopySuccess(null);
+    setAutopostError(null);
+    setAutopostSuccess(null);
     setCaptionDrafts([]);
     setSelectedPackIds((prev) =>
       prev.includes(generationRecordId)
@@ -2189,6 +2197,128 @@ function OutputPanel(props: {
       setPackError(err?.message || "Content pack creation failed.");
     } finally {
       setPackSaving(false);
+    }
+  };
+
+  const getSelectedGenerationIdsForAutopost = () =>
+    selectedPackItems
+      .map((item) => getGenerationRecordId(item))
+      .filter(Boolean) as string[];
+
+  const getCaptionDraftsForAutopost = () => {
+    if (captionDrafts.length > 0) return captionDrafts;
+
+    const cleanPackName = packName.trim() || "Creator Content Pack";
+    return selectedPackItems.map((item, index) =>
+      buildCaptionDraft(item, index, selectedPackItems.length, cleanPackName)
+    );
+  };
+
+  const buildAutopostPayload = (action: "post_now" | "schedule") => {
+    const generationIds = getSelectedGenerationIdsForAutopost();
+    const drafts = getCaptionDraftsForAutopost();
+    const cleanPackName = packName.trim() || "Creator Content Pack";
+
+    return {
+      action,
+      source: "generate_pack_builder",
+      platform: autopostPlatform,
+      platforms: [autopostPlatform],
+      pack_name: cleanPackName,
+      collection_name: cleanPackName,
+      generation_ids: generationIds,
+      captions: drafts.map((draft) => draft.caption),
+      hashtags: drafts.map((draft) => draft.hashtags),
+      caption_drafts: drafts,
+      assets: selectedPackItems.map((item) => ({
+        generation_id: getGenerationRecordId(item),
+        kind: item.kind,
+        url: item.url,
+        prompt: item.prompt,
+      })),
+    };
+  };
+
+  const handlePostNow = async () => {
+    setAutopostError(null);
+    setAutopostSuccess(null);
+
+    const generationIds = getSelectedGenerationIdsForAutopost();
+    if (generationIds.length === 0) {
+      setAutopostError("Select at least one database-backed asset before posting.");
+      return;
+    }
+
+    setAutopostLoadingAction("post");
+
+    try {
+      const payload = buildAutopostPayload("post_now");
+      const response = await fetch("/api/autopost/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(result?.error || result?.message || "Autopost run failed.");
+      }
+
+      if (captionDrafts.length === 0) {
+        setCaptionDrafts(getCaptionDraftsForAutopost());
+      }
+
+      setAutopostSuccess(`Post request sent to ${autopostPlatform}.`);
+    } catch (err: any) {
+      console.error("Autopost run error:", err);
+      setAutopostError(err?.message || "Post Now failed.");
+    } finally {
+      setAutopostLoadingAction(null);
+    }
+  };
+
+  const handleSchedulePost = async () => {
+    setAutopostError(null);
+    setAutopostSuccess(null);
+
+    const generationIds = getSelectedGenerationIdsForAutopost();
+    if (generationIds.length === 0) {
+      setAutopostError("Select at least one database-backed asset before scheduling.");
+      return;
+    }
+
+    setAutopostLoadingAction("schedule");
+
+    try {
+      const payload = {
+        ...buildAutopostPayload("schedule"),
+        status: "draft",
+        schedule_mode: "manual_review",
+      };
+
+      const response = await fetch("/api/autopost/rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(result?.error || result?.message || "Autopost schedule rule creation failed.");
+      }
+
+      if (captionDrafts.length === 0) {
+        setCaptionDrafts(getCaptionDraftsForAutopost());
+      }
+
+      setAutopostSuccess(`Schedule draft sent to Autopost for ${autopostPlatform}.`);
+    } catch (err: any) {
+      console.error("Autopost schedule error:", err);
+      setAutopostError(err?.message || "Schedule Post failed.");
+    } finally {
+      setAutopostLoadingAction(null);
     }
   };
 
@@ -2684,6 +2814,78 @@ function OutputPanel(props: {
                   {captionCopySuccess && (
                     <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-3 text-[11px] leading-5 text-emerald-100">
                       {captionCopySuccess}
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-emerald-500/20 bg-[linear-gradient(180deg,rgba(6,78,59,0.24),rgba(8,8,13,0.94))] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h4 className="text-sm font-semibold text-white">Autopost Distribution</h4>
+                      <p className="mt-1 text-[11px] leading-5 text-gray-400">
+                        Send this selected pack into the existing Autopost engine. This does not generate fake media or post outside your configured platform adapters.
+                      </p>
+                    </div>
+                    <div className="w-full sm:w-44">
+                      <Select value={autopostPlatform} onValueChange={setAutopostPlatform}>
+                        <SelectTrigger className="h-9 border-gray-700 bg-gray-950 text-xs text-gray-100">
+                          <SelectValue placeholder="Platform" />
+                        </SelectTrigger>
+                        <SelectContent className="border-gray-800 bg-gray-950 text-gray-100">
+                          <SelectItem value="fanvue">Fanvue</SelectItem>
+                          <SelectItem value="onlyfans">OnlyFans</SelectItem>
+                          <SelectItem value="fansly">Fansly</SelectItem>
+                          <SelectItem value="manyvids">ManyVids</SelectItem>
+                          <SelectItem value="reddit">Reddit</SelectItem>
+                          <SelectItem value="x">X</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Button
+                      type="button"
+                      onClick={handlePostNow}
+                      disabled={autopostLoadingAction !== null || selectedPackItems.length === 0}
+                      className="h-10 bg-gradient-to-r from-emerald-500 to-green-400 text-xs font-bold text-black transition hover:-translate-y-0.5 hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {autopostLoadingAction === "post" ? (
+                        <span className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 animate-spin" />
+                          Sending…
+                        </span>
+                      ) : (
+                        "Post Now"
+                      )}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleSchedulePost}
+                      disabled={autopostLoadingAction !== null || selectedPackItems.length === 0}
+                      className="h-10 border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/15 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {autopostLoadingAction === "schedule" ? (
+                        <span className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 animate-spin" />
+                          Scheduling…
+                        </span>
+                      ) : (
+                        "Schedule Post"
+                      )}
+                    </Button>
+                  </div>
+
+                  {autopostError && (
+                    <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-3 text-[11px] leading-5 text-rose-200">
+                      {autopostError}
+                    </div>
+                  )}
+
+                  {autopostSuccess && (
+                    <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-3 text-[11px] leading-5 text-emerald-100">
+                      {autopostSuccess}
                     </div>
                   )}
                 </div>
