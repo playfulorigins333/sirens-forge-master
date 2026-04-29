@@ -92,6 +92,34 @@ const FALLBACK_PLATFORMS: Platform[] = [
   { id: "reddit", name: "Reddit", status: "unknown" },
 ]
 
+const AUTOPOST_PACK_PREFILL_STORAGE_KEY = "sirensforge:autopost_pack_prefill"
+
+type PackCaptionDraft = {
+  id?: string
+  title?: string
+  caption?: string
+  hashtags?: string
+}
+
+type AutopostPackPrefill = {
+  source?: string
+  action?: string
+  platform?: PlatformId
+  platforms?: PlatformId[]
+  pack_name?: string
+  collection_name?: string
+  generation_ids?: string[]
+  captions?: string[]
+  hashtags?: string[]
+  caption_drafts?: PackCaptionDraft[]
+  assets?: any[]
+  explicitness?: number
+  tones?: string[]
+  frequency?: string
+  preview?: any
+  created_at?: number
+}
+
 // -----------------------------
 // Helpers
 // -----------------------------
@@ -264,6 +292,7 @@ export default function AutopostPage() {
   const [previewResult, setPreviewResult] = useState<AutopostPreviewResponse | null>(null)
   const [builderError, setBuilderError] = useState<string | null>(null)
   const [builderSuccess, setBuilderSuccess] = useState<string | null>(null)
+  const [packPrefill, setPackPrefill] = useState<AutopostPackPrefill | null>(null)
 
   // Rules state
   const [rules, setRules] = useState<AutopostRule[]>([])
@@ -298,6 +327,69 @@ export default function AutopostPage() {
       const p = await fetchPlatforms()
       if (p && p.length) setPlatforms(p)
     })()
+  }, [mounted])
+
+  // Load Generate → Autopost Builder handoff.
+  // Production-safe: this only prefills the builder. It does NOT publish, schedule, or call the cron executor.
+  useEffect(() => {
+    if (!mounted) return
+    if (typeof window === "undefined") return
+
+    const params = new URLSearchParams(window.location.search)
+    const isGeneratePrefill =
+      params.get("prefill") === "pack_builder" || params.get("from") === "generate"
+
+    if (!isGeneratePrefill) return
+
+    const raw = window.sessionStorage.getItem(AUTOPOST_PACK_PREFILL_STORAGE_KEY)
+
+    if (!raw) {
+      setTab("builder")
+      setBuilderError("No Generate handoff was found in this browser session. Go back to /generate and send the pack again.")
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as AutopostPackPrefill
+      const incomingPlatforms = Array.isArray(parsed.platforms) && parsed.platforms.length > 0
+        ? parsed.platforms.map((p) => String(p))
+        : parsed.platform
+          ? [String(parsed.platform)]
+          : ["fanvue"]
+
+      const incomingTones = Array.isArray(parsed.tones) && parsed.tones.length > 0
+        ? parsed.tones.map((t) => String(t))
+        : ["Playful", "Teasing"]
+
+      const incomingExplicitness = Number(parsed.explicitness)
+
+      setPackPrefill(parsed)
+      setTab("builder")
+      setEnabled(false)
+      setSelectedPlatforms(incomingPlatforms)
+      setFrequency(typeof parsed.frequency === "string" ? parsed.frequency : "manual")
+      setExplicitness(Number.isFinite(incomingExplicitness) ? Math.max(1, Math.min(5, incomingExplicitness)) : 3)
+      setSelectedTones(incomingTones)
+      setPreviewStatus("blocked")
+      setPreviewResult({
+        state: "BLOCKED",
+        reason: "Generate pack handoff loaded. Review settings, run Preview Selection, then save as a draft rule.",
+        payload: parsed,
+        diagnostics: {
+          source: parsed.source ?? "generate_pack_builder",
+          generation_ids: parsed.generation_ids ?? [],
+          caption_count: parsed.caption_drafts?.length ?? parsed.captions?.length ?? 0,
+          asset_count: parsed.assets?.length ?? 0,
+        },
+      })
+      setBuilderSuccess("Pack loaded from Generate. Review the selected platforms/settings, run Preview Selection, then Save as Rule (DRAFT).")
+      setBuilderError(null)
+      window.sessionStorage.removeItem(AUTOPOST_PACK_PREFILL_STORAGE_KEY)
+    } catch (err) {
+      console.error("Autopost prefill parse failed:", err)
+      setTab("builder")
+      setBuilderError("The Generate handoff could not be read. Go back to /generate and send the pack again.")
+    }
   }, [mounted])
 
   const eligibleRulesCount = useMemo(() => {
@@ -395,6 +487,13 @@ export default function AutopostPage() {
       preview_state: previewResult?.state ?? null,
       preview_reason: previewResult?.reason ?? null,
       preview_payload: previewResult?.payload ?? null,
+      source: packPrefill ? "generate_pack_builder" : "autopost_builder",
+      pack_name: packPrefill?.pack_name ?? packPrefill?.collection_name ?? null,
+      generation_ids: packPrefill?.generation_ids ?? [],
+      caption_drafts: packPrefill?.caption_drafts ?? [],
+      captions: packPrefill?.captions ?? [],
+      hashtags: packPrefill?.hashtags ?? [],
+      assets: packPrefill?.assets ?? [],
     }
 
     try {
@@ -481,18 +580,8 @@ export default function AutopostPage() {
   // Run eligible now
   // -----------------------------
   const handleRunNow = async () => {
-    setRunningJob(true)
     setRunResult(null)
-    setRulesError(null)
-    try {
-      const res = await runEligibleNow()
-      setRunResult(res)
-      await refreshRules()
-    } catch (e: any) {
-      setRulesError(e?.message ? String(e.message) : "Run failed")
-    } finally {
-      setRunningJob(false)
-    }
+    setRulesError("Manual run is disabled in the UI. Autopost runs through the protected system scheduler/cron route.")
   }
 
   if (!mounted) return null
@@ -536,27 +625,16 @@ export default function AutopostPage() {
 
               <Button
                 onClick={handleRunNow}
-                disabled={runningJob || eligibleRulesCount === 0}
-                className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                title={eligibleRulesCount === 0 ? "No eligible rules: rule must be APPROVED and enabled" : undefined}
+                disabled
+                className="bg-gray-800 text-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
+                title="Autopost execution is handled by the protected system scheduler/cron route."
               >
-                {runningJob ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    Running…
-                  </>
-                ) : (
-                  <>
-                    <PlayCircle className="w-4 h-4 mr-2" />
-                    Run Eligible Rules Now
-                  </>
-                )}
+                <Clock className="w-4 h-4 mr-2" />
+                Runs via System Scheduler
               </Button>
-              {eligibleRulesCount === 0 && (
-                <div className="mt-1 text-xs text-amber-300">
-                  No eligible rules. A rule must be <span className="font-semibold">APPROVED</span> and <span className="font-semibold">enabled</span> to run.
-                </div>
-              )}
+              <div className="mt-1 text-xs text-gray-400">
+                Execution stays server-side. Approved + enabled rules are picked up by cron.
+              </div>
 
               <Button
                 variant="outline"
@@ -802,6 +880,71 @@ export default function AutopostPage() {
                         {builderError ? <AlertCircle className="w-5 h-5 mt-0.5" /> : <CheckCircle className="w-5 h-5 mt-0.5" />}
                         <div>{builderError ?? builderSuccess}</div>
                       </div>
+                    </div>
+                  )}
+
+                  {packPrefill && (
+                    <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/20 p-4">
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <div className="text-sm font-semibold text-fuchsia-100">
+                            Generate Pack Loaded
+                          </div>
+                          <div className="mt-1 text-xs text-gray-300">
+                            {packPrefill.pack_name || packPrefill.collection_name || "Creator Content Pack"}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-300">
+                            <span className="rounded-full border border-gray-800 bg-black/30 px-2 py-1">
+                              Assets: {packPrefill.assets?.length ?? packPrefill.generation_ids?.length ?? 0}
+                            </span>
+                            <span className="rounded-full border border-gray-800 bg-black/30 px-2 py-1">
+                              Captions: {packPrefill.caption_drafts?.length ?? packPrefill.captions?.length ?? 0}
+                            </span>
+                            <span className="rounded-full border border-gray-800 bg-black/30 px-2 py-1">
+                              Source: Generate
+                            </span>
+                          </div>
+                        </div>
+
+                        <Button
+                          variant="outline"
+                          className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                          onClick={() => {
+                            setPackPrefill(null)
+                            setPreviewResult(null)
+                            setPreviewStatus("blocked")
+                            setBuilderSuccess(null)
+                          }}
+                        >
+                          <X className="w-4 h-4 mr-2" />
+                          Clear Handoff
+                        </Button>
+                      </div>
+
+                      {packPrefill.caption_drafts && packPrefill.caption_drafts.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                          <div className="text-xs font-semibold text-gray-200">Caption Drafts</div>
+                          <div className="max-h-56 space-y-2 overflow-auto pr-1">
+                            {packPrefill.caption_drafts.slice(0, 6).map((draft, index) => (
+                              <div key={`${draft.id ?? index}`} className="rounded-xl border border-gray-800 bg-black/30 p-3">
+                                <div className="text-xs font-semibold text-white">
+                                  {draft.title || `Caption ${index + 1}`}
+                                </div>
+                                {draft.caption && (
+                                  <div className="mt-1 text-xs leading-5 text-gray-300">
+                                    {draft.caption}
+                                  </div>
+                                )}
+                                {draft.hashtags && (
+                                  <div className="mt-2 text-[11px] leading-5 text-cyan-200">
+                                    {draft.hashtags}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
