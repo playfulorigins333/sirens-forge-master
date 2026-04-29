@@ -65,6 +65,7 @@ export interface BuildMyModelCompiledResult {
   prompt: string;
   negativePrompt: string;
   selection: BuildMyModelSelection;
+  selectedPreviewImage?: string | null;
 }
 
 interface BuildMyModelCardProps {
@@ -212,7 +213,8 @@ function joinPrompt(parts: string[]) {
 }
 
 export function compileBuildMyModelPrompt(
-  selection: BuildMyModelSelection
+  selection: BuildMyModelSelection,
+  selectedPreviewImage?: string | null
 ): BuildMyModelCompiledResult {
   const selectedVibes =
     selection.vibes.length > 0 ? selection.vibes : baseSelection.vibes;
@@ -239,7 +241,39 @@ export function compileBuildMyModelPrompt(
     prompt,
     negativePrompt: DEFAULT_NEGATIVE_PROMPT,
     selection,
+    selectedPreviewImage: selectedPreviewImage || null,
   };
+}
+
+function normalizePreviewImages(data: any): string[] {
+  const possibleArrays = [
+    data?.images,
+    data?.outputs,
+    data?.results,
+    data?.generated,
+    data?.data?.images,
+    data?.data?.outputs,
+  ];
+
+  for (const value of possibleArrays) {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => {
+          if (typeof item === "string") return item;
+          return item?.url || item?.image_url || item?.output_url || item?.media_url || "";
+        })
+        .filter(Boolean);
+    }
+  }
+
+  const single =
+    data?.url ||
+    data?.image_url ||
+    data?.output_url ||
+    data?.media_url ||
+    data?.generation?.image_url;
+
+  return single ? [single] : [];
 }
 
 function ChoiceButton(props: {
@@ -293,11 +327,22 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
   const [selection, setSelection] =
     useState<BuildMyModelSelection>(baseSelection);
   const [applied, setApplied] = useState(false);
+  const [previewImages, setPreviewImages] = useState<string[]>([]);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [selectedPreviewImage, setSelectedPreviewImage] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   const compiled = useMemo(
-    () => compileBuildMyModelPrompt(selection),
-    [selection]
+    () => compileBuildMyModelPrompt(selection, selectedPreviewImage),
+    [selection, selectedPreviewImage]
   );
+
+  const resetPreviewState = () => {
+    setApplied(false);
+    setPreviewImages([]);
+    setSelectedPreviewImage(null);
+    setPreviewError(null);
+  };
 
   const toggleVibe = (id: BuildModelVibe) => {
     setSelection((prev) => {
@@ -311,13 +356,13 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
       const next = [...prev.vibes, id].slice(-2);
       return { ...prev, vibes: next };
     });
-    setApplied(false);
+    resetPreviewState();
   };
 
   const setBaseModel = (baseModel: BuildModelBaseModel) => {
     setSelection((prev) => ({ ...prev, baseModel }));
     props.onBaseModelChange?.(baseModel);
-    setApplied(false);
+    resetPreviewState();
   };
 
   const applyPrompt = () => {
@@ -329,6 +374,59 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
   const generateNow = () => {
     applyPrompt();
     props.onGenerateNow?.(compiled);
+  };
+
+  const previewModel = async () => {
+    setIsPreviewing(true);
+    setPreviewError(null);
+    setPreviewImages([]);
+    setSelectedPreviewImage(null);
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mode: "text_to_image",
+          prompt: compiled.prompt,
+          negative_prompt: compiled.negativePrompt,
+          baseModel: selection.baseModel,
+          stylePreset: "photorealistic",
+          qualityPreset: "balanced",
+          consistencyPreset: "high",
+          batchSize: 4,
+          preview: true,
+          source: "build_my_model",
+          buildMyModelSelection: selection,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(data?.error || data?.message || "Preview generation failed.");
+      }
+
+      const images = normalizePreviewImages(data);
+
+      if (images.length === 0) {
+        throw new Error("Preview response did not include image URLs yet.");
+      }
+
+      setPreviewImages(images);
+      setSelectedPreviewImage(images[0] || null);
+    } catch (error) {
+      console.error("Build My Model preview failed", error);
+      setPreviewError(
+        error instanceof Error
+          ? error.message
+          : "Preview generation failed. Load the prompt and generate normally."
+      );
+    } finally {
+      setIsPreviewing(false);
+    }
   };
 
   const steps = [
@@ -373,7 +471,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
               </span>
             </div>
             <CardDescription className="mt-1 text-xs leading-5 text-zinc-400">
-              Pick a vibe, look, and energy. We’ll compile a generator-ready identity prompt without turning this into a setup wall.
+              Pick a vibe, look, and energy. Preview the model direction visually before loading it into Generate.
             </CardDescription>
           </div>
         </div>
@@ -486,7 +584,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                             type="button"
                             onClick={() => {
                               setSelection((prev) => ({ ...prev, hair }));
-                              setApplied(false);
+                              resetPreviewState();
                             }}
                             className={`rounded-xl border px-3 py-2 text-xs font-semibold capitalize transition ${
                               selection.hair === hair
@@ -517,7 +615,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                             type="button"
                             onClick={() => {
                               setSelection((prev) => ({ ...prev, style }));
-                              setApplied(false);
+                              resetPreviewState();
                             }}
                             className={`rounded-xl border px-3 py-2 text-xs font-semibold transition ${
                               selection.style === style
@@ -555,7 +653,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                           type="button"
                           onClick={() => {
                             setSelection((prev) => ({ ...prev, energy }));
-                            setApplied(false);
+                            resetPreviewState();
                           }}
                           className={`rounded-xl border px-3 py-3 text-xs font-semibold transition ${
                             selection.energy === energy
@@ -585,7 +683,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                             type="button"
                             onClick={() => {
                               setSelection((prev) => ({ ...prev, intensity }));
-                              setApplied(false);
+                              resetPreviewState();
                             }}
                             className={`rounded-xl border px-3 py-2 text-xs font-semibold capitalize transition ${
                               selection.intensity === intensity
@@ -601,6 +699,73 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                   </motion.div>
                 ) : null}
               </AnimatePresence>
+
+              {step === 2 ? (
+                <div className="rounded-2xl border border-purple-500/20 bg-purple-500/5 px-3 py-3">
+                  <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-[10px] font-bold uppercase tracking-[0.16em] text-purple-200">
+                        Visual Preview
+                      </div>
+                      <p className="mt-1 text-[11px] leading-5 text-zinc-400">
+                        Generate 4 preview images, pick the strongest direction, then load it into the main generator.
+                      </p>
+                    </div>
+
+                    <Button
+                      type="button"
+                      onClick={previewModel}
+                      disabled={props.disabled || isPreviewing}
+                      className="h-9 shrink-0 border border-purple-500/40 bg-black/40 px-4 text-xs font-bold text-purple-100 hover:bg-purple-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isPreviewing ? "Generating Preview..." : "Preview My Model"}
+                    </Button>
+                  </div>
+
+                  {previewError ? (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
+                      {previewError}
+                    </div>
+                  ) : null}
+
+                  {previewImages.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                      {previewImages.map((imageUrl, index) => {
+                        const selected = selectedPreviewImage === imageUrl;
+
+                        return (
+                          <button
+                            key={`${imageUrl}-${index}`}
+                            type="button"
+                            onClick={() => setSelectedPreviewImage(imageUrl)}
+                            className={`group relative overflow-hidden rounded-xl border transition hover:-translate-y-0.5 ${
+                              selected
+                                ? "border-purple-300 shadow-[0_0_24px_rgba(168,85,247,0.25)]"
+                                : "border-zinc-800 hover:border-zinc-600"
+                            }`}
+                          >
+                            <img
+                              src={imageUrl}
+                              alt={`Build My Model preview ${index + 1}`}
+                              className="h-40 w-full bg-zinc-950 object-cover transition group-hover:scale-[1.02]"
+                            />
+                            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-2 text-left">
+                              <span className="text-[10px] font-semibold text-white">
+                                Preview {index + 1}
+                              </span>
+                            </div>
+                            {selected ? (
+                              <div className="absolute right-2 top-2 rounded-full bg-purple-500 p-1 text-white shadow-lg">
+                                <CheckCircle2 className="h-4 w-4" />
+                              </div>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div className="rounded-2xl border border-zinc-800 bg-black/30 px-3 py-3">
                 <div className="mb-2 flex items-center justify-between gap-3">
