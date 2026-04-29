@@ -89,6 +89,7 @@ interface GeneratedItem {
   prompt: string;
   settings: any;
   createdAt: string;
+  dbGenerationId?: string | null;
 }
 
 type HandoffPayload = {
@@ -123,7 +124,35 @@ function inferKindFromOutput(output: any): MediaKind {
 
 function getOutputUrl(output: any): string {
   if (typeof output === "string") return output;
-  return output?.url || "";
+  return output?.url || output?.image_url || output?.video_url || output?.output_url || "";
+}
+
+function isUuidLike(value?: string | null): boolean {
+  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function getGenerationRecordId(output: any, responseData?: any): string | null {
+  if (output && typeof output === "object") {
+    const direct =
+      output.generation_id ||
+      output.generationId ||
+      output.generation?.id ||
+      output.record?.id ||
+      output.id;
+
+    if (isUuidLike(String(direct || ""))) {
+      return String(direct);
+    }
+  }
+
+  const fromResponse =
+    responseData?.generation_id ||
+    responseData?.generationId ||
+    responseData?.generation?.id ||
+    responseData?.record?.id ||
+    responseData?.id;
+
+  return isUuidLike(String(fromResponse || "")) ? String(fromResponse) : null;
 }
 
 function parseGenerationMode(input?: string | null): GenerationMode {
@@ -1726,6 +1755,8 @@ function OutputPanel(props: {
   const [selected, setSelected] = useState<GeneratedItem | null>(null);
   const [variationOpen, setVariationOpen] = useState(false);
   const [savedLatestId, setSavedLatestId] = useState<string | null>(null);
+  const [savingLatest, setSavingLatest] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   if (props.loading) {
     return (
@@ -1757,7 +1788,8 @@ function OutputPanel(props: {
   }
 
   const latestItem = props.items[0];
-  const latestIsSaved = savedLatestId === latestItem.id;
+  const latestGenerationRecordId = latestItem.dbGenerationId || (isUuidLike(latestItem.id) ? latestItem.id : null);
+  const latestIsSaved = savedLatestId === (latestGenerationRecordId || latestItem.id);
 
   const cleanPrompt = latestItem.prompt.trim();
   const promptWith = (addition: string) =>
@@ -1824,6 +1856,81 @@ function OutputPanel(props: {
   const handleGeneratePrompt = (nextPrompt: string) => {
     props.onApplyPrompt(nextPrompt);
     window.setTimeout(() => props.onGenerateMore(nextPrompt), 0);
+  };
+
+  const handleSaveToVault = async (item: GeneratedItem) => {
+    const generationRecordId = item.dbGenerationId || (isUuidLike(item.id) ? item.id : null);
+
+    if (!generationRecordId) {
+      setSaveError("This output is missing its database generation ID, so it cannot be saved to the Vault yet.");
+      return;
+    }
+
+    setSavingLatest(true);
+    setSaveError(null);
+
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      const user = authData?.user;
+
+      if (authError || !user) {
+        throw new Error("You must be logged in to save to the Vault.");
+      }
+
+      let collectionId: string | null = null;
+
+      const { data: existingCollections, error: collectionLookupError } = await supabase
+        .from("collections")
+        .select("id")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: true })
+        .limit(1);
+
+      if (collectionLookupError) {
+        throw collectionLookupError;
+      }
+
+      collectionId = existingCollections?.[0]?.id || null;
+
+      if (!collectionId) {
+        const { data: createdCollection, error: createCollectionError } = await supabase
+          .from("collections")
+          .insert({
+            user_id: user.id,
+            name: "My Vault",
+          })
+          .select("id")
+          .single();
+
+        if (createCollectionError) {
+          throw createCollectionError;
+        }
+
+        collectionId = createdCollection?.id || null;
+      }
+
+      if (!collectionId) {
+        throw new Error("Could not find or create your Vault collection.");
+      }
+
+      const { error: insertError } = await supabase
+        .from("collection_items")
+        .insert({
+          collection_id: collectionId,
+          generation_id: generationRecordId,
+        });
+
+      if (insertError && insertError.code !== "23505") {
+        throw insertError;
+      }
+
+      setSavedLatestId(generationRecordId);
+    } catch (err: any) {
+      console.error("Vault save error:", err);
+      setSaveError(err?.message || "Save to Vault failed.");
+    } finally {
+      setSavingLatest(false);
+    }
   };
 
   return (
@@ -1923,13 +2030,20 @@ function OutputPanel(props: {
 
             <Button
               type="button"
-              onClick={() => setSavedLatestId(latestItem.id)}
-              className="h-11 justify-start gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(16,185,129,0.18)]"
+              onClick={() => handleSaveToVault(latestItem)}
+              disabled={savingLatest || latestIsSaved}
+              className="h-11 justify-start gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(16,185,129,0.18)] disabled:cursor-not-allowed disabled:opacity-70"
             >
-              <CheckCircle2 className="h-4 w-4" />
-              {latestIsSaved ? "Saved to Vault" : "Save to Vault"}
+              {savingLatest ? <Clock className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              {savingLatest ? "Saving…" : latestIsSaved ? "Saved to Vault" : "Save to Vault"}
             </Button>
           </div>
+
+          {saveError && (
+            <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] leading-5 text-rose-200">
+              {saveError}
+            </div>
+          )}
 
           <AnimatePresence>
             {variationOpen && (
@@ -2734,14 +2848,22 @@ ${basePrompt}`,
           }
 
           const now = new Date().toISOString();
-          const generated: GeneratedItem[] = outputs.map((output: any) => ({
-            id: `${now}-${Math.random().toString(36).slice(2)}`,
-            kind: inferKindFromOutput(output),
-            url: getOutputUrl(output),
-            prompt: promptToUse,
-            settings: runPayload,
-            createdAt: now,
-          }));
+          const generated: GeneratedItem[] = outputs.map((output: any) => {
+            const generationRecordId = getGenerationRecordId(output, data);
+
+            return {
+              id: generationRecordId || `${now}-${Math.random().toString(36).slice(2)}`,
+              kind: inferKindFromOutput(output),
+              url: getOutputUrl(output),
+              prompt: promptToUse,
+              settings: {
+                ...runPayload,
+                generation_id: generationRecordId,
+              },
+              createdAt: now,
+              dbGenerationId: generationRecordId,
+            };
+          });
 
           generatedAll.push(...generated);
         } else {
@@ -2801,14 +2923,22 @@ ${basePrompt}`,
           }
 
           const now = new Date().toISOString();
-          const generated: GeneratedItem[] = outputs.map((output: any) => ({
-            id: `${now}-${Math.random().toString(36).slice(2)}`,
-            kind: "video",
-            url: getOutputUrl(output),
-            prompt: promptToUse || "(Image-driven video)",
-            settings: videoPayload,
-            createdAt: now,
-          }));
+          const generated: GeneratedItem[] = outputs.map((output: any) => {
+            const generationRecordId = getGenerationRecordId(output, data);
+
+            return {
+              id: generationRecordId || `${now}-${Math.random().toString(36).slice(2)}`,
+              kind: "video",
+              url: getOutputUrl(output),
+              prompt: promptToUse || "(Image-driven video)",
+              settings: {
+                ...videoPayload,
+                generation_id: generationRecordId,
+              },
+              createdAt: now,
+              dbGenerationId: generationRecordId,
+            };
+          });
 
           generatedAll.push(...generated);
         }
