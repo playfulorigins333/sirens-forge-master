@@ -73,6 +73,9 @@ type IdentityGroup = {
   heroItem: LibraryItem | null;
 };
 
+const VAULT_REUSE_HANDOFF_STORAGE_KEY = "sirensforge:vault_identity_reuse";
+
+
 function formatDate(value: string) {
   try {
     return new Date(value).toLocaleString();
@@ -129,6 +132,22 @@ function getGroupSortTime(group: IdentityGroup) {
   if (!group.latestCreatedAt) return 0;
   const time = new Date(group.latestCreatedAt).getTime();
   return Number.isNaN(time) ? 0 : time;
+}
+
+function buildReusePayload(item: LibraryItem) {
+  return {
+    source: "vault",
+    action: "reuse_identity",
+    identityId: item.identityLora || item.id,
+    title: identityTitle(item),
+    prompt: item.prompt || "",
+    baseModel: item.bodyMode || null,
+    bodyMode: item.bodyMode || null,
+    mode: item.mode || null,
+    previewUrl: getDisplayUrl(item),
+    isIdentitySeed: Boolean(item.isIdentitySeed || item.kind === "identity"),
+    createdAt: Date.now(),
+  };
 }
 
 function LibraryHeader() {
@@ -559,8 +578,9 @@ function VaultGrid(props: {
 function IdentityGroupCard(props: {
   group: IdentityGroup;
   onOpen: (item: LibraryItem) => void;
+  onReuse: (item: LibraryItem) => void;
 }) {
-  const { group, onOpen } = props;
+  const { group, onOpen, onReuse } = props;
   const previewItems = group.items.slice(0, 4);
   const hero = group.heroItem;
   const heroUrl = hero ? getDisplayUrl(hero) : null;
@@ -677,16 +697,24 @@ function IdentityGroupCard(props: {
               </Link>
             )}
 
-            <Link href="/generate">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
-              >
-                <Wand2 className="mr-2 h-4 w-4" />
-                Generate More Like This
-              </Button>
-            </Link>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                const reusable =
+                  group.heroItem ||
+                  group.items.find((item) => item.isIdentitySeed || item.kind === "identity") ||
+                  group.items[0];
+
+                if (reusable) {
+                  onReuse(reusable);
+                }
+              }}
+              className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
+            >
+              <Wand2 className="mr-2 h-4 w-4" />
+              Generate More Like This
+            </Button>
           </div>
         </CardContent>
       </div>
@@ -697,6 +725,7 @@ function IdentityGroupCard(props: {
 function IdentityGroupedVault(props: {
   groups: IdentityGroup[];
   onOpen: (item: LibraryItem) => void;
+  onReuse: (item: LibraryItem) => void;
 }) {
   if (props.groups.length === 0) {
     return (
@@ -721,7 +750,12 @@ function IdentityGroupedVault(props: {
   return (
     <div className="space-y-5">
       {props.groups.map((group) => (
-        <IdentityGroupCard key={group.key} group={group} onOpen={props.onOpen} />
+        <IdentityGroupCard
+          key={group.key}
+          group={group}
+          onOpen={props.onOpen}
+          onReuse={props.onReuse}
+        />
       ))}
     </div>
   );
@@ -730,6 +764,7 @@ function IdentityGroupedVault(props: {
 function VaultModal(props: {
   item: LibraryItem | null;
   onClose: () => void;
+  onReuse: (item: LibraryItem) => void;
 }) {
   if (!props.item) return null;
 
@@ -873,16 +908,15 @@ function VaultModal(props: {
                   </Link>
                 ) : null}
 
-                <Link href="/generate">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
-                  >
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Generate More Like This
-                  </Button>
-                </Link>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => props.onReuse(item)}
+                  className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
+                >
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Generate More Like This
+                </Button>
 
                 <Button
                   type="button"
@@ -907,6 +941,21 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
   const [sort, setSort] = useState<SortMode>("newest");
   const [view, setView] = useState<ViewMode>("all");
   const [selected, setSelected] = useState<LibraryItem | null>(null);
+
+  const reuseIdentity = (item: LibraryItem) => {
+    const payload = buildReusePayload(item);
+
+    try {
+      window.localStorage.setItem(
+        VAULT_REUSE_HANDOFF_STORAGE_KEY,
+        JSON.stringify(payload)
+      );
+    } catch (error) {
+      console.error("[library] Failed to store vault identity reuse handoff:", error);
+    }
+
+    window.location.href = "/generate?source=vault_identity";
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -1036,13 +1085,21 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
             </CardContent>
           </Card>
         ) : view === "identity" ? (
-          <IdentityGroupedVault groups={identityGroups} onOpen={setSelected} />
+          <IdentityGroupedVault
+            groups={identityGroups}
+            onOpen={setSelected}
+            onReuse={reuseIdentity}
+          />
         ) : (
           <VaultGrid items={filtered} onOpen={setSelected} />
         )}
       </main>
 
-      <VaultModal item={selected} onClose={() => setSelected(null)} />
+      <VaultModal
+        item={selected}
+        onClose={() => setSelected(null)}
+        onReuse={reuseIdentity}
+      />
     </div>
   );
 }
