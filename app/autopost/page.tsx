@@ -120,6 +120,13 @@ type AutopostPackPrefill = {
   created_at?: number
 }
 
+type SavedRuleSuccess = {
+  ruleId: string | null
+  platformLabels: string
+  packName: string
+  createdAt: string
+}
+
 // -----------------------------
 // Helpers
 // -----------------------------
@@ -292,6 +299,7 @@ export default function AutopostPage() {
   const [previewResult, setPreviewResult] = useState<AutopostPreviewResponse | null>(null)
   const [builderError, setBuilderError] = useState<string | null>(null)
   const [builderSuccess, setBuilderSuccess] = useState<string | null>(null)
+  const [savedRuleSuccess, setSavedRuleSuccess] = useState<SavedRuleSuccess | null>(null)
   const [packPrefill, setPackPrefill] = useState<AutopostPackPrefill | null>(null)
 
   // Rules state
@@ -383,6 +391,7 @@ export default function AutopostPage() {
         },
       })
       setBuilderSuccess("Pack loaded from Generate. Review the selected platforms/settings, run Preview Selection, then Save as Rule (DRAFT).")
+      setSavedRuleSuccess(null)
       setBuilderError(null)
       window.sessionStorage.removeItem(AUTOPOST_PACK_PREFILL_STORAGE_KEY)
     } catch (err) {
@@ -439,6 +448,7 @@ export default function AutopostPage() {
     setIsEvaluating(true)
     setBuilderError(null)
     setBuilderSuccess(null)
+    setSavedRuleSuccess(null)
     setPreviewResult(null)
     setRunResult(null)
     try {
@@ -474,6 +484,7 @@ export default function AutopostPage() {
   const saveAsRule = async () => {
     setBuilderError(null)
     setBuilderSuccess(null)
+    setSavedRuleSuccess(null)
 
     // We save the SAME config that preview uses.
     // Backend can store it as rule config + set approval_state=DRAFT by default.
@@ -497,9 +508,25 @@ export default function AutopostPage() {
     }
 
     try {
-      await createRule(body)
-      setBuilderSuccess("Rule saved as DRAFT. Approve it in My Rules when ready.")
-      setTab("rules")
+      const created = await createRule(body)
+      const createdRuleId =
+        created?.rule?.id ??
+        created?.data?.id ??
+        created?.id ??
+        created?.rule_id ??
+        null
+
+      const platformLabels = selectedPlatforms.length > 0
+        ? selectedPlatforms.map((p) => prettyPlatform(p)).join(", ")
+        : "—"
+
+      setSavedRuleSuccess({
+        ruleId: createdRuleId ? String(createdRuleId) : null,
+        platformLabels,
+        packName: packPrefill?.pack_name || packPrefill?.collection_name || "Autopost Rule",
+        createdAt: new Date().toISOString(),
+      })
+      setBuilderSuccess(null)
       await refreshRules()
     } catch (e: any) {
       setBuilderError(e?.message ? String(e.message) : "Save rule failed")
@@ -868,17 +895,98 @@ export default function AutopostPage() {
                 </CardHeader>
 
                 <CardContent className="space-y-6">
-                  {(builderError || builderSuccess) && (
-                    <div
-                      className={`text-sm rounded-xl p-3 border ${
-                        builderError
-                          ? "bg-rose-950/40 border-rose-900/40 text-rose-200"
-                          : "bg-emerald-950/30 border-emerald-900/30 text-emerald-200"
-                      }`}
-                    >
+                  {builderError && (
+                    <div className="rounded-xl border border-rose-900/40 bg-rose-950/40 p-3 text-sm text-rose-200">
                       <div className="flex items-start gap-2">
-                        {builderError ? <AlertCircle className="w-5 h-5 mt-0.5" /> : <CheckCircle className="w-5 h-5 mt-0.5" />}
-                        <div>{builderError ?? builderSuccess}</div>
+                        <AlertCircle className="mt-0.5 h-5 w-5" />
+                        <div>{builderError}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {builderSuccess && !savedRuleSuccess && (
+                    <div className="rounded-xl border border-emerald-900/30 bg-emerald-950/30 p-3 text-sm text-emerald-200">
+                      <div className="flex items-start gap-2">
+                        <CheckCircle className="mt-0.5 h-5 w-5" />
+                        <div>{builderSuccess}</div>
+                      </div>
+                    </div>
+                  )}
+
+                  {savedRuleSuccess && (
+                    <div className="overflow-hidden rounded-3xl border border-emerald-500/40 bg-gradient-to-br from-emerald-950/45 via-black/45 to-cyan-950/30 shadow-[0_0_44px_rgba(16,185,129,0.14)]">
+                      <div className="border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div className="min-w-0">
+                            <div className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-100">
+                              <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
+                              Rule Created Successfully
+                            </div>
+                            <div className="mt-3 text-lg font-bold text-white">
+                              Draft rule is ready for approval
+                            </div>
+                            <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
+                              The rule was saved as a DRAFT. Nothing has been posted, scheduled, or sent to cron. Approve it from My Rules when you are ready to activate automation.
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-emerald-500/20 bg-black/30 px-3 py-2 text-xs text-emerald-100">
+                            Safe draft state
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-3 p-4 md:grid-cols-3">
+                        <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Rule</div>
+                          <div className="mt-1 truncate text-sm font-semibold text-white">
+                            {savedRuleSuccess.ruleId ?? "Created"}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Pack</div>
+                          <div className="mt-1 truncate text-sm font-semibold text-white">
+                            {savedRuleSuccess.packName}
+                          </div>
+                        </div>
+                        <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                          <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Platforms</div>
+                          <div className="mt-1 truncate text-sm font-semibold text-white">
+                            {savedRuleSuccess.platformLabels}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 border-t border-white/10 bg-black/20 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="text-xs leading-5 text-gray-400">
+                          Next step: go to My Rules, review the draft, then click Approve when ready.
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            onClick={() => {
+                              setTab("rules")
+                              refreshRules()
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-500"
+                          >
+                            <CheckCircle className="mr-2 h-4 w-4" />
+                            View My Rules
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              setSavedRuleSuccess(null)
+                              setBuilderSuccess(null)
+                              setPreviewResult(null)
+                              setPreviewStatus("blocked")
+                              setPackPrefill(null)
+                            }}
+                            className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                          >
+                            Build Another Rule
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -914,6 +1022,7 @@ export default function AutopostPage() {
                               setPreviewResult(null)
                               setPreviewStatus("blocked")
                               setBuilderSuccess(null)
+                              setSavedRuleSuccess(null)
                             }}
                           >
                             <X className="w-4 h-4 mr-2" />
@@ -1173,11 +1282,11 @@ export default function AutopostPage() {
 
                     <Button
                       onClick={saveAsRule}
-                      disabled={selectedPlatforms.length === 0}
-                      className="bg-emerald-600 hover:bg-emerald-500"
+                      disabled={selectedPlatforms.length === 0 || !!savedRuleSuccess}
+                      className="bg-emerald-600 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Save className="w-4 h-4 mr-2" />
-                      Save as Rule (DRAFT)
+                      {savedRuleSuccess ? "Draft Rule Saved" : "Save as Rule (DRAFT)"}
                     </Button>
                   </div>
 
