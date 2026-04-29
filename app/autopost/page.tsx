@@ -884,67 +884,149 @@ export default function AutopostPage() {
                   )}
 
                   {packPrefill && (
-                    <div className="rounded-2xl border border-fuchsia-500/30 bg-fuchsia-950/20 p-4">
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <div className="text-sm font-semibold text-fuchsia-100">
-                            Generate Pack Loaded
-                          </div>
-                          <div className="mt-1 text-xs text-gray-300">
-                            {packPrefill.pack_name || packPrefill.collection_name || "Creator Content Pack"}
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-gray-300">
-                            <span className="rounded-full border border-gray-800 bg-black/30 px-2 py-1">
-                              Assets: {packPrefill.assets?.length ?? packPrefill.generation_ids?.length ?? 0}
-                            </span>
-                            <span className="rounded-full border border-gray-800 bg-black/30 px-2 py-1">
-                              Captions: {packPrefill.caption_drafts?.length ?? packPrefill.captions?.length ?? 0}
-                            </span>
-                            <span className="rounded-full border border-gray-800 bg-black/30 px-2 py-1">
-                              Source: Generate
-                            </span>
-                          </div>
-                        </div>
+                    <div className="overflow-hidden rounded-3xl border border-fuchsia-500/35 bg-gradient-to-br from-fuchsia-950/35 via-black/40 to-cyan-950/25 shadow-[0_0_40px_rgba(217,70,239,0.12)]">
+                      <div className="border-b border-white/10 bg-white/[0.03] px-4 py-4">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center rounded-full border border-fuchsia-400/40 bg-fuchsia-500/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-fuchsia-100">
+                                <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
+                                Loaded from Generate
+                              </span>
+                              <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-100">
+                                Pack handoff
+                              </span>
+                            </div>
 
-                        <Button
-                          variant="outline"
-                          className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
-                          onClick={() => {
-                            setPackPrefill(null)
-                            setPreviewResult(null)
-                            setPreviewStatus("blocked")
-                            setBuilderSuccess(null)
-                          }}
-                        >
-                          <X className="w-4 h-4 mr-2" />
-                          Clear Handoff
-                        </Button>
+                            <div className="mt-3 text-lg font-bold text-white">
+                              {packPrefill.pack_name || packPrefill.collection_name || "Creator Content Pack"}
+                            </div>
+                            <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
+                              This pack came from the Generate Pack Builder. Review platforms, run Preview Selection, then save as a DRAFT rule for approval. Nothing is posted from this screen.
+                            </div>
+                          </div>
+
+                          <Button
+                            variant="outline"
+                            className="shrink-0 border-gray-800 bg-black/30 text-gray-200 hover:bg-gray-900"
+                            onClick={() => {
+                              setPackPrefill(null)
+                              setPreviewResult(null)
+                              setPreviewStatus("blocked")
+                              setBuilderSuccess(null)
+                            }}
+                          >
+                            <X className="w-4 h-4 mr-2" />
+                            Clear Handoff
+                          </Button>
+                        </div>
                       </div>
 
-                      {packPrefill.caption_drafts && packPrefill.caption_drafts.length > 0 && (
-                        <div className="mt-4 space-y-2">
-                          <div className="text-xs font-semibold text-gray-200">Caption Drafts</div>
-                          <div className="max-h-56 space-y-2 overflow-auto pr-1">
-                            {packPrefill.caption_drafts.slice(0, 6).map((draft, index) => (
-                              <div key={`${draft.id ?? index}`} className="rounded-xl border border-gray-800 bg-black/30 p-3">
-                                <div className="text-xs font-semibold text-white">
-                                  {draft.title || `Caption ${index + 1}`}
-                                </div>
-                                {draft.caption && (
-                                  <div className="mt-1 text-xs leading-5 text-gray-300">
-                                    {draft.caption}
-                                  </div>
-                                )}
-                                {draft.hashtags && (
-                                  <div className="mt-2 text-[11px] leading-5 text-cyan-200">
-                                    {draft.hashtags}
-                                  </div>
-                                )}
+                      <div className="grid grid-cols-1 gap-4 p-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-2">
+                            <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Assets</div>
+                              <div className="mt-1 text-xl font-bold text-white">{packPrefill.assets?.length ?? packPrefill.generation_ids?.length ?? 0}</div>
+                            </div>
+                            <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Captions</div>
+                              <div className="mt-1 text-xl font-bold text-white">{packPrefill.caption_drafts?.length ?? packPrefill.captions?.length ?? 0}</div>
+                            </div>
+                            <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Platform</div>
+                              <div className="mt-1 truncate text-sm font-bold text-white">
+                                {(packPrefill.platforms && packPrefill.platforms.length > 0
+                                  ? packPrefill.platforms.map((p) => prettyPlatform(p)).join(", ")
+                                  : prettyPlatform(packPrefill.platform)) || "Fanvue"}
                               </div>
-                            ))}
+                            </div>
+                            <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Mode</div>
+                              <div className="mt-1 text-sm font-bold text-white">Draft only</div>
+                            </div>
                           </div>
+
+                          {packPrefill.assets && packPrefill.assets.length > 0 && (
+                            <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                              <div className="mb-3 flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-gray-200">Pack Assets</div>
+                                <div className="text-[10px] text-gray-500">Preview only</div>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 xl:grid-cols-3">
+                                {packPrefill.assets.slice(0, 6).map((asset: any, index: number) => (
+                                  <div key={`${asset?.generation_id ?? asset?.url ?? index}`} className="overflow-hidden rounded-xl border border-gray-800 bg-gray-950">
+                                    {asset?.url ? (
+                                      asset?.kind === "video" ? (
+                                        <video src={asset.url} className="aspect-square w-full object-cover" muted playsInline />
+                                      ) : (
+                                        <img src={asset.url} alt={`Pack asset ${index + 1}`} className="aspect-square w-full object-cover" />
+                                      )
+                                    ) : (
+                                      <div className="flex aspect-square w-full items-center justify-center bg-gray-900 text-[10px] text-gray-500">
+                                        Asset {index + 1}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                              {packPrefill.assets.length > 6 && (
+                                <div className="mt-2 text-[11px] text-gray-500">
+                                  + {packPrefill.assets.length - 6} more assets in this pack
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      )}
+
+                        <div className="space-y-4">
+                          <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div>
+                                <div className="text-xs font-semibold text-gray-200">Next Step</div>
+                                <div className="mt-1 text-[11px] leading-5 text-gray-400">
+                                  Preview validates the rule shape. Save creates the DRAFT. Approval is still required before cron execution.
+                                </div>
+                              </div>
+                              <div className="hidden rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200 sm:block">
+                                Safe handoff
+                              </div>
+                            </div>
+                          </div>
+
+                          {packPrefill.caption_drafts && packPrefill.caption_drafts.length > 0 ? (
+                            <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                              <div className="mb-3 flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold text-gray-200">Caption Drafts</div>
+                                <div className="text-[10px] text-gray-500">First {Math.min(packPrefill.caption_drafts.length, 4)} shown</div>
+                              </div>
+                              <div className="max-h-72 space-y-2 overflow-auto pr-1">
+                                {packPrefill.caption_drafts.slice(0, 4).map((draft, index) => (
+                                  <div key={`${draft.id ?? index}`} className="rounded-xl border border-gray-800 bg-gray-950/80 p-3">
+                                    <div className="text-xs font-semibold text-white">
+                                      {draft.title || `Caption ${index + 1}`}
+                                    </div>
+                                    {draft.caption && (
+                                      <div className="mt-1 text-xs leading-5 text-gray-300">
+                                        {draft.caption}
+                                      </div>
+                                    )}
+                                    {draft.hashtags && (
+                                      <div className="mt-2 text-[11px] leading-5 text-cyan-200">
+                                        {draft.hashtags}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100">
+                              No caption drafts were included in this handoff. You can still build the rule, but captions should be generated from the pack before approval.
+                            </div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   )}
 
