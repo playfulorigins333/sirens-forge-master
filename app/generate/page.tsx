@@ -92,6 +92,13 @@ interface GeneratedItem {
   dbGenerationId?: string | null;
 }
 
+interface PackCaptionDraft {
+  id: string;
+  title: string;
+  caption: string;
+  hashtags: string;
+}
+
 type HandoffPayload = {
   prompt?: string;
   negative_prompt?: string;
@@ -1763,6 +1770,9 @@ function OutputPanel(props: {
   const [packSaving, setPackSaving] = useState(false);
   const [packError, setPackError] = useState<string | null>(null);
   const [packSuccess, setPackSuccess] = useState<string | null>(null);
+  const [captionDrafts, setCaptionDrafts] = useState<PackCaptionDraft[]>([]);
+  const [captionCopySuccess, setCaptionCopySuccess] = useState<string | null>(null);
+  const [captionError, setCaptionError] = useState<string | null>(null);
 
   if (props.loading) {
     return (
@@ -1845,6 +1855,139 @@ function OutputPanel(props: {
         { label: "Change pose", addition: "same identity, new pose, natural anatomy, changed body angle" },
         { label: "More premium", addition: "premium creator content, polished lighting, high-end photorealistic finish" },
       ];
+
+  const sanitizeCaptionSeed = (value: string) =>
+    value
+      .replace(/\s+/g, " ")
+      .replace(/[<>]/g, "")
+      .trim();
+
+  const getPromptSummary = (prompt: string) => {
+    const cleaned = sanitizeCaptionSeed(prompt);
+    if (!cleaned) return "Premium AI creator content built inside Sirens Forge";
+    return cleaned.length > 165 ? `${cleaned.slice(0, 162).trim()}...` : cleaned;
+  };
+
+  const buildHashtagsForItem = (item: GeneratedItem) => {
+    const text = `${item.prompt} ${item.kind}`.toLowerCase();
+    const tags = new Set<string>([
+      "#SirensForge",
+      "#AICreator",
+      "#DigitalCreator",
+      "#ContentPack",
+    ]);
+
+    if (item.kind === "video") tags.add("#AIVideo");
+    if (item.kind === "image") tags.add("#AIImage");
+    if (/cinematic|film|camera|lighting|moody/.test(text)) tags.add("#Cinematic");
+    if (/boudoir|lingerie|sensual|erotic|explicit|spicy/.test(text)) tags.add("#SpicyContent");
+    if (/fashion|editorial|glam|outfit|wardrobe/.test(text)) tags.add("#CreatorStyle");
+    if (/beach|pool|sun|golden|luxury/.test(text)) tags.add("#LuxuryContent");
+    if (/same identity|consistent|lora|character/.test(text)) tags.add("#ConsistentIdentity");
+
+    return Array.from(tags).slice(0, 9).join(" ");
+  };
+
+  const buildCaptionDraft = (
+    item: GeneratedItem,
+    index: number,
+    total: number,
+    activePackName: string
+  ): PackCaptionDraft => {
+    const summary = getPromptSummary(item.prompt);
+    const kindLabel = item.kind === "video" ? "Video Clip" : "Image Drop";
+    const title = `${kindLabel} ${index + 1}${total > 1 ? ` of ${total}` : ""}`;
+    const cta = item.kind === "video"
+      ? "Best used as a premium teaser, unlockable clip, or short-form promo."
+      : "Best used as a feed teaser, premium gallery asset, or DM unlock preview.";
+
+    return {
+      id: getGenerationRecordId(item) || item.id,
+      title,
+      caption: `${title} — ${activePackName}\n\n${summary}\n\n${cta}`,
+      hashtags: buildHashtagsForItem(item),
+    };
+  };
+
+  const buildCaptionExportText = (drafts: PackCaptionDraft[]) => {
+    const cleanPackName = packName.trim() || "Creator Content Pack";
+    const header = `${cleanPackName}\nGenerated captions for selected Vault assets\n${new Date().toLocaleString()}\n`;
+    const body = drafts
+      .map((draft, index) => {
+        return [
+          `--- Caption ${index + 1}: ${draft.title} ---`,
+          draft.caption,
+          "",
+          draft.hashtags,
+        ].join("\n");
+      })
+      .join("\n\n");
+
+    return `${header}\n${body}`.trim();
+  };
+
+  const handleGeneratePackCaptions = () => {
+    setCaptionError(null);
+    setCaptionCopySuccess(null);
+
+    if (selectedPackItems.length === 0) {
+      setCaptionError("Select at least one asset before generating captions.");
+      return;
+    }
+
+    const cleanPackName = packName.trim() || "Creator Content Pack";
+    const drafts = selectedPackItems.map((item, index) =>
+      buildCaptionDraft(item, index, selectedPackItems.length, cleanPackName)
+    );
+
+    setCaptionDrafts(drafts);
+    setCaptionCopySuccess(`${drafts.length} caption${drafts.length === 1 ? "" : "s"} generated.`);
+  };
+
+  const handleCopyPackCaptions = async () => {
+    setCaptionError(null);
+    setCaptionCopySuccess(null);
+
+    if (captionDrafts.length === 0) {
+      setCaptionError("Generate captions before copying.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(buildCaptionExportText(captionDrafts));
+      setCaptionCopySuccess("Captions copied to clipboard.");
+    } catch (err) {
+      console.error("Caption copy error:", err);
+      setCaptionError("Could not copy captions to clipboard.");
+    }
+  };
+
+  const handleDownloadPackCaptions = () => {
+    setCaptionError(null);
+    setCaptionCopySuccess(null);
+
+    if (captionDrafts.length === 0) {
+      setCaptionError("Generate captions before exporting.");
+      return;
+    }
+
+    const cleanPackName = (packName.trim() || "creator-content-pack")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "creator-content-pack";
+    const blob = new Blob([buildCaptionExportText(captionDrafts)], {
+      type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${cleanPackName}-captions.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setCaptionCopySuccess("Caption export downloaded.");
+  };
 
   const handleDownloadLatest = () => {
     if (!latestItem?.url) return;
@@ -1951,6 +2094,8 @@ function OutputPanel(props: {
     const latestId = getGenerationRecordId(latestItem);
     setPackError(null);
     setPackSuccess(null);
+    setCaptionError(null);
+    setCaptionCopySuccess(null);
     setPackBuilderOpen(true);
 
     if (latestId && !selectedPackIds.includes(latestId)) {
@@ -1972,6 +2117,9 @@ function OutputPanel(props: {
 
     setPackError(null);
     setPackSuccess(null);
+    setCaptionError(null);
+    setCaptionCopySuccess(null);
+    setCaptionDrafts([]);
     setSelectedPackIds((prev) =>
       prev.includes(generationRecordId)
         ? prev.filter((id) => id !== generationRecordId)
@@ -2460,7 +2608,82 @@ function OutputPanel(props: {
 
                   {selectedPackItems.length > 0 && (
                     <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-[11px] leading-5 text-cyan-100">
-                      This creates a real Vault collection using the selected generation records. Caption generation, ZIP export, and OF/Fanvue templates can be layered onto this pack next.
+                      This creates a real Vault collection using the selected generation records. Captions and export files are generated from the selected real assets only.
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-cyan-500/20 bg-[linear-gradient(180deg,rgba(8,47,73,0.32),rgba(8,8,13,0.92))] p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h4 className="text-sm font-semibold text-white">Auto Captions + Export</h4>
+                      <p className="mt-1 text-[11px] leading-5 text-gray-400">
+                        Generates caption copy from selected real generation prompts. No fake media and no simulated backend output.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={handleGeneratePackCaptions}
+                      disabled={selectedPackItems.length === 0}
+                      className="h-9 shrink-0 bg-cyan-500/90 px-3 text-[11px] font-bold text-black transition hover:-translate-y-0.5 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Generate Captions
+                    </Button>
+                  </div>
+
+                  {captionDrafts.length > 0 && (
+                    <div className="mt-4 space-y-3">
+                      <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+                        {captionDrafts.map((draft) => (
+                          <div
+                            key={draft.id}
+                            className="rounded-xl border border-gray-800 bg-gray-950/80 px-3 py-3"
+                          >
+                            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300">
+                              {draft.title}
+                            </div>
+                            <pre className="whitespace-pre-wrap break-words font-sans text-[11px] leading-5 text-gray-200">
+                              {draft.caption}
+                            </pre>
+                            <div className="mt-3 rounded-lg border border-gray-800 bg-black/30 px-2 py-2 text-[10px] leading-5 text-gray-400">
+                              {draft.hashtags}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleCopyPackCaptions}
+                          className="h-9 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+                        >
+                          <Copy className="mr-2 h-4 w-4" />
+                          Copy All Captions
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleDownloadPackCaptions}
+                          className="h-9 border-gray-700 bg-gray-900 text-xs text-gray-100 hover:bg-gray-800"
+                        >
+                          <DownloadIcon />
+                          Export .TXT
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {captionError && (
+                    <div className="mt-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-3 text-[11px] leading-5 text-rose-200">
+                      {captionError}
+                    </div>
+                  )}
+
+                  {captionCopySuccess && (
+                    <div className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-3 py-3 text-[11px] leading-5 text-emerald-100">
+                      {captionCopySuccess}
                     </div>
                   )}
                 </div>
