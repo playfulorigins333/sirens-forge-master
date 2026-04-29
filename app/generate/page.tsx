@@ -42,6 +42,7 @@ import {
   SelectItem,
   SelectValue,
 } from "@/components/ui/select";
+import BuildMyModelCard from "@/components/generate/BuildMyModelCard";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -50,6 +51,7 @@ const supabase = createBrowserClient(
 
 const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff";
 const NEXT_PACK_SEED_STORAGE_KEY = "sirensforge:next_pack_seed";
+const VAULT_REUSE_IDENTITY_STORAGE_KEY = "sf_reuse_identity";
 const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs";
 
@@ -119,6 +121,17 @@ type NextPackSeedPayload = {
   explicitness?: number;
   style_hint?: string;
   created_at?: number;
+};
+
+type VaultReuseIdentityPayload = {
+  prompt?: string;
+  negativePrompt?: string;
+  negative_prompt?: string;
+  baseModel?: string;
+  bodyMode?: string;
+  identityId?: string;
+  id?: string;
+  source?: string;
 };
 
 function inferKindFromOutput(output: any): MediaKind {
@@ -3362,7 +3375,6 @@ export default function GeneratePage() {
           .from("user_loras")
           .select("id, name")
           .eq("user_id", session.user.id)
-          .eq("status", "completed")
           .order("created_at", { ascending: false });
 
         if (error) {
@@ -3388,6 +3400,86 @@ export default function GeneratePage() {
       cancelled = true;
       authListener?.subscription?.unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    let raw: string | null = null;
+
+    try {
+      raw = window.localStorage.getItem(VAULT_REUSE_IDENTITY_STORAGE_KEY);
+    } catch (err) {
+      console.error("Failed to read Vault reuse handoff:", err);
+    }
+
+    if (!raw) return;
+
+    try {
+      const payload = JSON.parse(raw) as VaultReuseIdentityPayload;
+
+      const incomingPrompt =
+        typeof payload.prompt === "string" ? payload.prompt.trim() : "";
+      const incomingNegative =
+        typeof payload.negativePrompt === "string" && payload.negativePrompt.trim().length > 0
+          ? payload.negativePrompt.trim()
+          : typeof payload.negative_prompt === "string"
+            ? payload.negative_prompt.trim()
+            : "";
+      const incomingBaseModel =
+        typeof payload.baseModel === "string" && payload.baseModel.trim().length > 0
+          ? payload.baseModel.trim().toLowerCase()
+          : typeof payload.bodyMode === "string"
+            ? payload.bodyMode.trim().toLowerCase()
+            : "";
+      const incomingIdentity =
+        typeof payload.identityId === "string" && payload.identityId.trim().length > 0
+          ? payload.identityId.trim()
+          : typeof payload.id === "string"
+            ? payload.id.trim()
+            : "";
+
+      if (incomingPrompt) setPrompt(incomingPrompt);
+      if (incomingNegative) setNegativePrompt(incomingNegative);
+      if (incomingBaseModel === "feminine" || incomingBaseModel === "masculine") {
+        setBaseModel(incomingBaseModel as BaseModel);
+      }
+      if (incomingIdentity) {
+        setPendingIdentityId(incomingIdentity);
+        setLoraSelection({
+          mode: "single",
+          selected: [incomingIdentity],
+          createNew: false,
+          newName: "",
+        });
+      }
+
+      setMode("text_to_image");
+      setHighlightPrompt(true);
+      setHighlightGenerate(true);
+
+      window.setTimeout(() => {
+        const textarea = promptTextareaRef.current;
+        if (!textarea) return;
+
+        textarea.scrollIntoView({ behavior: "smooth", block: "center" });
+        window.setTimeout(() => {
+          textarea.focus({ preventScroll: true });
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }, 250);
+      }, 350);
+
+      window.setTimeout(() => {
+        setHighlightPrompt(false);
+        setHighlightGenerate(false);
+      }, 3200);
+    } catch (err) {
+      console.error("Failed to apply Vault reuse handoff:", err);
+    } finally {
+      try {
+        window.localStorage.removeItem(VAULT_REUSE_IDENTITY_STORAGE_KEY);
+      } catch (err) {
+        console.error("Failed to clear Vault reuse handoff:", err);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -4000,6 +4092,27 @@ ${basePrompt}`,
             <CardContent className="space-y-3 p-4 md:p-4">
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
                 <div className="space-y-3">
+                  {mode === "text_to_image" && (
+                    <BuildMyModelCard
+                      onApplyPrompt={(result) => {
+                        setPrompt(result.prompt);
+                        setNegativePrompt(result.negativePrompt);
+                        setBaseModel(result.selection.baseModel);
+                        setRefineChoices(null);
+                      }}
+                      onBaseModelChange={(model) => {
+                        setBaseModel(model);
+                      }}
+                      onGenerateNow={(result) => {
+                        setPrompt(result.prompt);
+                        setNegativePrompt(result.negativePrompt);
+                        setBaseModel(result.selection.baseModel);
+                        setRefineChoices(null);
+                        void handleGenerate(result.prompt);
+                      }}
+                    />
+                  )}
+
                   <PromptSection
                     mode={mode}
                     prompt={prompt}
