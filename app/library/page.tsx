@@ -25,6 +25,23 @@ type GenerationRow = {
   mode?: string | null;
 };
 
+type UserLoraRow = {
+  id: string;
+  user_id: string | null;
+  name: string | null;
+  preview_url: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  description: string | null;
+  status: string | null;
+  source?: string | null;
+  base_model?: string | null;
+  prompt?: string | null;
+  negative_prompt?: string | null;
+  selection?: Record<string, unknown> | null;
+  is_identity_seed?: boolean | null;
+};
+
 function getMetadata(row: GenerationRow): Record<string, unknown> {
   return row?.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
     ? row.metadata
@@ -116,6 +133,50 @@ function getIdentityLora(row: GenerationRow): string | null {
     : null;
 }
 
+function isIdentitySeed(row: UserLoraRow): boolean {
+  const source = String(row?.source || "").trim().toLowerCase();
+  const status = String(row?.status || "").trim().toLowerCase();
+
+  return (
+    row?.is_identity_seed === true ||
+    source === "build_my_model" ||
+    status === "identity_seed" ||
+    status === "draft"
+  );
+}
+
+function getIdentitySeedUrl(row: UserLoraRow): string | null {
+  return typeof row?.preview_url === "string" && row.preview_url.trim().length > 0
+    ? row.preview_url.trim()
+    : null;
+}
+
+function getIdentitySeedPrompt(row: UserLoraRow): string {
+  if (typeof row?.prompt === "string" && row.prompt.trim().length > 0) {
+    return row.prompt.trim();
+  }
+
+  if (typeof row?.description === "string" && row.description.trim().length > 0) {
+    return row.description.trim();
+  }
+
+  return row?.name ? `Identity seed: ${row.name}` : "Build My Model identity seed";
+}
+
+function getIdentitySeedBodyMode(row: UserLoraRow): string | null {
+  if (typeof row?.base_model === "string" && row.base_model.trim().length > 0) {
+    return row.base_model.trim();
+  }
+
+  const selection = row?.selection && typeof row.selection === "object" && !Array.isArray(row.selection)
+    ? row.selection
+    : {};
+
+  const value = selection.baseModel;
+
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
 export default async function LibraryPage() {
   const auth = await ensureActiveSubscription();
 
@@ -136,34 +197,68 @@ export default async function LibraryPage() {
 
   const supabase = await supabaseServer();
 
-  const { data, error } = await supabase
-    .from("generations")
-    .select(
-      `
-      id,
-      user_id,
-      prompt,
-      image_url,
-      created_at,
-      updated_at,
-      status,
-      job_type,
-      body_type,
-      metadata,
-      lora_used,
-      mode
-    `
-    )
-    .in("user_id", [authUserId, profileId])
-    .order("created_at", { ascending: false });
+  const [{ data: generationData, error: generationError }, { data: loraData, error: loraError }] =
+    await Promise.all([
+      supabase
+        .from("generations")
+        .select(
+          `
+          id,
+          user_id,
+          prompt,
+          image_url,
+          created_at,
+          updated_at,
+          status,
+          job_type,
+          body_type,
+          metadata,
+          lora_used,
+          mode
+        `
+        )
+        .in("user_id", [authUserId, profileId])
+        .order("created_at", { ascending: false }),
 
-  if (error) {
-    console.error("[library] Failed to load generations:", error);
+      supabase
+        .from("user_loras")
+        .select(
+          `
+          id,
+          user_id,
+          name,
+          preview_url,
+          created_at,
+          updated_at,
+          description,
+          status,
+          source,
+          base_model,
+          prompt,
+          negative_prompt,
+          selection,
+          is_identity_seed
+        `
+        )
+        .in("user_id", [authUserId, profileId])
+        .order("created_at", { ascending: false }),
+    ]);
+
+  if (generationError) {
+    console.error("[library] Failed to load generations:", generationError);
   }
 
-  const rows: GenerationRow[] = Array.isArray(data) ? (data as GenerationRow[]) : [];
+  if (loraError) {
+    console.error("[library] Failed to load identity seeds:", loraError);
+  }
 
-  const items: LibraryItem[] = rows
+  const generationRows: GenerationRow[] = Array.isArray(generationData)
+    ? (generationData as GenerationRow[])
+    : [];
+
+  const loraRows: UserLoraRow[] = Array.isArray(loraData) ? (loraData as UserLoraRow[]) : [];
+
+  const generationItems: LibraryItem[] = generationRows
     .filter((row) => isRealAsset(row))
     .map((row) => {
       const url = getRealAssetUrl(row)!;
@@ -180,6 +275,33 @@ export default async function LibraryPage() {
         identityLora: getIdentityLora(row),
       };
     });
+
+  const identityItems: LibraryItem[] = loraRows
+    .filter((row) => isIdentitySeed(row))
+    .filter((row) => !!getIdentitySeedUrl(row))
+    .map((row) => {
+      const url = getIdentitySeedUrl(row)!;
+
+      return {
+        id: row.id,
+        kind: "image",
+        url,
+        prompt: getIdentitySeedPrompt(row),
+        createdAt: row.created_at || row.updated_at || new Date().toISOString(),
+        status: row.status || "identity_seed",
+        mode: "identity_seed",
+        bodyMode: getIdentitySeedBodyMode(row),
+        identityLora: row.id,
+      };
+    });
+
+  const items = [...identityItems, ...generationItems].sort((a, b) => {
+    const at = new Date(a.createdAt).getTime();
+    const bt = new Date(b.createdAt).getTime();
+    const safeAt = Number.isNaN(at) ? 0 : at;
+    const safeBt = Number.isNaN(bt) ? 0 : bt;
+    return safeBt - safeAt;
+  });
 
   return <LibraryClient items={items} />;
 }
