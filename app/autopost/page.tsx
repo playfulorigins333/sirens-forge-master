@@ -72,15 +72,8 @@ type AutopostRule = {
   next_run_at?: string | null
 }
 
-type RunResponse = {
-  ran_at?: string
-  processed?: number
-  rules?: any[]
-  error?: string
-}
-
 // -----------------------------
-// Fallback platforms (if /api/autopost/platforms fails)
+// Fallback platforms
 // -----------------------------
 const FALLBACK_PLATFORMS: Platform[] = [
   { id: "fanvue", name: "Fanvue", status: "unknown" },
@@ -264,13 +257,6 @@ async function postRuleAction(ruleId: string, action: "approve" | "pause" | "res
   return j
 }
 
-async function runEligibleNow(): Promise<RunResponse> {
-  const res = await fetch("/api/autopost/run", { method: "POST" })
-  const j = await safeJson<RunResponse>(res)
-  if (!res.ok) throw new Error(j?.error ? String(j.error) : `Run failed (${res.status})`)
-  return j ?? {}
-}
-
 // -----------------------------
 // Page
 // -----------------------------
@@ -315,10 +301,6 @@ export default function AutopostPage() {
   const [ackAutomation, setAckAutomation] = useState(false)
   const [ackControl, setAckControl] = useState(false)
 
-  // Run now state
-  const [runningJob, setRunningJob] = useState(false)
-  const [runResult, setRunResult] = useState<RunResponse | null>(null)
-
   useEffect(() => setMounted(true), [])
 
   useEffect(() => {
@@ -338,7 +320,6 @@ export default function AutopostPage() {
   }, [mounted])
 
   // Load Generate → Autopost Builder handoff.
-  // Production-safe: this only prefills the builder. It does NOT publish, schedule, or call the cron executor.
   useEffect(() => {
     if (!mounted) return
     if (typeof window === "undefined") return
@@ -450,7 +431,6 @@ export default function AutopostPage() {
     setBuilderSuccess(null)
     setSavedRuleSuccess(null)
     setPreviewResult(null)
-    setRunResult(null)
     try {
       const res = await runPreviewSelection({
         enabled,
@@ -494,7 +474,6 @@ export default function AutopostPage() {
       explicitness,
       tones: selectedTones,
       frequency,
-      // optional: store latest preview output if your backend wants it
       preview_state: previewResult?.state ?? null,
       preview_reason: previewResult?.reason ?? null,
       preview_payload: previewResult?.payload ?? null,
@@ -603,12 +582,23 @@ export default function AutopostPage() {
     }
   }
 
-  // -----------------------------
-  // Run eligible now
-  // -----------------------------
-  const handleRunNow = async () => {
-    setRunResult(null)
-    setRulesError("Autopost execution runs through your approved schedule.")
+  const startNextPack = (variant: "similar" | "different_style") => {
+    if (typeof window === "undefined") return
+
+    const nextPackSeed = {
+      source: "autopost_success",
+      action: variant,
+      pack_name: savedRuleSuccess?.packName ?? packPrefill?.pack_name ?? packPrefill?.collection_name ?? "Content Pack",
+      platforms: selectedPlatforms,
+      tones: selectedTones,
+      explicitness,
+      style_hint: variant === "similar" ? "same tone and content direction" : "fresh style direction with the same creator intent",
+      created_at: Date.now(),
+    }
+
+    window.sessionStorage.setItem("sirensforge:next_pack_seed", JSON.stringify(nextPackSeed))
+    const mode = variant === "similar" ? "similar_pack" : "different_style"
+    window.location.href = `/generate?from=autopost&next_pack=${mode}`
   }
 
   if (!mounted) return null
@@ -647,7 +637,7 @@ export default function AutopostPage() {
             <div className="flex flex-wrap items-center gap-2">
               <div className="hidden md:flex items-center gap-2 px-3 py-2 rounded-full bg-gray-900/60 border border-gray-800 text-xs text-gray-300">
                 <Shield className="w-4 h-4 text-cyan-300" />
-                Eligible rules: <span className="text-white font-semibold">{eligibleRulesCount}</span>
+                Active rules: <span className="text-white font-semibold">{eligibleRulesCount}</span>
               </div>
 
               <Button
@@ -657,10 +647,10 @@ export default function AutopostPage() {
                 title="Autopost runs through your approved posting schedule."
               >
                 <Clock className="w-4 h-4 mr-2" />
-                Runs on Schedule
+                Scheduled Posting
               </Button>
               <div className="mt-1 text-xs text-gray-400">
-                Approved and enabled rules run on your posting schedule.
+                Approved rules run according to their selected schedule.
               </div>
 
               <Button
@@ -704,15 +694,6 @@ export default function AutopostPage() {
             </Button>
           </div>
 
-          {runResult && (
-            <div className="mt-3 text-xs text-gray-300 bg-gray-900/60 border border-gray-800 rounded-xl p-3">
-              <div className="flex flex-wrap gap-x-4 gap-y-1 items-center">
-                <span className="text-gray-400">ran_at:</span> <span className="text-white">{runResult.ran_at ?? "—"}</span>
-                <span className="text-gray-400">processed:</span> <span className="text-white">{String(runResult.processed ?? 0)}</span>
-              </div>
-            </div>
-          )}
-
           {rulesError && (
             <div className="mt-3 text-sm text-rose-200 bg-rose-950/40 border border-rose-900/40 rounded-xl p-3">
               <div className="flex items-start gap-2">
@@ -739,135 +720,180 @@ export default function AutopostPage() {
               transition={{ duration: 0.2 }}
               className="space-y-4"
             >
-              <Card className="bg-gray-900/40 border-gray-800">
-                <CardHeader>
-                  <CardTitle className="text-white flex items-center gap-2">
-                    <Crown className="w-5 h-5 text-amber-300" />
-                    My Rules
-                  </CardTitle>
-                  <CardDescription className="text-gray-400">
-                    Review and manage your saved autopost rules.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {rulesLoading ? (
-                    <div className="text-gray-300 flex items-center gap-2">
-                      <RefreshCw className="w-4 h-4 animate-spin" /> Loading…
+              <Card className="overflow-hidden border-gray-800 bg-gray-950/70 shadow-[0_18px_60px_rgba(0,0,0,0.24)]">
+                <CardContent className="p-0">
+                  <div className="flex flex-col gap-3 border-b border-gray-800/80 bg-gradient-to-r from-gray-950 via-gray-950 to-purple-950/20 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-amber-400/25 bg-amber-500/10 text-amber-200">
+                        <Crown className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h2 className="text-base font-bold text-white">My Rules</h2>
+                          <span className="rounded-full border border-gray-700 bg-black/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-300">
+                            {rules.length} total
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-gray-400">
+                          Review, approve, pause, or revoke your saved autopost rules.
+                        </p>
+                      </div>
                     </div>
-                  ) : rules.length === 0 ? (
-                    <div className="text-gray-400">
-                      No rules yet. Go to <span className="text-white font-semibold">Build Rule</span> to create one.
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                      {rules.map(rule => {
-                        const badge = badgeForState(rule.approval_state)
-                        const BadgeIcon = badge.icon
-                        const a = actionsFor(rule)
-                        const busy = busyRuleId === rule.id
 
-                        return (
-                          <div key={rule.id} className="rounded-2xl border border-gray-800 bg-black/30 p-4">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm text-gray-400">Rule</div>
-                                <div className="text-white font-semibold break-all">{rule.id}</div>
-                                <div className="mt-2 text-sm text-gray-300">
-                                  Platforms:{" "}
-                                  <span className="text-white">
-                                    {(rule.selected_platforms && rule.selected_platforms.length
-                                      ? rule.selected_platforms
-                                      : rule.platform
-                                        ? [rule.platform]
-                                        : []
-                                    )
-                                      .map(p => prettyPlatform(p))
-                                      .join(", ") || "—"}
-                                  </span>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-200">
+                        {eligibleRulesCount} active
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={refreshRules}
+                        className="h-9 border-gray-800 bg-black/30 text-xs text-gray-200 hover:bg-gray-900"
+                      >
+                        <RefreshCw className={`mr-2 h-4 w-4 ${rulesLoading ? "animate-spin" : ""}`} />
+                        Refresh
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    {rulesLoading ? (
+                      <div className="flex min-h-40 items-center justify-center rounded-2xl border border-gray-800 bg-black/30 text-sm text-gray-300">
+                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                        Loading rules…
+                      </div>
+                    ) : rules.length === 0 ? (
+                      <div className="rounded-3xl border border-dashed border-gray-800 bg-black/30 px-5 py-10 text-center">
+                        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-purple-500/25 bg-purple-500/10 text-purple-200">
+                          <Settings className="h-5 w-5" />
+                        </div>
+                        <div className="mt-4 text-base font-semibold text-white">No autopost rules yet</div>
+                        <div className="mx-auto mt-2 max-w-md text-sm leading-6 text-gray-400">
+                          Build your first rule from a content pack, review the settings, then approve it when you are ready.
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={() => setTab("builder")}
+                          className="mt-5 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+                        >
+                          <Settings className="mr-2 h-4 w-4" />
+                          Build Rule
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                        {rules.map(rule => {
+                          const badge = badgeForState(rule.approval_state)
+                          const BadgeIcon = badge.icon
+                          const a = actionsFor(rule)
+                          const busy = busyRuleId === rule.id
+                          const rulePlatforms = (rule.selected_platforms && rule.selected_platforms.length
+                            ? rule.selected_platforms
+                            : rule.platform
+                              ? [rule.platform]
+                              : []
+                          )
+
+                          return (
+                            <div key={rule.id} className="overflow-hidden rounded-3xl border border-gray-800 bg-black/30 transition hover:border-gray-700 hover:bg-black/40">
+                              <div className="flex flex-col gap-3 border-b border-gray-800/80 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Rule</div>
+                                    <div className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${badge.cls}`}>
+                                      <div className="flex items-center gap-1.5">
+                                        <BadgeIcon className="h-3.5 w-3.5" />
+                                        {badge.label}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 break-all font-mono text-xs text-gray-200">{rule.id}</div>
                                 </div>
-                                <div className="mt-1 text-sm text-gray-300">
-                                  Enabled: <span className="text-white font-semibold">{rule.enabled ? "true" : "false"}</span>
+
+                                <div className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold ${rule.enabled ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-200" : "border-gray-700 bg-gray-900/60 text-gray-300"}`}>
+                                  {rule.enabled ? "Enabled" : "Disabled"}
                                 </div>
                               </div>
 
-                              <div className={`shrink-0 px-3 py-2 rounded-xl border ${badge.cls}`}>
-                                <div className="flex items-center gap-2 text-xs font-semibold">
-                                  <BadgeIcon className="w-4 h-4" />
-                                  {badge.label}
+                              <div className="space-y-4 px-4 py-4">
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                  <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-3">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Platforms</div>
+                                    <div className="mt-1 truncate text-sm font-semibold text-white">
+                                      {rulePlatforms.map(p => prettyPlatform(p)).join(", ") || "—"}
+                                    </div>
+                                  </div>
+                                  <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-3">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Last Run</div>
+                                    <div className="mt-1 truncate text-sm font-semibold text-gray-200">{formatTs(rule.last_ran_at)}</div>
+                                  </div>
+                                  <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-3">
+                                    <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Next Run</div>
+                                    <div className="mt-1 truncate text-sm font-semibold text-gray-200">{formatTs(rule.next_run_at)}</div>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-wrap gap-2">
+                                  {a.canApprove && (
+                                    <Button
+                                      onClick={() => openApprove(rule)}
+                                      disabled={busy}
+                                      className="bg-emerald-600 hover:bg-emerald-500"
+                                    >
+                                      <CheckCircle className="mr-2 h-4 w-4" />
+                                      Approve
+                                    </Button>
+                                  )}
+
+                                  {a.canPause && (
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => doPause(rule)}
+                                      disabled={busy}
+                                      className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                                    >
+                                      <PauseCircle className="mr-2 h-4 w-4" />
+                                      Pause
+                                    </Button>
+                                  )}
+
+                                  {a.canResume && (
+                                    <Button
+                                      onClick={() => doResume(rule)}
+                                      disabled={busy}
+                                      className="bg-cyan-600 hover:bg-cyan-500"
+                                    >
+                                      <PlayCircle className="mr-2 h-4 w-4" />
+                                      Resume
+                                    </Button>
+                                  )}
+
+                                  {a.canRevoke && (
+                                    <Button
+                                      variant="outline"
+                                      onClick={() => doRevoke(rule)}
+                                      disabled={busy}
+                                      className="border-rose-900/60 bg-rose-950/20 text-rose-200 hover:bg-rose-950/40"
+                                    >
+                                      <Trash2 className="mr-2 h-4 w-4" />
+                                      Revoke
+                                    </Button>
+                                  )}
+
+                                  {busy && (
+                                    <div className="flex items-center text-xs text-gray-400">
+                                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                                      Updating…
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
-
-                            <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-gray-400">
-                              <div>
-                                <div>Last ran</div>
-                                <div className="text-gray-200">{formatTs(rule.last_ran_at)}</div>
-                              </div>
-                              <div>
-                                <div>Next run</div>
-                                <div className="text-gray-200">{formatTs(rule.next_run_at)}</div>
-                              </div>
-                            </div>
-
-                            <div className="mt-4 flex flex-wrap gap-2">
-                              {a.canApprove && (
-                                <Button
-                                  onClick={() => openApprove(rule)}
-                                  disabled={busy}
-                                  className="bg-emerald-600 hover:bg-emerald-500"
-                                >
-                                  <CheckCircle className="w-4 h-4 mr-2" />
-                                  Approve
-                                </Button>
-                              )}
-
-                              {a.canPause && (
-                                <Button
-                                  variant="outline"
-                                  onClick={() => doPause(rule)}
-                                  disabled={busy}
-                                  className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
-                                >
-                                  <PauseCircle className="w-4 h-4 mr-2" />
-                                  Pause
-                                </Button>
-                              )}
-
-                              {a.canResume && (
-                                <Button
-                                  onClick={() => doResume(rule)}
-                                  disabled={busy}
-                                  className="bg-cyan-600 hover:bg-cyan-500"
-                                >
-                                  <PlayCircle className="w-4 h-4 mr-2" />
-                                  Resume
-                                </Button>
-                              )}
-
-                              {a.canRevoke && (
-                                <Button
-                                  variant="outline"
-                                  onClick={() => doRevoke(rule)}
-                                  disabled={busy}
-                                  className="border-rose-900/60 bg-rose-950/20 text-rose-200 hover:bg-rose-950/40"
-                                >
-                                  <Trash2 className="w-4 h-4 mr-2" />
-                                  Revoke
-                                </Button>
-                              )}
-
-                              {busy && (
-                                <div className="flex items-center text-xs text-gray-400 ml-2">
-                                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                                  Working…
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
             </motion.div>
@@ -955,36 +981,72 @@ export default function AutopostPage() {
                         </div>
                       </div>
 
-                      <div className="flex flex-col gap-2 border-t border-white/10 bg-black/20 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div className="text-xs leading-5 text-gray-400">
-                          Next step: review the rule in My Rules, then approve it when you are ready.
+                      <div className="border-t border-white/10 bg-black/20 px-4 py-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="text-xs leading-5 text-gray-400">
+                            Next step: review the rule in My Rules, then approve it when you are ready.
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              type="button"
+                              onClick={() => {
+                                setTab("rules")
+                                refreshRules()
+                              }}
+                              className="bg-emerald-600 hover:bg-emerald-500"
+                            >
+                              <CheckCircle className="mr-2 h-4 w-4" />
+                              View My Rules
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => {
+                                setSavedRuleSuccess(null)
+                                setBuilderSuccess(null)
+                                setPreviewResult(null)
+                                setPreviewStatus("blocked")
+                                setPackPrefill(null)
+                              }}
+                              className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+                            >
+                              Build Another Rule
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            onClick={() => {
-                              setTab("rules")
-                              refreshRules()
-                            }}
-                            className="bg-emerald-600 hover:bg-emerald-500"
-                          >
-                            <CheckCircle className="mr-2 h-4 w-4" />
-                            View My Rules
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => {
-                              setSavedRuleSuccess(null)
-                              setBuilderSuccess(null)
-                              setPreviewResult(null)
-                              setPreviewStatus("blocked")
-                              setPackPrefill(null)
-                            }}
-                            className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
-                          >
-                            Build Another Rule
-                          </Button>
+
+                        <div className="mt-4 overflow-hidden rounded-2xl border border-purple-500/25 bg-gradient-to-r from-purple-950/35 via-black/35 to-cyan-950/25">
+                          <div className="flex flex-col gap-4 p-4 md:flex-row md:items-center md:justify-between">
+                            <div className="min-w-0">
+                              <div className="inline-flex items-center rounded-full border border-purple-400/30 bg-purple-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-purple-100">
+                                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                                Keep Creating
+                              </div>
+                              <div className="mt-2 text-sm font-bold text-white">Create another pack from this direction</div>
+                              <div className="mt-1 max-w-2xl text-xs leading-5 text-gray-400">
+                                Continue the session while the idea is fresh. Send a safe handoff back to Generate with the same tone, platform, and pack context.
+                              </div>
+                            </div>
+
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                onClick={() => startNextPack("similar")}
+                                className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+                              >
+                                <Sparkles className="mr-2 h-4 w-4" />
+                                Generate Similar Pack
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => startNextPack("different_style")}
+                                className="border-gray-800 bg-black/30 text-gray-200 hover:bg-gray-900"
+                              >
+                                Try Different Style
+                              </Button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1142,7 +1204,7 @@ export default function AutopostPage() {
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <Label className="text-gray-200">Enabled</Label>
-                      <div className="text-xs text-gray-400">Rules won’t run unless enabled AND approved.</div>
+                      <div className="text-xs text-gray-400">Turn this on when you want the approved rule to run on its schedule.</div>
                     </div>
                     <Button
                       variant="outline"
@@ -1199,7 +1261,7 @@ export default function AutopostPage() {
                         <SelectValue placeholder="Select frequency" />
                       </SelectTrigger>
                       <SelectContent className="bg-gray-950 border-gray-800 text-gray-200">
-                        <SelectItem value="manual">Manual (run via job)</SelectItem>
+                        <SelectItem value="manual">Manual review</SelectItem>
                         <SelectItem value="daily">Daily</SelectItem>
                         <SelectItem value="twice_daily">Twice Daily</SelectItem>
                         <SelectItem value="hourly">Hourly</SelectItem>
@@ -1292,9 +1354,9 @@ export default function AutopostPage() {
                   {/* Preview output */}
                   <div className="rounded-2xl border border-gray-800 bg-black/30 p-4">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="text-white font-semibold">Preview Result</div>
+                      <div className="text-white font-semibold">Rule Preview</div>
                       <div className="text-xs text-gray-400">
-                        status:{" "}
+                        Status:{" "}
                         <span className="text-gray-200 font-semibold">
                           {previewStatus.toUpperCase()}
                         </span>
@@ -1304,23 +1366,27 @@ export default function AutopostPage() {
                     <div className="mt-3 text-sm text-gray-300">
                       {previewResult?.reason ? (
                         <>
-                          <span className="text-gray-400">reason:</span> <span className="text-gray-200">{String(previewResult.reason)}</span>
+                          <span className="text-gray-400">Note:</span> <span className="text-gray-200">{String(previewResult.reason)}</span>
                         </>
                       ) : (
                         <span className="text-gray-400">—</span>
                       )}
                     </div>
 
-                    {previewResult?.payload && (
-                      <pre className="mt-3 text-xs text-gray-200 bg-black/40 border border-gray-800 rounded-xl p-3 overflow-auto">
-                        {JSON.stringify(previewResult.payload, null, 2)}
-                      </pre>
-                    )}
-
-                    {showDetails && previewResult?.diagnostics && (
-                      <pre className="mt-3 text-xs text-gray-200 bg-black/40 border border-gray-800 rounded-xl p-3 overflow-auto">
-                        {JSON.stringify(previewResult.diagnostics, null, 2)}
-                      </pre>
+                    {showDetails && (previewResult?.payload || previewResult?.diagnostics) && (
+                      <div className="mt-3 rounded-xl border border-gray-800 bg-black/40 p-3">
+                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Rule Details</div>
+                        {previewResult?.payload && (
+                          <pre className="max-h-60 overflow-auto text-xs text-gray-200">
+                            {JSON.stringify(previewResult.payload, null, 2)}
+                          </pre>
+                        )}
+                        {previewResult?.diagnostics && (
+                          <pre className="mt-3 max-h-60 overflow-auto border-t border-gray-800 pt-3 text-xs text-gray-200">
+                            {JSON.stringify(previewResult.diagnostics, null, 2)}
+                          </pre>
+                        )}
+                      </div>
                     )}
                   </div>
                 </CardContent>
@@ -1344,7 +1410,7 @@ export default function AutopostPage() {
                     Connect Platforms
                   </CardTitle>
                   <CardDescription className="text-gray-400">
-                    Connect the platforms you want SirensForge to prepare for autoposting.
+                    Connect the platforms you want to use for content distribution.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -1355,7 +1421,7 @@ export default function AutopostPage() {
                           <div>
                             <div className="text-white font-semibold">{p.name}</div>
                             <div className="text-xs text-gray-400 mt-1">
-                              status: <span className="text-gray-200">{p.status ?? "unknown"}</span>
+                              Connection: <span className="text-gray-200">{p.status === "connected" ? "Connected" : "Not connected"}</span>
                             </div>
                             {p.hint && <div className="text-xs text-gray-500 mt-1">{p.hint}</div>}
                           </div>
