@@ -177,7 +177,7 @@ function badgeForState(state: string) {
   if (s === "APPROVED") return { label: "APPROVED", icon: CheckCircle, cls: "bg-emerald-500/15 border-emerald-500/30 text-emerald-200" }
   if (s === "PAUSED") return { label: "PAUSED", icon: PauseCircle, cls: "bg-amber-500/15 border-amber-500/30 text-amber-200" }
   if (s === "REVOKED") return { label: "REVOKED", icon: X, cls: "bg-rose-500/15 border-rose-500/30 text-rose-200" }
-  return { label: "DRAFT", icon: AlertCircle, cls: "bg-slate-500/15 border-slate-500/30 text-slate-200" }
+  return { label: "NEEDS APPROVAL", icon: AlertCircle, cls: "bg-slate-500/15 border-slate-500/30 text-slate-200" }
 }
 
 function actionsFor(rule: AutopostRule) {
@@ -295,7 +295,7 @@ export default function AutopostPage() {
   // Preview state
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("blocked")
   const [isEvaluating, setIsEvaluating] = useState(false)
-  const [showDiagnostics, setShowDiagnostics] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
   const [previewResult, setPreviewResult] = useState<AutopostPreviewResponse | null>(null)
   const [builderError, setBuilderError] = useState<string | null>(null)
   const [builderSuccess, setBuilderSuccess] = useState<string | null>(null)
@@ -381,7 +381,7 @@ export default function AutopostPage() {
       setPreviewStatus("blocked")
       setPreviewResult({
         state: "BLOCKED",
-        reason: "Generate pack handoff loaded. Review settings, run Preview Selection, then save as a draft rule.",
+        reason: "Generate pack loaded. Review settings, preview the rule, then save it for approval.",
         payload: parsed,
         diagnostics: {
           source: parsed.source ?? "generate_pack_builder",
@@ -390,7 +390,7 @@ export default function AutopostPage() {
           asset_count: parsed.assets?.length ?? 0,
         },
       })
-      setBuilderSuccess("Pack loaded from Generate. Review the selected platforms/settings, run Preview Selection, then Save as Rule (DRAFT).")
+      setBuilderSuccess("Pack loaded from Generate. Review the selected platforms and settings, preview the rule, then save it for approval.")
       setSavedRuleSuccess(null)
       setBuilderError(null)
       window.sessionStorage.removeItem(AUTOPOST_PACK_PREFILL_STORAGE_KEY)
@@ -608,7 +608,7 @@ export default function AutopostPage() {
   // -----------------------------
   const handleRunNow = async () => {
     setRunResult(null)
-    setRulesError("Manual run is disabled in the UI. Autopost runs through the protected system scheduler/cron route.")
+    setRulesError("Autopost execution runs through your approved schedule.")
   }
 
   if (!mounted) return null
@@ -639,7 +639,7 @@ export default function AutopostPage() {
                   Autopost
                 </h1>
                 <p className="text-xs sm:text-sm text-gray-400">
-                  Launch-ready: Connect → Build → Save → Approve/Pause/Resume/Revoke → Run
+                  Create and manage automated posting rules for your content packs.
                 </p>
               </div>
             </div>
@@ -654,13 +654,13 @@ export default function AutopostPage() {
                 onClick={handleRunNow}
                 disabled
                 className="bg-gray-800 text-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
-                title="Autopost execution is handled by the protected system scheduler/cron route."
+                title="Autopost runs through your approved posting schedule."
               >
                 <Clock className="w-4 h-4 mr-2" />
-                Runs via System Scheduler
+                Runs on Schedule
               </Button>
               <div className="mt-1 text-xs text-gray-400">
-                Execution stays server-side. Approved + enabled rules are picked up by cron.
+                Approved and enabled rules run on your posting schedule.
               </div>
 
               <Button
@@ -746,8 +746,7 @@ export default function AutopostPage() {
                     My Rules
                   </CardTitle>
                   <CardDescription className="text-gray-400">
-                    Approve / Pause / Resume / Revoke are fully wired to your backend.
-                    Only APPROVED + enabled rules run.
+                    Review and manage your saved autopost rules.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -890,7 +889,7 @@ export default function AutopostPage() {
                     Build Rule
                   </CardTitle>
                   <CardDescription className="text-gray-400">
-                    This uses your existing /api/autopost/preview contract, then saves the same config as a DRAFT rule.
+                    Choose platforms, posting style, and frequency before saving a rule for approval.
                   </CardDescription>
                 </CardHeader>
 
@@ -923,14 +922,14 @@ export default function AutopostPage() {
                               Rule Created Successfully
                             </div>
                             <div className="mt-3 text-lg font-bold text-white">
-                              Draft rule is ready for approval
+                              Rule is ready for approval
                             </div>
                             <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
-                              The rule was saved as a DRAFT. Nothing has been posted, scheduled, or sent to cron. Approve it from My Rules when you are ready to activate automation.
+                              Your rule has been saved safely. Nothing has been posted yet. Review it in My Rules and approve it when you are ready to activate automation.
                             </div>
                           </div>
                           <div className="rounded-2xl border border-emerald-500/20 bg-black/30 px-3 py-2 text-xs text-emerald-100">
-                            Safe draft state
+                            Awaiting approval
                           </div>
                         </div>
                       </div>
@@ -958,7 +957,7 @@ export default function AutopostPage() {
 
                       <div className="flex flex-col gap-2 border-t border-white/10 bg-black/20 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
                         <div className="text-xs leading-5 text-gray-400">
-                          Next step: go to My Rules, review the draft, then click Approve when ready.
+                          Next step: review the rule in My Rules, then approve it when you are ready.
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <Button
@@ -1010,7 +1009,7 @@ export default function AutopostPage() {
                               {packPrefill.pack_name || packPrefill.collection_name || "Creator Content Pack"}
                             </div>
                             <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
-                              This pack came from the Generate Pack Builder. Review platforms, run Preview Selection, then save as a DRAFT rule for approval. Nothing is posted from this screen.
+                              This pack came from the Generate Pack Builder. Review platforms, preview the rule, then save it for approval. Nothing is posted from this screen.
                             </div>
                           </div>
 
@@ -1052,7 +1051,7 @@ export default function AutopostPage() {
                             </div>
                             <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
                               <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Mode</div>
-                              <div className="mt-1 text-sm font-bold text-white">Draft only</div>
+                              <div className="mt-1 text-sm font-bold text-white">Approval first</div>
                             </div>
                           </div>
 
@@ -1094,7 +1093,7 @@ export default function AutopostPage() {
                               <div>
                                 <div className="text-xs font-semibold text-gray-200">Next Step</div>
                                 <div className="mt-1 text-[11px] leading-5 text-gray-400">
-                                  Preview validates the rule shape. Save creates the DRAFT. Approval is still required before cron execution.
+                                  Preview checks your rule before saving. Approval is required before automation can run.
                                 </div>
                               </div>
                               <div className="hidden rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200 sm:block">
@@ -1131,7 +1130,7 @@ export default function AutopostPage() {
                             </div>
                           ) : (
                             <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100">
-                              No caption drafts were included in this handoff. You can still build the rule, but captions should be generated from the pack before approval.
+                              No caption drafts were included with this pack. Add captions before approving this rule.
                             </div>
                           )}
                         </div>
@@ -1265,19 +1264,19 @@ export default function AutopostPage() {
                       ) : (
                         <>
                           <Zap className="w-4 h-4 mr-2" />
-                          Preview Selection
+                          Preview Rule
                         </>
                       )}
                     </Button>
 
                     <Button
                       variant="outline"
-                      onClick={() => setShowDiagnostics(v => !v)}
+                      onClick={() => setShowDetails(v => !v)}
                       className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
                       disabled={!previewResult}
                     >
-                      <ChevronRight className={`w-4 h-4 mr-2 ${showDiagnostics ? "rotate-90" : ""}`} />
-                      Diagnostics
+                      <ChevronRight className={`w-4 h-4 mr-2 ${showDetails ? "rotate-90" : ""}`} />
+                      Details
                     </Button>
 
                     <Button
@@ -1286,7 +1285,7 @@ export default function AutopostPage() {
                       className="bg-emerald-600 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Save className="w-4 h-4 mr-2" />
-                      {savedRuleSuccess ? "Draft Rule Saved" : "Save as Rule (DRAFT)"}
+                      {savedRuleSuccess ? "Rule Saved" : "Save Rule for Approval"}
                     </Button>
                   </div>
 
@@ -1318,7 +1317,7 @@ export default function AutopostPage() {
                       </pre>
                     )}
 
-                    {showDiagnostics && previewResult?.diagnostics && (
+                    {showDetails && previewResult?.diagnostics && (
                       <pre className="mt-3 text-xs text-gray-200 bg-black/40 border border-gray-800 rounded-xl p-3 overflow-auto">
                         {JSON.stringify(previewResult.diagnostics, null, 2)}
                       </pre>
@@ -1345,7 +1344,7 @@ export default function AutopostPage() {
                     Connect Platforms
                   </CardTitle>
                   <CardDescription className="text-gray-400">
-                    Uses /api/autopost/connect for each platform.
+                    Connect the platforms you want SirensForge to prepare for autoposting.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
