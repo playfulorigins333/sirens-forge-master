@@ -49,6 +49,7 @@ const supabase = createBrowserClient(
 );
 
 const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff";
+const NEXT_PACK_SEED_STORAGE_KEY = "sirensforge:next_pack_seed";
 const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs";
 
@@ -107,6 +108,17 @@ type HandoffPayload = {
   created_at?: number;
   source?: string;
   identity?: string;
+};
+
+type NextPackSeedPayload = {
+  source?: string;
+  action?: "similar" | "different_style" | string;
+  pack_name?: string;
+  platforms?: string[];
+  tones?: string[];
+  explicitness?: number;
+  style_hint?: string;
+  created_at?: number;
 };
 
 function inferKindFromOutput(output: any): MediaKind {
@@ -502,6 +514,94 @@ function ModeTabs(props: {
         );
       })}
     </div>
+  );
+}
+
+function GenerateEntryIntelligenceBanner(props: {
+  visible: boolean;
+  seed: NextPackSeedPayload | null;
+  onFocusPrompt: () => void;
+  onDismiss: () => void;
+  onOpenAutopost: () => void;
+}) {
+  if (!props.visible || !props.seed) return null;
+
+  const packName = props.seed.pack_name || "your last content pack";
+  const actionLabel =
+    props.seed.action === "different_style" ? "Fresh style direction" : "Similar pack direction";
+  const tones = Array.isArray(props.seed.tones) && props.seed.tones.length > 0
+    ? props.seed.tones.join(", ")
+    : "same creator tone";
+  const platforms = Array.isArray(props.seed.platforms) && props.seed.platforms.length > 0
+    ? props.seed.platforms.map((item) => String(item)).join(", ")
+    : "content pack";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="overflow-hidden rounded-2xl border border-cyan-500/25 bg-[linear-gradient(135deg,rgba(8,47,73,0.42),rgba(88,28,135,0.28),rgba(8,8,13,0.94))] shadow-[0_0_34px_rgba(34,211,238,0.10)]"
+    >
+      <div className="flex flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center rounded-full border border-cyan-400/35 bg-cyan-500/12 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">
+              <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              Continue Pack Flow
+            </span>
+            <span className="rounded-full border border-fuchsia-400/25 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-fuchsia-100">
+              {actionLabel}
+            </span>
+          </div>
+
+          <div className="mt-3 text-sm font-semibold text-white md:text-base">
+            Start the next pack from {packName}
+          </div>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
+            We brought over the last pack direction so you can keep the session moving. Review the prompt, adjust the style if needed, then generate when your production pods are online.
+          </p>
+
+          <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] text-gray-300 sm:grid-cols-3">
+            <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+              <span className="text-gray-500">Tone:</span> <span className="font-semibold text-gray-100">{tones}</span>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+              <span className="text-gray-500">Target:</span> <span className="font-semibold text-gray-100">{platforms}</span>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+              <span className="text-gray-500">Mode:</span> <span className="font-semibold text-gray-100">Prompt ready</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap gap-2 md:justify-end">
+          <Button
+            type="button"
+            onClick={props.onFocusPrompt}
+            className="h-9 bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-4 text-xs font-semibold text-white hover:brightness-110"
+          >
+            Review Prompt
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={props.onOpenAutopost}
+            className="h-9 border-gray-700 bg-black/30 px-4 text-xs text-gray-200 hover:bg-gray-900"
+          >
+            Autopost Rules
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={props.onDismiss}
+            className="h-9 px-3 text-xs text-gray-400 hover:bg-white/5 hover:text-white"
+          >
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    </motion.div>
   );
 }
 
@@ -3158,6 +3258,9 @@ export default function GeneratePage() {
   const [refineChoices, setRefineChoices] = useState<string[] | null>(null);
   const [appliedRefineIndex, setAppliedRefineIndex] = useState<number | null>(null);
   const [refineFeedback, setRefineFeedback] = useState<string | null>(null);
+  const [nextPackSeed, setNextPackSeed] = useState<NextPackSeedPayload | null>(null);
+  const [showNextPackBanner, setShowNextPackBanner] = useState(false);
+  const hydratedFromNextPackRef = useRef(false);
 
   const incomingQueryPayload = useMemo<HandoffPayload | null>(() => {
     const promptParam = searchParams.get("prompt");
@@ -3378,6 +3481,93 @@ export default function GeneratePage() {
       window.clearTimeout(highlightTimer);
     };
   }, [incomingQueryPayload, router]);
+
+  useEffect(() => {
+    if (hydratedFromNextPackRef.current) return;
+    if (typeof window === "undefined") return;
+
+    const fromAutopost = searchParams.get("from") === "autopost";
+    const nextPackMode = searchParams.get("next_pack");
+
+    if (!fromAutopost && !nextPackMode) return;
+
+    let seed: NextPackSeedPayload | null = null;
+
+    try {
+      const raw = window.sessionStorage.getItem(NEXT_PACK_SEED_STORAGE_KEY);
+      if (raw) {
+        seed = JSON.parse(raw) as NextPackSeedPayload;
+      }
+    } catch (err) {
+      console.error("Failed to restore next-pack seed:", err);
+    }
+
+    const normalizedAction =
+      seed?.action === "different_style" || nextPackMode === "different_style"
+        ? "different_style"
+        : "similar";
+
+    const tones = Array.isArray(seed?.tones) && seed?.tones.length
+      ? seed.tones.join(", ")
+      : "Playful, teasing";
+    const packName = seed?.pack_name || "the last content pack";
+    const styleHint =
+      typeof seed?.style_hint === "string" && seed.style_hint.trim().length > 0
+        ? seed.style_hint.trim()
+        : normalizedAction === "different_style"
+          ? "fresh visual style with the same creator intent"
+          : "same tone and content direction";
+
+    const prefilledPrompt =
+      normalizedAction === "different_style"
+        ? `Create a new creator content pack inspired by ${packName}, but shift it into a fresh visual style. Keep the creator intent consistent while changing the styling, lighting, wardrobe direction, and scene energy. Tone: ${tones}. Style direction: ${styleHint}. Make it premium, cohesive, and ready for a monetized content bundle.`
+        : `Create another creator content pack similar to ${packName}. Keep the same overall tone, content direction, and monetized creator intent while making the scene feel new enough for a fresh pack. Tone: ${tones}. Style direction: ${styleHint}. Make it premium, cohesive, and ready for a content bundle.`;
+
+    setNextPackSeed({
+      ...(seed ?? {}),
+      action: normalizedAction,
+      pack_name: packName,
+      tones: Array.isArray(seed?.tones) && seed?.tones.length ? seed.tones : ["Playful", "Teasing"],
+      style_hint: styleHint,
+    });
+    setPrompt(prefilledPrompt);
+    setMode("text_to_image");
+    setOutputType("IMAGE");
+    setStylePreset(normalizedAction === "different_style" ? "cinematic" : "photorealistic");
+    setBatchSize(4);
+    setShowNextPackBanner(true);
+    setHighlightPrompt(true);
+    setHighlightGenerate(true);
+    hydratedFromNextPackRef.current = true;
+
+    try {
+      window.sessionStorage.removeItem(NEXT_PACK_SEED_STORAGE_KEY);
+    } catch (err) {
+      console.error("Failed to clear next-pack seed:", err);
+    }
+
+    router.replace("/generate", { scroll: false });
+
+    const focusTimer = window.setTimeout(() => {
+      const textarea = promptTextareaRef.current;
+      if (!textarea) return;
+      textarea.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => {
+        textarea.focus({ preventScroll: true });
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      }, 320);
+    }, 900);
+
+    const highlightTimer = window.setTimeout(() => {
+      setHighlightPrompt(false);
+      setHighlightGenerate(false);
+    }, 3200);
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.clearTimeout(highlightTimer);
+    };
+  }, [router, searchParams]);
 
   useEffect(() => {
     if (!pendingIdentityId) return;
@@ -3770,6 +3960,24 @@ ${basePrompt}`,
             prompt={prompt}
             onPromptChange={setPrompt}
           />
+
+          <AnimatePresence>
+            <GenerateEntryIntelligenceBanner
+              visible={showNextPackBanner}
+              seed={nextPackSeed}
+              onFocusPrompt={() => {
+                const textarea = promptTextareaRef.current;
+                if (!textarea) return;
+                textarea.scrollIntoView({ behavior: "smooth", block: "center" });
+                window.setTimeout(() => {
+                  textarea.focus({ preventScroll: true });
+                  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+                }, 250);
+              }}
+              onDismiss={() => setShowNextPackBanner(false)}
+              onOpenAutopost={() => router.push("/autopost")}
+            />
+          </AnimatePresence>
 
           <ModeTabs activeMode={mode} onChange={setMode} />
 
