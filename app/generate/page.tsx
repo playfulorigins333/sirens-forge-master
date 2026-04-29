@@ -2294,10 +2294,43 @@ function OutputPanel(props: {
   };
 
   const handleOpenAutopostDashboard = () => {
+    setAutopostError(null);
+    setAutopostSuccess(null);
+
+    const generationIds = getSelectedGenerationIdsForAutopost();
+    if (generationIds.length === 0) {
+      setAutopostError("Select at least one database-backed asset before sending this pack to Autopost.");
+      return;
+    }
+
+    const drafts = getCaptionDraftsForAutopost();
+    const payload = {
+      ...buildAutopostPayload(),
+      action: "prefill_autopost_builder",
+      created_at: Date.now(),
+    };
+
+    if (captionDrafts.length === 0) {
+      setCaptionDrafts(drafts);
+    }
+
+    try {
+      window.sessionStorage.setItem(
+        "sirensforge:autopost_pack_prefill",
+        JSON.stringify(payload)
+      );
+    } catch (storageError) {
+      console.warn("Autopost prefill storage failed:", storageError);
+      setAutopostError("Could not prepare the Autopost handoff in this browser session.");
+      return;
+    }
+
     const query = new URLSearchParams({
-      from: "pack_builder",
+      prefill: "pack_builder",
+      from: "generate",
       platform: autopostPlatform,
     });
+
     window.location.href = `/autopost?${query.toString()}`;
   };
 
@@ -2802,7 +2835,7 @@ function OutputPanel(props: {
                     <div>
                       <h4 className="text-sm font-semibold text-white">Autopost Handoff</h4>
                       <p className="mt-1 text-[11px] leading-5 text-gray-400">
-                        Prepare this selected pack for the Autopost dashboard. This does not publish, schedule, or simulate a post.
+                        Prepare this selected pack for the Autopost dashboard, then send it to the builder as a prefilled draft. This does not publish, schedule, or simulate a post.
                       </p>
                     </div>
                     <div className="w-full sm:w-44">
@@ -2844,7 +2877,7 @@ function OutputPanel(props: {
                       onClick={handleOpenAutopostDashboard}
                       className="h-10 border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/15 hover:text-white"
                     >
-                      Open Autopost Dashboard
+                      Send to Autopost Builder
                     </Button>
                   </div>
 
