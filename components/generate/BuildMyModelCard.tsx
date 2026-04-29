@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import { createBrowserClient } from "@supabase/ssr";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronDown,
@@ -18,6 +19,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+
+const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+);
 
 export type BuildModelBaseModel = "feminine" | "masculine";
 
@@ -77,7 +83,6 @@ interface BuildMyModelCardProps {
   onApplyPrompt: (result: BuildMyModelCompiledResult) => void;
   onBaseModelChange?: (baseModel: BuildModelBaseModel) => void;
   onGenerateNow?: (result: BuildMyModelCompiledResult) => void;
-  onSaveIdentity?: (result: BuildMyModelCompiledResult) => Promise<void> | void;
 }
 
 const DEFAULT_NEGATIVE_PROMPT =
@@ -413,16 +418,56 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
   };
 
   const saveIdentity = async () => {
-    if (!props.onSaveIdentity) {
-      setIdentitySaveError("Identity save handler is not connected yet.");
-      return;
-    }
+    if (identitySaved) return;
 
     setIsSavingIdentity(true);
     setIdentitySaveError(null);
 
     try {
-      await props.onSaveIdentity(compiled);
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      if (userError || !userData.user?.id) {
+        throw new Error("You must be logged in to save this identity.");
+      }
+
+      const basePayload = {
+        user_id: userData.user.id,
+        name: compiled.identityName || getDefaultIdentityName(selection),
+        description: "Created from Build My Model on the Generate page.",
+        preview_url: compiled.selectedPreviewImage || null,
+        source: "build_my_model",
+        base_model: selection.baseModel,
+        prompt: compiled.prompt,
+        negative_prompt: compiled.negativePrompt,
+        selection,
+        is_identity_seed: true,
+        image_count: compiled.selectedPreviewImage ? 1 : 0,
+      };
+
+      const firstAttempt = await supabase
+        .from("user_loras")
+        .insert({
+          ...basePayload,
+          status: "draft",
+        })
+        .select("id")
+        .single();
+
+      if (firstAttempt.error) {
+        const retryAttempt = await supabase
+          .from("user_loras")
+          .insert({
+            ...basePayload,
+            status: "pending",
+          })
+          .select("id")
+          .single();
+
+        if (retryAttempt.error) {
+          throw retryAttempt.error;
+        }
+      }
+
       setIdentitySaved(true);
       setApplied(true);
     } catch (error) {
@@ -854,7 +899,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                     <Button
                       type="button"
                       onClick={saveIdentity}
-                      disabled={props.disabled || isSavingIdentity || !props.onSaveIdentity}
+                      disabled={props.disabled || isSavingIdentity || identitySaved}
                       className="h-10 shrink-0 bg-emerald-500 px-4 text-xs font-bold text-black hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {isSavingIdentity ? (
@@ -871,11 +916,6 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
                     </Button>
                   </div>
 
-                  {!props.onSaveIdentity ? (
-                    <p className="mt-2 text-[10px] leading-4 text-zinc-500">
-                      Save Identity is waiting for the Generate page save handler. Prompt loading still works.
-                    </p>
-                  ) : null}
 
                   {identitySaveError ? (
                     <div className="mt-2 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] leading-5 text-rose-100">
