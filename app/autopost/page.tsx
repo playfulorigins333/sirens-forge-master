@@ -641,7 +641,6 @@ export default function AutopostPage() {
               </div>
 
               <Button
-                onClick={handleRunNow}
                 disabled
                 className="bg-gray-800 text-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
                 title="Autopost runs through your approved posting schedule."
