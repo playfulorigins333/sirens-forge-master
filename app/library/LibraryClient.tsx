@@ -19,6 +19,7 @@ import {
   Wand2,
   ExternalLink,
   Lock,
+  UserRound,
 } from "lucide-react";
 import Link from "next/link";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -41,17 +42,21 @@ import {
 
 export type LibraryItem = {
   id: string;
-  kind: "image" | "video";
-  url: string;
+  itemType?: "asset" | "identity_seed";
+  kind: "image" | "video" | "identity";
+  url: string | null;
+  previewUrl?: string | null;
   prompt: string;
   createdAt: string;
   status: string;
   mode: string | null;
   bodyMode: string | null;
   identityLora: string | null;
+  title?: string | null;
+  isIdentitySeed?: boolean;
 };
 
-type FilterMode = "all" | "images" | "videos";
+type FilterMode = "all" | "images" | "videos" | "identities";
 type SortMode = "newest" | "oldest";
 type ViewMode = "all" | "identity";
 
@@ -63,6 +68,7 @@ type IdentityGroup = {
   items: LibraryItem[];
   imageCount: number;
   videoCount: number;
+  identitySeedCount: number;
   latestCreatedAt: string | null;
   heroItem: LibraryItem | null;
 };
@@ -94,7 +100,9 @@ function formatRelative(value: string) {
   }
 }
 
-function downloadFile(url: string, filename?: string) {
+function downloadFile(url: string | null, filename?: string) {
+  if (!url) return;
+
   const link = document.createElement("a");
   link.href = url;
   link.download = filename || "sirensforge-asset";
@@ -109,6 +117,14 @@ function shortIdentityLabel(identityId: string | null) {
   return `Identity ${identityId.slice(0, 8)}`;
 }
 
+function identityTitle(item: LibraryItem) {
+  return item.title || shortIdentityLabel(item.identityLora || item.id);
+}
+
+function getDisplayUrl(item: LibraryItem) {
+  return item.previewUrl || item.url || null;
+}
+
 function getGroupSortTime(group: IdentityGroup) {
   if (!group.latestCreatedAt) return 0;
   const time = new Date(group.latestCreatedAt).getTime();
@@ -117,34 +133,32 @@ function getGroupSortTime(group: IdentityGroup) {
 
 function LibraryHeader() {
   return (
-    <header className="border-b border-gray-800 bg-gray-950/70 backdrop-blur sticky top-0 z-40">
+    <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-950/70 backdrop-blur">
       <div className="flex items-center justify-between px-6 py-4">
         <div>
-          <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
+          <h1 className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-2xl font-bold text-transparent">
             Your Content Vault
           </h1>
-          <p className="text-xs md:text-sm text-gray-300 mt-1">
-            Your creations, organized around the identities you are building.
+          <p className="mt-1 text-xs text-gray-300 md:text-sm">
+            Your creations, identity seeds, and reusable model directions.
           </p>
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-black text-xs font-bold shadow-[0_0_20px_rgba(168,85,247,0.35)]">
-            <Shield className="w-3 h-3" />
+          <div className="hidden items-center gap-2 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_20px_rgba(168,85,247,0.35)] sm:flex">
+            <Shield className="h-3 w-3" />
             PRIVATE VAULT
           </div>
 
-          <div className="px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+          <div className="rounded-full border border-emerald-500/30 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-400">
             ✅ Active Subscription
           </div>
 
           <div className="flex items-center gap-3">
             <Avatar className="h-9 w-9 border border-purple-500/60">
-              <AvatarFallback className="bg-gray-900 text-purple-300">
-                S
-              </AvatarFallback>
+              <AvatarFallback className="bg-gray-900 text-purple-300">S</AvatarFallback>
             </Avatar>
-            <span className="hidden md:block text-sm font-medium text-gray-100">
+            <span className="hidden text-sm font-medium text-gray-100 md:block">
               Sirens Member
             </span>
           </div>
@@ -158,11 +172,12 @@ function LibraryStats({ items }: { items: LibraryItem[] }) {
   const total = items.length;
   const images = items.filter((i) => i.kind === "image").length;
   const videos = items.filter((i) => i.kind === "video").length;
+  const identitySeeds = items.filter((i) => i.isIdentitySeed || i.kind === "identity").length;
   const withIdentity = items.filter((i) => Boolean(i.identityLora)).length;
 
   const cards = [
     {
-      label: "Total Assets",
+      label: "Vault Items",
       value: total,
       icon: Sparkles,
       glow: "from-purple-500/25 via-pink-500/10 to-cyan-500/25",
@@ -186,8 +201,8 @@ function LibraryStats({ items }: { items: LibraryItem[] }) {
       text: "text-cyan-200",
     },
     {
-      label: "Identity-Based",
-      value: withIdentity,
+      label: "Identity Seeds",
+      value: identitySeeds || withIdentity,
       icon: Crown,
       glow: "from-yellow-500/20 via-orange-500/10 to-transparent",
       border: "border-yellow-900/40",
@@ -196,13 +211,13 @@ function LibraryStats({ items }: { items: LibraryItem[] }) {
   ];
 
   return (
-    <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
       {cards.map((card) => {
         const Icon = card.icon;
         return (
           <div
             key={card.label}
-            className={`relative rounded-2xl overflow-hidden border ${card.border} bg-gray-900/80`}
+            className={`relative overflow-hidden rounded-2xl border ${card.border} bg-gray-900/80`}
           >
             <div className={`absolute inset-0 bg-gradient-to-br ${card.glow}`} />
             <div className="relative px-4 py-4">
@@ -215,8 +230,8 @@ function LibraryStats({ items }: { items: LibraryItem[] }) {
                     {card.value}
                   </p>
                 </div>
-                <div className="h-10 w-10 rounded-2xl bg-black/30 border border-white/10 flex items-center justify-center">
-                  <Icon className="w-5 h-5 text-white/85" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-black/30">
+                  <Icon className="h-5 w-5 text-white/85" />
                 </div>
               </div>
             </div>
@@ -239,11 +254,11 @@ function VaultIntentBanner() {
                 <Lock className="h-3.5 w-3.5" />
                 Identity Engine
               </div>
-              <h2 className="text-xl md:text-2xl font-bold text-white">
-                Your Vault is not just storage — it is where your AI identities grow.
+              <h2 className="text-xl font-bold text-white md:text-2xl">
+                Your Vault is where identities start, evolve, and become reusable.
               </h2>
               <p className="max-w-3xl text-sm leading-6 text-gray-300">
-                Use All Assets when you want the full gallery. Switch to By Identity when you want to build around a specific AI Twin, review their strongest outputs, and generate more with the same look.
+                Build My Model seeds now appear here even before pods are online. When generation pods return, image and video assets will stack under the same identity flow.
               </p>
             </div>
 
@@ -258,7 +273,7 @@ function VaultIntentBanner() {
               </div>
               <div className="rounded-2xl border border-white/10 bg-black/25 px-4 py-3">
                 <p className="text-lg font-bold text-cyan-200">3</p>
-                <p className="text-gray-400">Evolve</p>
+                <p className="text-gray-400">Reuse</p>
               </div>
             </div>
           </div>
@@ -272,35 +287,25 @@ function EmptyState() {
   return (
     <Card className="border-gray-800 bg-gray-900/80">
       <CardContent className="py-16">
-        <div className="text-center space-y-4">
-          <div className="mx-auto h-16 w-16 rounded-3xl bg-gradient-to-br from-purple-500/20 via-pink-500/20 to-cyan-500/20 border border-purple-800/40 flex items-center justify-center">
-            <Sparkles className="w-8 h-8 text-purple-300" />
+        <div className="space-y-4 text-center">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl border border-purple-800/40 bg-gradient-to-br from-purple-500/20 via-pink-500/20 to-cyan-500/20">
+            <Sparkles className="h-8 w-8 text-purple-300" />
           </div>
 
           <div>
-            <h2 className="text-xl font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-transparent">
+            <h2 className="bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-xl font-bold text-transparent">
               Your vault is empty
             </h2>
-            <p className="text-sm text-gray-400 mt-2 max-w-xl mx-auto">
-              Start generating content and it will appear here — ready to reuse, download, and build from anytime.
+            <p className="mx-auto mt-2 max-w-xl text-sm text-gray-400">
+              Use Build My Model on the Generate page to save your first identity seed.
             </p>
           </div>
 
-          <div className="pt-2 flex flex-wrap justify-center gap-2">
+          <div className="flex flex-wrap justify-center gap-2 pt-2">
             <Link href="/generate">
-              <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white shadow-[0_0_24px_rgba(168,85,247,0.35)]">
-                <Sparkles className="w-4 h-4 mr-2" />
+              <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white shadow-[0_0_24px_rgba(168,85,247,0.35)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
+                <Sparkles className="mr-2 h-4 w-4" />
                 Open Generator
-              </Button>
-            </Link>
-            <Link href="/identities">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
-              >
-                <Crown className="w-4 h-4 mr-2" />
-                View Identities
               </Button>
             </Link>
           </div>
@@ -325,12 +330,12 @@ function VaultToolbar(props: {
       <CardHeader className="pb-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <CardTitle className="text-sm md:text-base flex items-center gap-2">
-              <Filter className="w-4 h-4 text-purple-300" />
+            <CardTitle className="flex items-center gap-2 text-sm md:text-base">
+              <Filter className="h-4 w-4 text-purple-300" />
               Vault Controls
             </CardTitle>
-            <CardDescription className="text-xs text-gray-300 mt-1">
-              Search, sort, and choose whether to browse everything or build by identity.
+            <CardDescription className="mt-1 text-xs text-gray-300">
+              Browse assets, identity seeds, or grouped identity collections.
             </CardDescription>
           </div>
 
@@ -345,8 +350,8 @@ function VaultToolbar(props: {
                   : "bg-transparent text-gray-300 hover:bg-gray-900 hover:text-white"
               }
             >
-              <Grid3X3 className="w-4 h-4 mr-2" />
-              All Assets
+              <Grid3X3 className="mr-2 h-4 w-4" />
+              All Items
             </Button>
             <Button
               type="button"
@@ -358,7 +363,7 @@ function VaultToolbar(props: {
                   : "bg-transparent text-gray-300 hover:bg-gray-900 hover:text-white"
               }
             >
-              <Layers3 className="w-4 h-4 mr-2" />
+              <Layers3 className="mr-2 h-4 w-4" />
               By Identity
             </Button>
           </div>
@@ -367,32 +372,33 @@ function VaultToolbar(props: {
 
       <CardContent className="space-y-3">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
           <Input
             placeholder="Search by prompt, mode, body type, or identity..."
             value={props.query}
             onChange={(e) => props.onQueryChange(e.target.value)}
-            className="pl-10 bg-gray-950 border-gray-700 text-gray-100 placeholder:text-gray-500 h-10"
+            className="h-10 border-gray-700 bg-gray-950 pl-10 text-gray-100 placeholder:text-gray-500"
           />
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <Select value={props.filter} onValueChange={(v) => props.onFilterChange(v as FilterMode)}>
-            <SelectTrigger className="bg-gray-950 border-gray-800 h-10 text-sm text-gray-100">
+            <SelectTrigger className="h-10 border-gray-800 bg-gray-950 text-sm text-gray-100">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
-              <SelectItem value="all">All Assets</SelectItem>
+            <SelectContent className="border-gray-800 bg-gray-950 text-gray-100">
+              <SelectItem value="all">All Items</SelectItem>
+              <SelectItem value="identities">Identity Seeds</SelectItem>
               <SelectItem value="images">Images Only</SelectItem>
               <SelectItem value="videos">Videos Only</SelectItem>
             </SelectContent>
           </Select>
 
           <Select value={props.sort} onValueChange={(v) => props.onSortChange(v as SortMode)}>
-            <SelectTrigger className="bg-gray-950 border-gray-800 h-10 text-sm text-gray-100">
+            <SelectTrigger className="h-10 border-gray-800 bg-gray-950 text-sm text-gray-100">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent className="bg-gray-950 border-gray-800 text-gray-100">
+            <SelectContent className="border-gray-800 bg-gray-950 text-gray-100">
               <SelectItem value="newest">Newest First</SelectItem>
               <SelectItem value="oldest">Oldest First</SelectItem>
             </SelectContent>
@@ -403,12 +409,42 @@ function VaultToolbar(props: {
   );
 }
 
+function IdentitySeedVisual({ item, large = false }: { item: LibraryItem; large?: boolean }) {
+  const url = getDisplayUrl(item);
+
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={item.prompt || identityTitle(item)}
+        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-purple-950/80 via-pink-950/25 to-cyan-950/40 p-4 text-center">
+      <div className={`${large ? "h-20 w-20" : "h-14 w-14"} flex items-center justify-center rounded-3xl border border-purple-400/25 bg-black/30`}>
+        <UserRound className={`${large ? "h-10 w-10" : "h-7 w-7"} text-purple-200`} />
+      </div>
+      <div className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-purple-100">
+        Identity Seed
+      </div>
+      <div className="mt-1 line-clamp-2 text-[11px] text-gray-300">
+        {item.bodyMode || "Reusable model direction"}
+      </div>
+    </div>
+  );
+}
+
 function AssetCard(props: {
   item: LibraryItem;
   index: number;
   onOpen: (item: LibraryItem) => void;
 }) {
   const { item, index, onOpen } = props;
+  const isIdentity = item.isIdentitySeed || item.kind === "identity";
+  const displayUrl = getDisplayUrl(item);
 
   return (
     <motion.div
@@ -416,77 +452,85 @@ function AssetCard(props: {
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ delay: index * 0.03 }}
-      className="group rounded-2xl overflow-hidden border border-gray-800 bg-gray-900/80 hover:border-purple-700/50 hover:shadow-[0_0_28px_rgba(168,85,247,0.12)] transition-all"
+      className="group overflow-hidden rounded-2xl border border-gray-800 bg-gray-900/80 transition-all hover:border-purple-700/50 hover:shadow-[0_0_28px_rgba(168,85,247,0.12)]"
     >
-      <div className="relative aspect-[4/5] bg-gray-950 overflow-hidden">
-        {item.kind === "image" ? (
+      <div className="relative aspect-[4/5] overflow-hidden bg-gray-950">
+        {isIdentity ? (
+          <IdentitySeedVisual item={item} />
+        ) : item.kind === "image" && displayUrl ? (
           <img
-            src={item.url}
+            src={displayUrl}
             alt={item.prompt}
-            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
           />
-        ) : (
+        ) : item.kind === "video" && displayUrl ? (
           <>
             <video
-              src={item.url}
-              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+              src={displayUrl}
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
               muted
               loop
               playsInline
             />
-            <div className="absolute top-3 left-3 px-2 py-1 rounded-full bg-black/60 border border-white/10 text-[10px] font-semibold text-cyan-200 flex items-center gap-1">
-              <Play className="w-3 h-3" />
+            <div className="absolute left-3 top-3 flex items-center gap-1 rounded-full border border-white/10 bg-black/60 px-2 py-1 text-[10px] font-semibold text-cyan-200">
+              <Play className="h-3 w-3" />
               VIDEO
             </div>
           </>
+        ) : (
+          <IdentitySeedVisual item={item} />
         )}
 
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/15 to-black/10 opacity-100" />
 
-        <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute right-3 top-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
           <Button
             size="icon"
             type="button"
             variant="ghost"
             onClick={() => onOpen(item)}
-            className="h-9 w-9 bg-black/55 border border-white/10 hover:bg-black/75 text-white"
+            className="h-9 w-9 border border-white/10 bg-black/55 text-white hover:bg-black/75"
           >
-            <Maximize2 className="w-4 h-4" />
+            <Maximize2 className="h-4 w-4" />
           </Button>
 
-          <Button
-            size="icon"
-            type="button"
-            variant="ghost"
-            onClick={() => downloadFile(item.url, `sirensforge-${item.kind}-${item.id}`)}
-            className="h-9 w-9 bg-black/55 border border-white/10 hover:bg-black/75 text-white"
-          >
-            <Download className="w-4 h-4" />
-          </Button>
+          {displayUrl && !isIdentity ? (
+            <Button
+              size="icon"
+              type="button"
+              variant="ghost"
+              onClick={() => downloadFile(displayUrl, `sirensforge-${item.kind}-${item.id}`)}
+              className="h-9 w-9 border border-white/10 bg-black/55 text-white hover:bg-black/75"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          ) : null}
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 p-3">
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             <span
-              className={`px-2 py-1 rounded-full text-[10px] font-semibold border ${
-                item.kind === "image"
-                  ? "bg-pink-500/15 text-pink-200 border-pink-500/30"
-                  : "bg-cyan-500/15 text-cyan-200 border-cyan-500/30"
+              className={`rounded-full border px-2 py-1 text-[10px] font-semibold ${
+                isIdentity
+                  ? "border-yellow-500/25 bg-yellow-500/10 text-yellow-200"
+                  : item.kind === "image"
+                    ? "border-pink-500/30 bg-pink-500/15 text-pink-200"
+                    : "border-cyan-500/30 bg-cyan-500/15 text-cyan-200"
               }`}
             >
-              {item.kind === "image" ? "IMAGE" : "VIDEO"}
+              {isIdentity ? "IDENTITY SEED" : item.kind === "image" ? "IMAGE" : "VIDEO"}
             </span>
 
-            {item.identityLora && (
-              <span className="px-2 py-1 rounded-full text-[10px] font-semibold border bg-yellow-500/10 text-yellow-200 border-yellow-500/25 flex items-center gap-1">
-                <Star className="w-3 h-3" />
+            {item.identityLora && !isIdentity ? (
+              <span className="flex items-center gap-1 rounded-full border border-yellow-500/25 bg-yellow-500/10 px-2 py-1 text-[10px] font-semibold text-yellow-200">
+                <Star className="h-3 w-3" />
                 IDENTITY
               </span>
-            )}
+            ) : null}
           </div>
 
-          <p className="text-xs font-medium text-gray-100 line-clamp-2">
-            {item.prompt || "(No prompt saved)"}
+          <p className="line-clamp-2 text-xs font-medium text-gray-100">
+            {isIdentity ? identityTitle(item) : item.prompt || "(No prompt saved)"}
           </p>
 
           <div className="mt-2 flex items-center justify-between text-[10px] text-gray-400">
@@ -504,7 +548,7 @@ function VaultGrid(props: {
   onOpen: (item: LibraryItem) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
       {props.items.map((item, index) => (
         <AssetCard key={item.id} item={item} index={index} onOpen={props.onOpen} />
       ))}
@@ -519,33 +563,38 @@ function IdentityGroupCard(props: {
   const { group, onOpen } = props;
   const previewItems = group.items.slice(0, 4);
   const hero = group.heroItem;
+  const heroUrl = hero ? getDisplayUrl(hero) : null;
 
   return (
-    <Card className="overflow-hidden border-gray-800 bg-gray-900/80 hover:border-purple-800/60 transition-all">
+    <Card className="overflow-hidden border-gray-800 bg-gray-900/80 transition-all hover:border-purple-800/60">
       <div className="grid grid-cols-1 xl:grid-cols-[0.8fr_1.2fr]">
-        <div className="relative min-h-[320px] bg-gray-950 overflow-hidden">
+        <div className="relative min-h-[320px] overflow-hidden bg-gray-950">
           {hero ? (
-            hero.kind === "image" ? (
-              <img src={hero.url} alt={hero.prompt} className="h-full w-full object-cover" />
+            hero.kind === "identity" || hero.isIdentitySeed ? (
+              <IdentitySeedVisual item={hero} large />
+            ) : hero.kind === "image" && heroUrl ? (
+              <img src={heroUrl} alt={hero.prompt} className="h-full w-full object-cover" />
+            ) : hero.kind === "video" && heroUrl ? (
+              <video src={heroUrl} className="h-full w-full object-cover" muted loop playsInline />
             ) : (
-              <video src={hero.url} className="h-full w-full object-cover" muted loop playsInline />
+              <IdentitySeedVisual item={hero} large />
             )
           ) : (
-            <div className="h-full w-full bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-cyan-500/10 flex items-center justify-center">
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-cyan-500/10">
               <Crown className="h-16 w-16 text-purple-300" />
             </div>
           )}
 
           <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-black/10" />
 
-          <div className="absolute left-4 right-4 bottom-4 space-y-3">
+          <div className="absolute bottom-4 left-4 right-4 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1 rounded-full border border-yellow-500/25 bg-yellow-500/10 px-2.5 py-1 text-[10px] font-bold text-yellow-200">
                 <Crown className="h-3 w-3" />
                 {group.identityId ? "AI TWIN" : "UNLINKED"}
               </span>
               <span className="rounded-full border border-white/10 bg-black/40 px-2.5 py-1 text-[10px] font-semibold text-gray-200">
-                {group.items.length} asset{group.items.length === 1 ? "" : "s"}
+                {group.items.length} item{group.items.length === 1 ? "" : "s"}
               </span>
             </div>
 
@@ -556,7 +605,7 @@ function IdentityGroupCard(props: {
           </div>
         </div>
 
-        <CardContent className="p-4 md:p-5 space-y-4">
+        <CardContent className="space-y-4 p-4 md:p-5">
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-2xl border border-gray-800 bg-gray-950 p-3 text-center">
               <ImageIcon className="mx-auto mb-1 h-4 w-4 text-pink-300" />
@@ -569,53 +618,60 @@ function IdentityGroupCard(props: {
               <p className="text-[10px] uppercase tracking-[0.12em] text-gray-500">Videos</p>
             </div>
             <div className="rounded-2xl border border-gray-800 bg-gray-950 p-3 text-center">
-              <Sparkles className="mx-auto mb-1 h-4 w-4 text-purple-300" />
-              <p className="text-lg font-bold text-purple-200">{group.items.length}</p>
-              <p className="text-[10px] uppercase tracking-[0.12em] text-gray-500">Total</p>
+              <Crown className="mx-auto mb-1 h-4 w-4 text-yellow-300" />
+              <p className="text-lg font-bold text-yellow-200">{group.identitySeedCount}</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-gray-500">Seeds</p>
             </div>
           </div>
 
           <div className="rounded-2xl border border-purple-900/40 bg-purple-500/10 p-4">
             <p className="text-sm font-semibold text-purple-100">
-              Identity Strength: Growing
+              Identity Strength: {group.identitySeedCount > 0 ? "Seeded" : "Growing"}
             </p>
             <p className="mt-1 text-xs leading-5 text-gray-300">
-              More saved generations give this identity a stronger creative history. Use this section to find what works and generate more around the same look.
+              Identity seeds are your reusable model directions. Generated assets will stack here once pods are back online.
             </p>
           </div>
 
-          {previewItems.length > 0 && (
+          {previewItems.length > 0 ? (
             <div className="grid grid-cols-4 gap-2">
-              {previewItems.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => onOpen(item)}
-                  className="relative aspect-square overflow-hidden rounded-xl border border-gray-800 bg-gray-950 hover:border-purple-600 transition-colors"
-                >
-                  {item.kind === "image" ? (
-                    <img src={item.url} alt={item.prompt} className="h-full w-full object-cover" />
-                  ) : (
-                    <video src={item.url} className="h-full w-full object-cover" muted playsInline />
-                  )}
-                  <div className="absolute inset-0 bg-black/10" />
-                </button>
-              ))}
+              {previewItems.map((item) => {
+                const url = getDisplayUrl(item);
+                const isIdentity = item.isIdentitySeed || item.kind === "identity";
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onOpen(item)}
+                    className="relative aspect-square overflow-hidden rounded-xl border border-gray-800 bg-gray-950 transition-colors hover:border-purple-600"
+                  >
+                    {isIdentity || !url ? (
+                      <IdentitySeedVisual item={item} />
+                    ) : item.kind === "image" ? (
+                      <img src={url} alt={item.prompt} className="h-full w-full object-cover" />
+                    ) : (
+                      <video src={url} className="h-full w-full object-cover" muted playsInline />
+                    )}
+                    <div className="absolute inset-0 bg-black/10" />
+                  </button>
+                );
+              })}
             </div>
-          )}
+          ) : null}
 
           <div className="flex flex-wrap gap-2 pt-1">
             {group.identityId ? (
               <Link href={`/identities/${group.identityId}`}>
-                <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white">
-                  <ExternalLink className="h-4 w-4 mr-2" />
+                <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
+                  <ExternalLink className="mr-2 h-4 w-4" />
                   View Identity
                 </Button>
               </Link>
             ) : (
               <Link href="/identities">
-                <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white">
-                  <Crown className="h-4 w-4 mr-2" />
+                <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
+                  <Crown className="mr-2 h-4 w-4" />
                   Link an Identity
                 </Button>
               </Link>
@@ -627,7 +683,7 @@ function IdentityGroupCard(props: {
                 variant="outline"
                 className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
               >
-                <Wand2 className="h-4 w-4 mr-2" />
+                <Wand2 className="mr-2 h-4 w-4" />
                 Generate More Like This
               </Button>
             </Link>
@@ -647,8 +703,8 @@ function IdentityGroupedVault(props: {
       <Card className="border-gray-800 bg-gray-900/80">
         <CardContent className="py-14 text-center">
           <div className="space-y-3">
-            <div className="mx-auto h-14 w-14 rounded-3xl bg-gray-950 border border-gray-800 flex items-center justify-center">
-              <Layers3 className="w-6 h-6 text-gray-500" />
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-gray-800 bg-gray-950">
+              <Layers3 className="h-6 w-6 text-gray-500" />
             </div>
             <h2 className="text-lg font-semibold text-gray-100">
               No identity groups match your filters
@@ -678,35 +734,37 @@ function VaultModal(props: {
   if (!props.item) return null;
 
   const item = props.item;
+  const isIdentity = item.isIdentitySeed || item.kind === "identity";
+  const displayUrl = getDisplayUrl(item);
 
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm p-4 md:p-6 flex items-center justify-center"
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm md:p-6"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         onClick={props.onClose}
       >
         <motion.div
-          className="w-full max-w-6xl rounded-3xl overflow-hidden border border-gray-800 bg-gray-950 shadow-[0_0_40px_rgba(168,85,247,0.25)]"
+          className="w-full max-w-6xl overflow-hidden rounded-3xl border border-gray-800 bg-gray-950 shadow-[0_0_40px_rgba(168,85,247,0.25)]"
           initial={{ scale: 0.96, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           exit={{ scale: 0.96, opacity: 0 }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_0.65fr]">
-            <div className="bg-black flex items-center justify-center max-h-[82vh] overflow-hidden">
-              {item.kind === "image" ? (
-                <img
-                  src={item.url}
-                  alt={item.prompt}
-                  className="w-full h-full object-contain"
-                />
+            <div className="flex max-h-[82vh] items-center justify-center overflow-hidden bg-black">
+              {isIdentity || !displayUrl ? (
+                <div className="h-[70vh] w-full">
+                  <IdentitySeedVisual item={item} large />
+                </div>
+              ) : item.kind === "image" ? (
+                <img src={displayUrl} alt={item.prompt} className="h-full w-full object-contain" />
               ) : (
                 <video
-                  src={item.url}
-                  className="w-full h-full object-contain"
+                  src={displayUrl}
+                  className="h-full w-full object-contain"
                   controls
                   autoPlay
                   loop
@@ -715,71 +773,75 @@ function VaultModal(props: {
               )}
             </div>
 
-            <div className="border-l border-gray-800 bg-gray-950/90 p-5 space-y-5">
+            <div className="space-y-5 border-l border-gray-800 bg-gray-950/90 p-5">
               <div>
-                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <div className="mb-3 flex flex-wrap items-center gap-2">
                   <span
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border ${
-                      item.kind === "image"
-                        ? "bg-pink-500/15 text-pink-200 border-pink-500/30"
-                        : "bg-cyan-500/15 text-cyan-200 border-cyan-500/30"
+                    className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${
+                      isIdentity
+                        ? "border-yellow-500/25 bg-yellow-500/10 text-yellow-200"
+                        : item.kind === "image"
+                          ? "border-pink-500/30 bg-pink-500/15 text-pink-200"
+                          : "border-cyan-500/30 bg-cyan-500/15 text-cyan-200"
                     }`}
                   >
-                    {item.kind === "image" ? "IMAGE ASSET" : "VIDEO ASSET"}
+                    {isIdentity ? "IDENTITY SEED" : item.kind === "image" ? "IMAGE ASSET" : "VIDEO ASSET"}
                   </span>
 
-                  {item.identityLora && (
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold border bg-yellow-500/10 text-yellow-200 border-yellow-500/25">
+                  {item.identityLora ? (
+                    <span className="rounded-full border border-yellow-500/25 bg-yellow-500/10 px-2.5 py-1 text-[10px] font-semibold text-yellow-200">
                       IDENTITY LINKED
                     </span>
-                  )}
+                  ) : null}
                 </div>
 
-                <h2 className="text-lg font-bold bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-transparent">
-                  Vault Asset Details
+                <h2 className="bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-lg font-bold text-transparent">
+                  {isIdentity ? identityTitle(item) : "Vault Asset Details"}
                 </h2>
-                <p className="text-xs text-gray-400 mt-1">
-                  Review, reuse, or keep building around this identity.
+                <p className="mt-1 text-xs text-gray-400">
+                  {isIdentity
+                    ? "Reusable model seed saved from Build My Model."
+                    : "Review, reuse, or keep building around this identity."}
                 </p>
               </div>
 
               <div className="space-y-3 text-xs">
                 <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
+                  <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
                     Prompt
                   </p>
-                  <p className="text-gray-200 leading-relaxed">
+                  <p className="leading-relaxed text-gray-200">
                     {item.prompt || "(No prompt saved)"}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
                       Created
                     </p>
                     <p className="text-gray-200">{formatDate(item.createdAt)}</p>
                   </div>
 
                   <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
                       Mode
                     </p>
                     <p className="text-gray-200">{item.mode || "generation"}</p>
                   </div>
 
                   <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
                       Body Mode
                     </p>
                     <p className="text-gray-200">{item.bodyMode || "Not stored"}</p>
                   </div>
 
                   <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3">
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-gray-400 mb-2">
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
                       Identity
                     </p>
-                    <p className="text-gray-200 break-all">
+                    <p className="break-all text-gray-200">
                       {item.identityLora || "Not linked"}
                     </p>
                   </div>
@@ -787,27 +849,29 @@ function VaultModal(props: {
               </div>
 
               <div className="flex flex-wrap gap-2 pt-2">
-                <Button
-                  type="button"
-                  onClick={() => downloadFile(item.url, `sirensforge-${item.kind}-${item.id}`)}
-                  className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Download
-                </Button>
+                {displayUrl && !isIdentity ? (
+                  <Button
+                    type="button"
+                    onClick={() => downloadFile(displayUrl, `sirensforge-${item.kind}-${item.id}`)}
+                    className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download
+                  </Button>
+                ) : null}
 
-                {item.identityLora && (
+                {item.identityLora ? (
                   <Link href={`/identities/${item.identityLora}`}>
                     <Button
                       type="button"
                       variant="outline"
                       className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
                     >
-                      <Crown className="w-4 h-4 mr-2" />
+                      <Crown className="mr-2 h-4 w-4" />
                       View Identity
                     </Button>
                   </Link>
-                )}
+                ) : null}
 
                 <Link href="/generate">
                   <Button
@@ -815,7 +879,7 @@ function VaultModal(props: {
                     variant="outline"
                     className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
                   >
-                    <Sparkles className="w-4 h-4 mr-2" />
+                    <Sparkles className="mr-2 h-4 w-4" />
                     Generate More Like This
                   </Button>
                 </Link>
@@ -849,18 +913,23 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
 
     return [...items]
       .filter((item) => {
+        const isIdentity = item.isIdentitySeed || item.kind === "identity";
+
         const matchesFilter =
           filter === "all" ||
+          (filter === "identities" && isIdentity) ||
           (filter === "images" && item.kind === "image") ||
           (filter === "videos" && item.kind === "video");
 
         const haystack = [
+          item.title || "",
           item.prompt,
           item.mode || "",
           item.bodyMode || "",
           item.identityLora || "",
           shortIdentityLabel(item.identityLora),
           item.status || "",
+          isIdentity ? "identity seed build my model ai twin" : "",
         ]
           .join(" ")
           .toLowerCase();
@@ -882,7 +951,7 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
     const map = new Map<string, LibraryItem[]>();
 
     for (const item of filtered) {
-      const key = item.identityLora || "__no_identity__";
+      const key = item.identityLora || (item.isIdentitySeed ? item.id : "__no_identity__");
       const existing = map.get(key) || [];
       existing.push(item);
       map.set(key, existing);
@@ -892,19 +961,29 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
       const identityId = key === "__no_identity__" ? null : key;
       const imageCount = groupItems.filter((item) => item.kind === "image").length;
       const videoCount = groupItems.filter((item) => item.kind === "video").length;
-      const heroItem = groupItems.find((item) => item.kind === "image") || groupItems[0] || null;
+      const identitySeedCount = groupItems.filter(
+        (item) => item.isIdentitySeed || item.kind === "identity"
+      ).length;
+      const heroItem =
+        groupItems.find((item) => item.isIdentitySeed || item.kind === "identity") ||
+        groupItems.find((item) => item.kind === "image") ||
+        groupItems[0] ||
+        null;
       const latestCreatedAt = groupItems[0]?.createdAt || null;
 
       return {
         key,
         identityId,
-        title: shortIdentityLabel(identityId),
+        title: heroItem?.isIdentitySeed ? identityTitle(heroItem) : shortIdentityLabel(identityId),
         subtitle: identityId
-          ? "A growing collection tied to this AI Twin."
+          ? identitySeedCount > 0
+            ? "A saved Build My Model identity seed ready for reuse."
+            : "A growing collection tied to this AI Twin."
           : "Assets created without a linked identity.",
         items: groupItems,
         imageCount,
         videoCount,
+        identitySeedCount,
         latestCreatedAt,
         heroItem,
       };
@@ -923,7 +1002,7 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
     <div className="min-h-screen bg-black text-gray-100">
       <LibraryHeader />
 
-      <main className="max-w-[1600px] mx-auto px-4 md:px-6 py-6 space-y-6">
+      <main className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 md:px-6">
         <VaultIntentBanner />
         <LibraryStats items={items} />
 
@@ -944,11 +1023,11 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
           <Card className="border-gray-800 bg-gray-900/80">
             <CardContent className="py-14 text-center">
               <div className="space-y-3">
-                <div className="mx-auto h-14 w-14 rounded-3xl bg-gray-950 border border-gray-800 flex items-center justify-center">
-                  <Search className="w-6 h-6 text-gray-500" />
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-3xl border border-gray-800 bg-gray-950">
+                  <Search className="h-6 w-6 text-gray-500" />
                 </div>
                 <h2 className="text-lg font-semibold text-gray-100">
-                  No assets match your filters
+                  No vault items match your filters
                 </h2>
                 <p className="text-sm text-gray-400">
                   Try a different search term or switch your media filter.

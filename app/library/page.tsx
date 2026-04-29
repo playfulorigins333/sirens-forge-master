@@ -29,17 +29,20 @@ type UserLoraRow = {
   id: string;
   user_id: string | null;
   name: string | null;
+  lora_url: string | null;
   preview_url: string | null;
   created_at: string | null;
   updated_at: string | null;
   description: string | null;
   status: string | null;
+  image_count: number | null;
   source?: string | null;
   base_model?: string | null;
   prompt?: string | null;
   negative_prompt?: string | null;
   selection?: Record<string, unknown> | null;
   is_identity_seed?: boolean | null;
+  trigger_token?: string | null;
 };
 
 function getMetadata(row: GenerationRow): Record<string, unknown> {
@@ -145,12 +148,6 @@ function isIdentitySeed(row: UserLoraRow): boolean {
   );
 }
 
-function getIdentitySeedUrl(row: UserLoraRow): string | null {
-  return typeof row?.preview_url === "string" && row.preview_url.trim().length > 0
-    ? row.preview_url.trim()
-    : null;
-}
-
 function getIdentitySeedPrompt(row: UserLoraRow): string {
   if (typeof row?.prompt === "string" && row.prompt.trim().length > 0) {
     return row.prompt.trim();
@@ -168,13 +165,29 @@ function getIdentitySeedBodyMode(row: UserLoraRow): string | null {
     return row.base_model.trim();
   }
 
-  const selection = row?.selection && typeof row.selection === "object" && !Array.isArray(row.selection)
-    ? row.selection
-    : {};
+  const selection =
+    row?.selection && typeof row.selection === "object" && !Array.isArray(row.selection)
+      ? row.selection
+      : {};
 
   const value = selection.baseModel;
 
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function getIdentitySeedName(row: UserLoraRow): string {
+  if (typeof row?.name === "string" && row.name.trim().length > 0) {
+    return row.name.trim();
+  }
+
+  const bodyMode = getIdentitySeedBodyMode(row);
+  return bodyMode ? `${bodyMode} identity seed` : "Build My Model identity";
+}
+
+function getIdentitySeedPreview(row: UserLoraRow): string | null {
+  return typeof row?.preview_url === "string" && row.preview_url.trim().length > 0
+    ? row.preview_url.trim()
+    : null;
 }
 
 export default async function LibraryPage() {
@@ -227,17 +240,20 @@ export default async function LibraryPage() {
           id,
           user_id,
           name,
+          lora_url,
           preview_url,
           created_at,
           updated_at,
           description,
           status,
+          image_count,
           source,
           base_model,
           prompt,
           negative_prompt,
           selection,
-          is_identity_seed
+          is_identity_seed,
+          trigger_token
         `
         )
         .in("user_id", [authUserId, profileId])
@@ -265,6 +281,7 @@ export default async function LibraryPage() {
 
       return {
         id: row.id,
+        itemType: "asset",
         kind: getAssetKind(row, url),
         url,
         prompt: row.prompt || "",
@@ -273,25 +290,31 @@ export default async function LibraryPage() {
         mode: getGenerationMode(row),
         bodyMode: getBodyMode(row),
         identityLora: getIdentityLora(row),
+        title: null,
+        previewUrl: url,
+        isIdentitySeed: false,
       };
     });
 
   const identityItems: LibraryItem[] = loraRows
     .filter((row) => isIdentitySeed(row))
-    .filter((row) => !!getIdentitySeedUrl(row))
     .map((row) => {
-      const url = getIdentitySeedUrl(row)!;
+      const previewUrl = getIdentitySeedPreview(row);
 
       return {
         id: row.id,
-        kind: "image",
-        url,
+        itemType: "identity_seed",
+        kind: "identity",
+        url: previewUrl,
         prompt: getIdentitySeedPrompt(row),
         createdAt: row.created_at || row.updated_at || new Date().toISOString(),
         status: row.status || "identity_seed",
         mode: "identity_seed",
         bodyMode: getIdentitySeedBodyMode(row),
         identityLora: row.id,
+        title: getIdentitySeedName(row),
+        previewUrl,
+        isIdentitySeed: true,
       };
     });
 
