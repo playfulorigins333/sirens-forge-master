@@ -4202,47 +4202,79 @@ ${basePrompt}`,
             />
           )}
 
+          <Card className="overflow-hidden border-purple-500/35 bg-[linear-gradient(135deg,rgba(88,28,135,0.30),rgba(15,23,42,0.94),rgba(8,8,13,0.98))] shadow-[0_0_42px_rgba(168,85,247,0.14)]">
+            <CardHeader className="border-b border-purple-500/15 pb-4">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
+                    <UserPlus className="h-5 w-5 text-fuchsia-300" />
+                    AI Twin Setup
+                  </CardTitle>
+                  <CardDescription className="mt-1 max-w-3xl text-xs leading-5 text-gray-300 md:text-sm">
+                    Start by building or selecting the identity you want to keep consistent. Sirens Forge is identity-first: choose the twin, then generate around her.
+                  </CardDescription>
+                </div>
+                <div className="shrink-0 rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-fuchsia-100">
+                  Twin First
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 p-4 md:p-5">
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.85fr)]">
+                {mode === "text_to_image" ? (
+                  <div className="opacity-100 transition hover:opacity-100">
+                    <BuildMyModelCard
+                      onApplyPrompt={(result) => {
+                        setPrompt(result.prompt);
+                        setNegativePrompt(result.negativePrompt);
+                        setBaseModel(result.selection.baseModel);
+                        applyIdentityIdToSelection(
+                          getBuildModelIdentityId(result),
+                          setPendingIdentityId,
+                          setLoraSelection,
+                        );
+                        setRefineChoices(null);
+                      }}
+                      onBaseModelChange={(model) => {
+                        setBaseModel(model);
+                      }}
+                      onGenerateNow={(result) => {
+                        setPrompt(result.prompt);
+                        setNegativePrompt(result.negativePrompt);
+                        setBaseModel(result.selection.baseModel);
+                        const identityId = getBuildModelIdentityId(result);
+                        applyIdentityIdToSelection(
+                          identityId,
+                          setPendingIdentityId,
+                          setLoraSelection,
+                        );
+                        setRefineChoices(null);
+
+                        window.setTimeout(() => {
+                          void handleGenerate(result.prompt, identityId);
+                        }, 0);
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-cyan-500/20 bg-black/25 p-4 text-sm text-gray-300">
+                    Video mode uses your selected saved identity. Choose a twin on the right, then add the motion prompt below.
+                  </div>
+                )}
+
+                <LoraIdentitySection
+                  value={loraSelection}
+                  onChange={(next) => setLoraSelection(next)}
+                  options={identitySelectOptions}
+                />
+              </div>
+            </CardContent>
+          </Card>
+
           <Card className="border-gray-800 bg-gray-900/80 shadow-[0_0_30px_rgba(34,211,238,0.05)]">
             <CardContent className="space-y-3 p-4 md:p-4">
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
                 <div className="space-y-3">
-                  {mode === "text_to_image" && (
-                    <div className="mb-4 opacity-95 transition hover:opacity-100">
-                      <BuildMyModelCard
-                        onApplyPrompt={(result) => {
-                          setPrompt(result.prompt);
-                          setNegativePrompt(result.negativePrompt);
-                          setBaseModel(result.selection.baseModel);
-                          applyIdentityIdToSelection(
-                            getBuildModelIdentityId(result),
-                            setPendingIdentityId,
-                            setLoraSelection,
-                          );
-                          setRefineChoices(null);
-                        }}
-                        onBaseModelChange={(model) => {
-                          setBaseModel(model);
-                        }}
-                        onGenerateNow={(result) => {
-                          setPrompt(result.prompt);
-                          setNegativePrompt(result.negativePrompt);
-                          setBaseModel(result.selection.baseModel);
-                          const identityId = getBuildModelIdentityId(result);
-                          applyIdentityIdToSelection(
-                            identityId,
-                            setPendingIdentityId,
-                            setLoraSelection,
-                          );
-                          setRefineChoices(null);
-
-                          window.setTimeout(() => {
-                            void handleGenerate(result.prompt, identityId);
-                          }, 0);
-                        }}
-                      />
-                    </div>
-                  )}
-
                   <PromptSection
                     mode={mode}
                     prompt={prompt}
@@ -4288,20 +4320,12 @@ ${basePrompt}`,
                 </div>
 
                 <div className="space-y-3 xl:sticky xl:top-24 xl:self-start">
-                  <div className="grid grid-cols-1 gap-3">
-                    <LoraIdentitySection
-                      value={loraSelection}
-                      onChange={(next) => setLoraSelection(next)}
-                      options={identitySelectOptions}
-                    />
-
-                    <ModelStyleSection
-                      baseModel={baseModel}
-                      stylePreset={stylePreset}
-                      onBaseModelChange={setBaseModel}
-                      onStylePresetChange={setStylePreset}
-                    />
-                  </div>
+                  <ModelStyleSection
+                    baseModel={baseModel}
+                    stylePreset={stylePreset}
+                    onBaseModelChange={setBaseModel}
+                    onStylePresetChange={setStylePreset}
+                  />
 
                   <div className="sticky bottom-0 z-30 rounded-2xl bg-gradient-to-t from-black/95 via-black/80 to-transparent pt-4 pb-2">
                     <GenerateButton
