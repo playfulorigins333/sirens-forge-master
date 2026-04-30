@@ -2559,14 +2559,40 @@ function OutputPanel(props: {
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
             <Button
               type="button"
-              onClick={() => setVariationOpen((value) => !value)}
+              onClick={() => props.onGenerateMore(latestItem.prompt)}
               className="h-11 justify-start gap-2 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 hover:shadow-[0_12px_28px_rgba(168,85,247,0.24)]"
             >
               <Sparkles className="h-4 w-4" />
-              Make 4 Variations
+              Again
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() =>
+                handleGeneratePrompt(
+                  promptWith("same identity, slight variation, alternate angle, different expression, fresh framing")
+                )
+              }
+              className="h-11 justify-start gap-2 bg-gradient-to-r from-fuchsia-600 via-purple-600 to-pink-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(217,70,239,0.22)]"
+            >
+              <Sparkles className="h-4 w-4" />
+              Variation
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() =>
+                handleGeneratePrompt(
+                  promptWith("same identity, push further, stronger lighting, more dynamic composition, higher intensity, premium creator finish")
+                )
+              }
+              className="h-11 justify-start gap-2 bg-gradient-to-r from-rose-600 via-pink-600 to-orange-500 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(244,63,94,0.22)]"
+            >
+              <Sparkles className="h-4 w-4" />
+              Push Further
             </Button>
 
             <Button
@@ -2576,7 +2602,7 @@ function OutputPanel(props: {
               className="h-11 justify-start gap-2 bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(34,211,238,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <VideoIcon className="h-4 w-4" />
-              Turn into Video
+              To Video
             </Button>
 
             <Button
@@ -2586,7 +2612,18 @@ function OutputPanel(props: {
               className="h-11 justify-start gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(16,185,129,0.18)] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {savingLatest ? <Clock className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              {savingLatest ? "Saving…" : latestIsSaved ? "Saved to Vault" : "Save to Vault"}
+              {savingLatest ? "Saving…" : latestIsSaved ? "Saved" : "Save"}
+            </Button>
+          </div>
+
+          <div className="mt-2 flex justify-end">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setVariationOpen((value) => !value)}
+              className="h-8 px-3 text-[11px] text-fuchsia-200 hover:bg-fuchsia-500/10 hover:text-white"
+            >
+              {variationOpen ? "Hide variation recipes" : "Show 4 variation recipes"}
             </Button>
           </div>
 
