@@ -163,6 +163,43 @@ function isUuidLike(value?: string | null): boolean {
   return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function getBuildModelIdentityId(result: any): string | null {
+  const candidates = [
+    result?.identityId,
+    result?.identity_id,
+    result?.savedIdentityId,
+    result?.saved_identity_id,
+    result?.savedIdentity?.id,
+    result?.identity?.id,
+    result?.loraId,
+    result?.lora_id,
+  ];
+
+  for (const value of candidates) {
+    if (typeof value === "string" && isUuidLike(value.trim())) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function applyIdentityIdToSelection(
+  identityId: string | null,
+  setPendingIdentityId: React.Dispatch<React.SetStateAction<string | null>>,
+  setLoraSelection: React.Dispatch<React.SetStateAction<LoraSelection>>,
+) {
+  if (!identityId || !isUuidLike(identityId)) return;
+
+  setPendingIdentityId(identityId);
+  setLoraSelection({
+    mode: "single",
+    selected: [identityId],
+    createNew: false,
+    newName: "",
+  });
+}
+
 function getGenerationRecordId(output: any, responseData?: any): string | null {
   if (output && typeof output === "object") {
     const direct =
@@ -3805,13 +3842,16 @@ ${basePrompt}`,
     }
   };
 
-  const handleGenerate = async (overridePrompt?: string) => {
+  const handleGenerate = async (overridePrompt?: string, identityOverride?: string | null) => {
     const bodyModeMap: Record<string, string> = {
       feminine: "body_feminine",
       masculine: "body_masculine",
     };
 
-    const selectedLoraId = loraSelection.selected[0] ?? null;
+    const selectedLoraId =
+      identityOverride && isUuidLike(identityOverride)
+        ? identityOverride
+        : loraSelection.selected[0] ?? null;
     const promptToUse = typeof overridePrompt === "string" ? overridePrompt : prompt;
 
     setErrorMessage(null);
@@ -3836,6 +3876,8 @@ ${basePrompt}`,
         cfg: guidance,
         seed: seedValue,
         identity_lora: selectedLoraId ? selectedLoraId : null,
+        lora_used: selectedLoraId ? selectedLoraId : null,
+        active_identity_id: selectedLoraId ? selectedLoraId : null,
       };
 
       const runCount =
@@ -3991,6 +4033,24 @@ ${basePrompt}`,
         throw new Error("Generation returned no outputs.");
       }
 
+      const linkedGenerationIds = generatedAll
+        .map((item) => item.dbGenerationId)
+        .filter((id): id is string => isUuidLike(id));
+
+      if (selectedLoraId && linkedGenerationIds.length > 0) {
+        const { error: linkError } = await supabase
+          .from("generations")
+          .update({
+            lora_used: selectedLoraId,
+            updated_at: new Date().toISOString(),
+          })
+          .in("id", linkedGenerationIds);
+
+        if (linkError) {
+          console.error("Failed to link generation(s) to identity:", linkError);
+        }
+      }
+
       setItems((prev) => [...generatedAll, ...prev].slice(0, 12));
       setHistory((prev) => [...generatedAll, ...prev]);
     } catch (err: any) {
@@ -4098,6 +4158,11 @@ ${basePrompt}`,
                         setPrompt(result.prompt);
                         setNegativePrompt(result.negativePrompt);
                         setBaseModel(result.selection.baseModel);
+                        applyIdentityIdToSelection(
+                          getBuildModelIdentityId(result),
+                          setPendingIdentityId,
+                          setLoraSelection,
+                        );
                         setRefineChoices(null);
                       }}
                       onBaseModelChange={(model) => {
@@ -4107,8 +4172,17 @@ ${basePrompt}`,
                         setPrompt(result.prompt);
                         setNegativePrompt(result.negativePrompt);
                         setBaseModel(result.selection.baseModel);
+                        const identityId = getBuildModelIdentityId(result);
+                        applyIdentityIdToSelection(
+                          identityId,
+                          setPendingIdentityId,
+                          setLoraSelection,
+                        );
                         setRefineChoices(null);
-                        void handleGenerate(result.prompt);
+
+                        window.setTimeout(() => {
+                          void handleGenerate(result.prompt, identityId);
+                        }, 0);
                       }}
                     />
                   )}
