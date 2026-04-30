@@ -3266,7 +3266,7 @@ export default function GeneratePage() {
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
   const [stylePreset, setStylePreset] = useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
-  const [consistencyPreset] = useState<ConsistencyPreset>("medium");
+  const [consistencyPreset] = useState<ConsistencyPreset>("high");
 
   const [loraSelection, setLoraSelection] = useState<LoraSelection>({
     mode: "single",
@@ -3393,6 +3393,23 @@ export default function GeneratePage() {
     !isGenerating &&
     (mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim())) &&
     Boolean(baseModel);
+
+  const isReadyToGenerate =
+    !isGenerating &&
+    Boolean(baseModel) &&
+    (mode === "image_to_video"
+      ? Boolean(imageFile)
+      : prompt.trim().length >= 20);
+
+  useEffect(() => {
+    if (!prompt.trim()) return;
+
+    const timer = window.setTimeout(() => {
+      promptTextareaRef.current?.focus({ preventScroll: true });
+    }, 120);
+
+    return () => window.clearTimeout(timer);
+  }, [prompt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4153,38 +4170,40 @@ ${basePrompt}`,
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
                 <div className="space-y-3">
                   {mode === "text_to_image" && (
-                    <BuildMyModelCard
-                      onApplyPrompt={(result) => {
-                        setPrompt(result.prompt);
-                        setNegativePrompt(result.negativePrompt);
-                        setBaseModel(result.selection.baseModel);
-                        applyIdentityIdToSelection(
-                          getBuildModelIdentityId(result),
-                          setPendingIdentityId,
-                          setLoraSelection,
-                        );
-                        setRefineChoices(null);
-                      }}
-                      onBaseModelChange={(model) => {
-                        setBaseModel(model);
-                      }}
-                      onGenerateNow={(result) => {
-                        setPrompt(result.prompt);
-                        setNegativePrompt(result.negativePrompt);
-                        setBaseModel(result.selection.baseModel);
-                        const identityId = getBuildModelIdentityId(result);
-                        applyIdentityIdToSelection(
-                          identityId,
-                          setPendingIdentityId,
-                          setLoraSelection,
-                        );
-                        setRefineChoices(null);
+                    <div className="mb-4 opacity-95 transition hover:opacity-100">
+                      <BuildMyModelCard
+                        onApplyPrompt={(result) => {
+                          setPrompt(result.prompt);
+                          setNegativePrompt(result.negativePrompt);
+                          setBaseModel(result.selection.baseModel);
+                          applyIdentityIdToSelection(
+                            getBuildModelIdentityId(result),
+                            setPendingIdentityId,
+                            setLoraSelection,
+                          );
+                          setRefineChoices(null);
+                        }}
+                        onBaseModelChange={(model) => {
+                          setBaseModel(model);
+                        }}
+                        onGenerateNow={(result) => {
+                          setPrompt(result.prompt);
+                          setNegativePrompt(result.negativePrompt);
+                          setBaseModel(result.selection.baseModel);
+                          const identityId = getBuildModelIdentityId(result);
+                          applyIdentityIdToSelection(
+                            identityId,
+                            setPendingIdentityId,
+                            setLoraSelection,
+                          );
+                          setRefineChoices(null);
 
-                        window.setTimeout(() => {
-                          void handleGenerate(result.prompt, identityId);
-                        }, 0);
-                      }}
-                    />
+                          window.setTimeout(() => {
+                            void handleGenerate(result.prompt, identityId);
+                          }, 0);
+                        }}
+                      />
+                    </div>
                   )}
 
                   <PromptSection
@@ -4247,16 +4266,18 @@ ${basePrompt}`,
                     />
                   </div>
 
-                  <GenerateButton
-                    mode={mode}
-                    isGenerating={isGenerating}
-                    batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
-                    qualityPreset={qualityPreset}
-                    consistencyPreset={consistencyPreset}
-                    disabled={!canGenerate}
-                    highlight={highlightGenerate}
-                    onClick={handleGenerate}
-                  />
+                  <div className="sticky bottom-0 z-30 rounded-2xl bg-gradient-to-t from-black/95 via-black/80 to-transparent pt-4 pb-2">
+                    <GenerateButton
+                      mode={mode}
+                      isGenerating={isGenerating}
+                      batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
+                      qualityPreset={qualityPreset}
+                      consistencyPreset={consistencyPreset}
+                      disabled={!canGenerate}
+                      highlight={highlightGenerate || isReadyToGenerate}
+                      onClick={handleGenerate}
+                    />
+                  </div>
                 </div>
               </div>
             </CardContent>
