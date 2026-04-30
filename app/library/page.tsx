@@ -45,6 +45,11 @@ type UserLoraRow = {
   trigger_token?: string | null;
 };
 
+type IdentityStats = {
+  generationCount: number;
+  lastUsedAt: string | null;
+};
+
 function getMetadata(row: GenerationRow): Record<string, unknown> {
   return row?.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
     ? row.metadata
@@ -274,6 +279,42 @@ export default async function LibraryPage() {
 
   const loraRows: UserLoraRow[] = Array.isArray(loraData) ? (loraData as UserLoraRow[]) : [];
 
+  const identityStatsByLora = new Map<string, IdentityStats>();
+
+  for (const row of generationRows) {
+    if (!isRealAsset(row)) continue;
+
+    const identityId = getIdentityLora(row);
+    if (!identityId) continue;
+
+    const current = identityStatsByLora.get(identityId) || {
+      generationCount: 0,
+      lastUsedAt: null,
+    };
+
+    const createdAt = row.created_at || row.updated_at || null;
+
+    current.generationCount += 1;
+
+    if (createdAt) {
+      const currentTime = current.lastUsedAt
+        ? new Date(current.lastUsedAt).getTime()
+        : 0;
+      const nextTime = new Date(createdAt).getTime();
+
+      if (!Number.isNaN(nextTime) && nextTime >= currentTime) {
+        current.lastUsedAt = createdAt;
+      }
+    }
+
+    identityStatsByLora.set(identityId, current);
+  }
+
+  const emptyIdentityStats: IdentityStats = {
+    generationCount: 0,
+    lastUsedAt: null,
+  };
+
   const generationItems: LibraryItem[] = generationRows
     .filter((row) => isRealAsset(row))
     .map((row) => {
@@ -293,6 +334,9 @@ export default async function LibraryPage() {
         title: null,
         previewUrl: url,
         isIdentitySeed: false,
+        identityStats: getIdentityLora(row)
+          ? identityStatsByLora.get(getIdentityLora(row)!) || emptyIdentityStats
+          : emptyIdentityStats,
       };
     });
 
@@ -315,6 +359,7 @@ export default async function LibraryPage() {
         title: getIdentitySeedName(row),
         previewUrl,
         isIdentitySeed: true,
+        identityStats: identityStatsByLora.get(row.id) || emptyIdentityStats,
       };
     });
 

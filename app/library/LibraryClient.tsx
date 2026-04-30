@@ -54,6 +54,10 @@ export type LibraryItem = {
   identityLora: string | null;
   title?: string | null;
   isIdentitySeed?: boolean;
+  identityStats?: {
+    generationCount: number;
+    lastUsedAt: string | null;
+  };
 };
 
 type FilterMode = "all" | "images" | "videos" | "identities";
@@ -69,6 +73,8 @@ type IdentityGroup = {
   imageCount: number;
   videoCount: number;
   identitySeedCount: number;
+  generationCount: number;
+  lastUsedAt: string | null;
   latestCreatedAt: string | null;
   heroItem: LibraryItem | null;
 };
@@ -101,6 +107,43 @@ function formatRelative(value: string) {
   } catch {
     return "Recently";
   }
+}
+
+function formatLastUsed(value?: string | null) {
+  if (!value) return "Never";
+  return formatRelative(value);
+}
+
+function getItemGenerationCount(item: LibraryItem) {
+  return item.identityStats?.generationCount || 0;
+}
+
+function getItemLastUsedAt(item: LibraryItem) {
+  return item.identityStats?.lastUsedAt || null;
+}
+
+function getGroupGenerationCount(items: LibraryItem[]) {
+  const values = items.map((item) => getItemGenerationCount(item));
+  const highest = Math.max(0, ...values);
+
+  if (highest > 0) return highest;
+
+  return items.filter((item) => !item.isIdentitySeed && item.kind !== "identity").length;
+}
+
+function getGroupLastUsedAt(items: LibraryItem[]) {
+  let latest: string | null = null;
+
+  for (const item of items) {
+    const candidate = getItemLastUsedAt(item);
+    if (!candidate) continue;
+
+    if (!latest || new Date(candidate).getTime() > new Date(latest).getTime()) {
+      latest = candidate;
+    }
+  }
+
+  return latest;
 }
 
 function downloadFile(url: string | null, filename?: string) {
@@ -556,6 +599,13 @@ function AssetCard(props: {
             <span>{formatRelative(item.createdAt)}</span>
             <span>{item.mode || "generation"}</span>
           </div>
+
+          {(item.isIdentitySeed || item.kind === "identity" || getItemGenerationCount(item) > 0) ? (
+            <div className="mt-2 flex items-center justify-between rounded-lg border border-yellow-500/20 bg-yellow-500/10 px-2 py-1 text-[10px] text-yellow-100">
+              <span>Generated {getItemGenerationCount(item)}x</span>
+              <span>Last used: {formatLastUsed(getItemLastUsedAt(item))}</span>
+            </div>
+          ) : null}
         </div>
       </div>
     </motion.div>
@@ -626,7 +676,7 @@ function IdentityGroupCard(props: {
         </div>
 
         <CardContent className="space-y-4 p-4 md:p-5">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="rounded-2xl border border-gray-800 bg-gray-950 p-3 text-center">
               <ImageIcon className="mx-auto mb-1 h-4 w-4 text-pink-300" />
               <p className="text-lg font-bold text-pink-200">{group.imageCount}</p>
@@ -642,6 +692,11 @@ function IdentityGroupCard(props: {
               <p className="text-lg font-bold text-yellow-200">{group.identitySeedCount}</p>
               <p className="text-[10px] uppercase tracking-[0.12em] text-gray-500">Seeds</p>
             </div>
+            <div className="rounded-2xl border border-gray-800 bg-gray-950 p-3 text-center">
+              <Sparkles className="mx-auto mb-1 h-4 w-4 text-purple-300" />
+              <p className="text-lg font-bold text-purple-200">{group.generationCount}</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-gray-500">Generated</p>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-purple-900/40 bg-purple-500/10 p-4">
@@ -649,7 +704,7 @@ function IdentityGroupCard(props: {
               Identity Strength: {group.identitySeedCount > 0 ? "Seeded" : "Growing"}
             </p>
             <p className="mt-1 text-xs leading-5 text-gray-300">
-              Identity seeds are your reusable model directions. Generated assets will stack here once pods are back online.
+              Identity seeds are your reusable model directions. This identity has generated {group.generationCount} time{group.generationCount === 1 ? "" : "s"}; last used: {formatLastUsed(group.lastUsedAt)}.
             </p>
           </div>
 
@@ -880,6 +935,20 @@ function VaultModal(props: {
                       {item.identityLora || "Not linked"}
                     </p>
                   </div>
+
+                  <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3">
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
+                      Generation Count
+                    </p>
+                    <p className="text-gray-200">{getItemGenerationCount(item)}</p>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3">
+                    <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
+                      Last Used
+                    </p>
+                    <p className="text-gray-200">{formatLastUsed(getItemLastUsedAt(item))}</p>
+                  </div>
                 </div>
               </div>
 
@@ -1019,6 +1088,8 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
         groupItems[0] ||
         null;
       const latestCreatedAt = groupItems[0]?.createdAt || null;
+      const generationCount = getGroupGenerationCount(groupItems);
+      const lastUsedAt = getGroupLastUsedAt(groupItems);
 
       return {
         key,
@@ -1033,6 +1104,8 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
         imageCount,
         videoCount,
         identitySeedCount,
+        generationCount,
+        lastUsedAt,
         latestCreatedAt,
         heroItem,
       };
