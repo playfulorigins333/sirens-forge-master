@@ -88,7 +88,7 @@ export function ChatInput({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Describe the mood, character, scene, or prompt you want to create..."
+            placeholder="Describe the scene, AI Twin, mood, image/video goal, or rough idea..."
             rows={1}
             className="max-h-48 min-h-[34px] flex-1 resize-none bg-transparent text-[15px] leading-7 text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
           />

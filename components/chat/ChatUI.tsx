@@ -420,7 +420,7 @@ export default function ChatUI({
                 </h1>
 
                 <p className="mt-2 text-[13px] uppercase tracking-[0.16em] text-zinc-500">
-                  Erotic Prompt Intelligence
+                  Prompt Brain • AI Twin → Generator
                 </p>
               </div>
             </div>
@@ -437,22 +437,22 @@ export default function ChatUI({
                 </div>
 
                 <p className="text-[18px] font-medium leading-8 text-white">
-                  Tell me what you want to create
+                  Shape the scene, choose image or video, then send it to the Generator
                   <span className="font-normal text-zinc-200">
                     {" "}
-                    — a mood, a character, a scene, or a polished prompt.
+                    with your AI Twin attached.
                   </span>
                 </p>
 
                 <p className="mt-3 text-[14px] leading-7 text-zinc-400">
-                  I’ll shape it into something stronger and ready to use.
+                  Siren’s Mind does not generate directly. It turns rough ideas into Forge-ready prompts that feed the identity-first generation engine.
                 </p>
 
                 <div className="mt-5 grid gap-3 md:grid-cols-2">
                   {[
-                    "Build a polished feminine character prompt with luxury styling",
-                    "Turn this rough idea into a stronger image prompt",
-                    "Create something darker, moodier, and more seductive",
+                    "Build a text-to-image scene for my AI Twin",
+                    "Build a text-to-video scene with cinematic motion",
+                    "Turn my rough idea into a generator-ready NSFW prompt",
                   ].map((starter) => (
                     <button
                       key={starter}

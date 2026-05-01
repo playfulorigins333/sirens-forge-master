@@ -26,7 +26,7 @@ export function ChatMessage({
       <div className="flex justify-start">
         <div className="max-w-[85%] rounded-[24px] border border-fuchsia-500/15 bg-[linear-gradient(180deg,rgba(12,12,16,0.98),rgba(8,8,12,0.98))] px-5 py-4">
           <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-fuchsia-300/80">
-            A Siren’s Mind
+            Siren’s Mind
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -54,7 +54,7 @@ export function ChatMessage({
               isError ? "text-red-300/80" : "text-fuchsia-300/80"
             }`}
           >
-            A Siren’s Mind
+            Siren’s Mind
           </div>
 
           <div
@@ -66,13 +66,16 @@ export function ChatMessage({
           </div>
 
           {showUsePrompt && onUsePrompt && !isError && (
-            <div className="mt-4">
+            <div className="mt-4 rounded-2xl border border-fuchsia-500/15 bg-black/25 p-3">
+              <div className="mb-2 text-[11px] leading-5 text-zinc-400">
+                Prompt is ready. Send it to the Forge, select your AI Twin, and generate.
+              </div>
               <button
                 type="button"
                 onClick={onUsePrompt}
-                className="rounded-2xl border border-fuchsia-400/20 bg-gradient-to-r from-violet-500/20 via-fuchsia-500/20 to-cyan-500/20 px-4 py-2 text-[12px] font-semibold text-white transition hover:border-fuchsia-300/40 hover:from-violet-500/30 hover:via-fuchsia-500/30 hover:to-cyan-500/30"
+                className="w-full rounded-2xl border border-transparent bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 px-4 py-2.5 text-[12px] font-bold text-white shadow-[0_0_22px_rgba(168,85,247,0.22)] transition hover:brightness-110"
               >
-                Use Prompt in Generator
+                Send to Generator →
               </button>
             </div>
           )}
