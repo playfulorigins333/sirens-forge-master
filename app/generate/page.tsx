@@ -4145,6 +4145,10 @@ ${basePrompt}`,
     handleGenerate();
   };
 
+  const handleTrainTwin = () => {
+    router.push("/lora/train");
+  };
+
   return (
     <div className="flex min-h-screen flex-col bg-black text-gray-100">
       <GeneratorHeader activeMode={mode} />
@@ -4202,71 +4206,128 @@ ${basePrompt}`,
             />
           )}
 
-          <Card className="overflow-hidden border-purple-500/35 bg-[linear-gradient(135deg,rgba(88,28,135,0.30),rgba(15,23,42,0.94),rgba(8,8,13,0.98))] shadow-[0_0_42px_rgba(168,85,247,0.14)]">
+          <Card className="overflow-hidden border-purple-500/35 bg-gray-950/80 shadow-[0_0_34px_rgba(168,85,247,0.12)]">
             <CardHeader className="border-b border-purple-500/15 pb-4">
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
                     <UserPlus className="h-5 w-5 text-fuchsia-300" />
-                    AI Twin Setup
+                    Start With Your AI Twin
                   </CardTitle>
                   <CardDescription className="mt-1 max-w-3xl text-xs leading-5 text-gray-300 md:text-sm">
-                    Start by building or selecting the identity you want to keep consistent. Sirens Forge is identity-first: choose the twin, then generate around her.
+                    Train a LoRA for the strongest identity consistency, select an existing twin, or use the starter builder only when you do not have photos ready yet.
                   </CardDescription>
                 </div>
                 <div className="shrink-0 rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-fuchsia-100">
-                  Twin First
+                  LoRA First
                 </div>
               </div>
             </CardHeader>
+
             <CardContent className="space-y-4 p-4 md:p-5">
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.85fr)]">
-                {mode === "text_to_image" ? (
-                  <div className="opacity-100 transition hover:opacity-100">
-                    <BuildMyModelCard
-                      onApplyPrompt={(result) => {
-                        setPrompt(result.prompt);
-                        setNegativePrompt(result.negativePrompt);
-                        setBaseModel(result.selection.baseModel);
-                        applyIdentityIdToSelection(
-                          getBuildModelIdentityId(result),
-                          setPendingIdentityId,
-                          setLoraSelection,
-                        );
-                        setRefineChoices(null);
-                      }}
-                      onBaseModelChange={(model) => {
-                        setBaseModel(model);
-                      }}
-                      onGenerateNow={(result) => {
-                        setPrompt(result.prompt);
-                        setNegativePrompt(result.negativePrompt);
-                        setBaseModel(result.selection.baseModel);
-                        const identityId = getBuildModelIdentityId(result);
-                        applyIdentityIdToSelection(
-                          identityId,
-                          setPendingIdentityId,
-                          setLoraSelection,
-                        );
-                        setRefineChoices(null);
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-fuchsia-500/30 bg-[linear-gradient(135deg,rgba(88,28,135,0.22),rgba(8,8,13,0.96))] p-4 shadow-[0_0_26px_rgba(192,38,211,0.10)]">
+                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-white shadow-[0_0_18px_rgba(192,38,211,0.24)]">
+                            <UserPlus className="h-5 w-5" />
+                          </span>
+                          <div>
+                            <div className="text-base font-bold text-white">Train Your AI Twin LoRA</div>
+                            <div className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-fuchsia-200">
+                              Best quality • strongest consistency • money path
+                            </div>
+                          </div>
+                        </div>
+                        <p className="mt-3 max-w-2xl text-xs leading-5 text-gray-300 md:text-sm">
+                          Upload your training set and create a reusable identity LoRA. This is the premium Sirens Forge workflow for keeping the same person consistent across images, packs, and future video.
+                        </p>
+                      </div>
 
-                        window.setTimeout(() => {
-                          void handleGenerate(result.prompt, identityId);
-                        }, 0);
-                      }}
-                    />
+                      <Button
+                        type="button"
+                        onClick={handleTrainTwin}
+                        className="h-11 shrink-0 bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-5 text-xs font-bold text-white shadow-[0_12px_30px_rgba(192,38,211,0.20)] transition hover:-translate-y-0.5 hover:brightness-110"
+                      >
+                        Train AI Twin LoRA
+                      </Button>
+                    </div>
                   </div>
-                ) : (
-                  <div className="rounded-2xl border border-cyan-500/20 bg-black/25 p-4 text-sm text-gray-300">
-                    Video mode uses your selected saved identity. Choose a twin on the right, then add the motion prompt below.
-                  </div>
-                )}
 
-                <LoraIdentitySection
-                  value={loraSelection}
-                  onChange={(next) => setLoraSelection(next)}
-                  options={identitySelectOptions}
-                />
+                  {mode === "text_to_image" ? (
+                    <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
+                      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <div className="text-sm font-semibold text-gray-100">No photos ready yet?</div>
+                          <div className="text-[11px] leading-5 text-gray-400">
+                            Use Build My Model as a starter only. Train a LoRA when you are ready for the strongest identity.
+                          </div>
+                        </div>
+                        <span className="w-fit rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-100">
+                          Starter path
+                        </span>
+                      </div>
+                      <BuildMyModelCard
+                        onApplyPrompt={(result) => {
+                          setPrompt(result.prompt);
+                          setNegativePrompt(result.negativePrompt);
+                          setBaseModel(result.selection.baseModel);
+                          applyIdentityIdToSelection(
+                            getBuildModelIdentityId(result),
+                            setPendingIdentityId,
+                            setLoraSelection,
+                          );
+                          setRefineChoices(null);
+                        }}
+                        onBaseModelChange={(model) => {
+                          setBaseModel(model);
+                        }}
+                        onGenerateNow={(result) => {
+                          setPrompt(result.prompt);
+                          setNegativePrompt(result.negativePrompt);
+                          setBaseModel(result.selection.baseModel);
+                          const identityId = getBuildModelIdentityId(result);
+                          applyIdentityIdToSelection(
+                            identityId,
+                            setPendingIdentityId,
+                            setLoraSelection,
+                          );
+                          setRefineChoices(null);
+
+                          window.setTimeout(() => {
+                            void handleGenerate(result.prompt, identityId);
+                          }, 0);
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-cyan-500/20 bg-black/25 p-4 text-sm text-gray-300">
+                      Video mode works best with a trained AI Twin LoRA. Train or select your twin first, then add the motion prompt below.
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <LoraIdentitySection
+                    value={loraSelection}
+                    onChange={(next) => setLoraSelection(next)}
+                    options={identitySelectOptions}
+                  />
+
+                  <div className="rounded-2xl border border-gray-800 bg-black/30 p-4 text-xs leading-5 text-gray-300">
+                    <div className="font-semibold text-gray-100">Recommended flow</div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-center text-[10px] font-semibold text-gray-200">
+                      <div className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/10 px-2 py-2">1. Train</div>
+                      <div className="rounded-xl border border-purple-500/20 bg-purple-500/10 px-2 py-2">2. Select</div>
+                      <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-2 py-2">3. Generate</div>
+                    </div>
+                    <p className="mt-3 text-[11px] text-gray-400">
+                      Build My Model is useful for fast concepting. LoRA training is the real identity engine.
+                    </p>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
