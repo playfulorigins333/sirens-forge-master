@@ -4265,9 +4265,6 @@ ${basePrompt}`,
                             Use Build My Model as a starter only. Train a LoRA when you are ready for the strongest identity.
                           </div>
                         </div>
-                        <span className="w-fit rounded-full border border-cyan-400/25 bg-transparent px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-100">
-                          Starter path
-                        </span>
                       </div>
                       <BuildMyModelCard
                         onApplyPrompt={(result) => {
