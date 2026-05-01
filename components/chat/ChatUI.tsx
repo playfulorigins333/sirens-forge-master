@@ -408,19 +408,20 @@ export default function ChatUI({
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute inset-0 bg-[#05060a]" />
         <div className="absolute inset-y-0 left-0 w-[22rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.10),transparent_72%)]" />
+        <div className="absolute bottom-0 right-0 h-[24rem] w-[28rem] bg-[radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.08),transparent_68%)]" />
       </div>
 
       <main className="relative flex min-w-0 flex-1">
         <section className="flex min-w-0 flex-1 flex-col">
           <header className="border-b border-white/5 bg-[linear-gradient(180deg,rgba(7,7,11,0.98),rgba(5,6,10,0.98))]">
-            <div className="mx-auto w-full max-w-4xl px-6 py-6">
+            <div className="mx-auto w-full max-w-4xl px-6 py-5">
               <div className="border-l-2 border-fuchsia-400/40 pl-5">
                 <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[32px] font-semibold tracking-tight text-transparent">
                   A Siren’s Mind
                 </h1>
 
                 <p className="mt-2 text-[13px] uppercase tracking-[0.16em] text-zinc-500">
-                  Prompt Brain • AI Twin → Generator
+                  Erotic Prompt Intelligence
                 </p>
               </div>
             </div>
@@ -428,27 +429,27 @@ export default function ChatUI({
 
           <div
             ref={scrollContainerRef}
-            className="min-h-0 flex-1 overflow-y-auto px-6 pb-[19rem] pt-5"
+            className="min-h-0 flex-1 overflow-y-auto px-6 pb-[17.5rem] pt-5"
           >
             <div className="mx-auto w-full max-w-4xl">
-              <div className="mb-5 rounded-[24px] border border-fuchsia-500/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.98),rgba(7,7,10,0.98))] px-7 py-6">
+              <div className="mb-5 overflow-hidden rounded-[24px] border border-fuchsia-500/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.98),rgba(7,7,10,0.98))] px-7 py-6 shadow-[0_0_34px_rgba(168,85,247,0.08)]">
                 <div className="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-fuchsia-300/80">
                   A Siren’s Mind
                 </div>
 
                 <p className="text-[18px] font-medium leading-8 text-white">
-                  Shape the scene, choose image or video, then send it to the Generator
+                  Start with the chat below
                   <span className="font-normal text-zinc-200">
                     {" "}
-                    with your AI Twin attached.
+                    — describe the mood, character, scene, or rough idea you want turned into a generator-ready prompt.
                   </span>
                 </p>
 
                 <p className="mt-3 text-[14px] leading-7 text-zinc-400">
-                  Siren’s Mind does not generate directly. It turns rough ideas into Forge-ready prompts that feed the identity-first generation engine.
+                  Use the quick starters if you want a shortcut, but the main move is simple: type the scene, choose image or video when asked, then send the result to the Generator.
                 </p>
 
-                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                <div className="mt-5 grid gap-3 md:grid-cols-3">
                   {[
                     "Build a text-to-image scene for my AI Twin",
                     "Build a text-to-video scene with cinematic motion",
@@ -457,7 +458,7 @@ export default function ChatUI({
                     <button
                       key={starter}
                       onClick={() => handleStarterClick(starter)}
-                      className="rounded-2xl bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 px-4 py-3 text-left text-white"
+                      className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(124,58,237,0.52),rgba(217,70,239,0.44),rgba(6,182,212,0.42))] px-4 py-3 text-left text-[13px] font-medium leading-6 text-white shadow-[0_10px_28px_rgba(0,0,0,0.22)] transition hover:-translate-y-0.5 hover:border-fuchsia-300/30 hover:brightness-110"
                     >
                       {starter}
                     </button>
@@ -490,13 +491,29 @@ export default function ChatUI({
             </div>
           </div>
 
-          <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-white/5 bg-black/90">
-            <div className="mx-auto w-full max-w-4xl px-6 py-4">
-              <ChatInput
-                mode={mode}
-                onModeChange={setMode}
-                onSend={handleSend}
-              />
+          <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-fuchsia-500/15 bg-[linear-gradient(180deg,rgba(8,8,12,0.92),rgba(0,0,0,0.96))] shadow-[0_-18px_45px_rgba(168,85,247,0.10)] backdrop-blur-xl">
+            <div className="mx-auto w-full max-w-4xl px-6 py-5">
+              <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200">
+                    Start Building Your Prompt
+                  </div>
+                  <div className="mt-1 text-[12px] text-zinc-500">
+                    Type your scene here — this is the main control for Siren’s Mind.
+                  </div>
+                </div>
+                <div className="hidden rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200 sm:block">
+                  Chat → Prompt → Generator
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(14,14,20,0.98),rgba(8,8,12,0.98))] p-3 shadow-[0_0_30px_rgba(168,85,247,0.16)]">
+                <ChatInput
+                  mode={mode}
+                  onModeChange={setMode}
+                  onSend={handleSend}
+                />
+              </div>
             </div>
           </div>
         </section>
