@@ -677,7 +677,7 @@ function HandoffArrivalBanner(props: {
 
           <div className="min-w-0">
             <div className="text-sm font-semibold text-white">
-              Prompt imported from A Siren’s Mind
+              Prompt imported from Siren’s Mind
             </div>
             <div className="mt-1 text-xs text-zinc-300">
               Mode detected:{" "}
@@ -686,7 +686,7 @@ function HandoffArrivalBanner(props: {
               </span>
             </div>
             <div className="mt-2 text-[11px] leading-5 text-zinc-400">
-              Review your prompt, choose a LoRA if you want one, adjust settings,
+              Review your prompt, select or create an AI Twin identity, adjust settings,
               then generate when you’re ready.
             </div>
           </div>
@@ -810,7 +810,7 @@ function HandoffConfidencePanel(props: {
               Prompt source
             </div>
             <div className="mt-1 text-sm font-semibold text-white">
-              A Siren’s Mind
+              Siren’s Mind
             </div>
           </div>
         </div>
@@ -1234,7 +1234,7 @@ function InlineUltraAddOnHelper(props: {
       <button
         type="button"
         onClick={props.onInsert}
-        className="rounded-full border border-gray-700 bg-transparent px-2 py-0.5 text-[10px] font-semibold text-cyan-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/15 hover:text-white"
+        className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/15 hover:text-white"
       >
         + Insert
       </button>
@@ -1416,9 +1416,9 @@ function LoraIdentitySection(props: {
       <CardContent className="space-y-3 text-xs">
         {props.options.length === 0 && (
           <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
-            No trained LoRAs yet. Create one on{" "}
+            No trained LoRAs yet. Train one on{" "}
             <span className="font-semibold text-gray-100">/lora/train</span>{" "}
-            then come back to select it here.
+            or use Build My Model to create a starter identity before generating.
           </div>
         )}
 
@@ -1438,7 +1438,7 @@ function LoraIdentitySection(props: {
         {!hasIdentity && (
           <div className="rounded-lg border border-purple-900/50 bg-purple-500/5 px-3 py-2 text-[11px] text-gray-300">
             <span className="font-semibold text-purple-300">New here?</span>{" "}
-            Generate once, then train an identity LoRA for more consistent results across images and video.
+            Create a starter identity with Build My Model, select an existing AI Twin, or train a LoRA before generating.
           </div>
         )}
       </CardContent>
@@ -1728,19 +1728,27 @@ function GenerateButton(props: {
   qualityPreset: QualityPreset;
   consistencyPreset: ConsistencyPreset;
   disabled?: boolean;
+  disabledReason?: string | null;
+  selectedIdentityLabel: string;
   highlight?: boolean;
   onClick: () => void;
 }) {
-  const actionLabel =
+  const baseActionLabel =
     props.mode === "image_to_video"
       ? "Generate Video"
       : props.mode === "text_to_video"
       ? "Generate Cinematic Video"
       : "Generate";
 
-  const subtext = `This will create ${props.batchSize} ${
-    props.batchSize > 1 ? "outputs" : "output"
-  } at ${props.qualityPreset} quality with ${props.consistencyPreset} consistency.`;
+  const actionLabel = props.disabledReason?.includes("identity")
+    ? "Select AI Twin First"
+    : baseActionLabel;
+
+  const subtext = props.disabledReason
+    ? props.disabledReason
+    : `This will create ${props.batchSize} ${
+        props.batchSize > 1 ? "outputs" : "output"
+      } at ${props.qualityPreset} quality with ${props.consistencyPreset} consistency using ${props.selectedIdentityLabel}.`;
 
   return (
     <IdleGlow>
@@ -1753,6 +1761,15 @@ function GenerateButton(props: {
       }`}
     >
       <CardContent className="p-4">
+        <div className="mb-3 rounded-xl border border-fuchsia-500/20 bg-black/30 px-3 py-2 text-[11px] text-gray-300">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-semibold text-fuchsia-200">Identity Lock</span>
+            <span className={props.disabledReason?.includes("identity") ? "text-amber-300" : "text-emerald-300"}>
+              {props.disabledReason?.includes("identity") ? "Required" : props.selectedIdentityLabel}
+            </span>
+          </div>
+        </div>
+
         <motion.div
           whileHover={{
             scale: props.disabled || props.isGenerating ? 1 : 1.02,
@@ -1866,7 +1883,7 @@ function RefineChoicesPanel(props: {
               className={`w-full rounded-xl border px-4 py-3 text-left text-[12px] text-zinc-200 transition-all hover:text-white ${
                 isRecommended
                   ? "border-fuchsia-400/50 bg-fuchsia-500/10 shadow-[0_0_0_1px_rgba(232,121,249,0.24),0_0_30px_rgba(217,70,239,0.16)] hover:border-fuchsia-300/60 hover:bg-fuchsia-500/14"
-                  : "border-cyan-500/20 bg-black/30 hover:border-cyan-400/40 hover:bg-transparent"
+                  : "border-cyan-500/20 bg-black/30 hover:border-cyan-400/40 hover:bg-cyan-500/10"
               } ${
                 isApplied
                   ? "ring-1 ring-cyan-300/40 shadow-[0_0_0_1px_rgba(34,211,238,0.2),0_0_22px_rgba(34,211,238,0.12)]"
@@ -2559,40 +2576,14 @@ function OutputPanel(props: {
             )}
           </div>
 
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-5">
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
             <Button
               type="button"
-              onClick={() => props.onGenerateMore(latestItem.prompt)}
+              onClick={() => setVariationOpen((value) => !value)}
               className="h-11 justify-start gap-2 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 hover:shadow-[0_12px_28px_rgba(168,85,247,0.24)]"
             >
               <Sparkles className="h-4 w-4" />
-              Again
-            </Button>
-
-            <Button
-              type="button"
-              onClick={() =>
-                handleGeneratePrompt(
-                  promptWith("same identity, slight variation, alternate angle, different expression, fresh framing")
-                )
-              }
-              className="h-11 justify-start gap-2 bg-gradient-to-r from-fuchsia-600 via-purple-600 to-pink-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(217,70,239,0.22)]"
-            >
-              <Sparkles className="h-4 w-4" />
-              Variation
-            </Button>
-
-            <Button
-              type="button"
-              onClick={() =>
-                handleGeneratePrompt(
-                  promptWith("same identity, push further, stronger lighting, more dynamic composition, higher intensity, premium creator finish")
-                )
-              }
-              className="h-11 justify-start gap-2 bg-gradient-to-r from-rose-600 via-pink-600 to-orange-500 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(244,63,94,0.22)]"
-            >
-              <Sparkles className="h-4 w-4" />
-              Push Further
+              Make 4 Variations
             </Button>
 
             <Button
@@ -2602,7 +2593,7 @@ function OutputPanel(props: {
               className="h-11 justify-start gap-2 bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(34,211,238,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <VideoIcon className="h-4 w-4" />
-              To Video
+              Turn into Video
             </Button>
 
             <Button
@@ -2612,18 +2603,7 @@ function OutputPanel(props: {
               className="h-11 justify-start gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(16,185,129,0.18)] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {savingLatest ? <Clock className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              {savingLatest ? "Saving…" : latestIsSaved ? "Saved" : "Save"}
-            </Button>
-          </div>
-
-          <div className="mt-2 flex justify-end">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setVariationOpen((value) => !value)}
-              className="h-8 px-3 text-[11px] text-fuchsia-200 hover:bg-fuchsia-500/10 hover:text-white"
-            >
-              {variationOpen ? "Hide variation recipes" : "Show 4 variation recipes"}
+              {savingLatest ? "Saving…" : latestIsSaved ? "Saved to Vault" : "Save to Vault"}
             </Button>
           </div>
 
@@ -2692,7 +2672,7 @@ function OutputPanel(props: {
               <h3 className="text-sm font-semibold text-white md:text-base">Try Next</h3>
               <p className="text-[11px] text-gray-400">One-click prompt moves that restart the loop.</p>
             </div>
-            <span className="rounded-full border border-cyan-500/20 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
+            <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
               Suggestions
             </span>
           </div>
@@ -2705,7 +2685,7 @@ function OutputPanel(props: {
                   key={chip.label}
                   type="button"
                   onClick={() => handleGeneratePrompt(nextPrompt)}
-                  className="rounded-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-[11px] font-medium text-gray-200 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-400/40 hover:bg-transparent hover:text-white"
+                  className="rounded-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-[11px] font-medium text-gray-200 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-400/40 hover:bg-cyan-500/10 hover:text-white"
                 >
                   + {chip.label}
                 </button>
@@ -2936,7 +2916,7 @@ function OutputPanel(props: {
                   </div>
 
                   {selectedPackItems.length > 0 && (
-                    <div className="mt-3 rounded-xl border border-cyan-500/20 bg-transparent px-3 py-3 text-[11px] leading-5 text-cyan-100">
+                    <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-[11px] leading-5 text-cyan-100">
                       This creates a real Vault collection using the selected generation records. Captions and export files are generated from the selected real assets only.
                     </div>
                   )}
@@ -3068,7 +3048,7 @@ function OutputPanel(props: {
                     </Button>
                   </div>
 
-                  <div className="mt-3 rounded-xl border border-cyan-500/20 bg-transparent px-3 py-3 text-[11px] leading-5 text-cyan-100">
+                  <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-[11px] leading-5 text-cyan-100">
                     Autopost rules still require preview, save as draft, approval, and the scheduler. This panel only hands off selected pack data.
                   </div>
 
@@ -3303,7 +3283,7 @@ export default function GeneratePage() {
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
   const [stylePreset, setStylePreset] = useState<StylePreset>("photorealistic");
   const [qualityPreset] = useState<QualityPreset>("balanced");
-  const [consistencyPreset] = useState<ConsistencyPreset>("high");
+  const [consistencyPreset] = useState<ConsistencyPreset>("medium");
 
   const [loraSelection, setLoraSelection] = useState<LoraSelection>({
     mode: "single",
@@ -3426,27 +3406,25 @@ export default function GeneratePage() {
     return () => window.clearTimeout(timer);
   }, [refineFeedback]);
 
+  const hasSelectedIdentity = loraSelection.selected.some((id) => isUuidLike(id));
+  const hasGenerationInput =
+    mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim());
+
+  const generateDisabledReason = !hasSelectedIdentity
+    ? "Select or create an AI Twin identity first."
+    : !hasGenerationInput
+      ? mode === "image_to_video"
+        ? "Upload a source image before generating video."
+        : "Add a prompt before generating."
+      : !baseModel
+        ? "Choose a body type before generating."
+        : null;
+
   const canGenerate =
     !isGenerating &&
-    (mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim())) &&
+    !generateDisabledReason &&
+    hasGenerationInput &&
     Boolean(baseModel);
-
-  const isReadyToGenerate =
-    !isGenerating &&
-    Boolean(baseModel) &&
-    (mode === "image_to_video"
-      ? Boolean(imageFile)
-      : prompt.trim().length >= 20);
-
-  useEffect(() => {
-    if (!prompt.trim()) return;
-
-    const timer = window.setTimeout(() => {
-      promptTextareaRef.current?.focus({ preventScroll: true });
-    }, 120);
-
-    return () => window.clearTimeout(timer);
-  }, [prompt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3908,6 +3886,21 @@ ${basePrompt}`,
         : loraSelection.selected[0] ?? null;
     const promptToUse = typeof overridePrompt === "string" ? overridePrompt : prompt;
 
+    if (!selectedLoraId || !isUuidLike(selectedLoraId)) {
+      setErrorMessage("Select or create an AI Twin identity before generating. SirensForge is identity-first by design.");
+      return;
+    }
+
+    if (mode === "image_to_video" && !imageFile) {
+      setErrorMessage("Upload a source image before generating video.");
+      return;
+    }
+
+    if (mode !== "image_to_video" && !promptToUse.trim()) {
+      setErrorMessage("Add a prompt before generating.");
+      return;
+    }
+
     setErrorMessage(null);
     setIsGenerating(true);
 
@@ -4145,10 +4138,6 @@ ${basePrompt}`,
     handleGenerate();
   };
 
-  const handleTrainTwin = () => {
-    router.push("/lora/train");
-  };
-
   return (
     <div className="flex min-h-screen flex-col bg-black text-gray-100">
       <GeneratorHeader activeMode={mode} />
@@ -4206,133 +4195,50 @@ ${basePrompt}`,
             />
           )}
 
-          <Card className="overflow-hidden border-purple-500/35 bg-gray-950/80 shadow-[0_0_34px_rgba(168,85,247,0.12)]">
-            <CardHeader className="border-b border-purple-500/15 pb-4">
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
-                    <UserPlus className="h-5 w-5 text-fuchsia-300" />
-                    Start With Your AI Twin
-                  </CardTitle>
-                  <CardDescription className="mt-1 max-w-3xl text-xs leading-5 text-gray-300 md:text-sm">
-                    Train a LoRA for the strongest identity consistency, select an existing twin, or use the starter builder only when you do not have photos ready yet.
-                  </CardDescription>
-                </div>
-                <div className="shrink-0 rounded-full border border-fuchsia-400/30 bg-fuchsia-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-fuchsia-100">
-                  LoRA First
-                </div>
-              </div>
-            </CardHeader>
-
-            <CardContent className="space-y-4 p-4 md:p-5">
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)]">
-                <div className="space-y-4">
-                  <div className="rounded-2xl border border-fuchsia-500/30 bg-[linear-gradient(135deg,rgba(88,28,135,0.22),rgba(8,8,13,0.96))] p-4 shadow-[0_0_26px_rgba(192,38,211,0.10)]">
-                    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-white shadow-[0_0_18px_rgba(192,38,211,0.24)]">
-                            <UserPlus className="h-5 w-5" />
-                          </span>
-                          <div>
-                            <div className="text-base font-bold text-white">Train Your AI Twin LoRA</div>
-                            <div className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-fuchsia-200">
-                              Best quality • strongest consistency • money path
-                            </div>
-                          </div>
-                        </div>
-                        <p className="mt-3 max-w-2xl text-xs leading-5 text-gray-300 md:text-sm">
-                          Upload your training set and create a reusable identity LoRA. This is the premium Sirens Forge workflow for keeping the same person consistent across images, packs, and future video.
-                        </p>
-                      </div>
-
-                      <Button
-                        type="button"
-                        onClick={handleTrainTwin}
-                        className="h-11 shrink-0 bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-5 text-xs font-bold text-white shadow-[0_12px_30px_rgba(192,38,211,0.20)] transition hover:-translate-y-0.5 hover:brightness-110"
-                      >
-                        Train AI Twin LoRA
-                      </Button>
-                    </div>
-                  </div>
-
-                  {mode === "text_to_image" ? (
-                    <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
-                      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <div className="text-sm font-semibold text-gray-100">No photos ready yet?</div>
-                          <div className="text-[11px] leading-5 text-gray-400">
-                            Use Build My Model as a starter only. Train a LoRA when you are ready for the strongest identity.
-                          </div>
-                        </div>
-                      </div>
-                      <BuildMyModelCard
-                        onApplyPrompt={(result) => {
-                          setPrompt(result.prompt);
-                          setNegativePrompt(result.negativePrompt);
-                          setBaseModel(result.selection.baseModel);
-                          applyIdentityIdToSelection(
-                            getBuildModelIdentityId(result),
-                            setPendingIdentityId,
-                            setLoraSelection,
-                          );
-                          setRefineChoices(null);
-                        }}
-                        onBaseModelChange={(model) => {
-                          setBaseModel(model);
-                        }}
-                        onGenerateNow={(result) => {
-                          setPrompt(result.prompt);
-                          setNegativePrompt(result.negativePrompt);
-                          setBaseModel(result.selection.baseModel);
-                          const identityId = getBuildModelIdentityId(result);
-                          applyIdentityIdToSelection(
-                            identityId,
-                            setPendingIdentityId,
-                            setLoraSelection,
-                          );
-                          setRefineChoices(null);
-
-                          window.setTimeout(() => {
-                            void handleGenerate(result.prompt, identityId);
-                          }, 0);
-                        }}
-                      />
-                    </div>
-                  ) : (
-                    <div className="rounded-2xl border border-cyan-500/20 bg-black/25 p-4 text-sm text-gray-300">
-                      Video mode works best with a trained AI Twin LoRA. Train or select your twin first, then add the motion prompt below.
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  <LoraIdentitySection
-                    value={loraSelection}
-                    onChange={(next) => setLoraSelection(next)}
-                    options={identitySelectOptions}
-                  />
-
-                  <div className="rounded-2xl border border-gray-800 bg-black/30 p-4 text-xs leading-5 text-gray-300">
-                    <div className="font-semibold text-gray-100">Recommended flow</div>
-                    <div className="mt-2 grid grid-cols-3 gap-2 text-center text-[10px] font-semibold text-gray-200">
-                      <div className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/10 px-2 py-2">1. Train</div>
-                      <div className="rounded-xl border border-purple-500/20 bg-purple-500/10 px-2 py-2">2. Select</div>
-                      <div className="rounded-xl border border-cyan-500/20 bg-transparent px-2 py-2">3. Generate</div>
-                    </div>
-                    <p className="mt-3 text-[11px] text-gray-400">
-                      Build My Model is useful for fast concepting. LoRA training is the real identity engine.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           <Card className="border-gray-800 bg-gray-900/80 shadow-[0_0_30px_rgba(34,211,238,0.05)]">
             <CardContent className="space-y-3 p-4 md:p-4">
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
                 <div className="space-y-3">
+                  {mode === "text_to_image" && (
+                    <BuildMyModelCard
+                      onApplyPrompt={(result) => {
+                        setPrompt(result.prompt);
+                        setNegativePrompt(result.negativePrompt);
+                        setBaseModel(result.selection.baseModel);
+                        applyIdentityIdToSelection(
+                          getBuildModelIdentityId(result),
+                          setPendingIdentityId,
+                          setLoraSelection,
+                        );
+                        setRefineChoices(null);
+                      }}
+                      onBaseModelChange={(model) => {
+                        setBaseModel(model);
+                      }}
+                      onGenerateNow={(result) => {
+                        setPrompt(result.prompt);
+                        setNegativePrompt(result.negativePrompt);
+                        setBaseModel(result.selection.baseModel);
+                        const identityId = getBuildModelIdentityId(result);
+                        applyIdentityIdToSelection(
+                          identityId,
+                          setPendingIdentityId,
+                          setLoraSelection,
+                        );
+                        setRefineChoices(null);
+
+                        if (!identityId || !isUuidLike(identityId)) {
+                          setErrorMessage("Build My Model needs to save a starter identity before generation. Select or train an AI Twin to continue.");
+                          return;
+                        }
+
+                        window.setTimeout(() => {
+                          void handleGenerate(result.prompt, identityId);
+                        }, 0);
+                      }}
+                    />
+                  )}
+
                   <PromptSection
                     mode={mode}
                     prompt={prompt}
@@ -4378,25 +4284,33 @@ ${basePrompt}`,
                 </div>
 
                 <div className="space-y-3 xl:sticky xl:top-24 xl:self-start">
-                  <ModelStyleSection
-                    baseModel={baseModel}
-                    stylePreset={stylePreset}
-                    onBaseModelChange={setBaseModel}
-                    onStylePresetChange={setStylePreset}
-                  />
+                  <div className="grid grid-cols-1 gap-3">
+                    <LoraIdentitySection
+                      value={loraSelection}
+                      onChange={(next) => setLoraSelection(next)}
+                      options={identitySelectOptions}
+                    />
 
-                  <div className="sticky bottom-0 z-30 rounded-2xl bg-gradient-to-t from-black/95 via-black/80 to-transparent pt-4 pb-2">
-                    <GenerateButton
-                      mode={mode}
-                      isGenerating={isGenerating}
-                      batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
-                      qualityPreset={qualityPreset}
-                      consistencyPreset={consistencyPreset}
-                      disabled={!canGenerate}
-                      highlight={highlightGenerate || isReadyToGenerate}
-                      onClick={handleGenerate}
+                    <ModelStyleSection
+                      baseModel={baseModel}
+                      stylePreset={stylePreset}
+                      onBaseModelChange={setBaseModel}
+                      onStylePresetChange={setStylePreset}
                     />
                   </div>
+
+                  <GenerateButton
+                    mode={mode}
+                    isGenerating={isGenerating}
+                    batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
+                    qualityPreset={qualityPreset}
+                    consistencyPreset={consistencyPreset}
+                    disabled={!canGenerate}
+                    disabledReason={generateDisabledReason}
+                    selectedIdentityLabel={selectedIdentityLabel}
+                    highlight={highlightGenerate}
+                    onClick={handleGenerate}
+                  />
                 </div>
               </div>
             </CardContent>
