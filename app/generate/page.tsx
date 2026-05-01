@@ -1416,9 +1416,7 @@ function LoraIdentitySection(props: {
       <CardContent className="space-y-3 text-xs">
         {props.options.length === 0 && (
           <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
-            No trained LoRAs yet. Train one on{" "}
-            <span className="font-semibold text-gray-100">/lora/train</span>{" "}
-            or use Build My Model to create a starter identity before generating.
+            No trained LoRAs yet. Train your AI Twin first for the strongest identity consistency, or use Build My Model only as a starter when photos are not ready.
           </div>
         )}
 
@@ -1438,7 +1436,7 @@ function LoraIdentitySection(props: {
         {!hasIdentity && (
           <div className="rounded-lg border border-purple-900/50 bg-purple-500/5 px-3 py-2 text-[11px] text-gray-300">
             <span className="font-semibold text-purple-300">New here?</span>{" "}
-            Create a starter identity with Build My Model, select an existing AI Twin, or train a LoRA before generating.
+            Train your AI Twin for the strongest results, or select an existing trained identity before generating. Build My Model is only the starter path when photos are not ready.
           </div>
         )}
       </CardContent>
@@ -3759,7 +3757,7 @@ export default function GeneratePage() {
   }, [imageFile]);
 
   const identitySelectOptions: { id: string; label: string }[] = [
-    { id: "none", label: "None (no identity LoRA)" },
+    { id: "none", label: "Select trained AI Twin" },
     ...identityOptions.map((l) => ({
       id: l.id,
       label: l.name && l.name.trim().length > 0 ? l.name : l.id,
@@ -4199,6 +4197,62 @@ ${basePrompt}`,
             <CardContent className="space-y-3 p-4 md:p-4">
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
                 <div className="space-y-3">
+                  <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
+                    <Card className="overflow-hidden border-fuchsia-500/35 bg-[linear-gradient(135deg,rgba(88,28,135,0.24),rgba(8,8,13,0.96))] shadow-[0_0_34px_rgba(192,38,211,0.12)]">
+                      <CardContent className="p-4 md:p-5">
+                        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-white shadow-[0_0_22px_rgba(192,38,211,0.28)]">
+                                <UserPlus className="h-5 w-5" />
+                              </span>
+                              <div>
+                                <div className="text-base font-bold text-white md:text-lg">Train Your AI Twin LoRA</div>
+                                <div className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-fuchsia-200">
+                                  Primary path • strongest consistency • creator-ready identity
+                                </div>
+                              </div>
+                            </div>
+                            <p className="mt-3 max-w-3xl text-xs leading-5 text-gray-300 md:text-sm">
+                              For real clients and creator accounts, start here. Upload a training set, build a reusable AI Twin, then return to the Forge with that identity selected for consistent image and video outputs.
+                            </p>
+                          </div>
+
+                          <div className="flex shrink-0 flex-col gap-2 sm:flex-row md:flex-col xl:flex-row">
+                            <Button
+                              type="button"
+                              onClick={() => router.push("/lora/train")}
+                              className="h-10 bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-4 text-xs font-bold text-white shadow-[0_10px_28px_rgba(192,38,211,0.20)] transition hover:-translate-y-0.5 hover:brightness-110"
+                            >
+                              <UserPlus className="mr-2 h-4 w-4" />
+                              Train My AI Twin
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => router.push("/identities")}
+                              className="h-10 border-fuchsia-400/25 bg-black/25 px-4 text-xs font-semibold text-fuchsia-100 hover:bg-fuchsia-500/10 hover:text-white"
+                            >
+                              Manage Identities
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-1 gap-2 text-[11px] text-gray-300 sm:grid-cols-3">
+                          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+                            <span className="font-semibold text-fuchsia-200">1.</span> Train or select AI Twin
+                          </div>
+                          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+                            <span className="font-semibold text-cyan-200">2.</span> Build prompt or use Siren’s Mind
+                          </div>
+                          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+                            <span className="font-semibold text-emerald-200">3.</span> Generate consistent assets
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+
                   {mode === "text_to_image" && (
                     <BuildMyModelCard
                       onApplyPrompt={(result) => {
