@@ -199,17 +199,24 @@ function LibraryHeader() {
       <div className="flex items-center justify-between px-6 py-4">
         <div>
           <h1 className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-2xl font-bold text-transparent">
-            Your Content Vault
+            Creation Loop Hub
           </h1>
           <p className="mt-1 text-xs text-gray-300 md:text-sm">
-            Your creations, identity seeds, and reusable model directions.
+            Everything you’ve made, saved, and can instantly reuse to create the next scene.
           </p>
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="hidden items-center gap-2 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_20px_rgba(168,85,247,0.35)] sm:flex">
+          <Link href="/generate" className="hidden sm:block">
+            <Button className="h-9 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 px-4 text-xs font-bold text-white shadow-[0_0_22px_rgba(168,85,247,0.30)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
+              <Wand2 className="mr-2 h-4 w-4" />
+              Create New Content
+            </Button>
+          </Link>
+
+          <div className="hidden items-center gap-2 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_20px_rgba(168,85,247,0.35)] lg:flex">
             <Shield className="h-3 w-3" />
-            PRIVATE VAULT
+            CREATION LOOP
           </div>
 
           <div className="rounded-full border border-emerald-500/30 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-400">
@@ -234,12 +241,12 @@ function LibraryStats({ items }: { items: LibraryItem[] }) {
   const total = items.length;
   const images = items.filter((i) => i.kind === "image").length;
   const videos = items.filter((i) => i.kind === "video").length;
-  const identitySeeds = items.filter((i) => i.isIdentitySeed || i.kind === "identity").length;
+  const identityConcepts = items.filter((i) => i.isIdentitySeed || i.kind === "identity").length;
   const withIdentity = items.filter((i) => Boolean(i.identityLora)).length;
 
   const cards = [
     {
-      label: "Vault Items",
+      label: "Saved Items",
       value: total,
       icon: Sparkles,
       glow: "from-purple-500/25 via-pink-500/10 to-cyan-500/25",
@@ -263,8 +270,8 @@ function LibraryStats({ items }: { items: LibraryItem[] }) {
       text: "text-cyan-200",
     },
     {
-      label: "Identity Seeds",
-      value: identitySeeds || withIdentity,
+      label: "Starter Concepts",
+      value: identityConcepts || withIdentity,
       icon: Crown,
       glow: "from-yellow-500/20 via-orange-500/10 to-transparent",
       border: "border-yellow-900/40",
@@ -314,13 +321,13 @@ function VaultIntentBanner() {
             <div className="space-y-2">
               <div className="inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-purple-200">
                 <Lock className="h-3.5 w-3.5" />
-                Identity Engine
+                Creation Loop
               </div>
               <h2 className="text-xl font-bold text-white md:text-2xl">
-                Your Vault is where identities start, evolve, and become reusable.
+                Save it. Reuse it. Generate the next scene.
               </h2>
               <p className="max-w-3xl text-sm leading-6 text-gray-300">
-                Build My Model seeds now appear here even before pods are online. When generation pods return, image and video assets will stack under the same identity flow.
+                Your Vault is not just storage. It is the loop: save the best concepts, reuse proven prompts, generate the next image or video, and keep building around the same AI Twin.
               </p>
             </div>
 
@@ -359,7 +366,7 @@ function EmptyState() {
               Your vault is empty
             </h2>
             <p className="mx-auto mt-2 max-w-xl text-sm text-gray-400">
-              Use Build My Model on the Generate page to save your first identity seed.
+              Start from the Generator or train an AI Twin, then every saved result and reusable concept will appear here.
             </p>
           </div>
 
@@ -367,7 +374,13 @@ function EmptyState() {
             <Link href="/generate">
               <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white shadow-[0_0_24px_rgba(168,85,247,0.35)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
                 <Sparkles className="mr-2 h-4 w-4" />
-                Open Generator
+                Create New Content
+              </Button>
+            </Link>
+            <Link href="/lora/train">
+              <Button variant="outline" className="border-gray-700 bg-gray-950 text-gray-100 hover:bg-gray-900">
+                <Crown className="mr-2 h-4 w-4" />
+                Train AI Twin
               </Button>
             </Link>
           </div>
@@ -397,7 +410,7 @@ function VaultToolbar(props: {
               Vault Controls
             </CardTitle>
             <CardDescription className="mt-1 text-xs text-gray-300">
-              Browse assets, identity seeds, or grouped identity collections.
+              Browse saved creations, reusable starter concepts, or full AI Twin loops.
             </CardDescription>
           </div>
 
@@ -413,7 +426,7 @@ function VaultToolbar(props: {
               }
             >
               <Grid3X3 className="mr-2 h-4 w-4" />
-              All Items
+              All Creations
             </Button>
             <Button
               type="button"
@@ -426,7 +439,7 @@ function VaultToolbar(props: {
               }
             >
               <Layers3 className="mr-2 h-4 w-4" />
-              By Identity
+              By AI Twin
             </Button>
           </div>
         </div>
@@ -449,8 +462,8 @@ function VaultToolbar(props: {
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="border-gray-800 bg-gray-950 text-gray-100">
-              <SelectItem value="all">All Items</SelectItem>
-              <SelectItem value="identities">Identity Seeds</SelectItem>
+              <SelectItem value="all">All Creations</SelectItem>
+              <SelectItem value="identities">Starter Concepts</SelectItem>
               <SelectItem value="images">Images Only</SelectItem>
               <SelectItem value="videos">Videos Only</SelectItem>
             </SelectContent>
@@ -490,7 +503,7 @@ function IdentitySeedVisual({ item, large = false }: { item: LibraryItem; large?
         <UserRound className={`${large ? "h-10 w-10" : "h-7 w-7"} text-purple-200`} />
       </div>
       <div className="mt-3 text-xs font-bold uppercase tracking-[0.14em] text-purple-100">
-        Identity Seed
+        Starter Concept
       </div>
       <div className="mt-1 line-clamp-2 text-[11px] text-gray-300">
         {item.bodyMode || "Reusable model direction"}
@@ -503,8 +516,9 @@ function AssetCard(props: {
   item: LibraryItem;
   index: number;
   onOpen: (item: LibraryItem) => void;
+  onReuse: (item: LibraryItem) => void;
 }) {
-  const { item, index, onOpen } = props;
+  const { item, index, onOpen, onReuse } = props;
   const isIdentity = item.isIdentitySeed || item.kind === "identity";
   const displayUrl = getDisplayUrl(item);
 
@@ -580,7 +594,7 @@ function AssetCard(props: {
                     : "border-cyan-500/30 bg-cyan-500/15 text-cyan-200"
               }`}
             >
-              {isIdentity ? "IDENTITY SEED" : item.kind === "image" ? "IMAGE" : "VIDEO"}
+              {isIdentity ? "STARTER CONCEPT" : item.kind === "image" ? "IMAGE" : "VIDEO"}
             </span>
 
             {item.identityLora && !isIdentity ? (
@@ -608,6 +622,26 @@ function AssetCard(props: {
           ) : null}
         </div>
       </div>
+
+      <div className="space-y-2 border-t border-gray-800 bg-gray-950/80 p-3">
+        <Button
+          type="button"
+          onClick={() => onReuse(item)}
+          className="h-10 w-full bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-bold text-white shadow-[0_0_18px_rgba(168,85,247,0.24)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
+        >
+          <Wand2 className="mr-2 h-4 w-4" />
+          Generate From This
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => onOpen(item)}
+          className="h-9 w-full border-gray-800 bg-black/30 text-xs text-gray-300 hover:bg-gray-900 hover:text-white"
+        >
+          <Maximize2 className="mr-2 h-4 w-4" />
+          View Details
+        </Button>
+      </div>
     </motion.div>
   );
 }
@@ -615,11 +649,12 @@ function AssetCard(props: {
 function VaultGrid(props: {
   items: LibraryItem[];
   onOpen: (item: LibraryItem) => void;
+  onReuse: (item: LibraryItem) => void;
 }) {
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
       {props.items.map((item, index) => (
-        <AssetCard key={item.id} item={item} index={index} onOpen={props.onOpen} />
+        <AssetCard key={item.id} item={item} index={index} onOpen={props.onOpen} onReuse={props.onReuse} />
       ))}
     </div>
   );
@@ -690,7 +725,7 @@ function IdentityGroupCard(props: {
             <div className="rounded-2xl border border-gray-800 bg-gray-950 p-3 text-center">
               <Crown className="mx-auto mb-1 h-4 w-4 text-yellow-300" />
               <p className="text-lg font-bold text-yellow-200">{group.identitySeedCount}</p>
-              <p className="text-[10px] uppercase tracking-[0.12em] text-gray-500">Seeds</p>
+              <p className="text-[10px] uppercase tracking-[0.12em] text-gray-500">Concepts</p>
             </div>
             <div className="rounded-2xl border border-gray-800 bg-gray-950 p-3 text-center">
               <Sparkles className="mx-auto mb-1 h-4 w-4 text-purple-300" />
@@ -701,7 +736,7 @@ function IdentityGroupCard(props: {
 
           <div className="rounded-2xl border border-purple-900/40 bg-purple-500/10 p-4">
             <p className="text-sm font-semibold text-purple-100">
-              Identity Strength: {group.identitySeedCount > 0 ? "Seeded" : "Growing"}
+              Loop Strength: {group.identitySeedCount > 0 ? "Ready to Reuse" : "Building"}
             </p>
             <p className="mt-1 text-xs leading-5 text-gray-300">
               Identity seeds are your reusable model directions. This identity has generated {group.generationCount} time{group.generationCount === 1 ? "" : "s"}; last used: {formatLastUsed(group.lastUsedAt)}.
@@ -736,25 +771,8 @@ function IdentityGroupCard(props: {
           ) : null}
 
           <div className="flex flex-wrap gap-2 pt-1">
-            {group.identityId ? (
-              <Link href={`/identities/${group.identityId}`}>
-                <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  View Identity
-                </Button>
-              </Link>
-            ) : (
-              <Link href="/identities">
-                <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
-                  <Crown className="mr-2 h-4 w-4" />
-                  Link an Identity
-                </Button>
-              </Link>
-            )}
-
             <Button
               type="button"
-              variant="outline"
               onClick={() => {
                 const reusable =
                   group.heroItem ||
@@ -765,11 +783,27 @@ function IdentityGroupCard(props: {
                   onReuse(reusable);
                 }
               }}
-              className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
+              className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
             >
               <Wand2 className="mr-2 h-4 w-4" />
-              Generate More Like This
+              Generate From This
             </Button>
+
+            {group.identityId ? (
+              <Link href={`/identities/${group.identityId}`}>
+                <Button variant="outline" className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800">
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  View AI Twin
+                </Button>
+              </Link>
+            ) : (
+              <Link href="/identities">
+                <Button variant="outline" className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800">
+                  <Crown className="mr-2 h-4 w-4" />
+                  Link an AI Twin
+                </Button>
+              </Link>
+            )}
           </div>
         </CardContent>
       </div>
@@ -791,7 +825,7 @@ function IdentityGroupedVault(props: {
               <Layers3 className="h-6 w-6 text-gray-500" />
             </div>
             <h2 className="text-lg font-semibold text-gray-100">
-              No identity groups match your filters
+              No AI Twin loops match your filters
             </h2>
             <p className="text-sm text-gray-400">
               Try a different search term or switch your media filter.
@@ -875,7 +909,7 @@ function VaultModal(props: {
                           : "border-cyan-500/30 bg-cyan-500/15 text-cyan-200"
                     }`}
                   >
-                    {isIdentity ? "IDENTITY SEED" : item.kind === "image" ? "IMAGE ASSET" : "VIDEO ASSET"}
+                    {isIdentity ? "STARTER CONCEPT" : item.kind === "image" ? "IMAGE ASSET" : "VIDEO ASSET"}
                   </span>
 
                   {item.identityLora ? (
@@ -886,12 +920,12 @@ function VaultModal(props: {
                 </div>
 
                 <h2 className="bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-lg font-bold text-transparent">
-                  {isIdentity ? identityTitle(item) : "Vault Asset Details"}
+                  {isIdentity ? identityTitle(item) : "Creation Details"}
                 </h2>
                 <p className="mt-1 text-xs text-gray-400">
                   {isIdentity
-                    ? "Reusable model seed saved from Build My Model."
-                    : "Review, reuse, or keep building around this identity."}
+                    ? "Reusable starter concept saved from Build My Model."
+                    : "Review it, reuse the prompt, or send it back to the Generator for the next scene."}
                 </p>
               </div>
 
@@ -938,7 +972,7 @@ function VaultModal(props: {
 
                   <div className="rounded-xl border border-gray-800 bg-gray-900/70 p-3">
                     <p className="mb-2 text-[11px] uppercase tracking-[0.14em] text-gray-400">
-                      Generation Count
+                      Reuse Count
                     </p>
                     <p className="text-gray-200">{getItemGenerationCount(item)}</p>
                   </div>
@@ -979,12 +1013,11 @@ function VaultModal(props: {
 
                 <Button
                   type="button"
-                  variant="outline"
                   onClick={() => props.onReuse(item)}
-                  className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
+                  className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
                 >
                   <Sparkles className="mr-2 h-4 w-4" />
-                  Generate More Like This
+                  Generate From This
                 </Button>
 
                 <Button
@@ -1047,7 +1080,7 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
           item.identityLora || "",
           shortIdentityLabel(item.identityLora),
           item.status || "",
-          isIdentity ? "identity seed build my model ai twin" : "",
+          isIdentity ? "starter concept build my model ai twin generation loop reuse" : "",
         ]
           .join(" ")
           .toLowerCase();
@@ -1097,8 +1130,8 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
         title: heroItem?.isIdentitySeed ? identityTitle(heroItem) : shortIdentityLabel(identityId),
         subtitle: identityId
           ? identitySeedCount > 0
-            ? "A saved Build My Model identity seed ready for reuse."
-            : "A growing collection tied to this AI Twin."
+            ? "A saved starter concept ready for the next generation loop."
+            : "Saved creations tied to this AI Twin, ready to reuse."
           : "Assets created without a linked identity.",
         items: groupItems,
         imageCount,
@@ -1164,7 +1197,7 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
             onReuse={reuseIdentity}
           />
         ) : (
-          <VaultGrid items={filtered} onOpen={setSelected} />
+          <VaultGrid items={filtered} onOpen={setSelected} onReuse={reuseIdentity} />
         )}
       </main>
 
