@@ -88,6 +88,38 @@ function statusTone(status: string) {
     }
 }
 
+
+function humanStatusLabel(status: string) {
+  switch ((status || "").toLowerCase()) {
+    case "completed":
+      return "Ready";
+    case "training":
+      return "Forging...";
+    case "queued":
+      return "Queued";
+    case "draft":
+      return "Draft";
+    case "failed":
+      return "Needs Attention";
+    default:
+      return status || "Unknown";
+  }
+}
+
+function buildGenerateHref(item: IdentityCardItem) {
+  const params = new URLSearchParams();
+  params.set("identity", item.id);
+  params.set("generation_target", "text_to_image");
+  params.set("output_type", "IMAGE");
+  params.set("source", "identities");
+
+  if (item.triggerToken) {
+    params.set("trigger", item.triggerToken);
+  }
+
+  return `/generate?${params.toString()}`;
+}
+
 function IdentityHeader() {
   return (
     <header className="border-b border-gray-800 bg-gray-950/70 backdrop-blur sticky top-0 z-40">
@@ -284,7 +316,7 @@ function EmptyState() {
             <Link href="/lora/train">
               <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 text-white shadow-[0_0_24px_rgba(168,85,247,0.35)]">
                 <Wand2 className="w-4 h-4 mr-2" />
-                Train Identity
+                Train Your AI Twin
               </Button>
             </Link>
           </div>
@@ -297,53 +329,74 @@ function EmptyState() {
 function IdentityGrid({ items }: { items: IdentityCardItem[] }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-      {items.map((item, index) => (
-        <motion.div
-          key={item.id}
-          initial={{ opacity: 0, y: 12, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ delay: index * 0.03 }}
-        >
-          <Link href={`/identities/${item.id}`}>
-            <Card className="h-full overflow-hidden border-gray-800 bg-gray-900/80 hover:border-purple-700/50 hover:shadow-[0_0_28px_rgba(168,85,247,0.12)] transition-all cursor-pointer">
-              <div className="relative aspect-[16/10] bg-gray-950 overflow-hidden">
-                {item.coverUrl ? (
-                  <img
-                    src={item.coverUrl}
-                    alt={item.name}
-                    className="w-full h-full object-cover transition-transform duration-300 hover:scale-[1.03]"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-cyan-500/10 flex items-center justify-center">
-                    <div className="h-16 w-16 rounded-3xl bg-black/30 border border-white/10 flex items-center justify-center">
-                      <Dna className="w-8 h-8 text-purple-300" />
+      {items.map((item, index) => {
+        const statusLabel = humanStatusLabel(item.status);
+        const isReady = item.status === "completed";
+        const assetLabel =
+          item.totalAssets > 0
+            ? `${item.totalAssets} creation${item.totalAssets === 1 ? "" : "s"} made with this AI Twin`
+            : isReady
+              ? "Ready to create your first scene"
+              : item.status === "training"
+                ? "Training in progress — your AI Twin is being forged"
+                : item.status === "queued"
+                  ? "Queued for training"
+                  : item.status === "failed"
+                    ? "Training needs attention"
+                    : "Finish setup to start creating";
+
+        return (
+          <motion.div
+            key={item.id}
+            initial={{ opacity: 0, y: 12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ delay: index * 0.03 }}
+          >
+            <Card className="h-full overflow-hidden border-gray-800 bg-gray-900/80 hover:border-purple-700/50 hover:shadow-[0_0_28px_rgba(168,85,247,0.12)] transition-all">
+              <Link href={`/identities/${item.id}`} className="block">
+                <div className="relative aspect-[16/10] bg-gray-950 overflow-hidden">
+                  {item.coverUrl ? (
+                    <img
+                      src={item.coverUrl}
+                      alt={item.name}
+                      className="w-full h-full object-cover transition-transform duration-300 hover:scale-[1.03]"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-purple-500/10 via-pink-500/5 to-cyan-500/10 flex items-center justify-center">
+                      <div className="h-16 w-16 rounded-3xl bg-black/30 border border-white/10 flex items-center justify-center">
+                        <Dna className="w-8 h-8 text-purple-300" />
+                      </div>
                     </div>
+                  )}
+
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/10" />
+
+                  <div className="absolute top-3 left-3">
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border ${statusTone(
+                        item.status
+                      )}`}
+                    >
+                      {statusLabel}
+                    </span>
                   </div>
-                )}
 
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-black/10" />
+                  <div className="absolute top-3 right-3">
+                    <span className="px-2.5 py-1 rounded-full text-[10px] font-semibold border border-purple-500/30 bg-purple-500/15 text-purple-100">
+                      AI TWIN
+                    </span>
+                  </div>
 
-                <div className="absolute top-3 left-3">
-                  <span
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-semibold border ${statusTone(
-                      item.status
-                    )}`}
-                  >
-                    {item.status.toUpperCase()}
-                  </span>
+                  <div className="absolute bottom-0 left-0 right-0 p-4">
+                    <h3 className="text-lg font-bold text-white line-clamp-1">
+                      {item.name}
+                    </h3>
+                    <p className="text-[11px] text-gray-300 mt-1">
+                      {assetLabel}
+                    </p>
+                  </div>
                 </div>
-
-                <div className="absolute bottom-0 left-0 right-0 p-4">
-                  <h3 className="text-lg font-bold text-white line-clamp-1">
-                    {item.name}
-                  </h3>
-                  <p className="text-[11px] text-gray-300 mt-1">
-                    {item.totalAssets > 0
-                      ? `${item.totalAssets} linked asset${item.totalAssets === 1 ? "" : "s"}`
-                      : "No linked assets yet"}
-                  </p>
-                </div>
-              </div>
+              </Link>
 
               <CardContent className="p-4 space-y-4">
                 <div className="grid grid-cols-3 gap-3">
@@ -403,19 +456,32 @@ function IdentityGrid({ items }: { items: IdentityCardItem[] }) {
                   )}
                 </div>
 
-                <div className="pt-1">
-                  <div className="flex items-center justify-between rounded-xl border border-purple-900/30 bg-purple-500/5 px-3 py-2">
-                    <span className="text-xs text-purple-200 font-medium">
-                      Open identity workspace
-                    </span>
-                    <ArrowRight className="w-4 h-4 text-purple-300" />
-                  </div>
+                <div className="pt-2 space-y-2">
+                  <Link href={buildGenerateHref(item)}>
+                    <Button
+                      type="button"
+                      disabled={!isReady}
+                      className="w-full bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white shadow-[0_0_20px_rgba(168,85,247,0.35)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Wand2 className="w-4 h-4 mr-2" />
+                      {isReady ? "Create With This AI Twin" : statusLabel}
+                    </Button>
+                  </Link>
+
+                  <Link href={`/identities/${item.id}`}>
+                    <div className="flex items-center justify-between rounded-xl border border-gray-800 bg-gray-950 px-3 py-2 transition hover:border-purple-700/40 hover:bg-gray-900">
+                      <span className="text-xs text-gray-300 font-medium">
+                        Open identity workspace
+                      </span>
+                      <ArrowRight className="w-4 h-4 text-gray-400" />
+                    </div>
+                  </Link>
                 </div>
               </CardContent>
             </Card>
-          </Link>
-        </motion.div>
-      ))}
+          </motion.div>
+        );
+      })}
     </div>
   );
 }
