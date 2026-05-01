@@ -613,13 +613,13 @@ function GenerateEntryIntelligenceBanner(props: {
           </p>
 
           <div className="mt-3 grid grid-cols-1 gap-2 text-[11px] text-gray-300 sm:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+            <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
               <span className="text-gray-500">Tone:</span> <span className="font-semibold text-gray-100">{tones}</span>
             </div>
-            <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+            <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
               <span className="text-gray-500">Target:</span> <span className="font-semibold text-gray-100">{platforms}</span>
             </div>
-            <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+            <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
               <span className="text-gray-500">Mode:</span> <span className="font-semibold text-gray-100">Prompt ready</span>
             </div>
           </div>
@@ -4198,12 +4198,13 @@ ${basePrompt}`,
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.95fr)]">
                 <div className="space-y-3">
                   <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
-                    <Card className="overflow-hidden border-fuchsia-500/35 bg-[linear-gradient(135deg,rgba(88,28,135,0.24),rgba(8,8,13,0.96))] shadow-[0_0_34px_rgba(192,38,211,0.12)]">
-                      <CardContent className="p-4 md:p-5">
+                    <Card className="relative overflow-hidden border-fuchsia-500/45 bg-[linear-gradient(135deg,rgba(18,8,28,0.98),rgba(88,28,135,0.55),rgba(8,8,13,0.98))] shadow-[0_0_44px_rgba(192,38,211,0.24)]">
+                      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_10%,rgba(236,72,153,0.22),transparent_32%),radial-gradient(circle_at_68%_12%,rgba(34,211,238,0.12),transparent_30%)]" />
+                      <CardContent className="relative p-4 md:p-5">
                         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-3">
-                              <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-white shadow-[0_0_22px_rgba(192,38,211,0.28)]">
+                              <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-white shadow-[0_0_26px_rgba(192,38,211,0.45)]">
                                 <UserPlus className="h-5 w-5" />
                               </span>
                               <div>
@@ -4213,7 +4214,7 @@ ${basePrompt}`,
                                 </div>
                               </div>
                             </div>
-                            <p className="mt-3 max-w-3xl text-xs leading-5 text-gray-300 md:text-sm">
+                            <p className="mt-3 max-w-3xl text-xs leading-5 text-gray-100 md:text-sm">
                               For real clients and creator accounts, start here. Upload a training set, build a reusable AI Twin, then return to the Forge with that identity selected for consistent image and video outputs.
                             </p>
                           </div>
@@ -4222,7 +4223,7 @@ ${basePrompt}`,
                             <Button
                               type="button"
                               onClick={() => router.push("/lora/train")}
-                              className="h-10 bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-4 text-xs font-bold text-white shadow-[0_10px_28px_rgba(192,38,211,0.20)] transition hover:-translate-y-0.5 hover:brightness-110"
+                              className="h-10 bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-4 text-xs font-bold text-white shadow-[0_0_28px_rgba(168,85,247,0.55)] transition hover:-translate-y-0.5 hover:brightness-110"
                             >
                               <UserPlus className="mr-2 h-4 w-4" />
                               Train My AI Twin
@@ -4231,7 +4232,7 @@ ${basePrompt}`,
                               type="button"
                               variant="outline"
                               onClick={() => router.push("/identities")}
-                              className="h-10 border-fuchsia-400/25 bg-black/25 px-4 text-xs font-semibold text-fuchsia-100 hover:bg-fuchsia-500/10 hover:text-white"
+                              className="h-10 border-gray-700 bg-black/35 px-4 text-xs font-semibold text-gray-200 hover:border-fuchsia-400/35 hover:bg-gray-900 hover:text-white"
                             >
                               Manage Identities
                             </Button>
@@ -4239,13 +4240,13 @@ ${basePrompt}`,
                         </div>
 
                         <div className="mt-4 grid grid-cols-1 gap-2 text-[11px] text-gray-300 sm:grid-cols-3">
-                          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+                          <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
                             <span className="font-semibold text-fuchsia-200">1.</span> Train or select AI Twin
                           </div>
-                          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+                          <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
                             <span className="font-semibold text-cyan-200">2.</span> Build prompt or use Siren’s Mind
                           </div>
-                          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+                          <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
                             <span className="font-semibold text-emerald-200">3.</span> Generate consistent assets
                           </div>
                         </div>
