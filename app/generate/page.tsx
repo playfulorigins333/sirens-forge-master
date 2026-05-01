@@ -1234,7 +1234,7 @@ function InlineUltraAddOnHelper(props: {
       <button
         type="button"
         onClick={props.onInsert}
-        className="rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/15 hover:text-white"
+        className="rounded-full border border-gray-700 bg-transparent px-2 py-0.5 text-[10px] font-semibold text-cyan-200 transition hover:border-cyan-400/50 hover:bg-cyan-500/15 hover:text-white"
       >
         + Insert
       </button>
@@ -1866,7 +1866,7 @@ function RefineChoicesPanel(props: {
               className={`w-full rounded-xl border px-4 py-3 text-left text-[12px] text-zinc-200 transition-all hover:text-white ${
                 isRecommended
                   ? "border-fuchsia-400/50 bg-fuchsia-500/10 shadow-[0_0_0_1px_rgba(232,121,249,0.24),0_0_30px_rgba(217,70,239,0.16)] hover:border-fuchsia-300/60 hover:bg-fuchsia-500/14"
-                  : "border-cyan-500/20 bg-black/30 hover:border-cyan-400/40 hover:bg-cyan-500/10"
+                  : "border-cyan-500/20 bg-black/30 hover:border-cyan-400/40 hover:bg-transparent"
               } ${
                 isApplied
                   ? "ring-1 ring-cyan-300/40 shadow-[0_0_0_1px_rgba(34,211,238,0.2),0_0_22px_rgba(34,211,238,0.12)]"
@@ -2692,7 +2692,7 @@ function OutputPanel(props: {
               <h3 className="text-sm font-semibold text-white md:text-base">Try Next</h3>
               <p className="text-[11px] text-gray-400">One-click prompt moves that restart the loop.</p>
             </div>
-            <span className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
+            <span className="rounded-full border border-cyan-500/20 bg-transparent px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
               Suggestions
             </span>
           </div>
@@ -2705,7 +2705,7 @@ function OutputPanel(props: {
                   key={chip.label}
                   type="button"
                   onClick={() => handleGeneratePrompt(nextPrompt)}
-                  className="rounded-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-[11px] font-medium text-gray-200 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-400/40 hover:bg-cyan-500/10 hover:text-white"
+                  className="rounded-full border border-gray-700 bg-gray-900 px-3 py-1.5 text-[11px] font-medium text-gray-200 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-400/40 hover:bg-transparent hover:text-white"
                 >
                   + {chip.label}
                 </button>
@@ -2936,7 +2936,7 @@ function OutputPanel(props: {
                   </div>
 
                   {selectedPackItems.length > 0 && (
-                    <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-[11px] leading-5 text-cyan-100">
+                    <div className="mt-3 rounded-xl border border-cyan-500/20 bg-transparent px-3 py-3 text-[11px] leading-5 text-cyan-100">
                       This creates a real Vault collection using the selected generation records. Captions and export files are generated from the selected real assets only.
                     </div>
                   )}
@@ -3068,7 +3068,7 @@ function OutputPanel(props: {
                     </Button>
                   </div>
 
-                  <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-[11px] leading-5 text-cyan-100">
+                  <div className="mt-3 rounded-xl border border-cyan-500/20 bg-transparent px-3 py-3 text-[11px] leading-5 text-cyan-100">
                     Autopost rules still require preview, save as draft, approval, and the scheduler. This panel only hands off selected pack data.
                   </div>
 
@@ -4265,7 +4265,7 @@ ${basePrompt}`,
                             Use Build My Model as a starter only. Train a LoRA when you are ready for the strongest identity.
                           </div>
                         </div>
-                        <span className="w-fit rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-100">
+                        <span className="w-fit rounded-full border border-cyan-400/25 bg-transparent px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-100">
                           Starter path
                         </span>
                       </div>
@@ -4321,7 +4321,7 @@ ${basePrompt}`,
                     <div className="mt-2 grid grid-cols-3 gap-2 text-center text-[10px] font-semibold text-gray-200">
                       <div className="rounded-xl border border-fuchsia-500/20 bg-fuchsia-500/10 px-2 py-2">1. Train</div>
                       <div className="rounded-xl border border-purple-500/20 bg-purple-500/10 px-2 py-2">2. Select</div>
-                      <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-2 py-2">3. Generate</div>
+                      <div className="rounded-xl border border-cyan-500/20 bg-transparent px-2 py-2">3. Generate</div>
                     </div>
                     <p className="mt-3 text-[11px] text-gray-400">
                       Build My Model is useful for fast concepting. LoRA training is the real identity engine.
