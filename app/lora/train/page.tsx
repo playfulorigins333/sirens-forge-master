@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
@@ -290,6 +289,7 @@ export default function LoRATrainerPage() {
   const [trainingProgress, setTrainingProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
+  const [showManualReview, setShowManualReview] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
@@ -320,6 +320,7 @@ export default function LoRATrainerPage() {
       setSelectedImageIds([]);
       setIsApproving(false);
       setShowConfetti(false);
+      setShowManualReview(false);
 
       if (options?.clearIdentity) {
         setIdentityName("");
@@ -625,6 +626,7 @@ export default function LoRATrainerPage() {
     setDatasetDoctorSummary(null);
     setDatasetDoctorImages([]);
     setSelectedImageIds([]);
+    setShowManualReview(false);
     setTrainingStatus("training");
 
     try {
@@ -799,7 +801,7 @@ export default function LoRATrainerPage() {
             </motion.h1>
             <Button
               variant="ghost"
-              onClick={() => (window.location.href = "/")}
+              onClick={() => (window.location.href = "/dashboard")}
               className="hover:bg-purple-500/10"
             >
               Back to Dashboard
@@ -866,7 +868,11 @@ export default function LoRATrainerPage() {
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 font-semibold">
             persistent AI identity
           </span>{" "}
-          that brings your vision to life across images and video
+          that brings your vision to life across images and video.
+          <br />
+          <span className="mt-2 inline-block text-base md:text-lg font-semibold text-white">
+            This is your AI Twin. It remembers who it is.
+          </span>
         </motion.p>
 
         <motion.div
@@ -877,7 +883,7 @@ export default function LoRATrainerPage() {
         >
           <Crown className="w-5 h-5 text-yellow-400" />
           <span className="text-sm font-semibold bg-gradient-to-r from-purple-300 to-pink-300 bg-clip-text text-transparent">
-            One identity at a time
+            Train once. Generate forever.
           </span>
           <motion.div
             animate={{ scale: [1, 1.2, 1] }}
@@ -886,6 +892,35 @@ export default function LoRATrainerPage() {
             <Zap className="w-4 h-4 text-cyan-400" />
           </motion.div>
         </motion.div>
+      </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.65 }}
+        className="max-w-4xl mx-auto px-6 pb-4 relative z-10"
+      >
+        <div className="rounded-3xl border border-purple-500/30 bg-[linear-gradient(135deg,rgba(88,28,135,0.35),rgba(168,85,247,0.18),rgba(8,8,13,0.96))] p-5 shadow-[0_0_38px_rgba(168,85,247,0.18)]">
+          <div className="mb-4 flex flex-col gap-1 text-center sm:text-left">
+            <div className="text-xs font-bold uppercase tracking-[0.18em] text-cyan-200">Simple training flow</div>
+            <div className="text-sm text-gray-300">No developer setup. No prompt engineering. Upload photos and let Dataset Doctor prep your AI Twin for generation.</div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            {[
+              { step: "01", title: "Name your AI Twin", text: "Give the identity a clear creator-facing name." },
+              { step: "02", title: "Upload 10+ photos", text: "Start with 10. More clean angles can improve consistency later." },
+              { step: "03", title: "Train + generate", text: "Dataset Doctor reviews the set, then your AI Twin becomes selectable in Generate." },
+            ].map((item) => (
+              <div key={item.step} className="rounded-2xl border border-white/10 bg-black/35 p-4">
+                <div className="mb-2 inline-flex rounded-full border border-cyan-400/25 bg-cyan-500/10 px-2 py-1 text-[10px] font-bold text-cyan-200">
+                  Step {item.step}
+                </div>
+                <div className="text-sm font-bold text-white">{item.title}</div>
+                <div className="mt-1 text-xs leading-5 text-gray-400">{item.text}</div>
+              </div>
+            ))}
+          </div>
+        </div>
       </motion.div>
 
       <div className="max-w-4xl mx-auto px-6 pb-20 space-y-8 relative z-10">
@@ -916,7 +951,7 @@ export default function LoRATrainerPage() {
                 </CardTitle>
               </div>
               <CardDescription className="text-gray-400">
-                Name your creation and bring it to life
+                Name the AI Twin your customers will recognize and reuse
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 relative z-10">
@@ -947,7 +982,7 @@ export default function LoRATrainerPage() {
                     id="identity-name"
                     value={identityName}
                     onChange={(e) => setIdentityName(e.target.value)}
-                    placeholder="My AI Twin, Scarlet Muse, Digital Goddess..."
+                    placeholder="My AI Twin, Scarlet Muse, Creator Twin..."
                     maxLength={50}
                     className="bg-gray-900/90 border-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 text-lg py-7 relative z-10 backdrop-blur-sm text-white placeholder:text-gray-500"
                   />
@@ -992,7 +1027,7 @@ export default function LoRATrainerPage() {
                   id="description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Describe your AI identity's personality, style, or purpose..."
+                  placeholder="Optional: style notes, creator persona, target content vibe, or consistency notes..."
                   maxLength={200}
                   className="bg-gray-900/90 border-gray-700 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 min-h-28 resize-none backdrop-blur-sm text-white placeholder:text-gray-500"
                 />
@@ -1034,10 +1069,16 @@ export default function LoRATrainerPage() {
                 </CardTitle>
               </div>
               <CardDescription className="text-gray-400">
-                Upload 10-20 high-quality images to train your AI
+                Start with 10 clear photos. Upload up to 20 for stronger consistency.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 relative z-10">
+              <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4 text-sm text-gray-200">
+                <div className="font-semibold text-cyan-200">Start with 10 photos — you can improve later.</div>
+                <div className="mt-1 text-xs leading-5 text-gray-300">
+                  More images usually improve consistency, but do not let perfection stop you. Use clear, well-lit images with a mix of face, upper-body, full-body, angles, and expressions. Training typically takes about 3–8 minutes once queued.
+                </div>
+              </div>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <motion.span
@@ -1219,10 +1260,10 @@ export default function LoRATrainerPage() {
                       className="space-y-3 text-sm text-gray-300 overflow-hidden"
                     >
                       {[
-                        { icon: Check, text: "Minimum: 10 images required", color: "text-emerald-400" },
-                        { icon: Star, text: "Maximum: 20 images for best results", color: "text-purple-400" },
-                        { icon: Sparkles, text: "Clear faces recommended", color: "text-cyan-400" },
-                        { icon: Zap, text: "Mix of angles and expressions encouraged", color: "text-pink-400" },
+                        { icon: Check, text: "Minimum: 10 images required to start", color: "text-emerald-400" },
+                        { icon: Star, text: "10 is enough to begin; 15–20 gives Dataset Doctor more coverage", color: "text-purple-400" },
+                        { icon: Sparkles, text: "Clear face, upper-body, and full-body photos help identity consistency", color: "text-cyan-400" },
+                        { icon: Zap, text: "Mix angles, expressions, lighting, and outfits when possible", color: "text-pink-400" },
                       ].map((item, index) => (
                         <motion.div
                           key={index}
@@ -1271,13 +1312,13 @@ export default function LoRATrainerPage() {
                 </motion.div>
                 <div className="flex-1 space-y-4">
                   <h3 className="font-bold text-2xl bg-gradient-to-r from-purple-300 to-pink-300 bg-clip-text text-transparent">
-                    How the Magic Works ✨
+                    How AI Twin Training Works ✨
                   </h3>
                   <ul className="space-y-3 text-gray-300">
                     {[
                       { icon: Crown, text: "Your identity is trained once and lives forever", color: "text-yellow-400" },
                       { icon: Zap, text: "Use it across images, videos, and future creations", color: "text-cyan-400" },
-                      { icon: Clock, text: "Training takes just a few minutes", color: "text-purple-400" },
+                      { icon: Clock, text: "Training usually takes about 3–8 minutes once queued", color: "text-purple-400" },
                       { icon: Star, text: "Create multiple identities to build your AI universe", color: "text-pink-400" },
                     ].map((item, index) => (
                       <motion.li
@@ -1332,7 +1373,7 @@ export default function LoRATrainerPage() {
               {!isReadyToTrain ? (
                 <>
                   <Upload className="w-6 h-6 mr-3" />
-                  Upload at least 10 images to continue
+                  Name your AI Twin + upload at least 10 images
                 </>
               ) : trainingStatus === "idle" ? (
                 <>
@@ -1346,13 +1387,13 @@ export default function LoRATrainerPage() {
                   >
                     <Sparkles className="w-6 h-6 mr-3" />
                   </motion.div>
-                  Begin the Transformation
+                  Train My AI Twin
                   <Zap className="w-6 h-6 ml-3" />
                 </>
               ) : (
                 <>
                   <Clock className="w-6 h-6 mr-3 animate-spin" />
-                  Forging your AI identity...
+                  Forging your AI Twin...
                 </>
               )}
             </Button>
@@ -1458,10 +1499,10 @@ export default function LoRATrainerPage() {
                         animate={{ opacity: [0.7, 1, 0.7] }}
                         transition={{ duration: 2, repeat: Infinity }}
                       >
-                        Dataset Doctor Review Ready ✨
+                        Dataset Doctor Optimized Your Set ✨
                       </motion.h3>
                       <p className="text-gray-300 text-lg">
-                        Review the analyzed images below, then approve at least 3 accepted shots.
+                        Recommended images have been selected for you. Start training now, or open the manual review if you want to inspect every decision.
                       </p>
                       {loraId && (
                         <p className="text-xs text-gray-400 mt-2">
@@ -1631,7 +1672,44 @@ export default function LoRATrainerPage() {
                       </span>
                     </div>
 
-                    {datasetDoctorSummary && (
+                    <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5">
+                      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                          <div className="text-sm font-bold text-emerald-200">Recommended: auto-optimize and train</div>
+                          <div className="mt-1 text-xs leading-5 text-gray-300">
+                            Dataset Doctor already filtered the upload and pre-selected accepted shots. This is the fastest path for creators who just want their AI Twin trained.
+                          </div>
+                        </div>
+                        <Button
+                          onClick={handleApproveAndStartTraining}
+                          disabled={selectedImageIds.length < 3 || isApproving}
+                          className="shrink-0 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 px-5 py-5 text-sm font-bold text-white shadow-[0_0_24px_rgba(168,85,247,0.35)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 disabled:opacity-50"
+                        >
+                          {isApproving ? (
+                            <>
+                              <Clock className="w-4 h-4 mr-2 animate-spin" />
+                              Starting...
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4 mr-2" />
+                              Train My AI Twin
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowManualReview((value) => !value)}
+                      className="flex w-full items-center justify-between rounded-2xl border border-gray-800 bg-black/30 px-4 py-3 text-left text-sm text-gray-200 transition hover:border-purple-500/40 hover:bg-purple-500/10"
+                    >
+                      <span className="font-semibold">{showManualReview ? "Hide manual dataset review" : "Show manual dataset review"}</span>
+                      <span className="text-xs text-gray-400">Advanced</span>
+                    </button>
+
+                    {showManualReview && datasetDoctorSummary && (
                       <div className="space-y-4">
                         {datasetDoctorSummary.primary_issue && (
                           <div className="bg-amber-500/10 rounded-xl p-4 border border-amber-500/30">
@@ -1909,6 +1987,7 @@ export default function LoRATrainerPage() {
                       </div>
                     )}
 
+                    {showManualReview && (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[420px] overflow-y-auto pr-1">
                       {datasetDoctorImages.map((image) => {
                         const isAccepted = image.decision === "accepted";
@@ -1996,12 +2075,14 @@ export default function LoRATrainerPage() {
                         );
                       })}
                     </div>
+                    )}
                   </div>
                 )}
 
                 <div className="space-y-3 pt-6">
                   {trainingStatus === "review" && (
                     <>
+                      {showManualReview && (
                       <Button
                         onClick={handleApproveAndStartTraining}
                         disabled={selectedImageIds.length < 3 || isApproving}
@@ -2015,10 +2096,11 @@ export default function LoRATrainerPage() {
                         ) : (
                           <>
                             <Check className="w-5 h-5 mr-2" />
-                            Approve & Start Training
+                            Approve Selected Images & Start Training
                           </>
                         )}
                       </Button>
+                      )}
 
                       <Button
                         variant="secondary"
@@ -2038,7 +2120,7 @@ export default function LoRATrainerPage() {
                         transition={{ delay: 0.6 }}
                       >
                         <Button
-                          onClick={() => (window.location.href = "/")}
+                          onClick={() => (window.location.href = "/generate")}
                           className="w-full py-6 text-lg font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 shadow-xl"
                         >
                           <Sparkles className="w-5 h-5 mr-2" />
