@@ -230,7 +230,7 @@ export default function PricingClient() {
     },
     {
       label: "Availability",
-      og: "35 total seats",
+      og: "50 total seats",
       earlyBird: "150 total seats",
       prime: "250 total seats",
       highlight: "og",
@@ -779,7 +779,7 @@ export default function PricingClient() {
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-purple-900/90 via-purple-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
                   <span className="text-[10px] uppercase tracking-[0.24em] text-purple-200/80">OG Eternal Throne</span>
                   <span className="text-xs font-semibold text-purple-50">$1,333 one-time</span>
-                  <span className="text-[10px] text-purple-200/80">35 total seats • Lifetime</span>
+                  <span className="text-[10px] text-purple-200/80">50 total seats • Lifetime</span>
                 </div>
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-pink-900/90 via-pink-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
                   <span className="text-[10px] uppercase tracking-[0.24em] text-pink-200/80">Early Bird</span>
@@ -949,3 +949,4 @@ function NeonButton({
     </button>
   );
 }
+
