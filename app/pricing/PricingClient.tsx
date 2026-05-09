@@ -61,6 +61,20 @@ function AnimatedNumber({ value }: { value: number }) {
   return <span>{display.toLocaleString()}</span>;
 }
 
+function SeatCounterText({ tier }: { tier: TierSeats }) {
+  if (tier.remaining === tier.total) {
+    return <span>{tier.total.toLocaleString()} founder spots remaining</span>;
+  }
+
+  return (
+    <>
+      <AnimatedNumber value={tier.remaining} />
+      <span className="mx-0.5">/</span>
+      <AnimatedNumber value={tier.total} />
+    </>
+  );
+}
+
 export default function PricingClient() {
   const [viewMode, setViewMode] = useState<ViewMode>("cards");
 
@@ -212,7 +226,13 @@ export default function PricingClient() {
     }
   };
 
-  const seatText = (tier: TierSeats) => `${tier.remaining}/${tier.total} seats left`;
+  const seatText = (tier: TierSeats) => {
+    if (tier.remaining === tier.total) {
+      return `${tier.total} founder spots remaining`;
+    }
+
+    return `${tier.remaining}/${tier.total} seats left`;
+  };
 
   const compareRows: {
     label: string;
@@ -377,10 +397,8 @@ export default function PricingClient() {
                     ) : ogSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
                     ) : (
-                      <AnimatedNumber value={seats.og.remaining} />
+                      <SeatCounterText tier={seats.og} />
                     )}
-                    <span className="mx-0.5">/</span>
-                    {!seats ? <span className="text-slate-500">—</span> : <AnimatedNumber value={seats.og.total} />}
                   </span>
                 </div>
               </div>
@@ -395,13 +413,7 @@ export default function PricingClient() {
                     ) : earlyBirdSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
                     ) : (
-                      <AnimatedNumber value={seats.earlyBird.remaining} />
-                    )}
-                    <span className="mx-0.5">/</span>
-                    {!seats ? (
-                      <span className="text-slate-500">—</span>
-                    ) : (
-                      <AnimatedNumber value={seats.earlyBird.total} />
+                      <SeatCounterText tier={seats.earlyBird} />
                     )}
                   </span>
                 </div>
