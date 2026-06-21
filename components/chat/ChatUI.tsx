@@ -443,74 +443,70 @@ export default function ChatUI({
           </nav>
         </header>
 
-        <section className="space-y-5 pr-1">
-          <section className="overflow-hidden rounded-[28px] border border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(12,12,18,0.98),rgba(7,7,10,0.98))] p-4 shadow-[0_0_34px_rgba(168,85,247,0.14)]">
-            <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200">
-                  Start Here
-                </div>
-                <div className="mt-1 text-[12px] text-zinc-500">
-                  Type the scene, mood, or rough idea below. Siren's Mind will shape it into a generator-ready prompt.
-                </div>
-              </div>
-              <div className="w-fit rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
-                Chat - Prompt - Generator
-              </div>
+        {messages.length === 0 && !isTyping ? (
+          <section className="mb-5 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.82),rgba(7,7,10,0.82))] px-5 py-5">
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-fuchsia-300/70">
+              Optional Starters
+            </div>
+
+            <p className="text-[14px] leading-7 text-zinc-400">
+              Pick a shortcut or type your own idea below.
+            </p>
+
+            <div className="mt-4 grid gap-2 md:grid-cols-3">
+              {[
+                "Build a text-to-image scene for my AI Twin",
+                "Build a text-to-video scene with cinematic motion",
+                "Turn my rough idea into a generator-ready NSFW prompt",
+              ].map((starter) => (
+                <button
+                  key={starter}
+                  onClick={() => handleStarterClick(starter)}
+                  className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3 text-left text-[12px] font-medium leading-6 text-zinc-200 transition hover:-translate-y-0.5 hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
+                >
+                  {starter}
+                </button>
+              ))}
             </div>
           </section>
+        ) : null}
 
-          {messages.length === 0 && !isTyping ? (
-            <section className="rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.82),rgba(7,7,10,0.82))] px-5 py-5">
-              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-fuchsia-300/70">
-                Optional Starters
-              </div>
+        <section className="flex flex-col gap-5">
+          {messages.map((msg) => (
+            <ChatMessage
+              key={msg.id}
+              role={msg.role}
+              content={msg.content}
+              isError={msg.isError}
+              showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
+              onUsePrompt={
+                msg.meta?.canUseInGenerator
+                  ? () => handleUsePrompt(msg)
+                  : undefined
+              }
+            />
+          ))}
 
-              <p className="text-[14px] leading-7 text-zinc-400">
-                Use one as a shortcut, or ignore these and type directly below.
-              </p>
+          {isTyping && <ChatMessage role="assistant" content="..." isTyping />}
 
-              <div className="mt-4 grid gap-2 md:grid-cols-3">
-                {[
-                  "Build a text-to-image scene for my AI Twin",
-                  "Build a text-to-video scene with cinematic motion",
-                  "Turn my rough idea into a generator-ready NSFW prompt",
-                ].map((starter) => (
-                  <button
-                    key={starter}
-                    onClick={() => handleStarterClick(starter)}
-                    className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3 text-left text-[12px] font-medium leading-6 text-zinc-200 transition hover:-translate-y-0.5 hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
-                  >
-                    {starter}
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          <section className="flex flex-col gap-5">
-            {messages.map((msg) => (
-              <ChatMessage
-                key={msg.id}
-                role={msg.role}
-                content={msg.content}
-                isError={msg.isError}
-                showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
-                onUsePrompt={
-                  msg.meta?.canUseInGenerator
-                    ? () => handleUsePrompt(msg)
-                    : undefined
-                }
-              />
-            ))}
-
-            {isTyping && <ChatMessage role="assistant" content="..." isTyping />}
-
-            <div ref={messagesEndRef} className="h-6" />
-          </section>
+          <div ref={messagesEndRef} className="h-6" />
         </section>
 
         <section className="sticky bottom-0 z-20 mt-5 rounded-t-[28px] border border-white/10 bg-black/95 p-4 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]">
+          <div className="mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200">
+                Start Here
+              </div>
+              <div className="mt-1 text-[12px] text-zinc-500">
+                Type the scene, mood, rough idea, or generator goal.
+              </div>
+            </div>
+            <div className="w-fit rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
+              Chat - Prompt - Generator
+            </div>
+          </div>
+
           <ChatInput
             mode={mode}
             onModeChange={setMode}
