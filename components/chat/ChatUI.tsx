@@ -405,14 +405,14 @@ export default function ChatUI({
   }
 
   return (
-    <div className="relative min-h-screen w-full overflow-x-hidden bg-black text-white">
+    <div className="relative h-screen w-full overflow-hidden bg-black text-white">
       <div className="pointer-events-none fixed inset-0">
         <div className="absolute inset-0 bg-[#05060a]" />
         <div className="absolute inset-y-0 left-0 w-[22rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.10),transparent_72%)]" />
         <div className="absolute bottom-0 right-0 h-[24rem] w-[28rem] bg-[radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.08),transparent_68%)]" />
       </div>
 
-      <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 pb-8 pt-4 sm:px-6 sm:pt-6">
+      <main className="relative z-10 mx-auto flex h-screen w-full max-w-4xl flex-col px-4 pt-4 sm:px-6 sm:pt-6">
         <header className="mb-4 flex shrink-0 flex-col gap-4 border-l-2 border-fuchsia-400/40 pl-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent sm:text-[32px]">
@@ -444,7 +444,7 @@ export default function ChatUI({
         </header>
 
         {messages.length === 0 && !isTyping ? (
-          <section className="mb-5 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.82),rgba(7,7,10,0.82))] px-5 py-5">
+          <section className="mb-4 shrink-0 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.82),rgba(7,7,10,0.82))] px-5 py-5">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-fuchsia-300/70">
               Optional Starters
             </div>
@@ -471,28 +471,30 @@ export default function ChatUI({
           </section>
         ) : null}
 
-        <section className="flex flex-col gap-5">
-          {messages.map((msg) => (
-            <ChatMessage
-              key={msg.id}
-              role={msg.role}
-              content={msg.content}
-              isError={msg.isError}
-              showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
-              onUsePrompt={
-                msg.meta?.canUseInGenerator
-                  ? () => handleUsePrompt(msg)
-                  : undefined
-              }
-            />
-          ))}
+        <section className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="flex flex-col gap-5 pb-5">
+            {messages.map((msg) => (
+              <ChatMessage
+                key={msg.id}
+                role={msg.role}
+                content={msg.content}
+                isError={msg.isError}
+                showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
+                onUsePrompt={
+                  msg.meta?.canUseInGenerator
+                    ? () => handleUsePrompt(msg)
+                    : undefined
+                }
+              />
+            ))}
 
-          {isTyping && <ChatMessage role="assistant" content="..." isTyping />}
+            {isTyping && <ChatMessage role="assistant" content="..." isTyping />}
 
-          <div ref={messagesEndRef} className="h-6" />
+            <div ref={messagesEndRef} className="h-6" />
+          </div>
         </section>
 
-        <section className="sticky bottom-0 z-20 mt-5 rounded-t-[28px] border border-white/10 bg-black/95 p-4 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]">
+        <section className="shrink-0 border-t border-white/10 bg-black/95 pb-4 pt-3 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]">
           <div className="mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200">
