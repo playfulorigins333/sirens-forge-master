@@ -52,7 +52,7 @@ type ChatUIProps = {
 }
 
 const TARGET_SELECTION_PROMPT =
-  "What are we building this for — text-to-image, text-to-video, or image-to-video?"
+  "What are we building this for - text-to-image, text-to-video, or image-to-video?"
 
 const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
@@ -135,6 +135,7 @@ export default function ChatUI({
   )
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (initialGenerationTarget) {
@@ -186,7 +187,7 @@ export default function ChatUI({
         JSON.stringify(handoffPayload),
       )
     } catch (err) {
-      console.error("Failed to store Siren’s Mind handoff:", err)
+      console.error("Failed to store Siren's Mind handoff:", err)
     }
 
     const params = new URLSearchParams({
@@ -197,7 +198,7 @@ export default function ChatUI({
       source: "siren_mind",
     })
 
-    window.location.assign(`/generate?${params.toString()}`)
+    window.location.assign("/generate?" + params.toString())
   }
 
   const sendHeadlessRequest = async ({
@@ -251,7 +252,7 @@ export default function ChatUI({
       appendMessage({
         id: crypto.randomUUID(),
         role: "assistant",
-        content: `${data.error_code}: ${data.reason}`,
+        content: data.error_code + ": " + data.reason,
         isError: true,
       })
       return
@@ -311,7 +312,10 @@ export default function ChatUI({
       appendMessage({
         id: crypto.randomUUID(),
         role: "assistant",
-        content: `Got it — I’ll use ${targetToLabel(resolvedTarget)} for this thread.`,
+        content:
+          "Got it - I'll use " +
+          targetToLabel(resolvedTarget) +
+          " for this thread.",
       })
 
       const descriptionToSend = pendingDescription
@@ -402,96 +406,122 @@ export default function ChatUI({
   }
 
   return (
-    <div className="relative min-h-screen w-full overflow-x-hidden bg-black text-white">
+    <div className="relative h-screen w-full overflow-hidden bg-black text-white">
       <div className="pointer-events-none fixed inset-0">
         <div className="absolute inset-0 bg-[#05060a]" />
         <div className="absolute inset-y-0 left-0 w-[22rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.10),transparent_72%)]" />
         <div className="absolute bottom-0 right-0 h-[24rem] w-[28rem] bg-[radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.08),transparent_68%)]" />
       </div>
 
-      <main className="relative z-10 mx-auto w-full max-w-4xl px-6 pb-16 pt-6">
-        <header className="mb-6 border-l-2 border-fuchsia-400/40 pl-5">
-          <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[32px] font-semibold tracking-tight text-transparent">
-            A Siren’s Mind
-          </h1>
+      <main className="relative z-10 mx-auto flex h-screen w-full max-w-4xl flex-col px-4 pt-4 sm:px-6 sm:pt-6">
+        <header className="mb-4 flex shrink-0 flex-col gap-4 border-l-2 border-fuchsia-400/40 pl-5 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent sm:text-[32px]">
+              A Siren's Mind
+            </h1>
 
-          <p className="mt-2 text-[13px] uppercase tracking-[0.16em] text-zinc-500">
-            Erotic Prompt Intelligence
-          </p>
-        </header>
-
-        <section className="mb-5 overflow-hidden rounded-[28px] border border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(12,12,18,0.98),rgba(7,7,10,0.98))] p-4 shadow-[0_0_34px_rgba(168,85,247,0.14)]">
-          <div className="mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200">
-                Start Here
-              </div>
-              <div className="mt-1 text-[12px] text-zinc-500">
-                Type the scene, mood, or rough idea. Siren’s Mind will shape it into a generator-ready prompt.
-              </div>
-            </div>
-            <div className="w-fit rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
-              Chat → Prompt → Generator
-            </div>
+            <p className="mt-2 text-[12px] uppercase tracking-[0.16em] text-zinc-500 sm:text-[13px]">
+              Erotic Prompt Intelligence
+            </p>
           </div>
 
+          <nav className="flex flex-wrap gap-2 sm:justify-end">
+            <button
+              type="button"
+              onClick={() => window.location.assign("/dashboard")}
+              className="rounded-full border border-white/10 bg-white/[0.035] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-300 transition hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
+            >
+              Dashboard
+            </button>
+
+            <button
+              type="button"
+              onClick={() => window.location.assign("/generate")}
+              className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-500/15 hover:text-white"
+            >
+              Generator
+            </button>
+          </nav>
+        </header>
+
+        <section
+          ref={messagesScrollRef}
+          className="min-h-0 flex-1 overflow-y-auto pb-5 pr-1"
+        >
+          <section className="mb-5 overflow-hidden rounded-[28px] border border-fuchsia-500/20 bg-[linear-gradient(180deg,rgba(12,12,18,0.98),rgba(7,7,10,0.98))] p-4 shadow-[0_0_34px_rgba(168,85,247,0.14)]">
+            <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200">
+                  Start Here
+                </div>
+                <div className="mt-1 text-[12px] text-zinc-500">
+                  Type the scene, mood, or rough idea below. Siren's Mind will shape it into a generator-ready prompt.
+                </div>
+              </div>
+              <div className="w-fit rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
+                Chat - Prompt - Generator
+              </div>
+            </div>
+          </section>
+
+          {messages.length === 0 && !isTyping ? (
+            <section className="mb-6 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.82),rgba(7,7,10,0.82))] px-5 py-5">
+              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-fuchsia-300/70">
+                Optional Starters
+              </div>
+
+              <p className="text-[14px] leading-7 text-zinc-400">
+                Use one as a shortcut, or ignore these and type directly below.
+              </p>
+
+              <div className="mt-4 grid gap-2 md:grid-cols-3">
+                {[
+                  "Build a text-to-image scene for my AI Twin",
+                  "Build a text-to-video scene with cinematic motion",
+                  "Turn my rough idea into a generator-ready NSFW prompt",
+                ].map((starter) => (
+                  <button
+                    key={starter}
+                    onClick={() => handleStarterClick(starter)}
+                    className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3 text-left text-[12px] font-medium leading-6 text-zinc-200 transition hover:-translate-y-0.5 hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
+                  >
+                    {starter}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="flex flex-col gap-5">
+            {messages.map((msg) => (
+              <ChatMessage
+                key={msg.id}
+                role={msg.role}
+                content={msg.content}
+                isError={msg.isError}
+                showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
+                onUsePrompt={
+                  msg.meta?.canUseInGenerator
+                    ? () => handleUsePrompt(msg)
+                    : undefined
+                }
+              />
+            ))}
+
+            {isTyping && <ChatMessage role="assistant" content="..." isTyping />}
+
+            <div ref={messagesEndRef} className="h-6" />
+          </section>
+        </section>
+
+        <section className="shrink-0 border-t border-white/10 bg-black/95 pb-4 pt-3 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]">
           <ChatInput
             mode={mode}
             onModeChange={setMode}
             onSend={handleSend}
           />
         </section>
-
-        {messages.length === 0 && !isTyping ? (
-          <section className="mb-6 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.82),rgba(7,7,10,0.82))] px-5 py-5">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-fuchsia-300/70">
-              Optional Starters
-            </div>
-
-            <p className="text-[14px] leading-7 text-zinc-400">
-              Use one as a shortcut, or ignore these and type directly above.
-            </p>
-
-            <div className="mt-4 grid gap-2 md:grid-cols-3">
-              {[
-                "Build a text-to-image scene for my AI Twin",
-                "Build a text-to-video scene with cinematic motion",
-                "Turn my rough idea into a generator-ready NSFW prompt",
-              ].map((starter) => (
-                <button
-                  key={starter}
-                  onClick={() => handleStarterClick(starter)}
-                  className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3 text-left text-[12px] font-medium leading-6 text-zinc-200 transition hover:-translate-y-0.5 hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
-                >
-                  {starter}
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        <section className="flex flex-col gap-5">
-          {messages.map((msg) => (
-            <ChatMessage
-              key={msg.id}
-              role={msg.role}
-              content={msg.content}
-              isError={msg.isError}
-              showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
-              onUsePrompt={
-                msg.meta?.canUseInGenerator
-                  ? () => handleUsePrompt(msg)
-                  : undefined
-              }
-            />
-          ))}
-
-          {isTyping && <ChatMessage role="assistant" content="…" isTyping />}
-
-          <div ref={messagesEndRef} className="h-6" />
-        </section>
       </main>
     </div>
   )
 }
-
