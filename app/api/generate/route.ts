@@ -267,6 +267,7 @@ export async function POST(req: NextRequest) {
         mode: "txt2img" as const,
         inputs: {
           workflow_json: workflowGraph,
+          identity_lora: identityLora,
         },
       },
     };
@@ -346,19 +347,35 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const legacyImages = Array.isArray(upstreamJson?.images)
+      ? upstreamJson.images.filter((url: unknown) => typeof url === "string")
+      : [];
+
+    const normalizedUpstreamJson =
+      upstreamJson?.success === true && legacyImages.length > 0
+        ? {
+            ...upstreamJson,
+            image_url: upstreamJson.image_url ?? legacyImages[0],
+            outputs:
+              upstreamJson.outputs ??
+              legacyImages.map((url: string) => ({ kind: "image", url })),
+            generation_id: upstreamJson.generation_id ?? upstreamJson.prompt_id,
+          }
+        : upstreamJson;
+
     const inferredImageUrl =
-      typeof upstreamJson?.image_url === "string"
-        ? upstreamJson.image_url
-        : typeof upstreamJson?.output_url === "string"
-        ? upstreamJson.output_url
-        : Array.isArray(upstreamJson?.outputs) &&
-          typeof upstreamJson.outputs?.[0]?.url === "string"
-        ? upstreamJson.outputs[0].url
+      typeof normalizedUpstreamJson?.image_url === "string"
+        ? normalizedUpstreamJson.image_url
+        : typeof normalizedUpstreamJson?.output_url === "string"
+        ? normalizedUpstreamJson.output_url
+        : Array.isArray(normalizedUpstreamJson?.outputs) &&
+          typeof normalizedUpstreamJson.outputs?.[0]?.url === "string"
+        ? normalizedUpstreamJson.outputs[0].url
         : null;
 
     const upstreamPlaceholder =
-      typeof upstreamJson?.placeholder === "boolean"
-        ? upstreamJson.placeholder
+      typeof normalizedUpstreamJson?.placeholder === "boolean"
+        ? normalizedUpstreamJson.placeholder
         : false;
 
     const logged = await bestEffortLogGeneration({
@@ -380,12 +397,12 @@ export async function POST(req: NextRequest) {
     });
 
     const finalImageUrl =
-      typeof upstreamJson?.image_url === "string"
-        ? upstreamJson.image_url
+      typeof normalizedUpstreamJson?.image_url === "string"
+        ? normalizedUpstreamJson.image_url
         : inferredImageUrl;
 
-    const finalOutputs = Array.isArray(upstreamJson?.outputs)
-      ? upstreamJson.outputs
+    const finalOutputs = Array.isArray(normalizedUpstreamJson?.outputs)
+      ? normalizedUpstreamJson.outputs
       : finalImageUrl
       ? [
           {
@@ -397,10 +414,12 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(
       {
-        ...upstreamJson,
+        ...normalizedUpstreamJson,
         status:
-          typeof upstreamJson?.status === "string" ? upstreamJson.status : "ok",
-        generation_id: upstreamJson?.generation_id ?? logged?.id ?? null,
+          typeof normalizedUpstreamJson?.status === "string"
+            ? normalizedUpstreamJson.status
+            : "ok",
+        generation_id: normalizedUpstreamJson?.generation_id ?? logged?.id ?? null,
         image_url: finalImageUrl,
         outputs: finalOutputs,
         placeholder: upstreamPlaceholder,
