@@ -7,6 +7,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
 import { createServerClient } from "@supabase/ssr";
+import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
+import { resolveLoraStack } from "@/lib/generation/lora-resolver";
+import type { BodyMode } from "@/lib/generation/contract";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -101,7 +104,7 @@ async function bestEffortLogGeneration(args: {
     ok: boolean;
     template: string;
     mode: "txt2img";
-    stub: boolean;
+    real_workflow: boolean;
   };
 }): Promise<LoggedGenerationRecord | null> {
   const admin = getAdminClient();
@@ -206,7 +209,10 @@ export async function POST(req: NextRequest) {
 
     const prompt = String(body.prompt || "").trim();
     const negativePrompt = String(body.negative_prompt || "").trim();
-    const bodyMode = String(body.body_mode || "").trim();
+    const rawBodyMode = String(body.body_mode || "none").trim();
+    const bodyMode: BodyMode = rawBodyMode === "body_feminine" || rawBodyMode === "body_masculine"
+      ? rawBodyMode
+      : "none";
     const identityLora =
       typeof body.identity_lora === "string" && body.identity_lora.trim().length > 0
         ? body.identity_lora.trim()
@@ -228,36 +234,24 @@ export async function POST(req: NextRequest) {
       batch: Math.max(1, Math.min(4, Number(body.batch || 1))),
     };
 
-    let finalPrompt = prompt;
+    const loraStack = await resolveLoraStack(bodyMode, identityLora);
+    const finalPrompt = loraStack.trigger_token
+      ? injectTriggerToken(prompt, loraStack.trigger_token)
+      : prompt;
 
-    if (identityLora) {
-      const { data } = await supabase
-        .from("user_loras")
-        .select("trigger_token")
-        .eq("id", identityLora)
-        .single();
-
-      if (data?.trigger_token) {
-        finalPrompt = injectTriggerToken(finalPrompt, data.trigger_token);
-      }
-    }
-
-    const workflowGraph = {
-      stub: true,
-      message: "Image route contract is active while real workflow builder is disconnected.",
-      inputs: {
-        prompt: finalPrompt,
-        negative_prompt: negativePrompt,
-        body_mode: bodyMode,
-        width: normalized.width,
-        height: normalized.height,
-        steps: normalized.steps,
-        cfg: normalized.cfg,
-        seed: normalized.seed,
-        batch: normalized.batch,
-        identity_lora: identityLora,
-      },
-    };
+    const workflowGraph = buildWorkflow({
+      prompt: finalPrompt,
+      negative: negativePrompt,
+      seed: normalized.seed,
+      steps: normalized.steps,
+      cfg: normalized.cfg,
+      width: normalized.width,
+      height: normalized.height,
+      batch: normalized.batch,
+      loraStack,
+      dnaImageNames: [],
+      fluxLock: null,
+    });
 
     const payload = {
       workflow: {
@@ -299,7 +293,7 @@ export async function POST(req: NextRequest) {
           ok: false,
           template: "sirens_image_v3_production",
           mode: "txt2img",
-          stub: true,
+          real_workflow: true,
         },
       });
 
@@ -333,7 +327,7 @@ export async function POST(req: NextRequest) {
           ok: true,
           template: "sirens_image_v3_production",
           mode: "txt2img",
-          stub: true,
+          real_workflow: true,
         },
       });
 
@@ -392,7 +386,7 @@ export async function POST(req: NextRequest) {
         ok: true,
         template: "sirens_image_v3_production",
         mode: "txt2img",
-        stub: true,
+        real_workflow: true,
       },
     });
 

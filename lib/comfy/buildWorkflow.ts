@@ -1,9 +1,9 @@
 // lib/comfy/buildWorkflow.ts
 // PRODUCTION — Dynamic ComfyUI workflow builder (FINAL — FIXED FOR API WORKFLOW)
 
-import fs from "fs";
 import path from "path";
-import { ResolvedLoraStack } from "@/lib/generation/lora-resolver";
+import workflowBase from "@/lib/comfy/workflow-base";
+import type { ResolvedLoraStack } from "@/lib/generation/lora-resolver";
 
 type BuildWorkflowInput = {
   prompt: string;
@@ -14,19 +14,14 @@ type BuildWorkflowInput = {
   width: number;
   height: number;
   loraStack: ResolvedLoraStack;
+  batch?: number;
   dnaImageNames: string[];
   fluxLock: any;
 };
 
 export function buildWorkflow(input: BuildWorkflowInput) {
-
-  // ⭐ Load the NEW API workflow export (THIS was the breaking bug)
-  const workflowPath = path.join(
-    process.cwd(),
-    "lib/comfy/workflows/sirens_image_v3_production.json"
-  );
-
-  const workflow = JSON.parse(fs.readFileSync(workflowPath, "utf-8"));
+  // Clone the bundled TS workflow template for a fresh mutable graph per request.
+  const workflow = JSON.parse(JSON.stringify(workflowBase));
 
   const {
     prompt,
@@ -37,6 +32,7 @@ export function buildWorkflow(input: BuildWorkflowInput) {
     width,
     height,
     loraStack,
+    batch,
   } = input;
 
   /* ------------------------------------------------
@@ -66,6 +62,7 @@ export function buildWorkflow(input: BuildWorkflowInput) {
    * ------------------------------------------------ */
   EmptyLatent.inputs.width = width;
   EmptyLatent.inputs.height = height;
+  EmptyLatent.inputs.batch_size = batch ?? EmptyLatent.inputs.batch_size;
 
   /* ------------------------------------------------
    * BASE MODEL
