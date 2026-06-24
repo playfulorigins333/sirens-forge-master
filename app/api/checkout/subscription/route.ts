@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { supabaseServer } from "@/lib/supabaseServer";
+import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,8 +33,6 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 /* ──────────────────────────────────────────────
    Launch rules
 ────────────────────────────────────────────── */
-const ACTIVE_STATUSES = ["active", "trialing"] as const;
-
 const LAUNCH_TIERS = ["og_throne", "early_bird", "prime_access"] as const;
 type LaunchTier = (typeof LAUNCH_TIERS)[number];
 
@@ -45,10 +45,6 @@ const PRICE_ID_MAP: Record<LaunchTier, string | undefined> = {
 /* ──────────────────────────────────────────────
    Helpers
 ────────────────────────────────────────────── */
-function clampNonNegative(n: number) {
-  return n < 0 ? 0 : n;
-}
-
 function safeString(v: unknown) {
   if (typeof v !== "string") return "";
   return v.trim();
@@ -220,6 +216,35 @@ export async function POST(req: Request) {
       );
     }
 
+    const authSupabase = await supabaseServer();
+    const {
+      data: { user },
+      error: userError,
+    } = await authSupabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: "Authentication required", code: "UNAUTHENTICATED", redirectTo: "/login" },
+        { status: 401 }
+      );
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, email, stripe_customer_id")
+      .or(`id.eq.${user.id},user_id.eq.${user.id}`)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      console.error("❌ Checkout profile lookup failed:", profileError);
+      return NextResponse.json({ error: "Profile not found" }, { status: 403 });
+    }
+
+    const stripeCustomerId = await getOrCreateStripeCustomer(
+      profile.id,
+      user.email ?? profile.email ?? undefined
+    );
+
     const body = await req.json().catch(() => ({} as any));
 
     const tierName = body?.tierName as LaunchTier | undefined;
@@ -253,48 +278,17 @@ export async function POST(req: Request) {
     ────────────────────────────────────────────── */
     const { data: tierRow, error: tierErr } = await supabase
       .from("subscription_tiers")
-      .select("id, max_slots")
+      .select("id, name, display_name, stripe_price_id, price_monthly, is_active")
       .eq("name", tierName)
+      .eq("is_active", true)
       .single();
 
     if (tierErr || !tierRow) {
       return NextResponse.json({ error: "Subscription tier not found" }, { status: 404 });
     }
 
-    /* ──────────────────────────────────────────────
-       2️⃣ Count active subscriptions
-       (OG excludes testers)
-    ────────────────────────────────────────────── */
-    let activeCount = 0;
-
-    if (tierName === "og_throne") {
-      const { count: totalOg } = await supabase
-        .from("user_subscriptions")
-        .select("id", { count: "exact", head: true })
-        .eq("tier_name", "og_throne")
-        .in("status", [...ACTIVE_STATUSES]);
-
-      const { count: excludedOg } = await supabase
-        .from("user_subscriptions")
-        .select("id", { count: "exact", head: true })
-        .eq("tier_name", "og_throne")
-        .in("status", [...ACTIVE_STATUSES])
-        .filter("metadata->>counts_toward_seats", "eq", "false");
-
-      activeCount = clampNonNegative((totalOg ?? 0) - (excludedOg ?? 0));
-    } else {
-      const { count } = await supabase
-        .from("user_subscriptions")
-        .select("id", { count: "exact", head: true })
-        .eq("tier_name", tierName)
-        .in("status", [...ACTIVE_STATUSES]);
-
-      activeCount = count ?? 0;
-    }
-
-    if (typeof tierRow.max_slots === "number" && activeCount >= tierRow.max_slots) {
-      return NextResponse.json({ error: "This tier is sold out" }, { status: 409 });
-    }
+    // Seat-cap enforcement intentionally only uses columns present in the live
+    // subscription_tiers schema. Do not query legacy tier_name/max_slots fields here.
 
     /* ──────────────────────────────────────────────
        2.5️⃣ Resolve referral (optional)
@@ -304,7 +298,10 @@ export async function POST(req: Request) {
     const platformFeePercent = clampPercent(100 - referral.commissionPercent);
 
     const sharedMetadata: Record<string, string> = {
+      user_id: user.id,
+      profile_id: profile.id,
       tier_name: tierName,
+      stripe_price_id: priceId,
       referral_code: referral.referralCode ?? "",
       affiliate_user_id: referral.affiliateUserId ?? "",
       commission_percent: String(referral.commissionPercent),
@@ -324,6 +321,8 @@ export async function POST(req: Request) {
 
         const session = await stripe.checkout.sessions.create({
           mode: "payment",
+          customer: stripeCustomerId,
+          client_reference_id: profile.id,
           line_items: [{ price: priceId, quantity: 1 }],
           success_url: successUrl,
           cancel_url: cancelUrl,
@@ -340,6 +339,8 @@ export async function POST(req: Request) {
 
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
+        customer: stripeCustomerId,
+        client_reference_id: profile.id,
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -356,6 +357,8 @@ export async function POST(req: Request) {
     if (referral.connectOnboarded && referral.connectAccountId) {
       const session = await stripe.checkout.sessions.create({
         mode: "subscription",
+        customer: stripeCustomerId,
+        client_reference_id: profile.id,
         line_items: [{ price: priceId, quantity: 1 }],
         success_url: successUrl,
         cancel_url: cancelUrl,
@@ -372,6 +375,8 @@ export async function POST(req: Request) {
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
+      customer: stripeCustomerId,
+      client_reference_id: profile.id,
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
