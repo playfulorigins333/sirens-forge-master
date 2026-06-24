@@ -24,7 +24,6 @@ import {
   Trash2,
   Save,
   List,
-  Link2,
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -86,6 +85,21 @@ const FALLBACK_PLATFORMS: Platform[] = [
 ]
 
 const AUTOPOST_PACK_PREFILL_STORAGE_KEY = "sirensforge:autopost_pack_prefill"
+
+const PLATFORM_URLS: Record<string, string> = {
+  fanvue: "https://www.fanvue.com/",
+  onlyfans: "https://onlyfans.com/",
+  fansly: "https://fansly.com/",
+  loyalfans: "https://www.loyalfans.com/",
+  justforfans: "https://justfor.fans/",
+  jff: "https://justfor.fans/",
+  x: "https://x.com/",
+  reddit: "https://www.reddit.com/",
+}
+
+function platformUrl(platform: PlatformId) {
+  return PLATFORM_URLS[String(platform)] ?? null
+}
 
 type PackCaptionDraft = {
   id?: string
@@ -197,17 +211,6 @@ async function fetchPlatforms(): Promise<Platform[] | null> {
   }
 }
 
-async function startConnectFlow(platform: PlatformId): Promise<{ redirectUrl?: string; url?: string } | null> {
-  try {
-    const res = await fetch(`/api/autopost/connect?platform=${encodeURIComponent(platform)}`, { method: "GET" })
-    if (!res.ok) return null
-    const data = await safeJson<{ redirectUrl?: string; url?: string }>(res)
-    return data
-  } catch {
-    return null
-  }
-}
-
 async function runPreviewSelection(input: {
   enabled: boolean
   selected_platforms: PlatformId[]
@@ -260,7 +263,7 @@ async function postRuleAction(ruleId: string, action: "approve" | "pause" | "res
 // -----------------------------
 // Page
 // -----------------------------
-type Tab = "rules" | "builder" | "connect"
+type Tab = "rules" | "builder" | "platforms"
 
 export default function AutopostPage() {
   const [mounted, setMounted] = useState(false)
@@ -407,20 +410,6 @@ export default function AutopostPage() {
     refreshRules()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, mounted])
-
-  // -----------------------------
-  // Connect actions
-  // -----------------------------
-  const handleConnect = async (platform: PlatformId) => {
-    setBuilderError(null)
-    const result = await startConnectFlow(platform)
-    const url = result?.redirectUrl || result?.url
-    if (!url) {
-      setBuilderError("Connect flow failed (no redirect URL returned).")
-      return
-    }
-    window.open(url, "_blank", "noopener,noreferrer")
-  }
 
   // -----------------------------
   // Preview + Save rule
@@ -629,7 +618,7 @@ export default function AutopostPage() {
                   Autopost
                 </h1>
                 <p className="text-xs sm:text-sm text-gray-400">
-                  Create and manage automated posting rules for your content packs.
+                  Create and manage posting rules for your content workflow.
                 </p>
               </div>
             </div>
@@ -643,13 +632,13 @@ export default function AutopostPage() {
               <Button
                 disabled
                 className="bg-gray-800 text-gray-300 disabled:opacity-60 disabled:cursor-not-allowed"
-                title="Autopost runs through your approved posting schedule."
+                title="Assisted posting helps organize approved distribution workflows."
               >
                 <Clock className="w-4 h-4 mr-2" />
-                Scheduled Posting
+                Distribution Workflow
               </Button>
               <div className="mt-1 text-xs text-gray-400">
-                Approved rules run according to their selected schedule.
+                Posting rules help organize approved content for distribution.
               </div>
 
               <Button
@@ -684,12 +673,12 @@ export default function AutopostPage() {
             </Button>
 
             <Button
-              variant={tab === "connect" ? "default" : "outline"}
-              onClick={() => setTab("connect")}
-              className={tab === "connect" ? "bg-gray-900 border border-gray-700" : "border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"}
+              variant={tab === "platforms" ? "default" : "outline"}
+              onClick={() => setTab("platforms")}
+              className={tab === "platforms" ? "bg-gray-900 border border-gray-700" : "border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"}
             >
-              <Link2 className="w-4 h-4 mr-2" />
-              Connect
+              <ExternalLink className="w-4 h-4 mr-2" />
+              Platforms
             </Button>
           </div>
 
@@ -734,7 +723,7 @@ export default function AutopostPage() {
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-gray-400">
-                          Review, approve, pause, or revoke your saved autopost rules.
+                          Review, approve, pause, or revoke your saved posting workflow rules.
                         </p>
                       </div>
                     </div>
@@ -914,7 +903,7 @@ export default function AutopostPage() {
                     Build Rule
                   </CardTitle>
                   <CardDescription className="text-gray-400">
-                    Choose platforms, posting style, and frequency before saving a rule for approval.
+                    Choose platforms, posting style, and workflow cadence before saving a rule for approval.
                   </CardDescription>
                 </CardHeader>
 
@@ -950,7 +939,7 @@ export default function AutopostPage() {
                               Rule is ready for approval
                             </div>
                             <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
-                              Your rule has been saved safely. Nothing has been posted yet. Review it in My Rules and approve it when you are ready to activate automation.
+                              Your rule has been saved safely. Nothing has been distributed yet. Review it in My Rules and approve it when you are ready to prepare your workflow.
                             </div>
                           </div>
                           <div className="rounded-2xl border border-emerald-500/20 bg-black/30 px-3 py-2 text-xs text-emerald-100">
@@ -1070,7 +1059,7 @@ export default function AutopostPage() {
                               {packPrefill.pack_name || packPrefill.collection_name || "Creator Content Pack"}
                             </div>
                             <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
-                              This pack came from the Generate Pack Builder. Review platforms, preview the rule, then save it for approval. Nothing is posted from this screen.
+                              This pack came from the Generate Pack Builder. Review platforms, preview the rule, then save it for approval. Final posting may be completed directly on each platform.
                             </div>
                           </div>
 
@@ -1154,7 +1143,7 @@ export default function AutopostPage() {
                               <div>
                                 <div className="text-xs font-semibold text-gray-200">Next Step</div>
                                 <div className="mt-1 text-[11px] leading-5 text-gray-400">
-                                  Preview checks your rule before saving. Approval is required before automation can run.
+                                  Preview checks your rule before saving. Approval is required before the workflow is marked active.
                                 </div>
                               </div>
                               <div className="hidden rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200 sm:block">
@@ -1203,7 +1192,7 @@ export default function AutopostPage() {
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <Label className="text-gray-200">Enabled</Label>
-                      <div className="text-xs text-gray-400">Turn this on when you want the approved rule to run on its schedule.</div>
+                      <div className="text-xs text-gray-400">Turn this on when you want the approved rule included in your distribution workflow.</div>
                     </div>
                     <Button
                       variant="outline"
@@ -1393,9 +1382,9 @@ export default function AutopostPage() {
             </motion.div>
           )}
 
-          {tab === "connect" && (
+          {tab === "platforms" && (
             <motion.div
-              key="connect"
+              key="platforms"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 10 }}
@@ -1406,34 +1395,47 @@ export default function AutopostPage() {
                 <CardHeader>
                   <CardTitle className="text-white flex items-center gap-2">
                     <ExternalLink className="w-5 h-5 text-cyan-300" />
-                    Connect Platforms
+                    Open Creator Platforms
                   </CardTitle>
                   <CardDescription className="text-gray-400">
-                    Connect the platforms you want to use for content distribution.
+                    Use these links to open your creator platforms and complete posting.
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
+                  <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-xs leading-5 text-cyan-100">
+                    Launch mode: Sirens Forge helps organize and prepare your posting workflow. Final posting may be completed directly on each platform.
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {platforms.map(p => (
-                      <div key={p.id} className="rounded-2xl border border-gray-800 bg-black/30 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-white font-semibold">{p.name}</div>
-                            <div className="text-xs text-gray-400 mt-1">
-                              Connection: <span className="text-gray-200">{p.status === "connected" ? "Connected" : "Not connected"}</span>
+                    {platforms.map(p => {
+                      const url = platformUrl(p.id)
+
+                      return (
+                        <div key={p.id} className="rounded-2xl border border-gray-800 bg-black/30 p-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-white font-semibold">{p.name}</div>
+                              <div className="text-xs text-gray-400 mt-1">
+                                Opens the creator platform in a new tab.
+                              </div>
+                              {p.hint && <div className="text-xs text-gray-500 mt-1">{p.hint}</div>}
                             </div>
-                            {p.hint && <div className="text-xs text-gray-500 mt-1">{p.hint}</div>}
+                            {url ? (
+                              <Button asChild className="bg-cyan-600 hover:bg-cyan-500">
+                                <a href={url} target="_blank" rel="noopener noreferrer">
+                                  <ExternalLink className="w-4 h-4 mr-2" />
+                                  Open
+                                </a>
+                              </Button>
+                            ) : (
+                              <Button disabled className="bg-gray-800 text-gray-300 disabled:opacity-60">
+                                <ExternalLink className="w-4 h-4 mr-2" />
+                                Unavailable
+                              </Button>
+                            )}
                           </div>
-                          <Button
-                            onClick={() => handleConnect(p.id)}
-                            className="bg-cyan-600 hover:bg-cyan-500"
-                          >
-                            <ExternalLink className="w-4 h-4 mr-2" />
-                            Connect
-                          </Button>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -1491,7 +1493,7 @@ export default function AutopostPage() {
                       onChange={e => setAckAutomation(e.target.checked)}
                       className="mt-1"
                     />
-                    <span>I understand this rule may post automatically when scheduled.</span>
+                    <span>I understand this rule helps prepare my posting workflow, and final posting may be completed directly on each platform.</span>
                   </label>
 
                   <label className="flex items-start gap-3 text-sm text-gray-200 cursor-pointer">

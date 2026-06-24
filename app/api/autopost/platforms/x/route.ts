@@ -110,13 +110,14 @@ export async function POST(req: Request) {
   // This is where X API v2 posting will go.
   // For now:
   // - Deterministic success
-  // - Stable platform_post_id
+  // - Stable workflow_task_id
   // ──────────────────────────────────────────────
-  const platformPostId = `x_${payload.rule_id}_${Date.now()}`;
+  const workflowTaskId = `x_${payload.rule_id}_${Date.now()}`;
 
   return json(200, {
     ok: true,
-    platform_post_id: platformPostId,
+    workflow_task_id: workflowTaskId,
+    status: "ready_for_assisted_posting",
   });
 }
 

@@ -5,25 +5,23 @@ type PlatformId =
   | "onlyfans"
   | "fansly"
   | "loyalfans"
+  | "justforfans"
   | "jff"
   | "x"
   | "reddit"
 
-const ALL_PLATFORMS: PlatformId[] = [
-  "fanvue",
-  "onlyfans",
-  "fansly",
-  "loyalfans",
-  "jff",
-  "x",
-  "reddit",
-]
+const PLATFORM_URLS: Record<PlatformId, string> = {
+  fanvue: "https://www.fanvue.com/",
+  onlyfans: "https://onlyfans.com/",
+  fansly: "https://fansly.com/",
+  loyalfans: "https://www.loyalfans.com/",
+  justforfans: "https://justfor.fans/",
+  jff: "https://justfor.fans/",
+  x: "https://x.com/",
+  reddit: "https://www.reddit.com/",
+}
 
-// Platforms that require OAuth before we can mark “connected”
-const OAUTH_REQUIRED: PlatformId[] = ["onlyfans", "fansly", "loyalfans", "jff", "x", "reddit"]
-
-// Fanvue is internal primary and connected by default (no OAuth redirect needed)
-const FANVUE_DEFAULT_REDIRECT = "/autopost"
+const ALL_PLATFORMS = Object.keys(PLATFORM_URLS) as PlatformId[]
 
 function isPlatformId(x: string | null): x is PlatformId {
   if (!x) return false
@@ -33,18 +31,11 @@ function isPlatformId(x: string | null): x is PlatformId {
 /**
  * GET /api/autopost/connect?platform=x
  *
- * Contract (LOCKED):
- * 200 -> { redirectUrl: string }
+ * Launch-safe contract:
+ * 200 -> { redirectUrl: string, mode: "external_platform" }
  *
- * Rules:
- * - Frontend must never fake connected state.
- * - OAuth handled server-side only.
- * - Fanvue is connected by default.
- *
- * This route is launch-safe:
- * - Fanvue returns a valid redirectUrl immediately.
- * - Other platforms return non-200 until OAuth start endpoints exist,
- *   ensuring the UI cannot “pretend” a platform is connected.
+ * This route provides external platform destinations for assisted posting.
+ * It does not create native OAuth/API sessions or mark a platform as linked.
  */
 export async function GET(req: Request) {
   const url = new URL(req.url)
@@ -61,30 +52,12 @@ export async function GET(req: Request) {
     )
   }
 
-  const platform: PlatformId = platformParam
-
-  // Fanvue: internal primary, connected by default, no OAuth redirect needed.
-  if (platform === "fanvue") {
-    return NextResponse.json({ redirectUrl: FANVUE_DEFAULT_REDIRECT }, { status: 200 })
-  }
-
-  // Everything else: require OAuth start route (server-side) BEFORE we can claim connected.
-  // We intentionally return non-200 until those routes exist.
-  if (OAUTH_REQUIRED.includes(platform)) {
-    return NextResponse.json(
-      {
-        error: "oauth_not_implemented",
-        message:
-          "OAuth connect flow for this platform is not implemented yet. UI must treat as NOT connected.",
-        platform,
-      },
-      { status: 501 }
-    )
-  }
-
-  // Defensive fallback (should never hit because ALL_PLATFORMS is exhaustive)
   return NextResponse.json(
-    { error: "unsupported_platform", message: "Unsupported platform.", platform },
-    { status: 400 }
+    {
+      redirectUrl: PLATFORM_URLS[platformParam],
+      mode: "external_platform",
+      message: "Open the creator platform to complete assisted posting.",
+    },
+    { status: 200 }
   )
 }

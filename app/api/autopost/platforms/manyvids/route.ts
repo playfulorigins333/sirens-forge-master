@@ -102,14 +102,15 @@ export async function POST(req: Request) {
   // PLACEHOLDER DISPATCH LOGIC (REAL SUCCESS PATH)
   // This is where the ManyVids API integration will go.
   // For now:
-  // - We simulate a successful post creation
-  // - We return a deterministic platform_post_id
+  // - We prepare a workflow task for assisted distribution
+  // - We return a deterministic workflow_task_id
   // ──────────────────────────────────────────────
-  const platformPostId = `manyvids_${payload.rule_id}_${Date.now()}`;
+  const workflowTaskId = `manyvids_${payload.rule_id}_${Date.now()}`;
 
   return json(200, {
     ok: true,
-    platform_post_id: platformPostId,
+    workflow_task_id: workflowTaskId,
+    status: "ready_for_assisted_posting",
   });
 }
 
