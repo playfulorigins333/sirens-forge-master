@@ -204,12 +204,52 @@ R2_DATASET_PREFIX_ROOT = _clean_prefix(R2_DATASET_PREFIX_ROOT)
 R2_ARTIFACT_PREFIX_ROOT = _clean_prefix(R2_ARTIFACT_PREFIX_ROOT)
 
 
+def _clean_optional_string(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    cleaned = CONTROL_CHARS_RE.sub("", str(value)).strip()
+    return cleaned or None
+
+
+def resolve_dataset_source(lora_id: str, job: Dict[str, Any]) -> Tuple[str, str]:
+    row_bucket = _clean_optional_string(job.get("dataset_r2_bucket"))
+    row_prefix = _clean_optional_string(job.get("dataset_r2_prefix"))
+
+    bucket = row_bucket or _clean_optional_string(R2_DATASET_BUCKET)
+    if not bucket:
+        raise RuntimeError(
+            "Missing dataset R2 bucket: user_loras.dataset_r2_bucket is empty "
+            "and R2_DATASET_BUCKET/R2_BUCKET is not configured"
+        )
+
+    if row_bucket:
+        log(f"📦 Using queued dataset bucket from user_loras.dataset_r2_bucket: {bucket}")
+    else:
+        log(f"⚠️ user_loras.dataset_r2_bucket missing; falling back to env dataset bucket: {bucket}")
+
+    if row_prefix:
+        prefix = _clean_prefix(row_prefix)
+        if not prefix:
+            raise RuntimeError("Missing dataset R2 prefix: user_loras.dataset_r2_prefix is empty")
+        prefix = f"{prefix}/"
+        log(f"📦 Using queued dataset prefix from user_loras.dataset_r2_prefix: {prefix}")
+    else:
+        prefix = f"{R2_DATASET_PREFIX_ROOT}/{lora_id}/".replace("//", "/")
+        if not _clean_prefix(prefix):
+            raise RuntimeError(
+                "Missing dataset R2 prefix: user_loras.dataset_r2_prefix is empty "
+                "and R2_DATASET_PREFIX_ROOT fallback is empty"
+            )
+        log(f"⚠️ user_loras.dataset_r2_prefix missing; falling back to env dataset prefix: {prefix}")
+
+    return bucket, prefix
+
+
 def r2_enabled() -> bool:
     return bool(
         R2_ACCESS_KEY_ID
         and R2_SECRET_ACCESS_KEY
         and R2_ENDPOINT
-        and R2_DATASET_BUCKET
         and R2_ARTIFACT_BUCKET
     )
 
@@ -218,8 +258,9 @@ def make_r2_client():
     if not r2_enabled():
         raise RuntimeError(
             "R2 env missing. Required: "
-            "R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET "
-            "(or explicit R2_DATASET_BUCKET / R2_ARTIFACT_BUCKET)."
+            "R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, and "
+            "R2_ARTIFACT_BUCKET/R2_BUCKET. Dataset bucket may come from "
+            "user_loras.dataset_r2_bucket or R2_DATASET_BUCKET/R2_BUCKET."
         )
 
     session = boto3.session.Session()
@@ -524,17 +565,23 @@ def build_caption(trigger_token: str, image_path: str) -> str:
 # ─────────────────────────────────────────────────────────────
 # Dataset builder
 # ─────────────────────────────────────────────────────────────
-def prepare_dataset(lora_id: str) -> Dict[str, Any]:
+def prepare_dataset(lora_id: str, dataset_bucket: str, dataset_prefix: str) -> Dict[str, Any]:
     s3 = make_r2_client()
 
     base = os.path.join(LOCAL_TRAIN_ROOT, f"sf_{lora_id}")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
 
-    prefix = f"{R2_DATASET_PREFIX_ROOT}/{lora_id}/".replace("//", "/")
-    keys = r2_list_objects(s3, R2_DATASET_BUCKET, prefix)
+    bucket = _clean_optional_string(dataset_bucket)
+    prefix = _clean_optional_string(dataset_prefix)
+    if not bucket:
+        raise RuntimeError("Missing dataset R2 bucket before training")
+    if not prefix:
+        raise RuntimeError("Missing dataset R2 prefix before training")
+
+    keys = r2_list_objects(s3, bucket, prefix)
     if not keys:
-        raise RuntimeError(f"No files found in R2 for this job: s3://{R2_DATASET_BUCKET}/{prefix}")
+        raise RuntimeError(f"No files found in R2 for this job: s3://{bucket}/{prefix}")
 
     tmp = os.path.join(base, "_tmp")
     os.makedirs(tmp, exist_ok=True)
@@ -544,7 +591,7 @@ def prepare_dataset(lora_id: str) -> Dict[str, Any]:
         if not filename:
             continue
         local_path = os.path.join(tmp, filename)
-        r2_download_file(s3, R2_DATASET_BUCKET, key, local_path)
+        r2_download_file(s3, bucket, key, local_path)
 
     images = [f for f in os.listdir(tmp) if f.lower().endswith(IMAGE_EXTS)]
     count = len(images)
@@ -583,13 +630,13 @@ def prepare_dataset(lora_id: str) -> Dict[str, Any]:
         "image_count": count,
         "repeat": repeat,
         "effective_samples": effective,
-        "r2_bucket": R2_DATASET_BUCKET,
+        "r2_bucket": bucket,
         "r2_prefix": prefix,
     }
     with open(os.path.join(base, "dataset_meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
 
-    log(f"📦 R2 dataset: bucket={R2_DATASET_BUCKET} prefix={prefix} files={len(keys)}")
+    log(f"📦 R2 dataset: bucket={bucket} prefix={prefix} files={len(keys)}")
     log(f"📊 Images={count} → repeat={repeat} → samples≈{effective}")
     log(f"🏷️ Trigger token: {trigger_token}  (THIS is what you will prompt with)")
     log(f"📝 Captions written: {captions_written}  (BLIP={USE_BLIP_CAPTIONS})")
@@ -599,6 +646,7 @@ def prepare_dataset(lora_id: str) -> Dict[str, Any]:
         "steps": effective,
         "image_count": count,
         "repeat": repeat,
+        "r2_bucket": bucket,
         "r2_prefix": prefix,
         "trigger_token": trigger_token,
     }
@@ -701,6 +749,7 @@ def worker_main() -> None:
             jobs = sb_get(
                 "user_loras",
                 {
+                    "select": "id,user_id,status,dataset_r2_bucket,dataset_r2_prefix",
                     "status": "eq.queued",
                     "user_id": "not.is.null",
                     "order": "created_at.asc",
@@ -723,7 +772,8 @@ def worker_main() -> None:
 
             sb_patch_safe("user_loras", {"status": "training", "progress": 1}, {"id": f"eq.{lora_id}"})
 
-            ds = prepare_dataset(lora_id)
+            dataset_bucket, dataset_prefix = resolve_dataset_source(lora_id, jobs[0])
+            ds = prepare_dataset(lora_id, dataset_bucket, dataset_prefix)
             local_artifact = run_training(lora_id, ds)
 
             s3 = make_r2_client()
@@ -736,7 +786,7 @@ def worker_main() -> None:
                 "progress": 100,
                 "artifact_r2_bucket": R2_ARTIFACT_BUCKET,
                 "artifact_r2_key": uploaded_r2_key,
-                "dataset_r2_bucket": R2_DATASET_BUCKET,
+                "dataset_r2_bucket": ds.get("r2_bucket"),
                 "dataset_r2_prefix": ds.get("r2_prefix"),
                 "image_count": ds.get("image_count"),
                 # Optional: store trigger_token if column exists; sb_patch_safe will strip if not.
