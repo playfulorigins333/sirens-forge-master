@@ -12,6 +12,7 @@ import {
 } from "lucide-react"
 import { ensureActiveSubscription } from "@/lib/subscription-checker"
 import { supabaseServer } from "@/lib/supabaseServer"
+import { ManageBillingPortalButton } from "./ManageBillingPortalButton"
 
 export const metadata = {
   title: "Sirens Forge — Billing",
@@ -333,6 +334,8 @@ export default async function BillingPage() {
             <h2 className="mb-4 text-2xl font-bold text-white">Manage Plan</h2>
 
             <div className="space-y-3">
+              <ManageBillingPortalButton />
+
               <Link
                 href="/pricing"
                 className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-gray-200 transition hover:border-white/20 hover:bg-white/10"
@@ -359,7 +362,7 @@ export default async function BillingPage() {
             </div>
 
             <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-gray-300">
-              Manage your subscription, review your plan, and keep your access active.
+              Manage subscriptions and payment methods in Stripe. Lifetime access purchases remain active and are not canceled like recurring subscriptions.
             </div>
           </section>
         </div>
