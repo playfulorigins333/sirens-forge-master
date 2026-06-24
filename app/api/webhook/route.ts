@@ -15,22 +15,40 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 
 async function findProfileIdByStripeCustomer(
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
-  stripeCustomerId: string
+  stripeCustomerId: string,
+  fallbackProfileId?: string | null
 ): Promise<string | null> {
-  if (!stripeCustomerId) return null
+  if (!stripeCustomerId && !fallbackProfileId) return null
 
-  const { data, error } = await supabaseAdmin
+  if (stripeCustomerId) {
+    const { data, error } = await supabaseAdmin
+      .from("profiles")
+      .select("id")
+      .eq("stripe_customer_id", stripeCustomerId)
+      .maybeSingle()
+
+    if (error) {
+      console.error("❌ Error finding profile by stripe_customer_id:", error)
+    } else if (data?.id) {
+      return data.id
+    }
+  }
+
+  const safeFallbackId = fallbackProfileId && String(fallbackProfileId).trim()
+  if (!safeFallbackId) return null
+
+  const { data: fallbackProfile, error: fallbackError } = await supabaseAdmin
     .from("profiles")
     .select("id")
-    .eq("stripe_customer_id", stripeCustomerId)
+    .eq("id", safeFallbackId)
     .maybeSingle()
 
-  if (error) {
-    console.error("❌ Error finding profile by stripe_customer_id:", error)
+  if (fallbackError) {
+    console.error("❌ Error finding profile by metadata fallback:", fallbackError)
     return null
   }
 
-  return data?.id ?? null
+  return fallbackProfile?.id ?? null
 }
 
 async function findProfileByConnectAccount(
@@ -64,12 +82,34 @@ async function findTierByPriceId(
 
   const { data, error } = await supabaseAdmin
     .from("subscription_tiers")
-    .select("id, name, display_name, stripe_price_id")
+    .select("id, name, display_name, stripe_price_id, is_active")
     .eq("stripe_price_id", priceId)
+    .eq("is_active", true)
     .maybeSingle()
 
   if (error) {
     console.error("❌ Error finding tier by priceId:", error)
+    return null
+  }
+
+  return data ?? null
+}
+
+async function findTierByName(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  tierName: string | null | undefined
+) {
+  if (!tierName) return null
+
+  const { data, error } = await supabaseAdmin
+    .from("subscription_tiers")
+    .select("id, name, display_name, stripe_price_id, is_active")
+    .eq("name", tierName)
+    .eq("is_active", true)
+    .maybeSingle()
+
+  if (error) {
+    console.error("❌ Error finding tier by name:", error)
     return null
   }
 
@@ -89,16 +129,102 @@ function destinationChargeUsed(obj: any): boolean {
   )
 }
 
+async function grantOgThroneAccessFromCheckoutSession(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  session: any
+) {
+  const metadata = session.metadata ?? {}
+  const tierName = metadata.tier_name ?? null
+
+  // Business decision: og_throne is a one-time payment that grants lifetime app access.
+  if (session.mode !== "payment" || tierName !== "og_throne") return
+
+  if (session.payment_status && session.payment_status !== "paid") {
+    console.log("ℹ️ Skipping og_throne access grant until payment is paid:", session.id)
+    return
+  }
+
+  const stripeCustomerId = session.customer ? String(session.customer) : ""
+  const profileId = await findProfileIdByStripeCustomer(
+    supabaseAdmin,
+    stripeCustomerId,
+    metadata.profile_id ?? session.client_reference_id ?? null
+  )
+
+  if (!profileId) {
+    console.error("❌ Could not resolve profile for og_throne checkout:", session.id)
+    return
+  }
+
+  const tier = await findTierByName(supabaseAdmin, "og_throne")
+  if (!tier) {
+    console.error("❌ Active og_throne tier not found for checkout:", session.id)
+    return
+  }
+
+  const periodStart = session.created
+    ? new Date(session.created * 1000).toISOString()
+    : new Date().toISOString()
+
+  const accessRow = {
+    user_id: profileId,
+    tier_id: tier.id,
+    tier_name: "og_throne",
+    stripe_subscription_id: null,
+    stripe_customer_id: stripeCustomerId || null,
+    status: "active",
+    current_period_start: periodStart,
+    current_period_end: null,
+    cancel_at_period_end: false,
+    canceled_at: null,
+    metadata: {
+      checkout_session_id: session.id ?? null,
+      payment_intent: session.payment_intent ? String(session.payment_intent) : null,
+      stripe_price_id: metadata.stripe_price_id ?? tier.stripe_price_id ?? null,
+      access_type: "one_time_lifetime",
+      tier_name: "og_throne",
+    },
+  }
+
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from("user_subscriptions")
+    .select("id")
+    .eq("user_id", profileId)
+    .eq("tier_name", "og_throne")
+    .in("status", ["active", "trialing"])
+    .order("current_period_start", { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (existingError) {
+    console.error("❌ Error checking existing og_throne access:", existingError)
+    return
+  }
+
+  const query = existing?.id
+    ? supabaseAdmin.from("user_subscriptions").update(accessRow).eq("id", existing.id)
+    : supabaseAdmin.from("user_subscriptions").insert(accessRow)
+
+  const { error } = await query
+
+  if (error) {
+    console.error("❌ Error granting og_throne access:", error)
+  }
+}
+
 async function upsertUserSubscriptionFromStripe(
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
-  sub: any
+  sub: any,
+  metadataFallback: Record<string, any> = {}
 ) {
   const stripeCustomerId = String(sub.customer)
   const stripeSubscriptionId = sub.id
 
+  const metadata = { ...(sub.metadata ?? {}), ...metadataFallback }
   const profileId = await findProfileIdByStripeCustomer(
     supabaseAdmin,
-    stripeCustomerId
+    stripeCustomerId,
+    metadata.profile_id ?? metadata.user_id ?? null
   )
   if (!profileId) return
 
@@ -116,7 +242,7 @@ async function upsertUserSubscriptionFromStripe(
       {
         user_id: profileId,
         tier_id: tier.id,
-        tier_name: tier.display_name ?? tier.name,
+        tier_name: tier.name,
         stripe_subscription_id: stripeSubscriptionId,
         stripe_customer_id: stripeCustomerId,
         status,
@@ -138,6 +264,9 @@ async function upsertUserSubscriptionFromStripe(
           : null,
         metadata: {
           stripe_price_id: priceId,
+          checkout_user_id: metadata.user_id ?? null,
+          checkout_profile_id: metadata.profile_id ?? null,
+          checkout_tier_name: metadata.tier_name ?? null,
         },
       },
       { onConflict: "stripe_subscription_id" }
@@ -209,7 +338,14 @@ export async function POST(req: Request) {
           const sub = await stripe.subscriptions.retrieve(
             String(session.subscription)
           )
-          await upsertUserSubscriptionFromStripe(supabaseAdmin, sub)
+          await upsertUserSubscriptionFromStripe(supabaseAdmin, sub, {
+            ...(session.metadata ?? {}),
+            profile_id: session.metadata?.profile_id ?? session.client_reference_id ?? null,
+          })
+        }
+
+        if (session.mode === "payment") {
+          await grantOgThroneAccessFromCheckoutSession(supabaseAdmin, session)
         }
 
         break

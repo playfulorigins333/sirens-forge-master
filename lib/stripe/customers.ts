@@ -1,18 +1,27 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 
-// Use Clover API version required by your Stripe SDK
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-11-17.clover",
-});
+function getStripe() {
+  return new Stripe(process.env.STRIPE_SECRET_KEY || "", {
+    apiVersion: "2025-11-17.clover",
+  });
+}
 
-// Service role Supabase client (needed to update profiles table)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+function getSupabaseAdminClient() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error("Missing Supabase admin env for Stripe customer lookup");
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey);
+}
 
 export async function getOrCreateStripeCustomer(userId: string, email?: string) {
+  const stripe = getStripe();
+  const supabase = getSupabaseAdminClient();
+
   // 1. Load user profile
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
@@ -35,6 +44,7 @@ export async function getOrCreateStripeCustomer(userId: string, email?: string) 
     email: email ?? profile.email,
     metadata: {
       user_id: userId,
+      profile_id: userId,
     },
   });
 
