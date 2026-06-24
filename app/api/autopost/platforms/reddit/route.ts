@@ -110,13 +110,14 @@ export async function POST(req: Request) {
   // integration will go.
   // For now:
   // - Deterministic success
-  // - Stable platform_post_id
+  // - Stable workflow_task_id
   // ──────────────────────────────────────────────
-  const platformPostId = `reddit_${payload.rule_id}_${Date.now()}`;
+  const workflowTaskId = `reddit_${payload.rule_id}_${Date.now()}`;
 
   return json(200, {
     ok: true,
-    platform_post_id: platformPostId,
+    workflow_task_id: workflowTaskId,
+    status: "ready_for_assisted_posting",
   });
 }
 

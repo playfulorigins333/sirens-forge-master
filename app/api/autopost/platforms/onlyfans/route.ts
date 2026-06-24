@@ -91,13 +91,14 @@ export async function POST(req: Request) {
 
   // ──────────────────────────────────────────────
   // LAUNCH BEHAVIOR (NO EXTERNAL API YET)
-  // Executor records success based on this response.
+  // Executor records workflow readiness based on this response.
   // ──────────────────────────────────────────────
-  const platformPostId = `onlyfans_${payload.rule_id}_${Date.now()}`;
+  const workflowTaskId = `onlyfans_${payload.rule_id}_${Date.now()}`;
 
   return json(200, {
     ok: true,
-    platform_post_id: platformPostId,
+    workflow_task_id: workflowTaskId,
+    status: "ready_for_assisted_posting",
   });
 }
 

@@ -188,7 +188,7 @@ async function dispatchToPlatformWebhook(
   if (dryRun) {
     return {
       ok: true,
-      platform_post_id: `dry_${platform}_${Date.now()}`,
+      platform_post_id: null,
     };
   }
 

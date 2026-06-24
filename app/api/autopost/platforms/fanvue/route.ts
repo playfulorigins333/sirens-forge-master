@@ -40,7 +40,8 @@ export async function POST(req: Request) {
 
     return json(200, {
       ok: true,
-      platform_post_id: `fanvue_${body.rule_id}_${Date.now()}`,
+      workflow_task_id: `fanvue_${body.rule_id}_${Date.now()}`,
+      status: "ready_for_assisted_posting",
     });
   } catch (err: any) {
     return json(500, {

@@ -67,7 +67,8 @@ export async function POST(req: Request) {
     // ---- Explicit success response (REQUIRED) ----
     return json(200, {
       ok: true,
-      platform_post_id: `fansly_${body.rule_id}_${Date.now()}`,
+      workflow_task_id: `fansly_${body.rule_id}_${Date.now()}`,
+      status: "ready_for_assisted_posting",
     });
   } catch (err: any) {
     return json(500, {
