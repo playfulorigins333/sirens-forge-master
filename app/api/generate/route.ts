@@ -78,7 +78,10 @@ async function getUserIdFromCookies(): Promise<string | null> {
 
     return user?.id ?? null;
   } catch (error) {
-    console.warn("[generate] Could not resolve authenticated user from cookies.", error);
+    console.warn(
+      "[generate] Could not resolve authenticated user from cookies.",
+      error,
+    );
     return null;
   }
 }
@@ -106,10 +109,17 @@ async function bestEffortLogGeneration(args: {
     mode: "txt2img";
     real_workflow: boolean;
   };
+  runpodJobId?: string | null;
+  errorMessage?: string | null;
+  processingTimeMs?: number | null;
+  r2Bucket?: string | null;
+  r2Key?: string | null;
 }): Promise<LoggedGenerationRecord | null> {
   const admin = getAdminClient();
   if (!admin) {
-    console.warn("[generate] Skipping generation log: SUPABASE_SERVICE_ROLE_KEY missing.");
+    console.warn(
+      "[generate] Skipping generation log: SUPABASE_SERVICE_ROLE_KEY missing.",
+    );
     return null;
   }
 
@@ -120,9 +130,7 @@ async function bestEffortLogGeneration(args: {
     typeof args.imageUrl === "string" && args.imageUrl.trim().length > 0;
 
   const isRealAsset =
-    status === "completed" &&
-    !args.placeholder &&
-    hasValidUrl;
+    status === "completed" && !args.placeholder && hasValidUrl;
 
   const authoritativeLinkedLora =
     isRealAsset &&
@@ -137,7 +145,9 @@ async function bestEffortLogGeneration(args: {
     mode: args.upstream.mode,
     placeholder: args.placeholder === true,
     output_url: args.imageUrl,
-    ...(args.placeholder && args.imageUrl ? { placeholder_url: args.imageUrl } : {}),
+    ...(args.placeholder && args.imageUrl
+      ? { placeholder_url: args.imageUrl }
+      : {}),
     body_mode: args.bodyMode,
     identity_lora: args.identityLora, // legacy only
     negative_prompt: args.negativePrompt,
@@ -149,16 +159,30 @@ async function bestEffortLogGeneration(args: {
   const payload = {
     user_id: args.userId,
     prompt: args.prompt,
-    status,
-    kind: "image",
     image_url: isRealAsset ? args.imageUrl : null,
-    output_url: isRealAsset ? args.imageUrl : null,
     lora_used: authoritativeLinkedLora,
+    job_type: "image",
+    body_type: args.bodyMode,
+    mode: args.upstream.mode,
+    status,
+    negative_prompt: args.negativePrompt,
+    steps: args.request.steps,
+    cfg_scale: args.request.cfg,
+    seed: args.request.seed,
+    width: args.request.width,
+    height: args.request.height,
+    runpod_job_id: args.runpodJobId,
+    error_message: args.errorMessage,
+    processing_time_ms: args.processingTimeMs,
+    completed_at: isRealAsset ? now : null,
     metadata,
+    r2_bucket: args.r2Bucket,
+    r2_key: args.r2Key,
+    updated_at: now,
   };
 
   const cleaned = Object.fromEntries(
-    Object.entries(payload).filter(([, value]) => value !== undefined)
+    Object.entries(payload).filter(([, value]) => value !== undefined),
   );
 
   const { data, error } = await admin
@@ -182,7 +206,7 @@ export async function POST(req: NextRequest) {
     if (!RUNPOD_BASE_URL) {
       return NextResponse.json(
         { error: "RUNPOD_BASE_URL_MISSING" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -192,7 +216,7 @@ export async function POST(req: NextRequest) {
     if (!publicSupabaseUrl || !publicSupabaseAnon) {
       return NextResponse.json(
         { error: "SUPABASE_PUBLIC_ENV_MISSING" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -201,7 +225,7 @@ export async function POST(req: NextRequest) {
     if (!supabase) {
       return NextResponse.json(
         { error: "SUPABASE_ADMIN_MISSING" },
-        { status: 500 }
+        { status: 500 },
       );
     }
 
@@ -210,19 +234,18 @@ export async function POST(req: NextRequest) {
     const prompt = String(body.prompt || "").trim();
     const negativePrompt = String(body.negative_prompt || "").trim();
     const rawBodyMode = String(body.body_mode || "none").trim();
-    const bodyMode: BodyMode = rawBodyMode === "body_feminine" || rawBodyMode === "body_masculine"
-      ? rawBodyMode
-      : "none";
+    const bodyMode: BodyMode =
+      rawBodyMode === "body_feminine" || rawBodyMode === "body_masculine"
+        ? rawBodyMode
+        : "none";
     const identityLora =
-      typeof body.identity_lora === "string" && body.identity_lora.trim().length > 0
+      typeof body.identity_lora === "string" &&
+      body.identity_lora.trim().length > 0
         ? body.identity_lora.trim()
         : null;
 
     if (!prompt) {
-      return NextResponse.json(
-        { error: "PROMPT_REQUIRED" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "PROMPT_REQUIRED" }, { status: 400 });
     }
 
     const normalized = {
@@ -267,6 +290,7 @@ export async function POST(req: NextRequest) {
     };
 
     const userId = await getUserIdFromCookies();
+    const startedAt = Date.now();
 
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
       method: "POST",
@@ -295,6 +319,8 @@ export async function POST(req: NextRequest) {
           mode: "txt2img",
           real_workflow: true,
         },
+        errorMessage: text || "UPSTREAM_ERROR",
+        processingTimeMs: Date.now() - startedAt,
       });
 
       return NextResponse.json(
@@ -304,7 +330,7 @@ export async function POST(req: NextRequest) {
           body: text,
           generation_id: logged?.id ?? null,
         },
-        { status: upstream.status }
+        { status: upstream.status },
       );
     }
 
@@ -329,6 +355,8 @@ export async function POST(req: NextRequest) {
           mode: "txt2img",
           real_workflow: true,
         },
+        errorMessage: "UPSTREAM_INVALID_JSON",
+        processingTimeMs: Date.now() - startedAt,
       });
 
       return NextResponse.json(
@@ -337,7 +365,7 @@ export async function POST(req: NextRequest) {
           generation_id: logged?.id ?? null,
           body: text,
         },
-        { status: 502 }
+        { status: 502 },
       );
     }
 
@@ -361,16 +389,31 @@ export async function POST(req: NextRequest) {
       typeof normalizedUpstreamJson?.image_url === "string"
         ? normalizedUpstreamJson.image_url
         : typeof normalizedUpstreamJson?.output_url === "string"
-        ? normalizedUpstreamJson.output_url
-        : Array.isArray(normalizedUpstreamJson?.outputs) &&
-          typeof normalizedUpstreamJson.outputs?.[0]?.url === "string"
-        ? normalizedUpstreamJson.outputs[0].url
-        : null;
+          ? normalizedUpstreamJson.output_url
+          : Array.isArray(normalizedUpstreamJson?.outputs) &&
+              typeof normalizedUpstreamJson.outputs?.[0]?.url === "string"
+            ? normalizedUpstreamJson.outputs[0].url
+            : null;
 
     const upstreamPlaceholder =
       typeof normalizedUpstreamJson?.placeholder === "boolean"
         ? normalizedUpstreamJson.placeholder
         : false;
+
+    const upstreamGenerationId =
+      typeof normalizedUpstreamJson?.generation_id === "string"
+        ? normalizedUpstreamJson.generation_id
+        : typeof normalizedUpstreamJson?.prompt_id === "string"
+          ? normalizedUpstreamJson.prompt_id
+          : null;
+    const r2Bucket =
+      typeof normalizedUpstreamJson?.r2_bucket === "string"
+        ? normalizedUpstreamJson.r2_bucket
+        : null;
+    const r2Key =
+      typeof normalizedUpstreamJson?.r2_key === "string"
+        ? normalizedUpstreamJson.r2_key
+        : null;
 
     const logged = await bestEffortLogGeneration({
       userId,
@@ -388,6 +431,10 @@ export async function POST(req: NextRequest) {
         mode: "txt2img",
         real_workflow: true,
       },
+      runpodJobId: upstreamGenerationId,
+      processingTimeMs: Date.now() - startedAt,
+      r2Bucket,
+      r2Key,
     });
 
     const finalImageUrl =
@@ -398,13 +445,13 @@ export async function POST(req: NextRequest) {
     const finalOutputs = Array.isArray(normalizedUpstreamJson?.outputs)
       ? normalizedUpstreamJson.outputs
       : finalImageUrl
-      ? [
-          {
-            kind: "image",
-            url: finalImageUrl,
-          },
-        ]
-      : [];
+        ? [
+            {
+              kind: "image",
+              url: finalImageUrl,
+            },
+          ]
+        : [];
 
     return NextResponse.json(
       {
@@ -413,12 +460,13 @@ export async function POST(req: NextRequest) {
           typeof normalizedUpstreamJson?.status === "string"
             ? normalizedUpstreamJson.status
             : "ok",
-        generation_id: normalizedUpstreamJson?.generation_id ?? logged?.id ?? null,
+        generation_id:
+          normalizedUpstreamJson?.generation_id ?? logged?.id ?? null,
         image_url: finalImageUrl,
         outputs: finalOutputs,
         placeholder: upstreamPlaceholder,
       },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (err: any) {
     console.error("[generate] fatal error:", err);
@@ -428,7 +476,7 @@ export async function POST(req: NextRequest) {
         error: "INTERNAL_ERROR",
         message: err?.message ?? "Unknown error",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
