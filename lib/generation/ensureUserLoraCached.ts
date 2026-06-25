@@ -59,7 +59,7 @@ export async function ensureUserLoraCached(loraId: string): Promise<string> {
   // 2️⃣ Fetch artifact metadata
   const { data, error } = await supabase
     .from("user_loras")
-    .select("artifact_r2_key")
+    .select("artifact_r2_bucket, artifact_r2_key")
     .eq("id", loraId)
     .eq("status", "completed")
     .single();
@@ -68,12 +68,17 @@ export async function ensureUserLoraCached(loraId: string): Promise<string> {
     throw new Error(`LoRA not found or not completed: ${loraId}`);
   }
 
+  const bucket = data.artifact_r2_bucket?.trim() || R2_BUCKET;
   const key = data.artifact_r2_key;
+
+  console.info(
+    `[ensureUserLoraCached] Downloading LoRA artifact from R2: bucket=${bucket} key=${key}`
+  );
 
   // 3️⃣ Download from R2
   const result = await r2.send(
     new GetObjectCommand({
-      Bucket: R2_BUCKET,
+      Bucket: bucket,
       Key: key,
     })
   );
