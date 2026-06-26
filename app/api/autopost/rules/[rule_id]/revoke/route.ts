@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { requireUserId } from "@/lib/supabaseServer"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 
 export async function POST(
@@ -7,6 +8,11 @@ export async function POST(
 ) {
   try {
     const { rule_id } = await params
+
+    const userId = await requireUserId()
+    if (!userId) {
+      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 })
+    }
 
     if (!rule_id) {
       return NextResponse.json(
@@ -22,6 +28,7 @@ export async function POST(
       .from("autopost_rules")
       .select("*")
       .eq("id", rule_id)
+      .eq("user_id", userId)
       .single()
 
     if (fetchError || !rule) {
@@ -50,6 +57,7 @@ export async function POST(
         updated_at: new Date().toISOString(),
       })
       .eq("id", rule_id)
+      .eq("user_id", userId)
       .select("*")
       .single()
 

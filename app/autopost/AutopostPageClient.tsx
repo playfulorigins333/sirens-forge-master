@@ -40,11 +40,35 @@ type PlatformId =
   | "reddit"
   | string
 
+type PlatformLaunchStatus = "available" | "coming_soon" | "not_configured" | "unsupported"
+
 type Platform = {
   id: PlatformId
   name: string
-  status?: "connected" | "not_connected" | "unknown"
+  label?: string
+  external_url?: string
+  launch_status?: PlatformLaunchStatus
+  public_selectable?: boolean
+  supports_real_posting?: boolean
+  supports_assisted_workflow?: boolean
+  reason?: string
+  status_message?: string
   hint?: string
+}
+
+type UserPlatformStatus = Platform & {
+  app_configured?: boolean
+  oauth_configured?: boolean
+  can_connect?: boolean
+  user_connected?: boolean
+  connection_status?: string | null
+  provider_username?: string | null
+  can_schedule?: boolean
+  supports_text_posting?: boolean
+  supports_media_posting?: boolean
+  disabled_reason?: string | null
+  blockers?: string[]
+  has_error?: boolean
 }
 
 type PreviewStatus = "blocked" | "eligible" | "ineligible" | "error"
@@ -74,14 +98,16 @@ type AutopostRule = {
 // -----------------------------
 // Fallback platforms
 // -----------------------------
+const FALLBACK_PLATFORM_STATUS = "Coming soon — not available for scheduled Autopost yet."
+
 const FALLBACK_PLATFORMS: Platform[] = [
-  { id: "fanvue", name: "Fanvue", status: "unknown" },
-  { id: "onlyfans", name: "OnlyFans", status: "unknown" },
-  { id: "fansly", name: "Fansly", status: "unknown" },
-  { id: "loyalfans", name: "LoyalFans", status: "unknown" },
-  { id: "justforfans", name: "JustForFans", status: "unknown" },
-  { id: "x", name: "X (Twitter)", status: "unknown" },
-  { id: "reddit", name: "Reddit", status: "unknown" },
+  { id: "fanvue", name: "Fanvue", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
+  { id: "onlyfans", name: "OnlyFans", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
+  { id: "fansly", name: "Fansly", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
+  { id: "loyalfans", name: "LoyalFans", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
+  { id: "justforfans", name: "JustForFans", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
+  { id: "x", name: "X (Twitter)", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
+  { id: "reddit", name: "Reddit", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
 ]
 
 const AUTOPOST_PACK_PREFILL_STORAGE_KEY = "sirensforge:autopost_pack_prefill"
@@ -99,6 +125,16 @@ const PLATFORM_URLS: Record<string, string> = {
 
 function platformUrl(platform: PlatformId) {
   return PLATFORM_URLS[String(platform)] ?? null
+}
+
+function isPlatformSelectable(platform: Platform) {
+  return platform.public_selectable === true && platform.supports_real_posting === true
+}
+
+function platformUnavailableMessage(platform: Platform) {
+  if (platform.status_message) return platform.status_message
+  if (platform.launch_status === "not_configured") return "Not configured — posting integration is not enabled."
+  return "Coming soon — not available for scheduled Autopost yet."
 }
 
 type PackCaptionDraft = {
@@ -158,6 +194,29 @@ function asPlatformsArray(maybe: any): Platform[] | null {
   return null
 }
 
+function asUserPlatformStatusArray(maybe: any): UserPlatformStatus[] | null {
+  if (!maybe) return null
+  if (Array.isArray(maybe.platforms)) return maybe.platforms as UserPlatformStatus[]
+  return null
+}
+
+function isValidHHmm(value: string) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value.trim())
+}
+
+function getBestDraftTextFromPrefill(prefill: AutopostPackPrefill | null) {
+  if (!prefill) return ""
+  const firstDraftCaption = prefill.caption_drafts?.find((draft) => typeof draft.caption === "string" && draft.caption.trim())?.caption
+  const firstCaption = prefill.captions?.find((caption) => typeof caption === "string" && caption.trim())
+  return String(firstDraftCaption ?? firstCaption ?? "").replace(/\s+/g, " ").trim()
+}
+
+function normalizeHashtags(value: unknown) {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+  if (typeof value !== "string") return []
+  return value.split(/\s+/).map((item) => item.trim()).filter(Boolean)
+}
+
 function formatTs(ts?: string | null) {
   if (!ts) return "—"
   const d = new Date(ts)
@@ -209,6 +268,25 @@ async function fetchPlatforms(): Promise<Platform[] | null> {
   } catch {
     return null
   }
+}
+
+async function fetchUserPlatformStatuses(): Promise<UserPlatformStatus[] | null> {
+  try {
+    const res = await fetch("/api/autopost/platforms/me", { method: "GET" })
+    if (res.status === 401) return null
+    if (!res.ok) return null
+    const data = await safeJson<any>(res)
+    return asUserPlatformStatusArray(data)
+  } catch {
+    return null
+  }
+}
+
+async function disconnectXAccount(): Promise<any> {
+  const res = await fetch("/api/autopost/connect/x/disconnect", { method: "POST" })
+  const j = await safeJson<any>(res)
+  if (!res.ok) throw new Error(j?.error ? String(j.error) : `Disconnect X failed (${res.status})`)
+  return j
 }
 
 async function runPreviewSelection(input: {
@@ -273,13 +351,38 @@ export default function AutopostPage() {
 
   // Server-backed state (with safe fallback)
   const [platforms, setPlatforms] = useState<Platform[]>(FALLBACK_PLATFORMS)
+  const [userPlatformStatuses, setUserPlatformStatuses] = useState<UserPlatformStatus[]>([])
+  const [xAccountBusy, setXAccountBusy] = useState(false)
 
   // Builder config state (matches your /preview contract)
   const [enabled, setEnabled] = useState(false)
-  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>(["fanvue"])
+  const [selectedPlatforms, setSelectedPlatforms] = useState<PlatformId[]>([])
   const [frequency, setFrequency] = useState("manual")
   const [explicitness, setExplicitness] = useState(3)
   const [selectedTones, setSelectedTones] = useState<string[]>(["Playful", "Teasing"])
+
+  const [xDraftText, setXDraftText] = useState("")
+  const [xDraftTimezone, setXDraftTimezone] = useState("America/New_York")
+  const [xDraftStartDate, setXDraftStartDate] = useState("")
+  const [xDraftEndDate, setXDraftEndDate] = useState("")
+  const [xDraftTimeSlot, setXDraftTimeSlot] = useState("09:00")
+  const [isSavingXDraft, setIsSavingXDraft] = useState(false)
+
+  const selectablePlatformIds = useMemo(() => {
+    return new Set(platforms.filter(isPlatformSelectable).map((platform) => platform.id))
+  }, [platforms])
+
+  const hasSelectablePlatforms = selectablePlatformIds.size > 0
+
+  const xStatus = useMemo(() => {
+    return userPlatformStatuses.find((platform) => platform.id === "x") ?? null
+  }, [userPlatformStatuses])
+
+  const xUserConnected = xStatus?.user_connected === true && xStatus?.connection_status === "CONNECTED"
+  const xCanConnect = xStatus?.can_connect === true
+  const xDraftCharacterCount = Array.from(xDraftText).length
+  const xDraftTooLong = xDraftCharacterCount > 280
+  const xDraftTimeSlotValid = isValidHHmm(xDraftTimeSlot)
 
   // Preview state
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("blocked")
@@ -313,14 +416,24 @@ export default function AutopostPage() {
     return () => window.removeEventListener("mousemove", handleMouseMove)
   }, [mounted])
 
+  const refreshUserPlatformStatuses = async () => {
+    const statuses = await fetchUserPlatformStatuses()
+    setUserPlatformStatuses(statuses ?? [])
+  }
+
   // Load platforms once
   useEffect(() => {
     if (!mounted) return
     ;(async () => {
-      const p = await fetchPlatforms()
+      const [p, statuses] = await Promise.all([fetchPlatforms(), fetchUserPlatformStatuses()])
       if (p && p.length) setPlatforms(p)
+      setUserPlatformStatuses(statuses ?? [])
     })()
   }, [mounted])
+
+  useEffect(() => {
+    setSelectedPlatforms(prev => prev.filter(platformId => selectablePlatformIds.has(platformId)))
+  }, [selectablePlatformIds])
 
   // Load Generate → Autopost Builder handoff.
   useEffect(() => {
@@ -356,16 +469,17 @@ export default function AutopostPage() {
       const incomingExplicitness = Number(parsed.explicitness)
 
       setPackPrefill(parsed)
+      setXDraftText(getBestDraftTextFromPrefill(parsed))
       setTab("builder")
       setEnabled(false)
-      setSelectedPlatforms(incomingPlatforms)
+      setSelectedPlatforms(incomingPlatforms.filter((platform): platform is PlatformId => selectablePlatformIds.has(platform as PlatformId)))
       setFrequency(typeof parsed.frequency === "string" ? parsed.frequency : "manual")
       setExplicitness(Number.isFinite(incomingExplicitness) ? Math.max(1, Math.min(5, incomingExplicitness)) : 3)
       setSelectedTones(incomingTones)
       setPreviewStatus("blocked")
       setPreviewResult({
         state: "BLOCKED",
-        reason: "Generate pack loaded. Review settings, preview the rule, then save it for approval.",
+        reason: "Generate pack loaded. X draft preparation can use the first caption as text. Scheduled posting is not enabled yet.",
         payload: parsed,
         diagnostics: {
           source: parsed.source ?? "generate_pack_builder",
@@ -374,7 +488,11 @@ export default function AutopostPage() {
           asset_count: parsed.assets?.length ?? 0,
         },
       })
-      setBuilderSuccess("Pack loaded from Generate. Review the selected platforms and settings, preview the rule, then save it for approval.")
+      setBuilderSuccess(
+        incomingPlatforms.some((platform) => platform !== "x")
+          ? "Pack loaded from Generate. Non-X platforms remain disabled; only X draft preparation is being built first. Scheduled posting is not enabled yet."
+          : "Pack loaded from Generate. X draft preparation is available after connection; scheduled posting is not enabled yet."
+      )
       setSavedRuleSuccess(null)
       setBuilderError(null)
       window.sessionStorage.removeItem(AUTOPOST_PACK_PREFILL_STORAGE_KEY)
@@ -383,7 +501,7 @@ export default function AutopostPage() {
       setTab("builder")
       setBuilderError("The Generate handoff could not be read. Go back to /generate and send the pack again.")
     }
-  }, [mounted])
+  }, [mounted, selectablePlatformIds])
 
   const eligibleRulesCount = useMemo(() => {
     return rules.filter(r => String(r.approval_state).toUpperCase() === "APPROVED" && r.enabled === true).length
@@ -451,6 +569,13 @@ export default function AutopostPage() {
   }
 
   const saveAsRule = async () => {
+    if (!hasSelectablePlatforms || selectedPlatforms.length === 0) {
+      setBuilderError("Coming soon — not available for scheduled Autopost yet.")
+      setBuilderSuccess(null)
+      setSavedRuleSuccess(null)
+      return
+    }
+
     setBuilderError(null)
     setBuilderSuccess(null)
     setSavedRuleSuccess(null)
@@ -498,6 +623,95 @@ export default function AutopostPage() {
       await refreshRules()
     } catch (e: any) {
       setBuilderError(e?.message ? String(e.message) : "Save rule failed")
+    }
+  }
+
+  const connectX = () => {
+    if (typeof window === "undefined") return
+    window.location.href = "/api/autopost/connect/x/start"
+  }
+
+  const disconnectX = async () => {
+    setXAccountBusy(true)
+    setBuilderError(null)
+    setBuilderSuccess(null)
+    try {
+      await disconnectXAccount()
+      await refreshUserPlatformStatuses()
+      setBuilderSuccess("X disconnected. Scheduled posting is still disabled.")
+    } catch (e: any) {
+      setBuilderError(e?.message ? String(e.message) : "Disconnect X failed")
+    } finally {
+      setXAccountBusy(false)
+    }
+  }
+
+  const saveXDraftRule = async () => {
+    setBuilderError(null)
+    setBuilderSuccess(null)
+    setSavedRuleSuccess(null)
+
+    const text = xDraftText.replace(/\s+/g, " ").trim()
+    if (!xUserConnected) {
+      setBuilderError("Connect X before saving an X draft rule.")
+      return
+    }
+    if (!text) {
+      setBuilderError("Add text content before saving an X draft.")
+      return
+    }
+    if (Array.from(text).length > 280) {
+      setBuilderError("X text must be 280 characters or fewer for this MVP draft.")
+      return
+    }
+    if (!xDraftTimeSlotValid) {
+      setBuilderError("Add one valid HH:mm time slot before saving an X draft.")
+      return
+    }
+
+    const firstDraft = packPrefill?.caption_drafts?.[0]
+    const body = {
+      selected_platforms: ["x"],
+      content_payload: {
+        platform: "x",
+        text,
+        source: packPrefill ? "generate_pack_builder" : "autopost_ui",
+        caption_draft_id: firstDraft?.id ?? null,
+        hashtags: normalizeHashtags(firstDraft?.hashtags ?? packPrefill?.hashtags),
+        media_posting_enabled: false,
+      },
+      text,
+      source: packPrefill ? "generate_pack_builder" : "autopost_ui",
+      generation_ids: packPrefill?.generation_ids ?? [],
+      caption_drafts: packPrefill?.caption_drafts ?? [],
+      captions: packPrefill?.captions ?? [],
+      hashtags: packPrefill?.hashtags ?? [],
+      assets: packPrefill?.assets ?? [],
+      explicitness,
+      tones: selectedTones,
+      timezone: xDraftTimezone.trim() || "America/New_York",
+      start_date: xDraftStartDate.trim() || null,
+      end_date: xDraftEndDate.trim() || null,
+      posts_per_day: 1,
+      time_slots: [xDraftTimeSlot.trim()],
+    }
+
+    setIsSavingXDraft(true)
+    try {
+      const created = await createRule(body)
+      const createdRuleId = created?.rule?.id ?? created?.data?.id ?? created?.id ?? created?.rule_id ?? null
+      setSavedRuleSuccess({
+        ruleId: createdRuleId ? String(createdRuleId) : null,
+        platformLabels: "X (Twitter)",
+        packName: packPrefill?.pack_name || packPrefill?.collection_name || "X Draft Rule",
+        createdAt: new Date().toISOString(),
+      })
+      setBuilderSuccess("X draft saved. Scheduled posting is still disabled until final posting checks are complete.")
+      await refreshRules()
+    } catch (e: any) {
+      setBuilderError(e?.message ? String(e.message) : "Save X draft failed")
+    } finally {
+      setIsSavingXDraft(false)
     }
   }
 
@@ -903,7 +1117,7 @@ export default function AutopostPage() {
                     Build Rule
                   </CardTitle>
                   <CardDescription className="text-gray-400">
-                    Choose platforms, posting style, and workflow cadence before saving a rule for approval.
+                    Prepare draft content safely. Scheduled posting remains disabled until final posting checks are complete.
                   </CardDescription>
                 </CardHeader>
 
@@ -933,17 +1147,17 @@ export default function AutopostPage() {
                           <div className="min-w-0">
                             <div className="inline-flex items-center rounded-full border border-emerald-400/40 bg-emerald-500/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-100">
                               <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
-                              Rule Created Successfully
+                              Draft Saved Successfully
                             </div>
                             <div className="mt-3 text-lg font-bold text-white">
-                              Rule is ready for approval
+                              Draft rule saved
                             </div>
                             <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
-                              Your rule has been saved safely. Nothing has been distributed yet. Review it in My Rules and approve it when you are ready to prepare your workflow.
+                              Your draft has been saved safely. Nothing has been sent to X or scheduled. Scheduled posting is still disabled until final posting checks are complete.
                             </div>
                           </div>
                           <div className="rounded-2xl border border-emerald-500/20 bg-black/30 px-3 py-2 text-xs text-emerald-100">
-                            Awaiting approval
+                            Non-runnable draft
                           </div>
                         </div>
                       </div>
@@ -972,7 +1186,7 @@ export default function AutopostPage() {
                       <div className="border-t border-white/10 bg-black/20 px-4 py-4">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                           <div className="text-xs leading-5 text-gray-400">
-                            Next step: review the rule in My Rules, then approve it when you are ready.
+                            Next step: keep this as a draft while X posting checks and run/result persistence are completed.
                           </div>
                           <div className="flex flex-wrap gap-2">
                             <Button
@@ -1040,6 +1254,142 @@ export default function AutopostPage() {
                     </div>
                   )}
 
+                  <div className="rounded-3xl border border-cyan-500/25 bg-cyan-950/10 p-4">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="inline-flex items-center rounded-full border border-cyan-400/35 bg-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">
+                          X draft preparation
+                        </div>
+                        <div className="mt-3 text-lg font-bold text-white">Connect X to prepare a text-only draft</div>
+                        <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
+                          X draft preparation is available after connection. Scheduled posting is not enabled yet. This saves a non-runnable draft rule only.
+                        </div>
+                        {xStatus?.blockers && xStatus.blockers.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {xStatus.blockers.map((blocker) => (
+                              <span key={blocker} className="rounded-full border border-gray-700 bg-black/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-gray-300">
+                                {blocker.replaceAll("_", " ")}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="shrink-0 rounded-2xl border border-gray-800 bg-black/30 p-3 text-sm text-gray-200 lg:min-w-72">
+                        {xUserConnected ? (
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">X connection</div>
+                              <div className="mt-1 font-semibold text-emerald-200">
+                                Connected{xStatus?.provider_username ? ` as @${xStatus.provider_username}` : ""}
+                              </div>
+                              <div className="mt-1 text-xs text-gray-400">Scheduled posting is not enabled yet.</div>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={xAccountBusy}
+                              onClick={disconnectX}
+                              className="w-full border-rose-900/60 bg-rose-950/20 text-rose-200 hover:bg-rose-950/40"
+                            >
+                              {xAccountBusy ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <X className="mr-2 h-4 w-4" />}
+                              Disconnect X
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">X connection</div>
+                              <div className="mt-1 font-semibold text-gray-200">
+                                {xCanConnect ? "Not connected" : "OAuth not configured"}
+                              </div>
+                              <div className="mt-1 text-xs text-gray-400">Connect X to prepare a draft. This does not enable scheduled posting.</div>
+                            </div>
+                            <Button
+                              type="button"
+                              disabled={!xCanConnect}
+                              onClick={connectX}
+                              className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <ExternalLink className="mr-2 h-4 w-4" />
+                              Connect X
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.6fr)]">
+                      <div className="space-y-2">
+                        <Label className="text-gray-200">X text content</Label>
+                        <textarea
+                          value={xDraftText}
+                          onChange={(event) => setXDraftText(event.target.value)}
+                          rows={6}
+                          className="w-full rounded-2xl border border-gray-800 bg-black/30 px-3 py-3 text-sm leading-6 text-gray-100 outline-none placeholder:text-gray-600 focus:border-cyan-500/60"
+                          placeholder="Write the text-only X draft. Media is metadata only for now."
+                        />
+                        <div className={`text-xs ${xDraftTooLong ? "text-rose-200" : "text-gray-400"}`}>
+                          {xDraftCharacterCount}/280 characters. Exact X weighted counting will be handled before posting expands beyond draft preparation.
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 rounded-2xl border border-gray-800 bg-black/30 p-3">
+                        <div>
+                          <Label className="text-gray-200">Timezone</Label>
+                          <input
+                            value={xDraftTimezone}
+                            onChange={(event) => setXDraftTimezone(event.target.value)}
+                            className="mt-1 w-full rounded-xl border border-gray-800 bg-black/40 px-3 py-2 text-sm text-gray-100 outline-none focus:border-cyan-500/60"
+                            placeholder="America/New_York"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <Label className="text-gray-200">Start date</Label>
+                            <input
+                              type="date"
+                              value={xDraftStartDate}
+                              onChange={(event) => setXDraftStartDate(event.target.value)}
+                              className="mt-1 w-full rounded-xl border border-gray-800 bg-black/40 px-3 py-2 text-sm text-gray-100 outline-none focus:border-cyan-500/60"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-gray-200">End date</Label>
+                            <input
+                              type="date"
+                              value={xDraftEndDate}
+                              onChange={(event) => setXDraftEndDate(event.target.value)}
+                              className="mt-1 w-full rounded-xl border border-gray-800 bg-black/40 px-3 py-2 text-sm text-gray-100 outline-none focus:border-cyan-500/60"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label className="text-gray-200">Time slot</Label>
+                          <input
+                            type="time"
+                            value={xDraftTimeSlot}
+                            onChange={(event) => setXDraftTimeSlot(event.target.value)}
+                            className="mt-1 w-full rounded-xl border border-gray-800 bg-black/40 px-3 py-2 text-sm text-gray-100 outline-none focus:border-cyan-500/60"
+                          />
+                          {!xDraftTimeSlotValid && <div className="mt-1 text-xs text-rose-200">Use one valid HH:mm time slot.</div>}
+                        </div>
+                        <div className="rounded-xl border border-gray-800 bg-gray-950/60 px-3 py-2 text-xs text-gray-300">
+                          1 post/day MVP. Scheduled posting is not enabled yet.
+                        </div>
+                        <Button
+                          type="button"
+                          onClick={saveXDraftRule}
+                          disabled={isSavingXDraft || !xUserConnected || !xDraftText.trim() || xDraftTooLong || !xDraftTimeSlotValid || !!savedRuleSuccess}
+                          className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isSavingXDraft ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                          {savedRuleSuccess ? "X Draft Saved" : "Save X Draft"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
                   {packPrefill && (
                     <div className="overflow-hidden rounded-3xl border border-fuchsia-500/35 bg-gradient-to-br from-fuchsia-950/35 via-black/40 to-cyan-950/25 shadow-[0_0_40px_rgba(217,70,239,0.12)]">
                       <div className="border-b border-white/10 bg-white/[0.03] px-4 py-4">
@@ -1059,7 +1409,7 @@ export default function AutopostPage() {
                               {packPrefill.pack_name || packPrefill.collection_name || "Creator Content Pack"}
                             </div>
                             <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
-                              This pack came from the Generate Pack Builder. Review platforms, preview the rule, then save it for approval. Final posting may be completed directly on each platform.
+                              This pack came from the Generate Pack Builder. X text can be prefilled from the first caption. Scheduled posting is not enabled yet.
                             </div>
                           </div>
 
@@ -1101,7 +1451,7 @@ export default function AutopostPage() {
                             </div>
                             <div className="rounded-2xl border border-gray-800 bg-black/30 p-3">
                               <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Mode</div>
-                              <div className="mt-1 text-sm font-bold text-white">Approval first</div>
+                              <div className="mt-1 text-sm font-bold text-white">Draft only</div>
                             </div>
                           </div>
 
@@ -1143,7 +1493,7 @@ export default function AutopostPage() {
                               <div>
                                 <div className="text-xs font-semibold text-gray-200">Next Step</div>
                                 <div className="mt-1 text-[11px] leading-5 text-gray-400">
-                                  Preview checks your rule before saving. Approval is required before the workflow is marked active.
+                                  Save an X draft when connected. This does not approve, schedule, or post anything.
                                 </div>
                               </div>
                               <div className="hidden rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200 sm:block">
@@ -1180,7 +1530,7 @@ export default function AutopostPage() {
                             </div>
                           ) : (
                             <div className="rounded-2xl border border-amber-500/25 bg-amber-500/10 p-3 text-xs leading-5 text-amber-100">
-                              No caption drafts were included with this pack. Add captions before approving this rule.
+                              No caption drafts were included with this pack. Add X text before saving a draft rule.
                             </div>
                           )}
                         </div>
@@ -1199,7 +1549,11 @@ export default function AutopostPage() {
                       className={`border-gray-800 bg-transparent ${
                         enabled ? "text-emerald-200 hover:bg-emerald-950/30" : "text-gray-200 hover:bg-gray-900"
                       }`}
-                      onClick={() => setEnabled(v => !v)}
+                      onClick={() => {
+                        if (!hasSelectablePlatforms) return
+                        setEnabled(v => !v)
+                      }}
+                      disabled={!hasSelectablePlatforms}
                     >
                       {enabled ? (
                         <>
@@ -1219,14 +1573,18 @@ export default function AutopostPage() {
                     <div className="flex flex-wrap gap-2">
                       {platforms.map(p => {
                         const active = selectedPlatforms.includes(p.id)
+                        const selectable = isPlatformSelectable(p)
                         return (
                           <Button
                             key={p.id}
                             variant="outline"
-                            className={`border-gray-800 bg-transparent ${
+                            disabled={!selectable}
+                            title={selectable ? undefined : platformUnavailableMessage(p)}
+                            className={`border-gray-800 bg-transparent disabled:cursor-not-allowed disabled:opacity-50 ${
                               active ? "text-white bg-gray-900" : "text-gray-200 hover:bg-gray-900"
                             }`}
                             onClick={() => {
+                              if (!selectable) return
                               setSelectedPlatforms(prev =>
                                 prev.includes(p.id) ? prev.filter(x => x !== p.id) : [...prev, p.id]
                               )
@@ -1238,7 +1596,11 @@ export default function AutopostPage() {
                         )
                       })}
                     </div>
-                    <div className="text-xs text-gray-400">Select 1+ platforms for this rule.</div>
+                    <div className="text-xs text-gray-400">
+                      {hasSelectablePlatforms
+                        ? "Select 1+ available platforms for this scheduled Autopost rule."
+                        : "Scheduled Autopost selection is disabled. Use Save X Draft for non-runnable X draft preparation."}
+                    </div>
                   </div>
 
                   {/* Frequency */}
@@ -1303,7 +1665,7 @@ export default function AutopostPage() {
                   <div className="flex flex-wrap gap-2">
                     <Button
                       onClick={evaluatePreview}
-                      disabled={isEvaluating || selectedPlatforms.length === 0}
+                      disabled={isEvaluating || !hasSelectablePlatforms || selectedPlatforms.length === 0}
                       className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
                     >
                       {isEvaluating ? (
@@ -1331,11 +1693,11 @@ export default function AutopostPage() {
 
                     <Button
                       onClick={saveAsRule}
-                      disabled={selectedPlatforms.length === 0 || !!savedRuleSuccess}
+                      disabled={!hasSelectablePlatforms || selectedPlatforms.length === 0 || !!savedRuleSuccess}
                       className="bg-emerald-600 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Save className="w-4 h-4 mr-2" />
-                      {savedRuleSuccess ? "Rule Saved" : "Save Rule for Approval"}
+                      {savedRuleSuccess ? "Rule Saved" : "Scheduled Save Disabled"}
                     </Button>
                   </div>
 
@@ -1403,27 +1765,31 @@ export default function AutopostPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-xs leading-5 text-cyan-100">
-                    Launch mode: Sirens Forge helps organize and prepare your posting workflow. Final posting may be completed directly on each platform.
+                    Launch mode: Scheduled Autopost platform availability is gated by server status. External links open platform websites only; they do not indicate account connection.
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                     {platforms.map(p => {
-                      const url = platformUrl(p.id)
+                      const url = p.external_url ?? platformUrl(p.id)
+                      const selectable = isPlatformSelectable(p)
 
                       return (
                         <div key={p.id} className="rounded-2xl border border-gray-800 bg-black/30 p-4">
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <div className="text-white font-semibold">{p.name}</div>
-                              <div className="text-xs text-gray-400 mt-1">
-                                Opens the creator platform in a new tab.
+                              <div className="mt-1 text-xs text-gray-400">
+                                {selectable ? "Available for Scheduled Autopost." : platformUnavailableMessage(p)}
                               </div>
-                              {p.hint && <div className="text-xs text-gray-500 mt-1">{p.hint}</div>}
+                              {p.reason && <div className="text-xs text-gray-500 mt-1">{p.reason}</div>}
+                              <div className="mt-2 inline-flex rounded-full border border-gray-700 bg-gray-950 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-300">
+                                {String(p.launch_status ?? "coming_soon").replace("_", " ")}
+                              </div>
                             </div>
                             {url ? (
                               <Button asChild className="bg-cyan-600 hover:bg-cyan-500">
                                 <a href={url} target="_blank" rel="noopener noreferrer">
                                   <ExternalLink className="w-4 h-4 mr-2" />
-                                  Open
+                                  Open platform
                                 </a>
                               </Button>
                             ) : (

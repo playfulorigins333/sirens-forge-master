@@ -9,6 +9,8 @@ export type PlatformId =
 
 export type ApprovalState = "DRAFT" | "APPROVED" | "PAUSED" | "REVOKED";
 
+export type PlatformLaunchStatus = "available" | "coming_soon" | "not_configured" | "unsupported";
+
 export type AutopostRule = {
   id: string;
   user_id: string;
