@@ -1,7 +1,8 @@
 // app/api/autopost/rules/[rule_id]/route.ts
 
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
+import { requireUserId } from "@/lib/supabaseServer"
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -14,22 +15,15 @@ function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v)
 }
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const serviceRole = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-  if (!url) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL")
-  if (!serviceRole) throw new Error("Missing SUPABASE_SERVICE_ROLE_KEY")
-
-  return createClient(url, serviceRole, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  })
-}
-
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   try {
     // ✅ Next.js 16: params is a Promise for dynamic routes in App Router
     const { rule_id } = await ctx.params
+
+    const userId = await requireUserId()
+    if (!userId) {
+      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 })
+    }
 
     if (!rule_id) {
       return NextResponse.json({ error: "Missing rule_id" }, { status: 400 })
@@ -45,6 +39,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       .from("autopost_rules")
       .select("*")
       .eq("id", rule_id)
+      .eq("user_id", userId)
       .single()
 
     if (error) {

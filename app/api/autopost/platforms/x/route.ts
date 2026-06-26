@@ -1,133 +1,81 @@
-// app/api/autopost/platforms/x/route.ts
-import { NextResponse } from "next/server";
+import crypto from "crypto"
+import { NextResponse } from "next/server"
+import { postXTextOnlyAutopost } from "@/lib/autopost/xAdapter"
 
-/**
- * ============================================================
- * X (TWITTER) AUTOPOST ADAPTER
- *
- * Contract:
- * - Called internally by /api/autopost/run
- * - MUST return JSON
- * - MUST return:
- *     { ok: true, platform_post_id }
- *   OR
- *     { ok: false, error_code, error_message }
- *
- * LAUNCH-SAFE:
- * - Deterministic responses
- * - No silent success
- * - No silent failure
- * ============================================================
- */
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-
-type AutopostPayload = {
-  run_mode: "autopost";
-  rule_id: string;
-  user_id: string;
-  platform: "x";
-  timezone: string;
-  explicitness: number;
-  tones: any;
-  posts_per_day: number;
-  time_slots: any;
-  creator_pct: number;
-  platform_pct: number;
-};
+export const runtime = "nodejs"
+export const dynamic = "force-dynamic"
 
 function json(status: number, body: any) {
-  return NextResponse.json(body, { status });
+  return NextResponse.json(body, { status })
+}
+
+function safeEqual(a: string, b: string) {
+  const aBuffer = Buffer.from(a)
+  const bBuffer = Buffer.from(b)
+  if (aBuffer.length !== bBuffer.length) return false
+  return crypto.timingSafeEqual(aBuffer, bBuffer)
+}
+
+function verifyInternalAdapterSecret(req: Request) {
+  const expectedSecret = process.env.AUTOPOST_INTERNAL_ADAPTER_SECRET
+  if (!expectedSecret) {
+    return { ok: false as const, status: 500, error_code: "AUTOPOST_INTERNAL_ADAPTER_SECRET_NOT_CONFIGURED" }
+  }
+
+  const providedSecret = req.headers.get("x-autopost-internal-secret") ?? ""
+  if (!providedSecret) {
+    return { ok: false as const, status: 401, error_code: "INTERNAL_ADAPTER_SECRET_REQUIRED" }
+  }
+
+  if (!safeEqual(providedSecret, expectedSecret)) {
+    return { ok: false as const, status: 403, error_code: "INTERNAL_ADAPTER_SECRET_INVALID" }
+  }
+
+  return { ok: true as const }
 }
 
 export async function POST(req: Request) {
-  let payload: AutopostPayload;
+  const auth = verifyInternalAdapterSecret(req)
+  if (!auth.ok) {
+    return json(auth.status, {
+      ok: false,
+      status: "FAILED",
+      platform: "x",
+      error_code: auth.error_code,
+    })
+  }
 
+  let payload: unknown
   try {
-    payload = (await req.json()) as AutopostPayload;
+    payload = await req.json()
   } catch {
     return json(400, {
       ok: false,
+      status: "FAILED",
+      platform: "x",
       error_code: "INVALID_JSON",
       error_message: "Request body must be valid JSON",
-    });
+    })
   }
 
-  // ──────────────────────────────────────────────
-  // HARD VALIDATION (NO COERCION)
-  // ──────────────────────────────────────────────
-  if (payload.run_mode !== "autopost") {
-    return json(400, {
-      ok: false,
-      error_code: "INVALID_RUN_MODE",
-      error_message: "run_mode must be 'autopost'",
-    });
-  }
+  const result = await postXTextOnlyAutopost(payload ?? {})
+  const statusCode = result.ok
+    ? 200
+    : result.status === "NOT_CONFIGURED"
+      ? 409
+      : result.status === "UNSUPPORTED"
+        ? 422
+        : 400
 
-  if (!payload.rule_id || !payload.user_id) {
-    return json(400, {
-      ok: false,
-      error_code: "MISSING_IDENTIFIERS",
-      error_message: "rule_id and user_id are required",
-    });
-  }
-
-  if (payload.platform !== "x") {
-    return json(400, {
-      ok: false,
-      error_code: "PLATFORM_MISMATCH",
-      error_message: "Platform must be 'x'",
-    });
-  }
-
-  // ──────────────────────────────────────────────
-  // X-SPECIFIC VALIDATION (SAFE DEFAULTS)
-  // ──────────────────────────────────────────────
-
-  // X character limits are strict (280 chars),
-  // but caption generation happens upstream.
-  // We only ensure scheduling structure is sane.
-
-  if (!Array.isArray(payload.time_slots)) {
-    return json(400, {
-      ok: false,
-      error_code: "INVALID_TIME_SLOTS",
-      error_message: "time_slots must be an array",
-    });
-  }
-
-  if (typeof payload.posts_per_day !== "number" || payload.posts_per_day < 1) {
-    return json(400, {
-      ok: false,
-      error_code: "INVALID_POSTS_PER_DAY",
-      error_message: "posts_per_day must be a positive number",
-    });
-  }
-
-  // ──────────────────────────────────────────────
-  // PLACEHOLDER DISPATCH (REAL SUCCESS PATH)
-  // This is where X API v2 posting will go.
-  // For now:
-  // - Deterministic success
-  // - Stable workflow_task_id
-  // ──────────────────────────────────────────────
-  const workflowTaskId = `x_${payload.rule_id}_${Date.now()}`;
-
-  return json(200, {
-    ok: true,
-    workflow_task_id: workflowTaskId,
-    status: "ready_for_assisted_posting",
-  });
+  return json(statusCode, result)
 }
 
-/**
- * Explicitly reject other methods
- */
 export async function GET() {
   return json(405, {
     ok: false,
+    status: "FAILED",
+    platform: "x",
     error_code: "METHOD_NOT_ALLOWED",
     error_message: "POST only",
-  });
+  })
 }

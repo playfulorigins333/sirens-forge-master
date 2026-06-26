@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireUserId } from "@/lib/supabaseServer"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
+import {
+  filterSelectableAutopostPlatformIds,
+  normalizeKnownPlatformIds,
+} from "@/lib/autopost/platformRegistry"
 
 type ApproveBody = {
   accept_split: boolean
@@ -37,6 +41,30 @@ export async function POST(
   }
 
   const supabaseAdmin = getSupabaseAdmin()
+
+  const { data: existingRule, error: fetchError } = await supabaseAdmin
+    .from("autopost_rules")
+    .select("selected_platforms")
+    .eq("id", rule_id)
+    .eq("user_id", userId)
+    .single()
+
+  if (fetchError || !existingRule) {
+    return NextResponse.json(
+      { error: fetchError?.message ?? "RULE_NOT_FOUND" },
+      { status: 404 }
+    )
+  }
+
+  const knownPlatforms = normalizeKnownPlatformIds(existingRule.selected_platforms)
+  const selectablePlatforms = filterSelectableAutopostPlatformIds(knownPlatforms)
+
+  if (selectablePlatforms.length === 0) {
+    return NextResponse.json(
+      { error: "NO_AVAILABLE_PLATFORMS" },
+      { status: 400 }
+    )
+  }
 
   const { data, error } = await supabaseAdmin
     .from("autopost_rules")
