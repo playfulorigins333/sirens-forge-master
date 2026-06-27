@@ -66,6 +66,10 @@ type UserPlatformStatus = Platform & {
   can_schedule?: boolean
   supports_text_posting?: boolean
   supports_media_posting?: boolean
+  assisted_available?: boolean
+  native_posting_available?: boolean
+  native_posting_blocker?: string | null
+  connection_blocker?: string | null
   disabled_reason?: string | null
   blockers?: string[]
   has_error?: boolean

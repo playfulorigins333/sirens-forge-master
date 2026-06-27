@@ -1,6 +1,10 @@
+import crypto from "crypto"
 import type { PlatformId } from "./types"
 
 const X_TEXT_MAX_LENGTH = 280
+const FANVUE_TEXT_MAX_LENGTH = 5000
+
+const FANVUE_CONTENT_TYPES = new Set(["text", "media", "text_media"])
 
 type ContentPayloadInput = Record<string, unknown>
 
@@ -121,6 +125,93 @@ export function buildXTextContentPayload(input: ContentPayloadInput, now = new D
       asset_ids,
       asset_urls,
       media_posting_enabled: false,
+      created_at: now.toISOString(),
+    },
+  }
+}
+
+function getFanvueText(input: ContentPayloadInput) {
+  const explicitPayload = asRecord(input.content_payload)
+  return (
+    normalizeText(explicitPayload?.text) ??
+    normalizeText(explicitPayload?.caption) ??
+    normalizeText(input.text) ??
+    normalizeText(input.caption) ??
+    normalizeText(getFirstCaptionDraft(input)?.caption) ??
+    getFirstCaptionString(input)
+  )
+}
+
+function normalizeFanvueContentType(value: unknown, hasAssets: boolean) {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : ""
+  if (FANVUE_CONTENT_TYPES.has(normalized)) return normalized as "text" | "media" | "text_media"
+  return hasAssets ? "text_media" : "text"
+}
+
+function normalizeDraftTimestamp(value: unknown) {
+  const text = normalizeText(value)
+  if (!text) return null
+  const date = new Date(text)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
+}
+
+function hashFanvueDraft(input: {
+  text: string | null
+  content_type: string
+  asset_ids: string[]
+  generation_ids: string[]
+}) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(input))
+    .digest("hex")
+}
+
+export function buildFanvueDraftContentPayload(input: ContentPayloadInput, now = new Date()) {
+  const explicitPayload = asRecord(input.content_payload)
+  const text = getFanvueText(input)
+  const { asset_ids, asset_urls } = getAssetMetadata(input)
+  const contentType = normalizeFanvueContentType(explicitPayload?.content_type ?? input.content_type, asset_ids.length > 0 || asset_urls.length > 0)
+
+  if ((contentType === "text" || contentType === "text_media") && !text) {
+    return { error: "EMPTY_FANVUE_TEXT" as const }
+  }
+
+  if (text && Array.from(text).length > FANVUE_TEXT_MAX_LENGTH) {
+    return { error: "FANVUE_TEXT_TOO_LONG" as const }
+  }
+
+  if (contentType === "media" && asset_ids.length === 0 && asset_urls.length === 0) {
+    return { error: "FANVUE_MEDIA_REFERENCES_REQUIRED" as const }
+  }
+
+  const generation_ids = normalizeStringArray(input.generation_ids)
+  const requestedPublishAt = normalizeDraftTimestamp(explicitPayload?.requested_publish_at ?? input.requested_publish_at)
+  const source = normalizeText(input.source) ?? "autopost_builder"
+  const firstDraft = getFirstCaptionDraft(input)
+
+  return {
+    payload: {
+      platform: "fanvue" as PlatformId,
+      content_type: contentType,
+      text,
+      source,
+      caption_draft_id: normalizeText(explicitPayload?.caption_draft_id) ?? normalizeText(firstDraft?.id),
+      source_generation_ids: generation_ids,
+      source_asset_ids: asset_ids,
+      source_asset_urls: asset_urls,
+      requested_publish_at: requestedPublishAt,
+      media_upload_enabled: false,
+      native_posting_enabled: false,
+      dispatch_enabled: false,
+      validation_status: "DRAFT_VALID_NON_RUNNABLE",
+      unsupported_features: ["fanvue_native_posting", "fanvue_media_upload", "fanvue_scheduled_execution"],
+      content_hash: hashFanvueDraft({
+        text,
+        content_type: contentType,
+        asset_ids,
+        generation_ids,
+      }),
       created_at: now.toISOString(),
     },
   }

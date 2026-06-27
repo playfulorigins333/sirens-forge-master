@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireUserId } from "@/lib/supabaseServer"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { normalizeKnownPlatformIds } from "@/lib/autopost/platformRegistry"
-import { buildXTextContentPayload } from "@/lib/autopost/contentPayload"
+import { buildFanvueDraftContentPayload, buildXTextContentPayload } from "@/lib/autopost/contentPayload"
 import { validateXDraftSchedule } from "@/lib/autopost/schedule"
 
 function normalizeExplicitness(value: unknown) {
@@ -65,53 +65,70 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "NO_VALID_PLATFORMS" }, { status: 400 })
   }
 
-  // Draft preparation is intentionally separate from scheduled posting availability.
-  // Pass 5E allows only X text-only DRAFT persistence while X remains non-selectable
-  // and non-runnable for scheduled Autopost.
-  if (knownPlatforms.length !== 1 || knownPlatforms[0] !== "x") {
+  if (knownPlatforms.length !== 1 || !["x", "fanvue"].includes(knownPlatforms[0])) {
     return NextResponse.json({ error: "NO_AVAILABLE_PLATFORMS" }, { status: 400 })
   }
 
-  const contentResult = buildXTextContentPayload(ruleInput)
-  if ("error" in contentResult) {
-    return NextResponse.json({ error: contentResult.error }, { status: 400 })
-  }
-
-  const scheduleResult = validateXDraftSchedule(ruleInput)
-  if ("error" in scheduleResult) {
-    return NextResponse.json({ error: scheduleResult.error }, { status: 400 })
-  }
-
   const supabase = getSupabaseAdmin()
-
-  const { data: connectedAccount, error: accountError } = await supabase
-    .from("autopost_accounts")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("platform", "x")
-    .eq("connection_status", "CONNECTED")
-    .maybeSingle()
-
-  if (accountError) {
-    return NextResponse.json({ error: "X_ACCOUNT_LOOKUP_FAILED" }, { status: 500 })
+  const platform = knownPlatforms[0]
+  let contentPayload: Record<string, unknown>
+  let schedule = {
+    timezone: "UTC",
+    start_date: null as string | null,
+    end_date: null as string | null,
+    posts_per_day: 0,
+    time_slots: [] as string[],
   }
 
-  if (!connectedAccount) {
-    return NextResponse.json({ error: "X_ACCOUNT_NOT_CONNECTED" }, { status: 400 })
+  if (platform === "x") {
+    const contentResult = buildXTextContentPayload(ruleInput)
+    if ("error" in contentResult) {
+      return NextResponse.json({ error: contentResult.error }, { status: 400 })
+    }
+
+    const scheduleResult = validateXDraftSchedule(ruleInput)
+    if ("error" in scheduleResult) {
+      return NextResponse.json({ error: scheduleResult.error }, { status: 400 })
+    }
+
+    const { data: connectedAccount, error: accountError } = await supabase
+      .from("autopost_accounts")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("platform", "x")
+      .eq("connection_status", "CONNECTED")
+      .maybeSingle()
+
+    if (accountError) {
+      return NextResponse.json({ error: "X_ACCOUNT_LOOKUP_FAILED" }, { status: 500 })
+    }
+
+    if (!connectedAccount) {
+      return NextResponse.json({ error: "X_ACCOUNT_NOT_CONNECTED" }, { status: 400 })
+    }
+
+    contentPayload = contentResult.payload
+    schedule = scheduleResult.schedule
+  } else {
+    const contentResult = buildFanvueDraftContentPayload(ruleInput)
+    if ("error" in contentResult) {
+      return NextResponse.json({ error: contentResult.error }, { status: 400 })
+    }
+    contentPayload = contentResult.payload
   }
 
   const insertRule = {
     user_id: userId,
     enabled: false,
-    selected_platforms: ["x"],
-    content_payload: contentResult.payload,
+    selected_platforms: [platform],
+    content_payload: contentPayload,
     explicitness: normalizeExplicitness(ruleInput.explicitness),
     tones: normalizeTones(ruleInput.tones),
-    timezone: scheduleResult.schedule.timezone,
-    start_date: scheduleResult.schedule.start_date,
-    end_date: scheduleResult.schedule.end_date,
-    posts_per_day: scheduleResult.schedule.posts_per_day,
-    time_slots: scheduleResult.schedule.time_slots,
+    timezone: schedule.timezone,
+    start_date: schedule.start_date,
+    end_date: schedule.end_date,
+    posts_per_day: schedule.posts_per_day,
+    time_slots: schedule.time_slots,
     approval_state: "DRAFT",
     approved_at: null,
     paused_at: null,

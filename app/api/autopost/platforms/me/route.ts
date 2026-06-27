@@ -16,6 +16,9 @@ type AutopostAccountRow = {
   connected_at: string | null
   last_refresh_at: string | null
   last_error: string | null
+  encrypted_access_token: string | null
+  encrypted_refresh_token: string | null
+  metadata: Record<string, unknown> | null
 }
 
 export async function GET(req: Request) {
@@ -31,7 +34,7 @@ export async function GET(req: Request) {
   const { data, error } = await supabaseAdmin
     .from("autopost_accounts")
     .select(
-      "platform, provider_account_id, provider_username, connection_status, connected_at, last_refresh_at, last_error"
+      "platform, provider_account_id, provider_username, connection_status, connected_at, last_refresh_at, last_error, encrypted_access_token, encrypted_refresh_token, metadata"
     )
     .eq("user_id", userId)
     .in("platform", supportedPlatformIds)
