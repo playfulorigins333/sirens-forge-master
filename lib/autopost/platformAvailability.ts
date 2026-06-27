@@ -1,5 +1,6 @@
 import type { PlatformId } from "./types"
 import type { AutopostPlatformRegistryEntry } from "./platformRegistry"
+import { getFanvueOAuthConfigStatus } from "./fanvueOAuth"
 
 export type AutopostAccountStatus = {
   platform: PlatformId
@@ -9,6 +10,9 @@ export type AutopostAccountStatus = {
   connected_at: string | null
   last_refresh_at: string | null
   last_error: string | null
+  encrypted_access_token?: string | null
+  encrypted_refresh_token?: string | null
+  metadata?: Record<string, unknown> | null
 }
 
 export type UserAutopostPlatformStatus = ReturnType<typeof buildUserPlatformStatus>
@@ -50,12 +54,83 @@ function isConnectedStatus(status: string | null | undefined) {
   return status === "CONNECTED"
 }
 
+function nonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0
+}
+
+function getFanvueConnectionBlocker(args: {
+  account: AutopostAccountStatus | null
+  configConfigured: boolean
+}) {
+  const { account, configConfigured } = args
+  if (!configConfigured) return "FANVUE_CONNECT_CONFIG_UNAVAILABLE"
+  if (!account) return "FANVUE_ACCOUNT_NOT_CONNECTED"
+  if (account.connection_status !== "CONNECTED") return `FANVUE_ACCOUNT_${account.connection_status ?? "DISCONNECTED"}`
+  if (!nonEmptyString(account.provider_account_id)) return "FANVUE_PROVIDER_IDENTITY_MISSING"
+  if (!nonEmptyString(account.encrypted_access_token)) return "FANVUE_ENCRYPTED_ACCESS_TOKEN_MISSING"
+  if (account.metadata?.provider !== "fanvue") return "FANVUE_PROVIDER_METADATA_MISSING"
+  if (account.metadata?.identity_fetched !== true) return "FANVUE_IDENTITY_NOT_CONFIRMED"
+  return null
+}
+
 export function buildUserPlatformStatus(
   platform: AutopostPlatformRegistryEntry,
   accountsByPlatform: Map<PlatformId, AutopostAccountStatus>
 ) {
   const account = getAccountForPlatform(accountsByPlatform, platform.id)
   const userConnected = isConnectedStatus(account?.connection_status)
+
+  if (platform.id === "fanvue") {
+    const fanvueConfig = getFanvueOAuthConfigStatus()
+    const connectionBlocker = getFanvueConnectionBlocker({
+      account,
+      configConfigured: fanvueConfig.configured,
+    })
+    const userConnected = connectionBlocker === null
+    const nativePostingBlocker = "FANVUE_NATIVE_POSTING_NOT_ENABLED"
+    const disabledReason = userConnected
+      ? "Fanvue OAuth is connected for internal validation. Native posting and scheduling are not enabled."
+      : fanvueConfig.configured
+        ? "Fanvue OAuth connect is available for internal validation. Native posting and scheduling are not enabled."
+        : fanvueConfig.config_error === "FANVUE_CONNECT_DISABLED"
+          ? "Fanvue OAuth connect is disabled for this environment."
+          : "Fanvue OAuth is not fully configured for this environment."
+
+    return {
+      id: platform.id,
+      name: platform.name,
+      label: platform.name,
+      external_url: platform.external_url,
+      launch_status: fanvueConfig.configured ? platform.launch_status : "not_configured",
+      app_configured: fanvueConfig.configured,
+      oauth_configured: fanvueConfig.configured,
+      config_error: fanvueConfig.config_error,
+      can_connect: fanvueConfig.configured,
+      user_connected: userConnected,
+      connection_status: account?.connection_status ?? "DISCONNECTED",
+      connection_blocker: connectionBlocker,
+      provider_username: account?.provider_username ?? null,
+      provider_account_id: account?.provider_account_id ?? null,
+      connected_at: userConnected ? account?.connected_at ?? null : null,
+      last_refresh_at: account?.last_refresh_at ?? null,
+      has_error: Boolean(account?.last_error) || Boolean(account && connectionBlocker && account.connection_status === "CONNECTED"),
+      public_selectable: false,
+      can_schedule: false,
+      supports_real_posting: false,
+      supports_text_posting: false,
+      supports_media_posting: false,
+      supports_async_dispatch: false,
+      supports_assisted_workflow: platform.supports_assisted_workflow,
+      assisted_available: platform.supports_assisted_workflow,
+      native_posting_available: false,
+      native_posting_blocker: nativePostingBlocker,
+      status_message: userConnected
+        ? "Fanvue OAuth is connected for internal validation. Native posting is not enabled."
+        : platform.status_message,
+      disabled_reason: disabledReason,
+      blockers: [nativePostingBlocker, "FANVUE_SCHEDULED_POSTING_NOT_ENABLED"],
+    }
+  }
 
   if (platform.id === "x") {
     const xConfig = getXConfigStatus()
