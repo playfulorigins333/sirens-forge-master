@@ -15,6 +15,7 @@ export type FanvueProofValidationInput = {
   provider_audience?: unknown
   expected_audience?: unknown
   provider_media_uuids?: unknown
+  expected_media_uuids?: unknown
   provider_account_id?: unknown
   provider_creator_id?: unknown
   content_hash?: unknown
@@ -65,6 +66,7 @@ export type FanvueLivePostProof = {
   rule_id?: string | null
   user_id?: string | null
   scheduled_for?: string | null
+  provider_media_uuids: string[]
 }
 
 export type FanvueProofValidationResult =
@@ -125,6 +127,7 @@ export function buildFanvueProofCandidateFromReadback(input: {
   expected_text: string
   expected_audience: string
   expected_content_hash?: string | null
+  expected_media_uuids?: string[] | null
   api_version: string
   job_id?: string | null
   rule_id?: string | null
@@ -144,6 +147,7 @@ export function buildFanvueProofCandidateFromReadback(input: {
     provider_publish_at: input.post.publishAt,
     provider_published_at: input.post.publishedAt,
     provider_media_uuids: input.post.mediaUuids,
+    expected_media_uuids: input.expected_media_uuids ?? null,
     content_hash: hashReadbackContent({
       text: input.expected_text,
       audience: input.expected_audience,
@@ -187,6 +191,12 @@ export function validateFanvueLivePostProof(input: FanvueProofValidationInput): 
   const mediaUuids = stringArray(input.provider_media_uuids)
   if (mediaUuids.includes(providerPostUuid)) {
     return failure("FANVUE_MEDIA_UUID_NOT_POST_ID", "Fanvue media UUID must not be used as post proof id.")
+  }
+
+  const expectedMediaUuids = stringArray(input.expected_media_uuids)
+  const missingMediaUuids = expectedMediaUuids.filter((uuid) => !mediaUuids.includes(uuid))
+  if (missingMediaUuids.length > 0) {
+    return failure("FANVUE_MEDIA_UUID_PROOF_MISMATCH", "Fanvue proof requires read-back mediaUuids to include every expected media UUID.")
   }
 
   const publishAt = validIso(optionalString(input.provider_publish_at))
@@ -245,6 +255,7 @@ export function validateFanvueLivePostProof(input: FanvueProofValidationInput): 
       provider_audience: providerAudience,
       provider_account_id: optionalString(input.provider_account_id),
       provider_creator_id: optionalString(input.provider_creator_id),
+      provider_media_uuids: mediaUuids,
       content_hash: contentHash,
       api_version: apiVersion,
       verification_needed: true,
