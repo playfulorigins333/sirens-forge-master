@@ -11,6 +11,8 @@ assert.match(adapter, /FANVUE_RUN_DISPATCH_ENABLED === "true"/, 'Fanvue adapter 
 assert.match(adapter, /path: "\/posts"/, 'Fanvue request builder prepares the official posts path only in isolated adapter')
 assert.match(adapter, /authorization: `Bearer \$\{accessToken\}`/, 'Fanvue request builder requires in-memory bearer token')
 assert.match(adapter, /"X-Fanvue-API-Version": apiVersion/, 'Fanvue request builder must include API version header')
+assert.match(adapter, /audience = normalizeText\(input.audience\)/, 'Fanvue request builder must require explicit audience')
+assert.match(adapter, /const body: FanvuePostRequest\["body"\] = \{ text, audience \}/, 'Fanvue create-post body must include official required audience')
 assert.match(adapter, /publishAt = normalizeDraftTimestamp/, 'requested_publish_at must map only to publishAt request data')
 assert.match(adapter, /FANVUE_MEDIA_UPLOAD_DEFERRED/, 'local media references must not become Fanvue media UUIDs')
 assert.match(adapter, /FANVUE_MEDIA_UUID_INVALID/, 'Fanvue media UUIDs must be validated')
