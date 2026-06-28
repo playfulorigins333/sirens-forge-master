@@ -172,6 +172,7 @@ type SavedRuleSuccess = {
   platformLabels: string
   packName: string
   createdAt: string
+  message?: string
 }
 
 // -----------------------------
@@ -371,6 +372,9 @@ export default function AutopostPage() {
   const [xDraftEndDate, setXDraftEndDate] = useState("")
   const [xDraftTimeSlot, setXDraftTimeSlot] = useState("09:00")
   const [isSavingXDraft, setIsSavingXDraft] = useState(false)
+  const [fanvueValidationDraftText, setFanvueValidationDraftText] = useState("")
+  const [fanvueValidationAudience, setFanvueValidationAudience] = useState("internal_validation")
+  const [isSavingFanvueValidationDraft, setIsSavingFanvueValidationDraft] = useState(false)
 
   const selectablePlatformIds = useMemo(() => {
     return new Set(platforms.filter(isPlatformSelectable).map((platform) => platform.id))
@@ -478,7 +482,9 @@ export default function AutopostPage() {
       const incomingExplicitness = Number(parsed.explicitness)
 
       setPackPrefill(parsed)
-      setXDraftText(getBestDraftTextFromPrefill(parsed))
+      const bestDraftText = getBestDraftTextFromPrefill(parsed)
+      setXDraftText(bestDraftText)
+      setFanvueValidationDraftText(bestDraftText)
       setTab("builder")
       setEnabled(false)
       setSelectedPlatforms(incomingPlatforms.filter((platform): platform is PlatformId => selectablePlatformIds.has(platform as PlatformId)))
@@ -721,6 +727,76 @@ export default function AutopostPage() {
       setBuilderError(e?.message ? String(e.message) : "Save X draft failed")
     } finally {
       setIsSavingXDraft(false)
+    }
+  }
+
+  const saveFanvueInternalValidationDraftRule = async () => {
+    setBuilderError(null)
+    setBuilderSuccess(null)
+    setSavedRuleSuccess(null)
+
+    const text = fanvueValidationDraftText.replace(/\s+/g, " ").trim()
+    const audience = fanvueValidationAudience.replace(/\s+/g, "_").trim() || "internal_validation"
+
+    if (!fanvueUserConnected) {
+      setBuilderError("Fanvue OAuth validation connection is required before saving a Fanvue validation draft.")
+      return
+    }
+
+    if (!text) {
+      setBuilderError("Add Fanvue validation draft text before saving.")
+      return
+    }
+
+    if (Array.from(text).length > 5000) {
+      setBuilderError("Fanvue validation draft text must be 5000 characters or fewer.")
+      return
+    }
+
+    const firstDraft = packPrefill?.caption_drafts?.[0]
+    const body = {
+      selected_platforms: ["fanvue"],
+      content_payload: {
+        platform: "fanvue",
+        content_type: "text",
+        text,
+        audience,
+        source: packPrefill ? "generate_pack_builder" : "autopost_ui_internal_validation",
+        caption_draft_id: firstDraft?.id ?? null,
+        media_upload_enabled: false,
+        native_posting_enabled: false,
+        dispatch_enabled: false,
+      },
+      text,
+      audience,
+      content_type: "text",
+      source: packPrefill ? "generate_pack_builder" : "autopost_ui_internal_validation",
+      generation_ids: packPrefill?.generation_ids ?? [],
+      caption_drafts: packPrefill?.caption_drafts ?? [],
+      captions: [],
+      hashtags: [],
+      assets: [],
+      explicitness,
+      tones: selectedTones,
+    }
+
+    setIsSavingFanvueValidationDraft(true)
+    try {
+      const created = await createRule(body)
+      const createdRuleId = created?.rule?.id ?? created?.data?.id ?? created?.id ?? created?.rule_id ?? null
+      setSavedRuleSuccess({
+        ruleId: createdRuleId ? String(createdRuleId) : null,
+        platformLabels: "Fanvue",
+        packName: packPrefill?.pack_name || packPrefill?.collection_name || "Fanvue Validation Draft",
+        createdAt: new Date().toISOString(),
+        message: "Fanvue validation draft saved. Native posting, scheduling, dispatch, and media upload remain disabled.",
+      })
+      setBuilderSuccess("Fanvue validation draft saved. Native posting, scheduling, dispatch, and media upload remain disabled.")
+      await refreshRules()
+    } catch (e: any) {
+      setBuilderError(e?.message ? String(e.message) : "Save Fanvue validation draft failed")
+    } finally {
+      setIsSavingFanvueValidationDraft(false)
     }
   }
 
@@ -1162,7 +1238,7 @@ export default function AutopostPage() {
                               Draft rule saved
                             </div>
                             <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
-                              Your draft has been saved safely. Nothing has been sent to X or scheduled. Scheduled posting is still disabled until final posting checks are complete.
+                              {savedRuleSuccess.message ?? "Your draft has been saved safely. Nothing has been sent to X or scheduled. Scheduled posting is still disabled until final posting checks are complete."}
                             </div>
                           </div>
                           <div className="rounded-2xl border border-emerald-500/20 bg-black/30 px-3 py-2 text-xs text-emerald-100">
@@ -1265,20 +1341,68 @@ export default function AutopostPage() {
 
                   {fanvueUserConnected && (
                     <div className="rounded-3xl border border-purple-500/25 bg-purple-950/10 p-4">
-                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div className="min-w-0">
                           <div className="inline-flex items-center rounded-full border border-purple-400/35 bg-purple-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-purple-100">
-                            Fanvue internal validation
+                            Fanvue internal validation only
                           </div>
                           <div className="mt-3 text-lg font-bold text-white">
-                            Fanvue connected{fanvueStatus?.provider_username ? ` as @${fanvueStatus.provider_username}` : ""}
+                            Prepare a non-runnable Fanvue draft
                           </div>
                           <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
-                            Native posting and scheduling are not enabled.
+                            Connected as @{fanvueStatus?.provider_username ?? "Fanvue account"} for OAuth validation only
+                          </div>
+                          <div className="mt-2 max-w-3xl text-xs leading-5 text-gray-300">
+                            This saves Fanvue draft metadata for internal validation. It does not post to Fanvue, schedule Fanvue posts, upload media, or enable native posting.
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {["Internal validation only", "Non-runnable draft", "Native posting disabled", "Scheduling disabled", "Media upload disabled"].map((badge) => (
+                              <span key={badge} className="rounded-full border border-purple-400/25 bg-black/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-purple-100">
+                                {badge}
+                              </span>
+                            ))}
                           </div>
                         </div>
                         <div className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200">
                           Connected OAuth
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.6fr)]">
+                        <div className="space-y-2">
+                          <Label className="text-gray-200">Fanvue validation draft text</Label>
+                          <textarea
+                            value={fanvueValidationDraftText}
+                            onChange={(event) => setFanvueValidationDraftText(event.target.value)}
+                            rows={6}
+                            className="w-full rounded-2xl border border-gray-800 bg-black/30 px-3 py-3 text-sm leading-6 text-gray-100 outline-none placeholder:text-gray-600 focus:border-purple-500/60"
+                            placeholder="Write text-only Fanvue validation metadata. No media is uploaded."
+                          />
+                          <div className={`text-xs ${Array.from(fanvueValidationDraftText).length > 5000 ? "text-rose-200" : "text-gray-400"}`}>
+                            {Array.from(fanvueValidationDraftText).length}/5000 characters. Text-only metadata is stored for validation.
+                          </div>
+                        </div>
+
+                        <div className="space-y-3 rounded-2xl border border-gray-800 bg-black/30 p-3">
+                          <div>
+                            <Label className="text-gray-200">Internal validation audience key</Label>
+                            <input
+                              value={fanvueValidationAudience}
+                              onChange={(event) => setFanvueValidationAudience(event.target.value)}
+                              className="mt-1 w-full rounded-xl border border-gray-800 bg-black/40 px-3 py-2 text-sm text-gray-100 outline-none focus:border-purple-500/60"
+                              placeholder="internal_validation"
+                            />
+                            <div className="mt-1 text-xs text-gray-400">Explicit internal metadata only; this is not a public placement.</div>
+                          </div>
+                          <Button
+                            type="button"
+                            onClick={saveFanvueInternalValidationDraftRule}
+                            disabled={isSavingFanvueValidationDraft || !fanvueValidationDraftText.trim() || Array.from(fanvueValidationDraftText).length > 5000 || !!savedRuleSuccess}
+                            className="w-full bg-purple-600 hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {isSavingFanvueValidationDraft ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                            Save Fanvue Validation Draft
+                          </Button>
                         </div>
                       </div>
                     </div>
