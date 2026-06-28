@@ -251,10 +251,29 @@ function badgeForState(state: string) {
   return { label: "NEEDS APPROVAL", icon: AlertCircle, cls: "bg-slate-500/15 border-slate-500/30 text-slate-200" }
 }
 
+function rulePlatformIds(rule: AutopostRule) {
+  return (rule.selected_platforms && rule.selected_platforms.length
+    ? rule.selected_platforms
+    : rule.platform
+      ? [rule.platform]
+      : []
+  )
+}
+
+function isFanvueOnlyRule(rule: AutopostRule) {
+  const platforms = rulePlatformIds(rule).map(platform => String(platform).toLowerCase())
+  return platforms.length === 1 && platforms[0] === "fanvue"
+}
+
+function isFanvueInternalValidationDraft(rule: AutopostRule) {
+  return isFanvueOnlyRule(rule) && String(rule.approval_state).toUpperCase() === "DRAFT"
+}
+
 function actionsFor(rule: AutopostRule) {
   const state = String(rule.approval_state).toUpperCase()
+  const fanvueInternalValidationDraft = isFanvueInternalValidationDraft(rule)
   return {
-    canApprove: state === "DRAFT",
+    canApprove: state === "DRAFT" && !fanvueInternalValidationDraft,
     canPause: state === "APPROVED",
     canResume: state === "PAUSED",
     canRevoke: state !== "REVOKED",
@@ -343,7 +362,15 @@ async function postRuleAction(ruleId: string, action: "approve" | "pause" | "res
     body: body ? JSON.stringify(body) : undefined,
   })
   const j = await safeJson<any>(res)
-  if (!res.ok) throw new Error(j?.error ? String(j.error) : `${action} failed (${res.status})`)
+  if (!res.ok) {
+    const safeMessages: Record<string, string> = {
+      NO_AVAILABLE_PLATFORMS: "Approval disabled: this rule has no currently selectable posting platforms. Fanvue validation drafts are internal-only and non-runnable.",
+      NO_SELECTABLE_PLATFORMS: "Approval disabled: this rule has no currently selectable posting platforms. Fanvue validation drafts are internal-only and non-runnable.",
+    }
+    const code = typeof j?.code === "string" ? j.code : typeof j?.error === "string" ? j.error : null
+    const message = code && safeMessages[code] ? safeMessages[code] : j?.error ? String(j.error) : `${action} failed (${res.status})`
+    throw new Error(message)
+  }
   return j
 }
 
@@ -1083,12 +1110,8 @@ export default function AutopostPage() {
                           const BadgeIcon = badge.icon
                           const a = actionsFor(rule)
                           const busy = busyRuleId === rule.id
-                          const rulePlatforms = (rule.selected_platforms && rule.selected_platforms.length
-                            ? rule.selected_platforms
-                            : rule.platform
-                              ? [rule.platform]
-                              : []
-                          )
+                          const rulePlatforms = rulePlatformIds(rule)
+                          const fanvueInternalValidationDraft = isFanvueInternalValidationDraft(rule)
 
                           return (
                             <div key={rule.id} className="overflow-hidden rounded-3xl border border-gray-800 bg-black/30 transition hover:border-gray-700 hover:bg-black/40">
@@ -1128,6 +1151,19 @@ export default function AutopostPage() {
                                     <div className="mt-1 truncate text-sm font-semibold text-gray-200">{formatTs(rule.next_run_at)}</div>
                                   </div>
                                 </div>
+
+                                {fanvueInternalValidationDraft && (
+                                  <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-3 text-sm text-cyan-100">
+                                    <div className="flex flex-wrap gap-2">
+                                      <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-100">Internal validation only</span>
+                                      <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-100">Approval disabled</span>
+                                      <span className="rounded-full border border-slate-500/40 bg-slate-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-100">Non-runnable draft</span>
+                                    </div>
+                                    <div className="mt-2 text-xs leading-5 text-cyan-100/85">
+                                      Native posting disabled · Scheduling disabled · Media upload disabled. This Fanvue draft remains visible for internal validation, but it cannot be approved, scheduled, dispatched, or posted.
+                                    </div>
+                                  </div>
+                                )}
 
                                 <div className="flex flex-wrap gap-2">
                                   {a.canApprove && (
