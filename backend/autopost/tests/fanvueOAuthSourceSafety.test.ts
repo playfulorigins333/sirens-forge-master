@@ -11,6 +11,7 @@ assert.match(oauth, /FANVUE_CONNECT_ENABLED"\) === "true"/, 'Fanvue connect must
 assert.match(oauth, /provider: "fanvue"/, 'Fanvue OAuth state must bind provider')
 assert.match(oauth, /code_challenge_method", "S256"/, 'Fanvue OAuth must use PKCE S256')
 assert.match(oauth, /FANVUE_OAUTH_SCOPES_UNAPPROVED/, 'Fanvue scopes must reject unapproved scopes')
+assert.doesNotMatch(oauth, /write:creator/, 'Fanvue text-only readiness must not add write:creator scope')
 
 assert.match(callback, /encryptAutopostToken\(tokenResponse\.access_token\)/, 'Fanvue access token must be encrypted before storage')
 assert.match(callback, /encrypted_refresh_token: encryptedRefreshToken/, 'Fanvue refresh token must use encrypted storage')

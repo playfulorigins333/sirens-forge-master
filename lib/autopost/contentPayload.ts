@@ -5,6 +5,7 @@ const X_TEXT_MAX_LENGTH = 280
 const FANVUE_TEXT_MAX_LENGTH = 5000
 
 const FANVUE_CONTENT_TYPES = new Set(["text", "media", "text_media"])
+const FANVUE_AUDIENCE_RE = /^[A-Za-z0-9_-]{1,64}$/
 
 type ContentPayloadInput = Record<string, unknown>
 
@@ -148,6 +149,12 @@ function normalizeFanvueContentType(value: unknown, hasAssets: boolean) {
   return hasAssets ? "text_media" : "text"
 }
 
+function normalizeFanvueAudience(value: unknown) {
+  const normalized = normalizeText(value)
+  if (!normalized || !FANVUE_AUDIENCE_RE.test(normalized)) return null
+  return normalized
+}
+
 function normalizeDraftTimestamp(value: unknown) {
   const text = normalizeText(value)
   if (!text) return null
@@ -187,6 +194,7 @@ export function buildFanvueDraftContentPayload(input: ContentPayloadInput, now =
 
   const generation_ids = normalizeStringArray(input.generation_ids)
   const requestedPublishAt = normalizeDraftTimestamp(explicitPayload?.requested_publish_at ?? input.requested_publish_at)
+  const audience = normalizeFanvueAudience(explicitPayload?.audience ?? input.audience)
   const source = normalizeText(input.source) ?? "autopost_builder"
   const firstDraft = getFirstCaptionDraft(input)
 
@@ -201,6 +209,7 @@ export function buildFanvueDraftContentPayload(input: ContentPayloadInput, now =
       source_asset_ids: asset_ids,
       source_asset_urls: asset_urls,
       requested_publish_at: requestedPublishAt,
+      audience,
       media_upload_enabled: false,
       native_posting_enabled: false,
       dispatch_enabled: false,
@@ -214,5 +223,78 @@ export function buildFanvueDraftContentPayload(input: ContentPayloadInput, now =
       }),
       created_at: now.toISOString(),
     },
+  }
+}
+
+
+export type FanvueTextOnlyPayloadValidationResult =
+  | {
+      valid: true
+      text: string
+      audience: string
+      requested_publish_at: string | null
+      content_hash: string
+    }
+  | {
+      valid: false
+      error_code:
+        | "CONTENT_PAYLOAD_INVALID"
+        | "CONTENT_PLATFORM_MISMATCH"
+        | "CONTENT_TYPE_UNSUPPORTED"
+        | "EMPTY_FANVUE_TEXT"
+        | "FANVUE_TEXT_TOO_LONG"
+        | "FANVUE_AUDIENCE_REQUIRED"
+        | "FANVUE_MEDIA_UPLOAD_DEFERRED"
+        | "FANVUE_NATIVE_POSTING_FLAG_UNSAFE"
+      safe_error_message: string
+    }
+
+export function validateFanvueTextOnlyContentPayload(contentPayload: unknown): FanvueTextOnlyPayloadValidationResult {
+  const payload = asRecord(contentPayload)
+  if (!payload) {
+    return { valid: false, error_code: "CONTENT_PAYLOAD_INVALID", safe_error_message: "Fanvue content payload is invalid." }
+  }
+
+  if (payload.platform !== "fanvue") {
+    return { valid: false, error_code: "CONTENT_PLATFORM_MISMATCH", safe_error_message: "Fanvue content payload platform must be fanvue." }
+  }
+
+  if (payload.content_type !== "text") {
+    return { valid: false, error_code: "CONTENT_TYPE_UNSUPPORTED", safe_error_message: "Only text-only Fanvue payloads are allowed in this readiness gate." }
+  }
+
+  if (payload.native_posting_enabled === true || payload.dispatch_enabled === true || payload.media_upload_enabled === true) {
+    return { valid: false, error_code: "FANVUE_NATIVE_POSTING_FLAG_UNSAFE", safe_error_message: "Fanvue native posting and media upload flags must remain disabled." }
+  }
+
+  const text = normalizeText(payload.text)
+  if (!text) {
+    return { valid: false, error_code: "EMPTY_FANVUE_TEXT", safe_error_message: "Fanvue text content is required." }
+  }
+
+  if (Array.from(text).length > FANVUE_TEXT_MAX_LENGTH) {
+    return { valid: false, error_code: "FANVUE_TEXT_TOO_LONG", safe_error_message: "Fanvue text content exceeds the local limit." }
+  }
+
+  const audience = normalizeFanvueAudience(payload.audience)
+  if (!audience) {
+    return { valid: false, error_code: "FANVUE_AUDIENCE_REQUIRED", safe_error_message: "Fanvue text-only payload requires an explicit audience." }
+  }
+
+  const assetIds = normalizeStringArray(payload.source_asset_ids)
+  const assetUrls = normalizeStringArray(payload.source_asset_urls)
+  const mediaUuids = normalizeStringArray(payload.mediaUuids)
+  if (assetIds.length > 0 || assetUrls.length > 0 || mediaUuids.length > 0) {
+    return { valid: false, error_code: "FANVUE_MEDIA_UPLOAD_DEFERRED", safe_error_message: "Fanvue media upload remains deferred for text-only readiness." }
+  }
+
+  return {
+    valid: true,
+    text,
+    audience,
+    requested_publish_at: normalizeDraftTimestamp(payload.requested_publish_at),
+    content_hash: typeof payload.content_hash === "string" && payload.content_hash.trim()
+      ? payload.content_hash.trim()
+      : hashFanvueDraft({ text, content_type: "text", asset_ids: [], generation_ids: normalizeStringArray(payload.source_generation_ids) }),
   }
 }

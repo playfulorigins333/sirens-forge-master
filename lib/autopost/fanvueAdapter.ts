@@ -18,6 +18,7 @@ export type FanvuePostRequest = {
   }
   body: {
     text: string
+    audience: string
     publishAt?: string
     mediaUuids?: string[]
   }
@@ -53,6 +54,7 @@ export type FanvuePostRequestInput = {
   access_token: string
   api_version: string
   text?: unknown
+  audience?: unknown
   requested_publish_at?: unknown
   fanvue_media_uuids?: unknown
   source_asset_ids?: unknown
@@ -80,8 +82,16 @@ function normalizeDraftTimestamp(value: unknown) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
-function hashContent(input: { text: string; publishAt: string | null; mediaUuids: string[] }) {
-  return crypto.createHash("sha256").update(JSON.stringify(input)).digest("hex")
+export function hashFanvueTextPostContent(input: { text: string; audience: string; publishAt: string | null; mediaUuids?: string[] }) {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify({
+      text: input.text,
+      audience: input.audience,
+      publishAt: input.publishAt,
+      mediaUuids: input.mediaUuids ?? [],
+    }))
+    .digest("hex")
 }
 
 export function isFanvueAdapterDispatchEnabled() {
@@ -110,6 +120,11 @@ export function buildFanvueTextPostRequest(input: FanvuePostRequestInput):
     return failure("FAILED", "EMPTY_FANVUE_TEXT", "Fanvue text content is required.")
   }
 
+  const audience = normalizeText(input.audience)
+  if (!audience) {
+    return failure("FAILED", "FANVUE_AUDIENCE_REQUIRED", "Fanvue audience is required by the official create-post API.")
+  }
+
   if (Array.from(text).length > FANVUE_TEXT_MAX_LENGTH) {
     return failure("FAILED", "FANVUE_TEXT_TOO_LONG", "Fanvue text content exceeds the local draft limit.")
   }
@@ -126,7 +141,7 @@ export function buildFanvueTextPostRequest(input: FanvuePostRequestInput):
   }
 
   const publishAt = normalizeDraftTimestamp(input.requested_publish_at)
-  const body: FanvuePostRequest["body"] = { text }
+  const body: FanvuePostRequest["body"] = { text, audience }
   if (publishAt) body.publishAt = publishAt
   if (mediaUuids.length > 0) body.mediaUuids = Array.from(new Set(mediaUuids))
 
@@ -142,7 +157,7 @@ export function buildFanvueTextPostRequest(input: FanvuePostRequestInput):
       },
       body,
     },
-    content_hash: hashContent({ text, publishAt, mediaUuids: body.mediaUuids ?? [] }),
+    content_hash: hashFanvueTextPostContent({ text, audience, publishAt, mediaUuids: body.mediaUuids ?? [] }),
   }
 }
 
