@@ -382,8 +382,13 @@ export default function AutopostPage() {
     return userPlatformStatuses.find((platform) => platform.id === "x") ?? null
   }, [userPlatformStatuses])
 
+  const fanvueStatus = useMemo(() => {
+    return userPlatformStatuses.find((platform) => platform.id === "fanvue") ?? null
+  }, [userPlatformStatuses])
+
   const xUserConnected = xStatus?.user_connected === true && xStatus?.connection_status === "CONNECTED"
   const xCanConnect = xStatus?.can_connect === true
+  const fanvueUserConnected = fanvueStatus?.user_connected === true && fanvueStatus?.connection_status === "CONNECTED"
   const xDraftCharacterCount = Array.from(xDraftText).length
   const xDraftTooLong = xDraftCharacterCount > 280
   const xDraftTimeSlotValid = isValidHHmm(xDraftTimeSlot)
@@ -1253,6 +1258,27 @@ export default function AutopostPage() {
                               </Button>
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {fanvueUserConnected && (
+                    <div className="rounded-3xl border border-purple-500/25 bg-purple-950/10 p-4">
+                      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="inline-flex items-center rounded-full border border-purple-400/35 bg-purple-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-purple-100">
+                            Fanvue internal validation
+                          </div>
+                          <div className="mt-3 text-lg font-bold text-white">
+                            Fanvue connected{fanvueStatus?.provider_username ? ` as @${fanvueStatus.provider_username}` : ""}
+                          </div>
+                          <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
+                            Native posting and scheduling are not enabled.
+                          </div>
+                        </div>
+                        <div className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200">
+                          Connected OAuth
                         </div>
                       </div>
                     </div>
