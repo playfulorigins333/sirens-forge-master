@@ -76,8 +76,11 @@ export async function POST(req: NextRequest) {
     timezone: "UTC",
     start_date: null as string | null,
     end_date: null as string | null,
-    posts_per_day: 0,
-    time_slots: [] as string[],
+    // Keep non-runnable draft inserts compatible with the existing rule
+    // scheduling contract. Runtime eligibility remains blocked by DRAFT,
+    // enabled=false, and next_run_at=null.
+    posts_per_day: 1,
+    time_slots: ["00:00"] as string[],
   }
 
   if (platform === "x") {

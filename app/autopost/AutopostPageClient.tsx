@@ -776,6 +776,11 @@ export default function AutopostPage() {
       captions: [],
       hashtags: [],
       assets: [],
+      timezone: "UTC",
+      start_date: null,
+      end_date: null,
+      posts_per_day: 1,
+      time_slots: ["00:00"],
       explicitness,
       tones: selectedTones,
     }
