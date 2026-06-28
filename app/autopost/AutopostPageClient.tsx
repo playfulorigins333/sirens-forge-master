@@ -328,7 +328,11 @@ async function createRule(body: any): Promise<any> {
     body: JSON.stringify(body),
   })
   const j = await safeJson<any>(res)
-  if (!res.ok) throw new Error(j?.error ? String(j.error) : `Create rule failed (${res.status})`)
+  if (!res.ok) {
+    const details = j?.details ? `: ${String(j.details)}` : ""
+    const hint = j?.hint ? ` (${String(j.hint)})` : ""
+    throw new Error(j?.error ? `${String(j.error)}${details}${hint}` : `Create rule failed (${res.status})`)
+  }
   return j
 }
 

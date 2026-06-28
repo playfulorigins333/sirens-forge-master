@@ -153,7 +153,12 @@ export async function POST(req: NextRequest) {
 
   if (error || !data) {
     return NextResponse.json(
-      { error: "INSERT_FAILED", details: error?.message ?? null },
+      {
+        error: "INSERT_FAILED",
+        details: error?.message ?? null,
+        code: error?.code ?? null,
+        hint: error?.hint ?? null,
+      },
       { status: 500 }
     )
   }
