@@ -1,4 +1,38 @@
 import "server-only"
 
-export { createFanvueTextPost, readFanvuePost } from "./fanvueApiClientCore"
-export type { FanvueApiClientConfig, FanvueCreatePostResult, FanvueCreateTextPostInput, FanvueFetch, FanvueFetchResponse, FanvueReadPostInput, FanvueReadPostResult } from "./fanvueApiClientCore"
+export {
+  completeFanvueUploadSession,
+  createFanvueMediaPost,
+  createFanvueTextPost,
+  createFanvueUploadSession,
+  getFanvueUploadPartUrl,
+  readFanvueMedia,
+  readFanvuePost,
+  uploadFanvueSignedPart,
+  waitForFanvueMediaReady,
+} from "./fanvueApiClientCore"
+export type {
+  FanvueApiClientConfig,
+  FanvueApiFailure,
+  FanvueApiFailureKind,
+  FanvueCompleteUploadResult,
+  FanvueCreateMediaPostInput,
+  FanvueCreatePostResult,
+  FanvueCreateTextPostInput,
+  FanvueCreateUploadSessionInput,
+  FanvueFetch,
+  FanvueFetchResponse,
+  FanvueMediaReadyResult,
+  FanvueMediaReadback,
+  FanvueMediaStatus,
+  FanvueReadMediaResult,
+  FanvueReadPostInput,
+  FanvueReadPostResult,
+  FanvueSignedPartUploader,
+  FanvueSignedUrlResult,
+  FanvueUploadPart,
+  FanvueUploadPartResult,
+  FanvueUploadSession,
+  FanvueUploadSessionResult,
+  NormalizedPost,
+} from "./fanvueApiClientCore"
