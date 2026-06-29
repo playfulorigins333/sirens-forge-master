@@ -358,9 +358,22 @@ export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploa
   return safeUploadOnlySuccess({ provider_media_uuid: ready.media.uuid, attempts: ready.attempts })
 }
 
+function fileUrlToCrossPlatformPath(value: string): string {
+  try {
+    return fileURLToPath(value)
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error
+
+    const url = new URL(value)
+    if (url.protocol !== "file:") throw error
+
+    return decodeURIComponent(url.pathname)
+  }
+}
+
 function normalizeCliEntrypointPath(value: string): string {
   const normalized = value.replace(/\\/g, "/")
-  const withoutFileProtocol = normalized.startsWith("file://") ? fileURLToPath(value).replace(/\\/g, "/") : normalized
+  const withoutFileProtocol = normalized.startsWith("file://") ? fileUrlToCrossPlatformPath(value).replace(/\\/g, "/") : normalized
   const withoutLeadingDriveSlash = withoutFileProtocol.replace(/^\/([A-Za-z]:\/)/, "$1")
   return path.resolve(withoutLeadingDriveSlash).replace(/\\/g, "/").toLowerCase()
 }
@@ -368,8 +381,7 @@ function normalizeCliEntrypointPath(value: string): string {
 export function isFanvueLivePhotoUploadCliEntrypoint(argv: string[], importMetaUrl: string): boolean {
   const invokedPath = argv[1]
   if (!invokedPath) return false
-  const modulePath = fileURLToPath(importMetaUrl)
-  return normalizeCliEntrypointPath(invokedPath) === normalizeCliEntrypointPath(modulePath)
+  return normalizeCliEntrypointPath(invokedPath) === normalizeCliEntrypointPath(importMetaUrl)
 }
 
 export async function runFanvueLivePhotoUploadCliMain(argv: string[] = process.argv.slice(2), env: Record<string, string | undefined> = process.env, write: (output: string) => void = console.log): Promise<void> {
