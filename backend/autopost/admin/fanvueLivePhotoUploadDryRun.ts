@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin"
 import {
   completeFanvueUploadSession,
@@ -18,8 +19,8 @@ import {
  * app/api, UI code, and public run dispatch. It never creates posts, updates
  * jobs, advances schedules, or persists upload results.
  *
- * Local preflight shape (safe gate-disabled import/test path):
- * DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts --operation upload_photo_only --user-id <uuid> --file <local image path> --confirm "UPLOAD_ONE_FANVUE_PHOTO_NO_POST"
+ * Local preflight shape (safe gate-disabled CLI path; must print blocked JSON and must not call Fanvue):
+ * DOTENV_CONFIG_PATH=.env.local FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED=false FANVUE_RUN_DISPATCH_ENABLED=false FANVUE_POST_VERIFY_ENABLED=false npx tsx -r dotenv/config backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts --operation upload_photo_only --user-id <uuid> --file <local image path> --confirm "UPLOAD_ONE_FANVUE_PHOTO_NO_POST"
  *
  * DO NOT RUN UNTIL HUMAN APPROVES FV-40. Future single-process live upload-only command shape:
  * DOTENV_CONFIG_PATH=.env.local FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED=true FANVUE_RUN_DISPATCH_ENABLED=false FANVUE_POST_VERIFY_ENABLED=false npx tsx -r dotenv/config backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts --operation upload_photo_only --user-id <uuid> --file <local image path> --confirm "UPLOAD_ONE_FANVUE_PHOTO_NO_POST"
@@ -357,14 +358,28 @@ export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploa
   return safeUploadOnlySuccess({ provider_media_uuid: ready.media.uuid, attempts: ready.attempts })
 }
 
-async function main() {
-  const result = await planFanvueLivePhotoUploadDryRun(parseFanvueLivePhotoUploadArgs(process.argv.slice(2)))
-  console.log(JSON.stringify(result, (_key, value) => redactSensitiveLogValue(value), 2))
+function normalizeCliEntrypointPath(value: string): string {
+  const normalized = value.replace(/\\/g, "/")
+  const withoutFileProtocol = normalized.startsWith("file://") ? fileURLToPath(value).replace(/\\/g, "/") : normalized
+  const withoutLeadingDriveSlash = withoutFileProtocol.replace(/^\/([A-Za-z]:\/)/, "$1")
+  return path.resolve(withoutLeadingDriveSlash).replace(/\\/g, "/").toLowerCase()
+}
+
+export function isFanvueLivePhotoUploadCliEntrypoint(argv: string[], importMetaUrl: string): boolean {
+  const invokedPath = argv[1]
+  if (!invokedPath) return false
+  const modulePath = fileURLToPath(importMetaUrl)
+  return normalizeCliEntrypointPath(invokedPath) === normalizeCliEntrypointPath(modulePath)
+}
+
+export async function runFanvueLivePhotoUploadCliMain(argv: string[] = process.argv.slice(2), env: Record<string, string | undefined> = process.env, write: (output: string) => void = console.log): Promise<void> {
+  const result = await planFanvueLivePhotoUploadDryRun(parseFanvueLivePhotoUploadArgs(argv), env)
+  write(JSON.stringify(result, (_key, value) => redactSensitiveLogValue(value), 2))
   process.exitCode = 0
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
-  main().catch(() => {
+if (isFanvueLivePhotoUploadCliEntrypoint(process.argv, import.meta.url)) {
+  runFanvueLivePhotoUploadCliMain().catch(() => {
     console.log(JSON.stringify(blocked("FANVUE_UPLOAD_DRY_RUN_FAILED", "Fanvue upload dry-run scaffold failed safely.")))
     process.exitCode = 0
   })

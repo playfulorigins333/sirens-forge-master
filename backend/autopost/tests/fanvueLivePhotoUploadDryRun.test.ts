@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import {
   FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENV,
   FANVUE_PHOTO_UPLOAD_CONFIRMATION,
   FANVUE_PHOTO_UPLOAD_OPERATION,
   guardFanvueUploadOnlyRoute,
+  isFanvueLivePhotoUploadCliEntrypoint,
   planFanvueLivePhotoUploadDryRun,
   redactSensitiveLogValue,
+  runFanvueLivePhotoUploadCliMain,
   safeUploadOnlySuccess,
   type FanvueLivePhotoUploadDependencies,
   validateFanvueAccountForPhotoUpload,
@@ -101,6 +104,46 @@ async function run() {
   assert.equal(blockedBeforeDeps.error_code, 'FANVUE_UPLOAD_LIVE_GATE_DISABLED')
   assert.equal(providerCalls, 0, 'flag false blocks before provider calls')
 
+
+  assert.equal(
+    isFanvueLivePhotoUploadCliEntrypoint(
+      ['node', '/workspace/sirens-forge-master/backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts'],
+      'file:///workspace/sirens-forge-master/backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts',
+    ),
+    true,
+    'POSIX tsx script argv path should be detected as the CLI entrypoint',
+  )
+  assert.equal(
+    isFanvueLivePhotoUploadCliEntrypoint(
+      ['node.exe', 'C:\\repo\\sirens-forge-master\\backend\\autopost\\admin\\fanvueLivePhotoUploadDryRun.ts'],
+      'file:///C:/repo/sirens-forge-master/backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts',
+    ),
+    true,
+    'Windows tsx script argv path should be detected as the CLI entrypoint',
+  )
+  assert.equal(
+    isFanvueLivePhotoUploadCliEntrypoint(
+      ['node', '/workspace/sirens-forge-master/backend/autopost/tests/fanvueLivePhotoUploadDryRun.test.ts'],
+      'file:///workspace/sirens-forge-master/backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts',
+    ),
+    false,
+    'importing from a test file must not be detected as running the admin CLI directly',
+  )
+
+  const mainOutput: string[] = []
+  await runFanvueLivePhotoUploadCliMain(
+    ['--operation', FANVUE_PHOTO_UPLOAD_OPERATION, '--user-id', userId, '--file', filePath, '--confirm', FANVUE_PHOTO_UPLOAD_CONFIRMATION],
+    { [FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENV]: 'false' },
+    (output) => mainOutput.push(output),
+  )
+  const mainBlocked = JSON.parse(mainOutput[0])
+  assert.equal(mainBlocked.ok, false)
+  assert.equal(mainBlocked.blocked, true)
+  assert.equal(mainBlocked.error_code, 'FANVUE_UPLOAD_LIVE_GATE_DISABLED')
+  assert.equal(mainBlocked.provider_calls_attempted, false)
+  assert.equal(mainBlocked.posted_proof, false)
+  assert.equal(mainBlocked.platform_post_id, null)
+
   const calls: string[] = []
   const mediaUuid = '223e4567-e89b-42d3-a456-426614174000'
   const deps: FanvueLivePhotoUploadDependencies = {
@@ -147,6 +190,37 @@ async function run() {
   assert.match(script, /FANVUE_RUN_DISPATCH_ENABLED=false/, 'future live command must keep dispatch disabled for the process')
   assert.match(script, /FANVUE_POST_VERIFY_ENABLED=false/, 'future live command must keep post verification disabled for the process')
   assert.match(script, /tokenCryptoCore/, 'admin runner must import CLI-safe token crypto core instead of server-only wrapper')
+
+
+  const importOnlyOutput = execFileSync(
+    process.execPath,
+    ['--import', 'tsx', '-e', "await import('./backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts')"],
+    { encoding: 'utf8', env: { ...process.env, FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED: 'false' } },
+  )
+  assert.equal(importOnlyOutput, '', 'importing the admin runner module must not auto-run main or print JSON')
+
+  const cliOutput = execFileSync(
+    process.execPath,
+    [
+      '--import',
+      'tsx',
+      'backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts',
+      '--operation',
+      FANVUE_PHOTO_UPLOAD_OPERATION,
+      '--user-id',
+      userId,
+      '--file',
+      filePath,
+      '--confirm',
+      FANVUE_PHOTO_UPLOAD_CONFIRMATION,
+    ],
+    { encoding: 'utf8', env: { ...process.env, FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED: 'false' } },
+  )
+  const cliBlocked = JSON.parse(cliOutput)
+  assert.equal(cliBlocked.error_code, 'FANVUE_UPLOAD_LIVE_GATE_DISABLED')
+  assert.equal(cliBlocked.provider_calls_attempted, false)
+  assert.equal(cliBlocked.posted_proof, false)
+  assert.equal(cliBlocked.platform_post_id, null)
   assert.doesNotMatch(script, /import\("\.\.\/\.\.\/\.\.\/lib\/autopost\/tokenCrypto"\)/, 'admin runner must not dynamically import server-only tokenCrypto wrapper')
   assert.doesNotMatch(script, /createFanvueMediaPost|createFanvueTextPost|readFanvuePost|postXTextOnlyAutopost|persistAutopostJobResult|calculateNextRunAtAfterPostedProof/)
   assert.doesNotMatch(script, /from\("autopost_jobs"\)|from\('autopost_jobs'\)/)
