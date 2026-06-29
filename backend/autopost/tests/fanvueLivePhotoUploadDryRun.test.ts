@@ -184,6 +184,57 @@ async function run() {
   assert.equal(happy.platform_post_id, null)
   assert.deepEqual(calls, ['POST /media/uploads', 'GET /media/uploads/upload_1/parts/1/url', 'PATCH /media/uploads/upload_1', `GET /media/${mediaUuid}`])
 
+  const authFailureSteps = [
+    { failed_step: 'create_upload_session', provider_route: 'POST /media/uploads' },
+    { failed_step: 'get_signed_part_url', provider_route: 'GET /media/uploads/:uploadId/parts/1/url' },
+    { failed_step: 'upload_signed_part', provider_route: 'PUT [signed-upload-url]' },
+    { failed_step: 'complete_upload', provider_route: 'PATCH /media/uploads/:uploadId' },
+    { failed_step: 'media_readback', provider_route: 'GET /media/:uuid' },
+  ] as const
+  for (const step of authFailureSteps) {
+    for (const status of [401, 403] as const) {
+      const authDeps: FanvueLivePhotoUploadDependencies = {
+        ...deps,
+        fanvueFetch: async (url, init) => {
+          const pathname = new URL(url).pathname
+          if (step.failed_step === 'create_upload_session' && init.method === 'POST') return { ok: false, status, json: async () => ({ raw_secret: 'raw provider body must not leak' }) }
+          if (init.method === 'POST') return { ok: true, status: 200, json: async () => ({ mediaUuid, uploadId: 'upload_1' }) }
+          if (step.failed_step === 'get_signed_part_url' && init.method === 'GET' && pathname.includes('/parts/1/url')) return { ok: false, status, json: async () => ({ raw_secret: 'raw provider body must not leak' }) }
+          if (init.method === 'GET' && pathname.includes('/parts/1/url')) return { ok: true, status: 200, json: async () => 'https://signed-upload.invalid/part-1?X-Amz-Signature=secret' }
+          if (step.failed_step === 'complete_upload' && init.method === 'PATCH') return { ok: false, status, json: async () => ({ raw_secret: 'raw provider body must not leak' }) }
+          if (init.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ status: 'processing' }) }
+          if (step.failed_step === 'media_readback') return { ok: false, status, json: async () => ({ raw_secret: 'raw provider body must not leak' }) }
+          return { ok: true, status: 200, json: async () => ({ uuid: mediaUuid, status: 'ready', mediaType: 'image', name: 'photo.png' }) }
+        },
+        signedPartUploader: async () => {
+          if (step.failed_step === 'upload_signed_part') {
+            throw {
+              ok: false,
+              kind: status === 401 ? 'UNAUTHORIZED' : 'FORBIDDEN',
+              status,
+              error_code: status === 401 ? 'FANVUE_UNAUTHORIZED' : 'FANVUE_FORBIDDEN',
+              safe_error_message: 'Fanvue rejected the request authorization.',
+            }
+          }
+          return { ETag: 'mock-etag-1' }
+        },
+      }
+      const failed = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, liveEnv, authDeps)
+      assert.equal(failed.ok, false)
+      assert.equal(failed.error_code, 'FANVUE_UNAUTHORIZED')
+      assert.equal(failed.safe_error_message, 'Fanvue rejected the request authorization.')
+      assert.equal(failed.failed_step, step.failed_step)
+      assert.equal(failed.provider_status, status)
+      assert.equal(failed.provider_error_code, status === 401 ? 'FANVUE_UNAUTHORIZED' : 'FANVUE_FORBIDDEN')
+      assert.equal(failed.provider_route, step.provider_route)
+      assert.equal(failed.provider_calls_attempted, true)
+      assert.equal(failed.posted_proof, false)
+      assert.equal(failed.platform_post_id, null)
+      const serialized = JSON.stringify(failed, (_key, value) => redactSensitiveLogValue(value))
+      assert.doesNotMatch(serialized, /decrypted-token-never-logged|encrypted-token-placeholder|X-Amz-Signature|raw provider body|Authorization:|Authorization=|Bearer [A-Za-z0-9]|Cookie:/i)
+    }
+  }
+
   const script = readFileSync('backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts', 'utf8')
   assert.match(script, /DOTENV_CONFIG_PATH=\.env\.local/, 'local CLI runbook must document .env.local loading')
   assert.match(script, /DO NOT RUN UNTIL HUMAN APPROVES FV-40/, 'future live command must stay explicitly human-gated')

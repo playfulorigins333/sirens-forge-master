@@ -83,6 +83,8 @@ export type FanvueUploadOnlySuccess = {
   platform_post_id: null
 }
 
+export type FanvueUploadFailedStep = "create_upload_session" | "get_signed_part_url" | "upload_signed_part" | "complete_upload" | "media_readback"
+
 export type FanvueUploadBlockedResult = {
   ok: false
   blocked: true
@@ -91,6 +93,10 @@ export type FanvueUploadBlockedResult = {
   provider_calls_attempted: boolean
   posted_proof: false
   platform_post_id: null
+  failed_step?: FanvueUploadFailedStep
+  provider_status?: number
+  provider_error_code?: string
+  provider_route?: string
 }
 
 function blocked(error_code: string, safe_error_message: string): FanvueUploadBlockedResult {
@@ -101,8 +107,25 @@ function failed(error_code: string, safe_error_message: string, provider_calls_a
   return { ok: false, blocked: true, error_code, safe_error_message, provider_calls_attempted, posted_proof: false, platform_post_id: null }
 }
 
-function fromApiFailure(result: FanvueApiFailure, provider_calls_attempted: boolean): FanvueUploadBlockedResult {
-  return failed(result.error_code, result.safe_error_message, provider_calls_attempted)
+function sanitizeProviderErrorCode(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined
+  return /^[A-Z0-9_]{3,80}$/.test(value) ? value : undefined
+}
+
+function fromApiFailure(result: FanvueApiFailure, provider_calls_attempted: boolean, failed_step: FanvueUploadFailedStep, provider_route: string): FanvueUploadBlockedResult {
+  const authFailure = result.status === 401 || result.status === 403 || result.error_code === "FANVUE_UNAUTHORIZED"
+  const base = failed(
+    authFailure ? "FANVUE_UNAUTHORIZED" : result.error_code,
+    authFailure ? "Fanvue rejected the request authorization." : result.safe_error_message,
+    provider_calls_attempted,
+  )
+  return {
+    ...base,
+    failed_step,
+    ...(typeof result.status === "number" ? { provider_status: result.status } : {}),
+    ...(sanitizeProviderErrorCode(result.error_code) ? { provider_error_code: result.error_code } : {}),
+    provider_route,
+  }
 }
 
 function nonEmptyString(value: unknown) {
@@ -276,7 +299,16 @@ function defaultSignedPartUploader(providerCallCounter: () => void): FanvueSigne
   return async ({ signedUrl, body }) => {
     providerCallCounter()
     const response = await fetch(signedUrl, { method: "PUT", body: body as BodyInit })
-    if (!response.ok) throw new Error("FANVUE_SIGNED_PART_UPLOAD_FAILED")
+    if (!response.ok) {
+      const status = response.status
+      throw {
+        ok: false,
+        kind: status === 401 ? "UNAUTHORIZED" : status === 403 ? "FORBIDDEN" : "FAILED",
+        status,
+        error_code: status === 401 ? "FANVUE_UNAUTHORIZED" : status === 403 ? "FANVUE_FORBIDDEN" : "FANVUE_SIGNED_PART_UPLOAD_FAILED",
+        safe_error_message: status === 401 || status === 403 ? "Fanvue rejected the request authorization." : "Signed upload part failed.",
+      } satisfies FanvueApiFailure
+    }
     return { ETag: response.headers.get("ETag") ?? response.headers.get("etag") ?? "" }
   }
 }
@@ -340,20 +372,20 @@ export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploa
 
   const config = { accessToken, apiBaseUrl: deps.apiBaseUrl, apiVersion: deps.apiVersion, fetch: guardedFetch }
   const uploadSession = await createFanvueUploadSession(config, { name: file.filename, filename: file.filename, mediaType: "image" })
-  if (!uploadSession.ok) return fromApiFailure(uploadSession as FanvueApiFailure, providerCallsAttempted)
+  if (!uploadSession.ok) return fromApiFailure(uploadSession as FanvueApiFailure, providerCallsAttempted, "create_upload_session", "POST /media/uploads")
 
   const signed = await getFanvueUploadPartUrl(config, { uploadId: uploadSession.uploadId, partNumber: 1 })
-  if (!signed.ok) return fromApiFailure(signed as FanvueApiFailure, providerCallsAttempted)
+  if (!signed.ok) return fromApiFailure(signed as FanvueApiFailure, providerCallsAttempted, "get_signed_part_url", `GET /media/uploads/:uploadId/parts/1/url`)
 
   const bytes = await deps.readFileBytes(String(args.filePath))
   const uploaded = await uploadFanvueSignedPart({ signedUrl: signed.signed_url, partNumber: 1, body: bytes, uploader: guardedSignedPartUploader })
-  if (!uploaded.ok) return fromApiFailure(uploaded as FanvueApiFailure, providerCallsAttempted)
+  if (!uploaded.ok) return fromApiFailure(uploaded as FanvueApiFailure, providerCallsAttempted, "upload_signed_part", "PUT [signed-upload-url]")
 
   const completed = await completeFanvueUploadSession(config, { uploadId: uploadSession.uploadId, parts: [uploaded.part] })
-  if (!completed.ok) return fromApiFailure(completed as FanvueApiFailure, providerCallsAttempted)
+  if (!completed.ok) return fromApiFailure(completed as FanvueApiFailure, providerCallsAttempted, "complete_upload", "PATCH /media/uploads/:uploadId")
 
   const ready = await waitForFanvueMediaReady(config, { uuid: uploadSession.mediaUuid, maxAttempts: 5, maxDelayMs: 1_000, sleep: deps.sleep })
-  if (!ready.ok) return fromApiFailure(ready as FanvueApiFailure, providerCallsAttempted)
+  if (!ready.ok) return fromApiFailure(ready as FanvueApiFailure, providerCallsAttempted, "media_readback", "GET /media/:uuid")
 
   return safeUploadOnlySuccess({ provider_media_uuid: ready.media.uuid, attempts: ready.attempts })
 }
