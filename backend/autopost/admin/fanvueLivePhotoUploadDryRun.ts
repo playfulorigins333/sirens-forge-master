@@ -18,8 +18,11 @@ import {
  * app/api, UI code, and public run dispatch. It never creates posts, updates
  * jobs, advances schedules, or persists upload results.
  *
- * Documented shape:
- * npx tsx backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts --operation upload_photo_only --user-id <uuid> --file <local-test-image> --confirm "UPLOAD_ONE_FANVUE_PHOTO_NO_POST"
+ * Local preflight shape (safe gate-disabled import/test path):
+ * DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts --operation upload_photo_only --user-id <uuid> --file <local image path> --confirm "UPLOAD_ONE_FANVUE_PHOTO_NO_POST"
+ *
+ * DO NOT RUN UNTIL HUMAN APPROVES FV-40. Future single-process live upload-only command shape:
+ * DOTENV_CONFIG_PATH=.env.local FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED=true FANVUE_RUN_DISPATCH_ENABLED=false FANVUE_POST_VERIFY_ENABLED=false npx tsx -r dotenv/config backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts --operation upload_photo_only --user-id <uuid> --file <local image path> --confirm "UPLOAD_ONE_FANVUE_PHOTO_NO_POST"
  *
  * Live execution additionally requires:
  * FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED === "true"
@@ -299,7 +302,7 @@ export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploa
   const markProviderCall = () => { providerCallsAttempted = true }
   const deps = dependencies ?? createDefaultFanvueLivePhotoUploadDependencies(env, markProviderCall)
   if (!dependencies) {
-    const { decryptAutopostToken } = await import("../../../lib/autopost/tokenCrypto")
+    const { decryptAutopostToken } = await import("../../../lib/autopost/tokenCryptoCore")
     deps.decryptToken = decryptAutopostToken
   }
 

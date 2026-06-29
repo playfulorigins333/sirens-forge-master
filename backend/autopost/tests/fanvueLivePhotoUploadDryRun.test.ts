@@ -142,6 +142,12 @@ async function run() {
   assert.deepEqual(calls, ['POST /media/uploads', 'GET /media/uploads/upload_1/parts/1/url', 'PATCH /media/uploads/upload_1', `GET /media/${mediaUuid}`])
 
   const script = readFileSync('backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts', 'utf8')
+  assert.match(script, /DOTENV_CONFIG_PATH=\.env\.local/, 'local CLI runbook must document .env.local loading')
+  assert.match(script, /DO NOT RUN UNTIL HUMAN APPROVES FV-40/, 'future live command must stay explicitly human-gated')
+  assert.match(script, /FANVUE_RUN_DISPATCH_ENABLED=false/, 'future live command must keep dispatch disabled for the process')
+  assert.match(script, /FANVUE_POST_VERIFY_ENABLED=false/, 'future live command must keep post verification disabled for the process')
+  assert.match(script, /tokenCryptoCore/, 'admin runner must import CLI-safe token crypto core instead of server-only wrapper')
+  assert.doesNotMatch(script, /import\("\.\.\/\.\.\/\.\.\/lib\/autopost\/tokenCrypto"\)/, 'admin runner must not dynamically import server-only tokenCrypto wrapper')
   assert.doesNotMatch(script, /createFanvueMediaPost|createFanvueTextPost|readFanvuePost|postXTextOnlyAutopost|persistAutopostJobResult|calculateNextRunAtAfterPostedProof/)
   assert.doesNotMatch(script, /from\("autopost_jobs"\)|from\('autopost_jobs'\)/)
 
