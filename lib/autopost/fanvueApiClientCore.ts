@@ -135,6 +135,12 @@ function failure(kind: FanvueApiFailureKind, status: number | null, error_code: 
   return { ok: false, kind, status, error_code, safe_error_message }
 }
 
+function isFanvueApiFailure(value: unknown): value is FanvueApiFailure {
+  if (!value || typeof value !== "object") return false
+  const record = value as Partial<FanvueApiFailure>
+  return record.ok === false && typeof record.error_code === "string" && typeof record.safe_error_message === "string"
+}
+
 function retryAfterMs(response: FanvueFetchResponse, maxDelayMs: number) {
   const raw = response.headers?.get("Retry-After")
   if (!raw) return null
@@ -291,7 +297,8 @@ export async function uploadFanvueSignedPart(input: { signedUrl: string; partNum
     const ETag = clean(uploaded?.ETag)
     if (!ETag) return failure("FAILED", null, "FANVUE_UPLOAD_PART_ETAG_REQUIRED", "Signed upload part response must include an ETag.")
     return { ok: true, part: { ETag, PartNumber: input.partNumber }, proof: false }
-  } catch {
+  } catch (error) {
+    if (isFanvueApiFailure(error)) return error
     return failure("FAILED", null, "FANVUE_SIGNED_PART_UPLOAD_FAILED", "Signed upload part failed.")
   }
 }
