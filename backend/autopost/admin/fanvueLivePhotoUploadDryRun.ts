@@ -1,17 +1,27 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
+import { getSupabaseAdmin } from "../../../lib/supabaseAdmin"
+import {
+  completeFanvueUploadSession,
+  createFanvueUploadSession,
+  getFanvueUploadPartUrl,
+  uploadFanvueSignedPart,
+  waitForFanvueMediaReady,
+  type FanvueApiFailure,
+  type FanvueFetch,
+  type FanvueSignedPartUploader,
+} from "../../../lib/autopost/fanvueApiClientCore"
 
 /**
- * FV-30 hard-disabled local/admin scaffold for a future single Fanvue live
- * photo upload test. This file intentionally lives outside app/api, UI code,
- * and public run dispatch. It does not perform Supabase lookups, token
- * decryption, Fanvue API calls, signed URL uploads, post creation, job updates,
- * schedule advancement, or persistence in FV-30.
+ * FV-37 hard-gated local/admin runner for a single connected-user Fanvue
+ * photo media upload/readback test. This file intentionally lives outside
+ * app/api, UI code, and public run dispatch. It never creates posts, updates
+ * jobs, advances schedules, or persists upload results.
  *
- * Future documented shape only:
+ * Documented shape:
  * npx tsx backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts --operation upload_photo_only --user-id <uuid> --file <local-test-image> --confirm "UPLOAD_ONE_FANVUE_PHOTO_NO_POST"
  *
- * Future live execution must additionally require:
+ * Live execution additionally requires:
  * FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED === "true"
  */
 
@@ -74,13 +84,21 @@ export type FanvueUploadBlockedResult = {
   blocked: true
   error_code: string
   safe_error_message: string
-  provider_calls_attempted: false
+  provider_calls_attempted: boolean
   posted_proof: false
   platform_post_id: null
 }
 
 function blocked(error_code: string, safe_error_message: string): FanvueUploadBlockedResult {
   return { ok: false, blocked: true, error_code, safe_error_message, provider_calls_attempted: false, posted_proof: false, platform_post_id: null }
+}
+
+function failed(error_code: string, safe_error_message: string, provider_calls_attempted: boolean): FanvueUploadBlockedResult {
+  return { ok: false, blocked: true, error_code, safe_error_message, provider_calls_attempted, posted_proof: false, platform_post_id: null }
+}
+
+function fromApiFailure(result: FanvueApiFailure, provider_calls_attempted: boolean): FanvueUploadBlockedResult {
+  return failed(result.error_code, result.safe_error_message, provider_calls_attempted)
 }
 
 function nonEmptyString(value: unknown) {
@@ -210,13 +228,130 @@ export async function validateLocalTestImageFile(filePath: string, readBytes: (p
   return { ok: true, filename, extension, bytes: bytes.length }
 }
 
-export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploadArgs, env: Record<string, string | undefined> = process.env): Promise<FanvueUploadBlockedResult> {
+export type FanvueLivePhotoUploadDependencies = {
+  loadAccount: (userId: string) => Promise<FanvueAutopostAccountRow | null>
+  decryptToken: (encryptedToken: string) => string
+  readFileBytes: (filePath: string) => Promise<Buffer>
+  fanvueFetch: FanvueFetch
+  signedPartUploader: FanvueSignedPartUploader
+  apiBaseUrl: string
+  apiVersion: string
+  sleep?: (ms: number) => Promise<void>
+}
+
+export async function loadFanvueAutopostAccountForUser(userId: string): Promise<FanvueAutopostAccountRow | null> {
+  const supabase = getSupabaseAdmin()
+  const { data, error } = await supabase
+    .from("autopost_accounts")
+    .select("user_id, platform, connection_status, metadata, provider_account_id, encrypted_access_token, scopes")
+    .eq("user_id", userId)
+    .eq("platform", "fanvue")
+    .maybeSingle()
+  if (error) throw new Error("FANVUE_ACCOUNT_LOOKUP_FAILED")
+  return data as FanvueAutopostAccountRow | null
+}
+
+function getFanvueAdminApiBaseUrl(env: Record<string, string | undefined> = process.env) {
+  return env.FANVUE_API_BASE_URL ?? env.FANVUE_API_BASE ?? "https://api.fanvue.com"
+}
+
+function getFanvueAdminApiVersion(env: Record<string, string | undefined> = process.env) {
+  return env.FANVUE_API_VERSION ?? "2025-06-26"
+}
+
+function defaultFanvueFetchWithUploadOnlyGuard(providerCallCounter: () => void): FanvueFetch {
+  return async (url, init) => {
+    const guarded = guardFanvueUploadOnlyRoute(init.method, url)
+    if ("blocked" in guarded) throw new Error(guarded.error_code)
+    providerCallCounter()
+    return fetch(url, init) as Promise<Awaited<ReturnType<FanvueFetch>>>
+  }
+}
+
+function defaultSignedPartUploader(providerCallCounter: () => void): FanvueSignedPartUploader {
+  return async ({ signedUrl, body }) => {
+    providerCallCounter()
+    const response = await fetch(signedUrl, { method: "PUT", body: body as BodyInit })
+    if (!response.ok) throw new Error("FANVUE_SIGNED_PART_UPLOAD_FAILED")
+    return { ETag: response.headers.get("ETag") ?? response.headers.get("etag") ?? "" }
+  }
+}
+
+export function createDefaultFanvueLivePhotoUploadDependencies(env: Record<string, string | undefined> = process.env, providerCallCounter: () => void = () => {}): FanvueLivePhotoUploadDependencies {
+  return {
+    loadAccount: loadFanvueAutopostAccountForUser,
+    decryptToken: (encryptedToken) => {
+      throw new Error("FANVUE_TOKEN_DECRYPT_DEPENDENCY_NOT_LOADED")
+    },
+    readFileBytes: readFile,
+    fanvueFetch: defaultFanvueFetchWithUploadOnlyGuard(providerCallCounter),
+    signedPartUploader: defaultSignedPartUploader(providerCallCounter),
+    apiBaseUrl: getFanvueAdminApiBaseUrl(env),
+    apiVersion: getFanvueAdminApiVersion(env),
+  }
+}
+
+export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploadArgs, env: Record<string, string | undefined> = process.env, dependencies?: FanvueLivePhotoUploadDependencies): Promise<FanvueUploadBlockedResult | FanvueUploadOnlySuccess> {
   const gate = validateHardDisabledGate(args, env)
   if (gate) return gate
-  // FV-30 intentionally stops even after all future live gates are present. A later
-  // human-approved gate must replace this final scaffold block with injected,
-  // audited account/file/provider steps.
-  return blocked("FANVUE_UPLOAD_SCAFFOLD_ONLY", "FV-30 scaffold does not execute live Fanvue upload.")
+
+  let providerCallsAttempted = false
+  const markProviderCall = () => { providerCallsAttempted = true }
+  const deps = dependencies ?? createDefaultFanvueLivePhotoUploadDependencies(env, markProviderCall)
+  if (!dependencies) {
+    const { decryptAutopostToken } = await import("../../../lib/autopost/tokenCrypto")
+    deps.decryptToken = decryptAutopostToken
+  }
+
+  const file = await validateLocalTestImageFile(String(args.filePath), deps.readFileBytes)
+  if ("blocked" in file) return file
+
+  let account: FanvueAutopostAccountRow | null
+  try {
+    account = await deps.loadAccount(String(args.userId))
+  } catch {
+    return failed("FANVUE_ACCOUNT_LOOKUP_FAILED", "Fanvue account lookup failed safely.", providerCallsAttempted)
+  }
+
+  const accountValidation = validateFanvueAccountForPhotoUpload(account, String(args.userId))
+  if ("blocked" in accountValidation) return accountValidation
+
+  let accessToken: string
+  try {
+    accessToken = deps.decryptToken(String(account?.encrypted_access_token))
+  } catch {
+    return failed("FANVUE_TOKEN_DECRYPT_FAILED", "Unable to decrypt Fanvue access token.", providerCallsAttempted)
+  }
+
+  const guardedFetch: FanvueFetch = async (url, init) => {
+    const guarded = guardFanvueUploadOnlyRoute(init.method, url)
+    if ("blocked" in guarded) throw new Error(guarded.error_code)
+    markProviderCall()
+    return deps.fanvueFetch(url, init)
+  }
+  const guardedSignedPartUploader: FanvueSignedPartUploader = async (input) => {
+    markProviderCall()
+    return deps.signedPartUploader(input)
+  }
+
+  const config = { accessToken, apiBaseUrl: deps.apiBaseUrl, apiVersion: deps.apiVersion, fetch: guardedFetch }
+  const uploadSession = await createFanvueUploadSession(config, { name: file.filename, filename: file.filename, mediaType: "image" })
+  if (!uploadSession.ok) return fromApiFailure(uploadSession as FanvueApiFailure, providerCallsAttempted)
+
+  const signed = await getFanvueUploadPartUrl(config, { uploadId: uploadSession.uploadId, partNumber: 1 })
+  if (!signed.ok) return fromApiFailure(signed as FanvueApiFailure, providerCallsAttempted)
+
+  const bytes = await deps.readFileBytes(String(args.filePath))
+  const uploaded = await uploadFanvueSignedPart({ signedUrl: signed.signed_url, partNumber: 1, body: bytes, uploader: guardedSignedPartUploader })
+  if (!uploaded.ok) return fromApiFailure(uploaded as FanvueApiFailure, providerCallsAttempted)
+
+  const completed = await completeFanvueUploadSession(config, { uploadId: uploadSession.uploadId, parts: [uploaded.part] })
+  if (!completed.ok) return fromApiFailure(completed as FanvueApiFailure, providerCallsAttempted)
+
+  const ready = await waitForFanvueMediaReady(config, { uuid: uploadSession.mediaUuid, maxAttempts: 5, maxDelayMs: 1_000, sleep: deps.sleep })
+  if (!ready.ok) return fromApiFailure(ready as FanvueApiFailure, providerCallsAttempted)
+
+  return safeUploadOnlySuccess({ provider_media_uuid: ready.media.uuid, attempts: ready.attempts })
 }
 
 async function main() {
