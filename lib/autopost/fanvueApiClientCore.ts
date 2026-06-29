@@ -181,7 +181,7 @@ function requireConfig(config: FanvueApiClientConfig): FanvueApiFailure | null {
 
 function headers(config: FanvueApiClientConfig) {
   return {
-    Authorization: `Bearer ${config.accessToken}`,
+    authorization: `Bearer ${config.accessToken}`,
     "Content-Type": "application/json",
     "X-Fanvue-API-Version": config.apiVersion,
   }

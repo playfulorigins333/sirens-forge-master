@@ -162,6 +162,13 @@ async function run() {
       assert.doesNotMatch(url, /api\.fanvue\.com/, 'mocked test must not call live Fanvue API')
       const guarded = guardFanvueUploadOnlyRoute(init.method, url)
       assert.equal(guarded.ok, true)
+      if (init.method === 'POST') {
+        assert.equal(init.headers.authorization, 'Bearer decrypted-token-never-logged')
+        assert.equal(init.headers.Authorization, undefined, 'admin upload should use the same lowercase authorization header key as Fanvue identity lookup')
+        assert.equal(init.headers['X-Fanvue-API-Version'], '2025-06-26')
+        assert.equal(init.headers['Content-Type'], 'application/json')
+        assert.deepEqual(JSON.parse(init.body ?? '{}'), { name: 'fanvue-live-upload-test-photo.png', filename: 'fanvue-live-upload-test-photo.png', mediaType: 'image' })
+      }
       if (init.method === 'POST') return { ok: true, status: 200, json: async () => ({ mediaUuid, uploadId: 'upload_1' }) }
       if (init.method === 'GET' && url.includes('/parts/1/url')) return { ok: true, status: 200, json: async () => 'https://signed-upload.invalid/part-1?X-Amz-Signature=secret' }
       if (init.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ status: 'processing' }) }

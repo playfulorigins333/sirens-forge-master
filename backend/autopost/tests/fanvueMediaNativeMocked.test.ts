@@ -51,7 +51,19 @@ async function run() {
   assert.equal(upload.uploadId, uploadId)
   assert.equal(calls[0].url, `${apiBaseUrl}/media/uploads`)
   assert.equal(calls[0].init.method, 'POST')
+  assert.equal(calls[0].init.headers.authorization, `Bearer ${token}`)
+  assert.equal(calls[0].init.headers.Authorization, undefined, 'upload-session request should match successful identity lookup header casing')
+  assert.equal(calls[0].init.headers['X-Fanvue-API-Version'], '2025-06-26')
+  assert.equal(calls[0].init.headers['Content-Type'], 'application/json')
   assert.deepEqual(JSON.parse(calls[0].init.body ?? '{}'), { name: 'Mock image', filename: 'mock-image', mediaType: 'image' })
+
+  const unauthorized = await createFanvueUploadSession(config(queueFetch([{ status: 401, data: { access_token: token, signed_url: 'https://signed-upload.invalid/part-1?X-Amz-Signature=secret', raw: 'raw provider response must not leak' } }])), {
+    name: 'Mock unauthorized', filename: 'mock-unauthorized.png', mediaType: 'image',
+  })
+  assert.equal(unauthorized.ok, false)
+  assert.equal(unauthorized.error_code, 'FANVUE_UNAUTHORIZED')
+  assert.equal(unauthorized.safe_error_message, 'Fanvue rejected the request authorization.')
+  assert.doesNotMatch(JSON.stringify(unauthorized), new RegExp(`${token}|signed-upload|X-Amz-Signature|raw provider response`), 'unauthorized upload-session diagnostics must not leak tokens, signed URLs, or raw responses')
 
   const uploadFailure = await createFanvueUploadSession(config(queueFetch([{ status: 400, data: { error: 'unsupported-media-type' } }])), {
     name: 'Mock rejected', filename: 'mock.bin', mediaType: 'image',
