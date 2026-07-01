@@ -6,11 +6,34 @@ const availability = readFileSync('lib/autopost/platformAvailability.ts', 'utf8'
 const callback = readFileSync('app/api/autopost/connect/fanvue/callback/route.ts', 'utf8')
 const statusRoute = readFileSync('app/api/autopost/platforms/me/route.ts', 'utf8')
 const envExample = readFileSync('.env.example', 'utf8')
+const refreshScopeNote = readFileSync('backend/autopost/docs/fanvue-oauth-refresh-scopes-FV-40R.md', 'utf8')
 
 assert.match(oauth, /FANVUE_CONNECT_ENABLED"\) === "true"/, 'Fanvue connect must default off unless exactly true')
 assert.match(oauth, /provider: "fanvue"/, 'Fanvue OAuth state must bind provider')
 assert.match(oauth, /code_challenge_method", "S256"/, 'Fanvue OAuth must use PKCE S256')
 assert.match(oauth, /FANVUE_OAUTH_SCOPES_UNAPPROVED/, 'Fanvue scopes must reject unapproved scopes')
+
+const approvedScopesMatch = oauth.match(/export const FANVUE_APPROVED_SCOPES = \[([\s\S]*?)\] as const/)
+assert.ok(approvedScopesMatch, 'Fanvue approved scopes must be declared as a const allowlist')
+const approvedScopes = Array.from(approvedScopesMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1])
+assert.ok(approvedScopes.includes('openid'), 'Fanvue approved/default scopes must include openid')
+assert.ok(approvedScopes.includes('offline_access'), 'Fanvue approved/default scopes must include offline_access for refresh-token issuance')
+assert.ok(approvedScopes.includes('offline'), 'Fanvue approved/default scopes must include offline')
+assert.ok(approvedScopes.includes('read:media'), 'Fanvue approved/default scopes must preserve read:media')
+assert.ok(approvedScopes.includes('write:media'), 'Fanvue approved/default scopes must preserve write:media')
+assert.ok(!approvedScopes.includes('write:creator'), 'Fanvue approved/default scopes must not include write:creator')
+assert.match(oauth, /export const FANVUE_DEFAULT_SCOPES = FANVUE_APPROVED_SCOPES\.join\(" "\)/, 'Fanvue default scopes must derive from the approved allowlist')
+
+const buildAuthorizeUrlSource = oauth.match(/export function buildFanvueAuthorizeUrl[\s\S]*?^}/m)?.[0] ?? ''
+assert.match(buildAuthorizeUrlSource, /searchParams\.set\("response_type", "code"\)/, 'Fanvue authorize URL must request authorization code flow')
+assert.match(buildAuthorizeUrlSource, /searchParams\.set\("client_id", config\.clientId\)/, 'Fanvue authorize URL must include client_id')
+assert.match(buildAuthorizeUrlSource, /searchParams\.set\("redirect_uri", config\.redirectUri\)/, 'Fanvue authorize URL must include redirect_uri')
+assert.match(buildAuthorizeUrlSource, /searchParams\.set\("scope", config\.scopes\.join\(" "\)\)/, 'Fanvue authorize URL must include approved scopes through the existing scope parameter')
+assert.match(buildAuthorizeUrlSource, /searchParams\.set\("state", input\.state\)/, 'Fanvue authorize URL must include state')
+assert.match(buildAuthorizeUrlSource, /searchParams\.set\("code_challenge", input\.codeChallenge\)/, 'Fanvue authorize URL must include PKCE code_challenge')
+assert.match(buildAuthorizeUrlSource, /searchParams\.set\("code_challenge_method", "S256"\)/, 'Fanvue authorize URL must include PKCE S256 method')
+assert.doesNotMatch(buildAuthorizeUrlSource, /prompt|access_type/, 'Fanvue authorize URL must not invent prompt=consent or access_type=offline params')
+assert.doesNotMatch(buildAuthorizeUrlSource, /clientSecret|FANVUE_CLIENT_SECRET/, 'Fanvue authorize URL must not leak client secrets')
 assert.doesNotMatch(oauth, /write:creator/, 'Fanvue text-only readiness must not add write:creator scope')
 
 assert.match(callback, /encryptAutopostToken\(tokenResponse\.access_token\)/, 'Fanvue access token must be encrypted before storage')
@@ -36,5 +59,8 @@ assert.match(statusRoute, /encrypted_access_token, encrypted_refresh_token, meta
 assert.match(envExample, /FANVUE_CONNECT_ENABLED=false/, 'Fanvue connect env example must default off')
 assert.match(envExample, /FANVUE_RUN_DISPATCH_ENABLED=false/, 'Fanvue dispatch env example must default off')
 assert.match(envExample, /FANVUE_CLIENT_SECRET=\n/, 'Fanvue client secret placeholder must be empty')
+assert.match(refreshScopeNote, /does not initiate Fanvue reconnect/i, 'FV-40R docs must not approve reconnect')
+assert.match(refreshScopeNote, /does not prove that Fanvue will return a `refresh_token`/i, 'FV-40R docs must keep refresh-token issuance unproven')
+assert.match(refreshScopeNote, /does not approve live upload/i, 'FV-40R docs must not approve live upload')
 
 console.log('Fanvue OAuth source safety checks passed')
