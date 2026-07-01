@@ -32,6 +32,7 @@ import {
 export const FANVUE_PHOTO_UPLOAD_OPERATION = "upload_photo_only" as const
 export const FANVUE_PHOTO_UPLOAD_CONFIRMATION = "UPLOAD_ONE_FANVUE_PHOTO_NO_POST" as const
 export const FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENV = "FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED" as const
+export const FANVUE_TOKEN_FRESHNESS_BUFFER_MS = 5 * 60 * 1000
 
 const POST_RELATED_FIELDS = new Set([
   "caption",
@@ -64,6 +65,11 @@ export type FanvueAutopostAccountRow = {
   metadata?: Record<string, unknown> | null
   provider_account_id?: unknown
   encrypted_access_token?: unknown
+  encrypted_refresh_token?: unknown
+  token_expires_at?: unknown
+  token_type?: unknown
+  token_key_version?: unknown
+  last_refresh_at?: unknown
   scopes?: unknown
 }
 
@@ -176,6 +182,19 @@ function scopeList(scopes: unknown) {
   return []
 }
 
+export function validateFanvueAccessTokenFreshness(account: Pick<FanvueAutopostAccountRow, "token_expires_at"> | null | undefined, nowMs: number = Date.now()): FanvueUploadBlockedResult | { ok: true; tokenExpiresAt: Date } {
+  const stale = () => blocked("FANVUE_TOKEN_FRESHNESS_REQUIRED", "Fanvue access token needs refresh before media upload.")
+  if (!account || account.token_expires_at == null) return stale()
+  if (typeof account.token_expires_at !== "string" && typeof account.token_expires_at !== "number" && !(account.token_expires_at instanceof Date)) return stale()
+
+  const tokenExpiresAt = new Date(account.token_expires_at)
+  const expiresAtMs = tokenExpiresAt.getTime()
+  if (!Number.isFinite(expiresAtMs)) return stale()
+  if (expiresAtMs <= nowMs + FANVUE_TOKEN_FRESHNESS_BUFFER_MS) return stale()
+
+  return { ok: true, tokenExpiresAt }
+}
+
 export function validateFanvueAccountForPhotoUpload(account: FanvueAutopostAccountRow | null | undefined, targetUserId: string): FanvueUploadBlockedResult | { ok: true; scopes: string[]; writeCreatorRequired: false } {
   if (!account) return blocked("FANVUE_ACCOUNT_NOT_FOUND", "Fanvue account row was not found.")
   if (account.platform !== "fanvue") return blocked("FANVUE_ACCOUNT_PLATFORM_INVALID", "Account platform must be fanvue.")
@@ -270,7 +289,7 @@ export async function loadFanvueAutopostAccountForUser(userId: string): Promise<
   const supabase = getSupabaseAdmin()
   const { data, error } = await supabase
     .from("autopost_accounts")
-    .select("user_id, platform, connection_status, metadata, provider_account_id, encrypted_access_token, scopes")
+    .select("user_id, platform, connection_status, metadata, provider_account_id, encrypted_access_token, encrypted_refresh_token, token_expires_at, token_type, token_key_version, last_refresh_at, scopes")
     .eq("user_id", userId)
     .eq("platform", "fanvue")
     .maybeSingle()
@@ -351,6 +370,9 @@ export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploa
 
   const accountValidation = validateFanvueAccountForPhotoUpload(account, String(args.userId))
   if ("blocked" in accountValidation) return accountValidation
+
+  const tokenFreshness = validateFanvueAccessTokenFreshness(account)
+  if ("blocked" in tokenFreshness) return tokenFreshness
 
   let accessToken: string
   try {
