@@ -118,6 +118,7 @@ async function run() {
     decryptToken: () => 'token',
     readFileBytes: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]),
     fanvueFetch: async () => { throw new Error('provider call should be blocked') },
+    refreshFanvueAccessToken: async () => { throw new Error('refresh should be blocked by disabled gate') },
     signedPartUploader: async () => { throw new Error('signed upload should be blocked') },
     apiBaseUrl: 'https://api.test.fanvue.example',
     apiVersion: '2025-06-26',
@@ -134,7 +135,7 @@ async function run() {
     let localProviderCalls = 0
     let decryptCalls = 0
     const stale = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, liveEnv, {
-      loadAccount: async () => ({ ...baseAccount, token_expires_at }),
+      loadAccount: async () => ({ ...baseAccount, token_expires_at, encrypted_refresh_token: null }),
       decryptToken: () => { decryptCalls++; return 'access-token-must-not-be-used' },
       readFileBytes: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]),
       fanvueFetch: async () => { localProviderCalls++; throw new Error('provider call should be blocked by stale token') },
@@ -143,12 +144,12 @@ async function run() {
       apiVersion: '2025-06-26',
     })
     assert.equal(stale.ok, false, `${label} token expiry must block the upload path`)
-    assert.equal(stale.error_code, 'FANVUE_TOKEN_FRESHNESS_REQUIRED')
+    assert.equal(stale.error_code, 'FANVUE_REFRESH_TOKEN_MISSING')
     assert.equal(stale.provider_calls_attempted, false)
     assert.equal(stale.posted_proof, false)
     assert.equal(stale.platform_post_id, null)
-    assert.equal(localProviderCalls, 0, `${label} token expiry must block before provider calls`)
-    assert.equal(decryptCalls, 0, `${label} token expiry must block before token decrypt`)
+    assert.equal(localProviderCalls, 0, `${label} token expiry with no refresh token must block before provider calls`)
+    assert.equal(decryptCalls, 0, `${label} token expiry with no refresh token must block before token decrypt`)
     const serialized = JSON.stringify(stale, (_key, value) => redactSensitiveLogValue(value))
     assert.doesNotMatch(serialized, /access-token|refresh-token|encrypted-token|encrypted-refresh|X-Amz-Signature|raw provider body|Authorization:|Authorization=|Bearer [A-Za-z0-9]|Cookie:/i)
   }
@@ -240,6 +241,75 @@ async function run() {
   assert.equal(happy.platform_post_id, null)
   assert.deepEqual(calls, ['POST /media/uploads', 'GET /media/uploads/upload_1/parts/1/url', 'PATCH /media/uploads/upload_1', `GET /media/${mediaUuid}`])
 
+
+
+  let refreshCalls = 0
+  let refreshedDecryptSeen = false
+  let refreshSuccessLoadCalls = 0
+  const refreshSuccessCalls: string[] = []
+  const refreshSuccessDeps: FanvueLivePhotoUploadDependencies = {
+    ...deps,
+    loadAccount: async () => {
+      refreshSuccessLoadCalls++
+      return refreshSuccessLoadCalls === 1
+        ? { ...baseAccount, token_expires_at: new Date(Date.now() - 60 * 1000).toISOString(), encrypted_refresh_token: 'encrypted-refresh-token-placeholder' }
+        : { ...baseAccount, token_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(), encrypted_access_token: 'encrypted-refreshed-access-token', encrypted_refresh_token: 'encrypted-refresh-token-placeholder' }
+    },
+    refreshFanvueAccessToken: async () => {
+      refreshCalls++
+      refreshSuccessCalls.push('refresh')
+      return {
+        ok: true,
+        token_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        token_type: 'Bearer',
+        scopes: ['read:media', 'write:media'],
+        refreshed: true,
+      }
+    },
+    decryptToken: (encrypted) => {
+      if (encrypted === 'encrypted-refreshed-access-token') {
+        refreshedDecryptSeen = true
+        return 'refreshed-access-token-never-logged'
+      }
+      throw new Error('stale access token must not be decrypted after refresh')
+    },
+    fanvueFetch: async (url, init) => {
+      providerCalls++
+      refreshSuccessCalls.push(`${init.method} ${new URL(url).pathname}`)
+      assert.doesNotMatch(url, /api\.fanvue\.com/, 'mocked refresh-success upload must not call live Fanvue API')
+      if (init.method === 'POST') assert.equal(init.headers.authorization, 'Bearer refreshed-access-token-never-logged')
+      if (init.method === 'POST') return { ok: true, status: 200, json: async () => ({ mediaUuid, uploadId: 'upload_1' }) }
+      if (init.method === 'GET' && url.includes('/parts/1/url')) return { ok: true, status: 200, json: async () => 'https://signed-upload.invalid/part-1?X-Amz-Signature=secret' }
+      if (init.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ status: 'processing' }) }
+      return { ok: true, status: 200, json: async () => ({ uuid: mediaUuid, status: 'ready', mediaType: 'image', name: 'photo.png' }) }
+    },
+  }
+  const refreshedHappy = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, liveEnv, refreshSuccessDeps)
+  assert.equal(refreshedHappy.ok, true)
+  assert.equal(refreshCalls, 1, 'stale token with refresh token calls refresh once')
+  assert.equal(refreshSuccessLoadCalls, 2, 'upload path reloads account after refresh persistence')
+  assert.equal(refreshedDecryptSeen, true, 'upload path decrypts refreshed encrypted access token')
+  assert.deepEqual(refreshSuccessCalls, ['refresh', 'POST /media/uploads', 'GET /media/uploads/upload_1/parts/1/url', 'PATCH /media/uploads/upload_1', `GET /media/${mediaUuid}`])
+  assert.equal(refreshedHappy.posted_proof, false)
+  assert.equal(refreshedHappy.platform_post_id, null)
+
+  let refreshFailureUploadCalls = 0
+  const refreshFailed = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, liveEnv, {
+    ...deps,
+    loadAccount: async () => ({ ...baseAccount, token_expires_at: new Date(Date.now() + 2 * 60 * 1000).toISOString(), encrypted_refresh_token: 'encrypted-refresh-token-placeholder' }),
+    refreshFanvueAccessToken: async () => ({ ok: false, blocked: true, error_code: 'FANVUE_REFRESH_UNAUTHORIZED', safe_error_message: 'Fanvue refresh token is unauthorized or expired.', provider_calls_attempted: true, posted_proof: false, platform_post_id: null }),
+    decryptToken: () => { throw new Error('refresh failure must not decrypt access token') },
+    fanvueFetch: async () => { refreshFailureUploadCalls++; throw new Error('upload must not start after refresh failure') },
+    signedPartUploader: async () => { refreshFailureUploadCalls++; throw new Error('signed upload must not start after refresh failure') },
+  })
+  assert.equal(refreshFailed.ok, false)
+  assert.equal(refreshFailed.error_code, 'FANVUE_REFRESH_UNAUTHORIZED')
+  assert.equal(refreshFailed.provider_calls_attempted, false)
+  assert.equal(refreshFailed.posted_proof, false)
+  assert.equal(refreshFailed.platform_post_id, null)
+  assert.equal(refreshFailureUploadCalls, 0)
+  assert.doesNotMatch(JSON.stringify(refreshFailed, (_key, value) => redactSensitiveLogValue(value)), /access-token|refresh-token|encrypted-token|encrypted-refresh|Authorization|Bearer|Basic|client-secret|signed-upload|raw provider|Cookie/i)
+
   const authFailureSteps = [
     { failed_step: 'create_upload_session', provider_route: 'POST /media/uploads' },
     { failed_step: 'get_signed_part_url', provider_route: 'GET /media/uploads/:uploadId/parts/1/url' },
@@ -298,7 +368,8 @@ async function run() {
   assert.match(script, /FANVUE_POST_VERIFY_ENABLED=false/, 'future live command must keep post verification disabled for the process')
   assert.match(script, /tokenCryptoCore/, 'admin runner must import CLI-safe token crypto core instead of server-only wrapper')
   assert.match(script, /encrypted_refresh_token, token_expires_at, token_type, token_key_version, last_refresh_at/, 'admin account lookup must include token freshness fields')
-  assert.doesNotMatch(script, /FANVUE_OAUTH_TOKEN_URL|refreshFanvue|fanvueTokenRefresh|grant_type:\s*["']refresh_token/, 'FV-40M must not introduce Fanvue token refresh logic or token endpoint calls')
+  assert.match(script, /refreshFanvueAccessToken/, 'FV-40O wires the refresh helper into upload-only admin path')
+  assert.doesNotMatch(script, /grant_type:\s*["']refresh_token/, 'upload runner must delegate refresh; it must not build token endpoint payloads inline')
 
 
   const importOnlyOutput = execFileSync(

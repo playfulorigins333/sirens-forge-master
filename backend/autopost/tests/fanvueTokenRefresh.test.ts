@@ -166,8 +166,9 @@ async function run() {
   assertSafe(persistFailure.result)
 
   const adminUpload = readFileSync('backend/autopost/admin/fanvueLivePhotoUploadDryRun.ts', 'utf8')
-  assert.doesNotMatch(adminUpload, /refreshFanvueAccessToken|fanvueTokenRefresh|FANVUE_OAUTH_TOKEN_URL|grant_type:\s*["']refresh_token/, 'FV-40N must not wire refresh into upload-only admin path')
-  assert.doesNotMatch(adminUpload, /from ["'].*fanvueTokenRefresh["']/, 'upload-only admin path must not import Fanvue refresh helper yet')
+  assert.match(adminUpload, /refreshFanvueAccessToken/, 'FV-40O wires refresh helper into upload-only admin path')
+  assert.match(adminUpload, /fanvueTokenRefresh/, 'FV-40O imports the Fanvue refresh helper in the upload-only admin path')
+  assert.doesNotMatch(adminUpload, /grant_type:\s*["']refresh_token/, 'upload-only admin path must delegate token payload construction to the helper')
 
   for (const unchanged of [
     'app/api/autopost/run/route.ts',

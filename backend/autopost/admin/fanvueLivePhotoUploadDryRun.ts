@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin"
+import { refreshFanvueAccessToken, type FanvueTokenRefreshResult } from "../../../lib/autopost/fanvueTokenRefresh"
 import {
   completeFanvueUploadSession,
   createFanvueUploadSession,
@@ -280,6 +281,7 @@ export type FanvueLivePhotoUploadDependencies = {
   readFileBytes: (filePath: string) => Promise<Buffer>
   fanvueFetch: FanvueFetch
   signedPartUploader: FanvueSignedPartUploader
+  refreshFanvueAccessToken?: (account: FanvueAutopostAccountRow) => Promise<FanvueTokenRefreshResult>
   apiBaseUrl: string
   apiVersion: string
   sleep?: (ms: number) => Promise<void>
@@ -341,6 +343,15 @@ export function createDefaultFanvueLivePhotoUploadDependencies(env: Record<strin
     readFileBytes: readFile,
     fanvueFetch: defaultFanvueFetchWithUploadOnlyGuard(providerCallCounter),
     signedPartUploader: defaultSignedPartUploader(providerCallCounter),
+    refreshFanvueAccessToken: (account) => refreshFanvueAccessToken({
+      user_id: String(account.user_id),
+      platform: String(account.platform),
+      encrypted_refresh_token: typeof account.encrypted_refresh_token === "string" ? account.encrypted_refresh_token : null,
+      token_expires_at: typeof account.token_expires_at === "string" ? account.token_expires_at : null,
+      token_type: typeof account.token_type === "string" ? account.token_type : null,
+      token_key_version: typeof account.token_key_version === "number" ? account.token_key_version : null,
+      scopes: Array.isArray(account.scopes) || typeof account.scopes === "string" ? account.scopes : null,
+    }),
     apiBaseUrl: getFanvueAdminApiBaseUrl(env),
     apiVersion: getFanvueAdminApiVersion(env),
   }
@@ -372,11 +383,42 @@ export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploa
   if ("blocked" in accountValidation) return accountValidation
 
   const tokenFreshness = validateFanvueAccessTokenFreshness(account)
-  if ("blocked" in tokenFreshness) return tokenFreshness
+
+  let encryptedAccessToken = String(account?.encrypted_access_token)
+  if ("blocked" in tokenFreshness) {
+    if (!nonEmptyString(account?.encrypted_refresh_token)) {
+      return blocked("FANVUE_REFRESH_TOKEN_MISSING", "Fanvue refresh token is missing; upload cannot start with a stale access token.")
+    }
+
+    const refresh = deps.refreshFanvueAccessToken ?? ((refreshAccount) => refreshFanvueAccessToken({
+      user_id: String(refreshAccount.user_id),
+      platform: String(refreshAccount.platform),
+      encrypted_refresh_token: String(refreshAccount.encrypted_refresh_token),
+      token_expires_at: typeof refreshAccount.token_expires_at === "string" ? refreshAccount.token_expires_at : null,
+      token_type: typeof refreshAccount.token_type === "string" ? refreshAccount.token_type : null,
+      token_key_version: typeof refreshAccount.token_key_version === "number" ? refreshAccount.token_key_version : null,
+      scopes: Array.isArray(refreshAccount.scopes) || typeof refreshAccount.scopes === "string" ? refreshAccount.scopes : null,
+    }))
+    const refreshResult = await refresh(account)
+    if ("blocked" in refreshResult) {
+      return failed(refreshResult.error_code, refreshResult.safe_error_message, false)
+    }
+
+    try {
+      account = await deps.loadAccount(String(args.userId))
+    } catch {
+      return failed("FANVUE_ACCOUNT_LOOKUP_FAILED", "Fanvue account lookup failed safely.", providerCallsAttempted)
+    }
+    const refreshedAccountValidation = validateFanvueAccountForPhotoUpload(account, String(args.userId))
+    if ("blocked" in refreshedAccountValidation) return refreshedAccountValidation
+    const refreshedTokenFreshness = validateFanvueAccessTokenFreshness(account)
+    if ("blocked" in refreshedTokenFreshness) return failed("FANVUE_TOKEN_REFRESH_STALE", "Fanvue token refresh did not produce a fresh access token.", false)
+    encryptedAccessToken = String(account?.encrypted_access_token)
+  }
 
   let accessToken: string
   try {
-    accessToken = deps.decryptToken(String(account?.encrypted_access_token))
+    accessToken = deps.decryptToken(encryptedAccessToken)
   } catch {
     return failed("FANVUE_TOKEN_DECRYPT_FAILED", "Unable to decrypt Fanvue access token.", providerCallsAttempted)
   }
