@@ -12,6 +12,7 @@ import {
   runFanvueLivePhotoUploadCliMain,
   safeUploadOnlySuccess,
   type FanvueLivePhotoUploadDependencies,
+  validateFanvueAccessTokenFreshness,
   validateFanvueAccountForPhotoUpload,
   validateHardDisabledGate,
   validateLocalTestImageFile,
@@ -60,6 +61,11 @@ async function run() {
     metadata: { provider: 'fanvue', identity_fetched: true },
     provider_account_id: 'fanvue-account-1',
     encrypted_access_token: 'encrypted-token-placeholder',
+    encrypted_refresh_token: 'encrypted-refresh-token-placeholder',
+    token_expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    token_type: 'Bearer',
+    token_key_version: 1,
+    last_refresh_at: null,
     scopes: ['read:self', 'read:media', 'write:media'],
   }
   assert.equal(validateFanvueAccountForPhotoUpload(null, userId).error_code, 'FANVUE_ACCOUNT_NOT_FOUND')
@@ -74,6 +80,21 @@ async function run() {
   const validAccount = validateFanvueAccountForPhotoUpload(baseAccount, userId)
   assert.equal(validAccount.ok, true)
   assert.equal(validAccount.writeCreatorRequired, false, 'write:creator must not be required')
+
+  for (const [label, token_expires_at] of [
+    ['missing', null],
+    ['invalid', 'not-a-date'],
+    ['expired', new Date(Date.now() - 60 * 1000).toISOString()],
+    ['near-expired', new Date(Date.now() + 2 * 60 * 1000).toISOString()],
+  ] as const) {
+    const tokenFreshness = validateFanvueAccessTokenFreshness({ token_expires_at })
+    assert.equal(tokenFreshness.ok, false, `${label} token expiry must block`)
+    assert.equal(tokenFreshness.error_code, 'FANVUE_TOKEN_FRESHNESS_REQUIRED')
+    assert.equal(tokenFreshness.provider_calls_attempted, false)
+    assert.equal(tokenFreshness.posted_proof, false)
+    assert.equal(tokenFreshness.platform_post_id, null)
+  }
+  assert.equal(validateFanvueAccessTokenFreshness({ token_expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() }).ok, true)
 
   assert.equal(redactSensitiveLogValue('https://signed-upload.invalid/part-1?X-Amz-Signature=secret'), 'https://signed-upload.invalid/part-1')
   assert.equal(redactSensitiveLogValue('Authorization=Bearer super-secret-token'), 'Authorization=Bearer [REDACTED]')
@@ -103,6 +124,34 @@ async function run() {
   })
   assert.equal(blockedBeforeDeps.error_code, 'FANVUE_UPLOAD_LIVE_GATE_DISABLED')
   assert.equal(providerCalls, 0, 'flag false blocks before provider calls')
+
+  for (const [label, token_expires_at] of [
+    ['missing', null],
+    ['invalid', 'not-a-date'],
+    ['expired', new Date(Date.now() - 60 * 1000).toISOString()],
+    ['near-expired', new Date(Date.now() + 2 * 60 * 1000).toISOString()],
+  ] as const) {
+    let localProviderCalls = 0
+    let decryptCalls = 0
+    const stale = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, liveEnv, {
+      loadAccount: async () => ({ ...baseAccount, token_expires_at }),
+      decryptToken: () => { decryptCalls++; return 'access-token-must-not-be-used' },
+      readFileBytes: async () => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]),
+      fanvueFetch: async () => { localProviderCalls++; throw new Error('provider call should be blocked by stale token') },
+      signedPartUploader: async () => { localProviderCalls++; throw new Error('signed upload should be blocked by stale token') },
+      apiBaseUrl: 'https://api.test.fanvue.example',
+      apiVersion: '2025-06-26',
+    })
+    assert.equal(stale.ok, false, `${label} token expiry must block the upload path`)
+    assert.equal(stale.error_code, 'FANVUE_TOKEN_FRESHNESS_REQUIRED')
+    assert.equal(stale.provider_calls_attempted, false)
+    assert.equal(stale.posted_proof, false)
+    assert.equal(stale.platform_post_id, null)
+    assert.equal(localProviderCalls, 0, `${label} token expiry must block before provider calls`)
+    assert.equal(decryptCalls, 0, `${label} token expiry must block before token decrypt`)
+    const serialized = JSON.stringify(stale, (_key, value) => redactSensitiveLogValue(value))
+    assert.doesNotMatch(serialized, /access-token|refresh-token|encrypted-token|encrypted-refresh|X-Amz-Signature|raw provider body|Authorization:|Authorization=|Bearer [A-Za-z0-9]|Cookie:/i)
+  }
 
 
   assert.equal(
@@ -248,6 +297,8 @@ async function run() {
   assert.match(script, /FANVUE_RUN_DISPATCH_ENABLED=false/, 'future live command must keep dispatch disabled for the process')
   assert.match(script, /FANVUE_POST_VERIFY_ENABLED=false/, 'future live command must keep post verification disabled for the process')
   assert.match(script, /tokenCryptoCore/, 'admin runner must import CLI-safe token crypto core instead of server-only wrapper')
+  assert.match(script, /encrypted_refresh_token, token_expires_at, token_type, token_key_version, last_refresh_at/, 'admin account lookup must include token freshness fields')
+  assert.doesNotMatch(script, /FANVUE_OAUTH_TOKEN_URL|refreshFanvue|fanvueTokenRefresh|grant_type:\s*["']refresh_token/, 'FV-40M must not introduce Fanvue token refresh logic or token endpoint calls')
 
 
   const importOnlyOutput = execFileSync(
