@@ -7,6 +7,9 @@ export const FANVUE_OAUTH_COOKIE_PATH = "/api/autopost/connect/fanvue"
 export const FANVUE_OAUTH_EXPIRES_IN_SECONDS = 10 * 60
 
 export const FANVUE_APPROVED_SCOPES = [
+  "openid",
+  "offline_access",
+  "offline",
   "read:self",
   "read:creator",
   "read:post",
