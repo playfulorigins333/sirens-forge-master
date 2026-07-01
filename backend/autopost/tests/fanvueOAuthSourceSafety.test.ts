@@ -22,6 +22,17 @@ assert.ok(approvedScopes.includes('offline'), 'Fanvue approved/default scopes mu
 assert.ok(approvedScopes.includes('read:media'), 'Fanvue approved/default scopes must preserve read:media')
 assert.ok(approvedScopes.includes('write:media'), 'Fanvue approved/default scopes must preserve write:media')
 assert.ok(!approvedScopes.includes('write:creator'), 'Fanvue approved/default scopes must not include write:creator')
+const requiredScopesMatch = oauth.match(/export const FANVUE_REQUIRED_CONNECTION_SCOPES = \[([\s\S]*?)\] as const/)
+assert.ok(requiredScopesMatch, 'Fanvue required connection scopes must be declared separately from approved/requestable scopes')
+const requiredConnectionScopes = Array.from(requiredScopesMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1])
+assert.ok(requiredConnectionScopes.includes('read:self'), 'Fanvue required connection scopes must include read:self')
+assert.ok(requiredConnectionScopes.includes('read:media'), 'Fanvue required connection scopes must include read:media')
+assert.ok(requiredConnectionScopes.includes('write:media'), 'Fanvue required connection scopes must include write:media')
+assert.ok(!requiredConnectionScopes.includes('openid'), 'Fanvue required connection scopes must not require openid echo')
+assert.ok(!requiredConnectionScopes.includes('offline_access'), 'Fanvue required connection scopes must not require offline_access echo')
+assert.ok(!requiredConnectionScopes.includes('offline'), 'Fanvue required connection scopes must not require offline echo')
+assert.ok(!requiredConnectionScopes.includes('write:creator'), 'Fanvue required connection scopes must not include write:creator')
+assert.ok(requiredConnectionScopes.length < approvedScopes.length, 'Fanvue required connection scopes must be smaller than the requestable allowlist')
 assert.match(oauth, /export const FANVUE_DEFAULT_SCOPES = FANVUE_APPROVED_SCOPES\.join\(" "\)/, 'Fanvue default scopes must derive from the approved allowlist')
 
 const buildAuthorizeUrlSource = oauth.match(/export function buildFanvueAuthorizeUrl[\s\S]*?^}/m)?.[0] ?? ''
@@ -36,6 +47,15 @@ assert.doesNotMatch(buildAuthorizeUrlSource, /prompt|access_type/, 'Fanvue autho
 assert.doesNotMatch(buildAuthorizeUrlSource, /clientSecret|FANVUE_CLIENT_SECRET/, 'Fanvue authorize URL must not leak client secrets')
 assert.doesNotMatch(oauth, /write:creator/, 'Fanvue text-only readiness must not add write:creator scope')
 
+const missingRequiredScopesSource = callback.match(/function missingRequiredScopes[\s\S]*?^}/m)?.[0] ?? ''
+assert.match(callback, /FANVUE_REQUIRED_CONNECTION_SCOPES/, 'Fanvue callback must import/use required connection scopes')
+assert.match(missingRequiredScopesSource, /FANVUE_REQUIRED_CONNECTION_SCOPES\.filter/, 'Fanvue missing-scope check must use required connection scopes')
+assert.doesNotMatch(missingRequiredScopesSource, /FANVUE_APPROVED_SCOPES/, 'Fanvue missing-scope check must not require every approved/requestable scope')
+assert.ok(requiredConnectionScopes.every((scope) => !['openid', 'offline_access', 'offline'].includes(scope)), 'Fanvue callback must not block solely on optional refresh/offline scope echo')
+assert.ok(['read:self', 'read:media', 'write:media'].every((scope) => requiredConnectionScopes.includes(scope)), 'Fanvue callback still blocks when a required connection scope is missing')
+assert.match(callback, /const missingScopes = missingRequiredScopes\(scopes\)[\s\S]*?if \(missingScopes\.length > 0\)[\s\S]*?fanvue_oauth_missing_required_scopes/, 'Fanvue callback must keep rejecting missing required connection scopes')
+assert.match(callback, /const missingScopes = missingRequiredScopes\(scopes\)[\s\S]*?const identity = await fetchFanvueIdentity/s, 'Fanvue callback must validate required scopes before identity verification')
+assert.match(callback, /const providerAccountId = getIdentityId\(identity\)[\s\S]*?if \(!providerAccountId\)[\s\S]*?fanvue_identity_unverified[\s\S]*?const encryptedAccessToken = encryptAutopostToken/s, 'Fanvue callback must not encrypt/store token material before required-scope and identity checks')
 assert.match(callback, /encryptAutopostToken\(tokenResponse\.access_token\)/, 'Fanvue access token must be encrypted before storage')
 assert.match(callback, /encrypted_refresh_token: encryptedRefreshToken/, 'Fanvue refresh token must use encrypted storage')
 assert.doesNotMatch(callback, /access_token:\s*tokenResponse/, 'Fanvue callback must not write legacy plaintext access_token')

@@ -4,7 +4,7 @@ import { requireUserId } from "@/lib/supabaseServer"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { encryptAutopostToken, getAutopostTokenKeyVersion } from "@/lib/autopost/tokenCrypto"
 import {
-  FANVUE_APPROVED_SCOPES,
+  FANVUE_REQUIRED_CONNECTION_SCOPES,
   FANVUE_OAUTH_COOKIE_NAME,
   clearFanvueOAuthCookie,
   getSafeFanvueRedirect,
@@ -56,7 +56,7 @@ function normalizeScopes(tokenResponse: FanvueTokenResponse, fallbackScopes: str
 
 function missingRequiredScopes(grantedScopes: string[]) {
   const granted = new Set(grantedScopes)
-  return FANVUE_APPROVED_SCOPES.filter((scope) => !granted.has(scope))
+  return FANVUE_REQUIRED_CONNECTION_SCOPES.filter((scope) => !granted.has(scope))
 }
 
 async function exchangeCodeForTokens(input: { code: string; codeVerifier: string }) {

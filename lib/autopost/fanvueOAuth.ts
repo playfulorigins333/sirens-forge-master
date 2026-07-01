@@ -18,6 +18,12 @@ export const FANVUE_APPROVED_SCOPES = [
   "write:media",
 ] as const
 
+export const FANVUE_REQUIRED_CONNECTION_SCOPES = [
+  "read:self",
+  "read:media",
+  "write:media",
+] as const
+
 export const FANVUE_DEFAULT_SCOPES = FANVUE_APPROVED_SCOPES.join(" ")
 
 export type FanvueOAuthCookiePayload = {
