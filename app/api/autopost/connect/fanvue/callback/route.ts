@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { requireUserId } from "@/lib/supabaseServer"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { encryptAutopostToken, getAutopostTokenKeyVersion } from "@/lib/autopost/tokenCrypto"
+import { buildFanvueTokenExchangeRequestInit } from "@/lib/autopost/fanvueOAuthTokenExchange"
 import {
   FANVUE_REQUIRED_CONNECTION_SCOPES,
   FANVUE_OAUTH_COOKIE_NAME,
@@ -38,10 +39,6 @@ type FanvueIdentityResponse = {
   creator?: unknown
 }
 
-function getBasicAuthHeader(clientId: string, clientSecret: string) {
-  return `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
-}
-
 function redirectWithClearedCookie(params: Record<string, string>) {
   const response = NextResponse.redirect(getSafeFanvueRedirect(params))
   clearFanvueOAuthCookie(response)
@@ -61,20 +58,18 @@ function missingRequiredScopes(grantedScopes: string[]) {
 
 async function exchangeCodeForTokens(input: { code: string; codeVerifier: string }) {
   const config = requireFanvueOAuthConfig()
-  const body = new URLSearchParams({
+  const requestInit = buildFanvueTokenExchangeRequestInit({
+    clientId: config.clientId,
+    clientSecret: config.clientSecret,
     code: input.code,
-    grant_type: "authorization_code",
-    redirect_uri: config.redirectUri,
-    code_verifier: input.codeVerifier,
+    redirectUri: config.redirectUri,
+    codeVerifier: input.codeVerifier,
   })
 
   const response = await fetch(config.tokenUrl, {
     method: "POST",
-    headers: {
-      authorization: getBasicAuthHeader(config.clientId, config.clientSecret),
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body,
+    headers: requestInit.headers,
+    body: requestInit.body,
   })
 
   const tokenResponse = (await response.json().catch(() => null)) as FanvueTokenResponse | null

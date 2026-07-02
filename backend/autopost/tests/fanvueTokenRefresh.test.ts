@@ -77,9 +77,14 @@ async function run() {
   assert.notEqual(new URL(success.fetchCalls[0].url).hostname, 'api.fanvue.com')
   assert.equal(success.fetchCalls[0].init.method, 'POST')
   assert.equal(success.fetchCalls[0].init.headers['content-type'], 'application/x-www-form-urlencoded')
-  assert.match(success.fetchCalls[0].init.headers.authorization, /^Basic /)
+  assert.equal(success.fetchCalls[0].init.headers.authorization, undefined)
   assert.equal(success.fetchCalls[0].init.body.get('grant_type'), 'refresh_token')
+  assert.equal(success.fetchCalls[0].init.body.get('client_id'), clientId)
+  assert.equal(success.fetchCalls[0].init.body.get('client_secret'), clientSecret)
   assert.equal(success.fetchCalls[0].init.body.get('refresh_token'), 'plain-existing-refresh')
+  assert.equal(success.fetchCalls[0].init.body.has('scope'), false)
+  assert.equal(success.fetchCalls[0].init.body.has('redirect_uri'), false)
+  assert.equal(success.fetchCalls[0].init.body.has('code_verifier'), false)
   assert.deepEqual(success.decrypted, ['enc-existing-refresh'])
   assert.deepEqual(success.encrypted, ['plain-new-access', 'plain-new-refresh'])
   assert.equal(success.persistCalls.length, 1)
@@ -99,17 +104,25 @@ async function run() {
 
   const rotated = await runRefresh({ body: { access_token: 'plain-new-access', refresh_token: 'plain-new-refresh-2', expires_in: 60 } })
   assert.equal(rotated.persistCalls[0].updatePayload.encrypted_refresh_token, 'enc:plain-new-refresh-2')
+  assert.notEqual(rotated.persistCalls[0].updatePayload.encrypted_refresh_token, baseAccount.encrypted_refresh_token)
 
-  const preserved = await runRefresh({ body: { access_token: 'plain-new-access', expires_in: 60 } })
-  assert.equal(preserved.persistCalls[0].updatePayload.encrypted_refresh_token, 'enc-existing-refresh')
-  assert.deepEqual(preserved.persistCalls[0].updatePayload.scopes, ['read:media', 'write:media'])
+  const missingRotated = await runRefresh({ body: { access_token: 'plain-new-access', expires_in: 60, raw: 'raw provider body with plain-new-access mock-client-secret' } })
+  assert.equal(missingRotated.result.ok, false)
+  assert.equal(missingRotated.result.error_code, 'FANVUE_REFRESH_MISSING_ROTATED_TOKEN')
+  assert.equal(missingRotated.result.provider_calls_attempted, true)
+  assert.equal(missingRotated.result.provider_response_present, true)
+  assert.equal(missingRotated.result.provider_status, 200)
+  assert.equal(missingRotated.result.provider_status_class, '2xx')
+  assert.equal(missingRotated.persistCalls.length, 0)
+  assert.deepEqual(missingRotated.encrypted, [])
+  assertSafe(missingRotated.result)
 
-  const returnedScopes = await runRefresh({ body: { access_token: 'plain-new-access', expires_in: 60, scope: 'write:media read:media write:media' } })
+  const returnedScopes = await runRefresh({ body: { access_token: 'plain-new-access', refresh_token: 'plain-new-refresh', expires_in: 60, scope: 'write:media read:media write:media' } })
   assert.deepEqual(returnedScopes.persistCalls[0].updatePayload.scopes, ['write:media', 'read:media'])
   assert.ok(!(returnedScopes.persistCalls[0].updatePayload.scopes as string[]).includes('write:creator'), 'write:creator must not be added unless returned by provider')
   assert.deepEqual(baseAccount.scopes, ['read:media', 'write:media'], 'known posture: read:media is present, write:media is present, write:creator is absent')
 
-  const providerWriteCreator = await runRefresh({ body: { access_token: 'plain-new-access', expires_in: 60, scope: 'read:media write:media write:creator' } })
+  const providerWriteCreator = await runRefresh({ body: { access_token: 'plain-new-access', refresh_token: 'plain-new-refresh', expires_in: 60, scope: 'read:media write:media write:creator' } })
   assert.deepEqual(providerWriteCreator.persistCalls[0].updatePayload.scopes, ['read:media', 'write:media', 'write:creator'], 'provider-returned write:creator can be stored but is not invented')
 
   for (const account of [{ ...baseAccount, encrypted_refresh_token: null }, { ...baseAccount, encrypted_refresh_token: '' }]) {
@@ -168,12 +181,14 @@ async function run() {
   for (const status of [400, 401, 403, 500] as const) {
     const failed = await runRefresh({ status, body: { error_code: 'invalid_grant', error_description: 'raw provider body', access_token: 'plain-new-access' } })
     assert.equal(failed.result.ok, false)
-    assert.equal(failed.result.error_code, status === 500 ? 'FANVUE_REFRESH_FAILED' : 'FANVUE_REFRESH_UNAUTHORIZED')
+    assert.equal(failed.result.error_code, 'FANVUE_REFRESH_INVALID_GRANT_REAUTH_REQUIRED')
     assert.equal(failed.result.provider_calls_attempted, true)
     assert.equal(failed.result.provider_response_present, true)
     assert.equal(failed.result.provider_status, status)
     assert.equal(failed.result.provider_status_class, `${Math.floor(status / 100)}xx`)
     assert.equal(failed.result.provider_error_code, 'invalid_grant')
+    assert.equal(failed.result.requires_oauth_reconnect, true)
+    assert.equal(failed.fetchCalls.length, 1)
     assert.equal(failed.persistCalls.length, 0)
     assertSafe(failed.result)
   }
@@ -181,9 +196,9 @@ async function run() {
   for (const body of [
     { refresh_token: 'plain-new-refresh', expires_in: 60 },
     { access_token: '', expires_in: 60 },
-    { access_token: 'plain-new-access', expires_in: 0 },
-    { access_token: 'plain-new-access', expires_in: -1 },
-    { access_token: 'plain-new-access', expires_in: '3600' },
+    { access_token: 'plain-new-access', refresh_token: 'plain-new-refresh', expires_in: 0 },
+    { access_token: 'plain-new-access', refresh_token: 'plain-new-refresh', expires_in: -1 },
+    { access_token: 'plain-new-access', refresh_token: 'plain-new-refresh', expires_in: '3600' },
   ]) {
     const invalid = await runRefresh({ body })
     assert.equal(invalid.result.ok, false)

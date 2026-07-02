@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 const oauth = readFileSync('lib/autopost/fanvueOAuth.ts', 'utf8')
 const availability = readFileSync('lib/autopost/platformAvailability.ts', 'utf8')
 const callback = readFileSync('app/api/autopost/connect/fanvue/callback/route.ts', 'utf8')
+const tokenExchangeHelper = readFileSync('lib/autopost/fanvueOAuthTokenExchange.ts', 'utf8')
 const statusRoute = readFileSync('app/api/autopost/platforms/me/route.ts', 'utf8')
 const envExample = readFileSync('.env.example', 'utf8')
 const refreshScopeNote = readFileSync('backend/autopost/docs/fanvue-oauth-refresh-scopes-FV-40R.md', 'utf8')
@@ -58,6 +59,15 @@ assert.match(callback, /const missingScopes = missingRequiredScopes\(scopes\)[\s
 assert.match(callback, /const providerAccountId = getIdentityId\(identity\)[\s\S]*?if \(!providerAccountId\)[\s\S]*?fanvue_identity_unverified[\s\S]*?const encryptedAccessToken = encryptAutopostToken/s, 'Fanvue callback must not encrypt/store token material before required-scope and identity checks')
 assert.match(callback, /encryptAutopostToken\(tokenResponse\.access_token\)/, 'Fanvue access token must be encrypted before storage')
 assert.match(callback, /encrypted_refresh_token: encryptedRefreshToken/, 'Fanvue refresh token must use encrypted storage')
+assert.match(callback, /buildFanvueTokenExchangeRequestInit/, 'Fanvue callback must centralize token exchange request construction for mocked source safety')
+const tokenExchangeHelperSource = tokenExchangeHelper
+assert.match(tokenExchangeHelperSource, /client_id: input\.clientId/, 'Fanvue token exchange must send client_id in the form body')
+assert.match(tokenExchangeHelperSource, /client_secret: input\.clientSecret/, 'Fanvue token exchange must send client_secret in the form body')
+assert.match(tokenExchangeHelperSource, /grant_type: "authorization_code"/, 'Fanvue token exchange must preserve authorization_code grant')
+assert.match(tokenExchangeHelperSource, /redirect_uri: input\.redirectUri/, 'Fanvue token exchange must preserve redirect_uri')
+assert.match(tokenExchangeHelperSource, /code_verifier: input\.codeVerifier/, 'Fanvue token exchange must preserve PKCE code_verifier')
+assert.doesNotMatch(tokenExchangeHelperSource, /authorization:|Authorization|Basic|getBasicAuthHeader/, 'Fanvue token exchange helper must not use Basic auth')
+assert.doesNotMatch(callback, /function getBasicAuthHeader/, 'Fanvue OAuth callback must not keep Basic auth helper for token exchange')
 assert.doesNotMatch(callback, /access_token:\s*tokenResponse/, 'Fanvue callback must not write legacy plaintext access_token')
 assert.doesNotMatch(callback, /refresh_token:\s*tokenResponse/, 'Fanvue callback must not write legacy plaintext refresh_token')
 assert.match(callback, /fetchFanvueIdentity/, 'Fanvue callback must verify identity before CONNECTED')
@@ -82,5 +92,9 @@ assert.match(envExample, /FANVUE_CLIENT_SECRET=\n/, 'Fanvue client secret placeh
 assert.match(refreshScopeNote, /does not initiate Fanvue reconnect/i, 'FV-40R docs must not approve reconnect')
 assert.match(refreshScopeNote, /does not prove that Fanvue will return a `refresh_token`/i, 'FV-40R docs must keep refresh-token issuance unproven')
 assert.match(refreshScopeNote, /does not approve live upload/i, 'FV-40R docs must not approve live upload')
+
+for (const source of [oauth, callback]) {
+  assert.doesNotMatch(source, /\.env\.local|dotenv\/config|api\.fanvue\.com\/posts|\/media\/uploads|\/posts\//, 'OAuth source safety checks must not add env-local, upload, or posts behavior')
+}
 
 console.log('Fanvue OAuth source safety checks passed')
