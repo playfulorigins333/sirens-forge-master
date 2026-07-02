@@ -89,6 +89,7 @@ type FanvueRefreshFailureDiagnostics = {
   provider_status?: number | null
   provider_status_class?: string | null
   provider_error_code?: string | null
+  requires_oauth_reconnect?: boolean
 }
 
 function providerStatusClass(status: unknown): string | null {
