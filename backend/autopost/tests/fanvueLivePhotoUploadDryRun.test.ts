@@ -346,7 +346,19 @@ async function run() {
   const refreshFailed = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, liveEnv, {
     ...deps,
     loadAccount: async () => ({ ...baseAccount, token_expires_at: new Date(Date.now() + 2 * 60 * 1000).toISOString(), encrypted_refresh_token: 'encrypted-refresh-token-placeholder' }),
-    refreshFanvueAccessToken: async () => ({ ok: false, blocked: true, error_code: 'FANVUE_REFRESH_UNAUTHORIZED', safe_error_message: 'Fanvue refresh token is unauthorized or expired.', provider_calls_attempted: true, posted_proof: false, platform_post_id: null }),
+    refreshFanvueAccessToken: async () => ({
+      ok: false,
+      blocked: true,
+      error_code: 'FANVUE_REFRESH_UNAUTHORIZED',
+      safe_error_message: 'Fanvue refresh token is unauthorized or expired.',
+      provider_calls_attempted: true,
+      posted_proof: false,
+      platform_post_id: null,
+      provider_response_present: true,
+      provider_status: 401,
+      provider_status_class: '4xx',
+      provider_error_code: 'invalid_grant',
+    }),
     decryptToken: () => { throw new Error('refresh failure must not decrypt access token') },
     fanvueFetch: async () => { refreshFailureUploadCalls++; throw new Error('upload must not start after refresh failure') },
     signedPartUploader: async () => { refreshFailureUploadCalls++; throw new Error('signed upload must not start after refresh failure') },
@@ -354,6 +366,10 @@ async function run() {
   assert.equal(refreshFailed.ok, false)
   assert.equal(refreshFailed.error_code, 'FANVUE_REFRESH_UNAUTHORIZED')
   assert.equal(refreshFailed.provider_calls_attempted, false)
+  assert.equal(refreshFailed.provider_response_present, true)
+  assert.equal(refreshFailed.provider_status, 401)
+  assert.equal(refreshFailed.provider_status_class, '4xx')
+  assert.equal(refreshFailed.provider_error_code, 'invalid_grant')
   assert.equal(refreshFailed.posted_proof, false)
   assert.equal(refreshFailed.platform_post_id, null)
   assert.equal(refreshFailureUploadCalls, 0)

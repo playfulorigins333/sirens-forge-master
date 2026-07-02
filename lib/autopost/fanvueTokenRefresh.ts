@@ -48,6 +48,10 @@ export type FanvueTokenRefreshResult =
       provider_calls_attempted: boolean
       posted_proof: false
       platform_post_id: null
+      provider_response_present?: boolean
+      provider_status?: number | null
+      provider_status_class?: string | null
+      provider_error_code?: string | null
     }
 
 type FanvueRefreshFetch = (url: string, init: {
@@ -77,10 +81,37 @@ type FanvueTokenRefreshDependencies = {
   persistRefresh?: FanvueRefreshUpdater
 }
 
+type FanvueRefreshFailureDiagnostics = {
+  provider_response_present?: boolean
+  provider_status?: number | null
+  provider_status_class?: string | null
+  provider_error_code?: string | null
+}
+
+function providerStatusClass(status: unknown): string | null {
+  if (typeof status !== "number" || !Number.isInteger(status) || status < 100 || status > 599) return null
+  return `${Math.floor(status / 100)}xx`
+}
+
+function sanitizeProviderErrorCode(value: unknown): string | null {
+  if (typeof value !== "string") return null
+  const trimmed = value.trim()
+  if (!trimmed || trimmed.length > 64) return null
+  if (/https?:|www\.|[\s{}[\]<>/\\]|token|secret|cookie|authorization/i.test(trimmed)) return null
+  return /^[A-Za-z0-9_.-]+$/.test(trimmed) ? trimmed : null
+}
+
+function extractProviderErrorCode(body: unknown): string | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null
+  const record = body as Record<string, unknown>
+  return sanitizeProviderErrorCode(record.error_code) ?? sanitizeProviderErrorCode(record.error)
+}
+
 function safeFailure(
   errorCode: FanvueTokenRefreshErrorCode,
   safeErrorMessage: string,
   providerCallsAttempted: boolean,
+  diagnostics: FanvueRefreshFailureDiagnostics = {},
 ): FanvueTokenRefreshResult {
   return {
     ok: false,
@@ -90,6 +121,7 @@ function safeFailure(
     provider_calls_attempted: providerCallsAttempted,
     posted_proof: false,
     platform_post_id: null,
+    ...diagnostics,
   }
 }
 
@@ -168,7 +200,12 @@ export async function refreshFanvueAccessToken(
       }),
     })
   } catch {
-    return safeFailure("FANVUE_REFRESH_FAILED", "Fanvue token refresh request failed.", true)
+    return safeFailure("FANVUE_REFRESH_FAILED", "Fanvue token refresh request failed.", true, {
+      provider_response_present: false,
+      provider_status: null,
+      provider_status_class: null,
+      provider_error_code: null,
+    })
   }
 
   const tokenResponse = (await response.json().catch(() => null)) as FanvueRefreshTokenResponse | null
@@ -178,6 +215,12 @@ export async function refreshFanvueAccessToken(
       unauthorized ? "FANVUE_REFRESH_UNAUTHORIZED" : "FANVUE_REFRESH_FAILED",
       unauthorized ? "Fanvue refresh token is unauthorized or expired." : "Fanvue token refresh failed.",
       true,
+      {
+        provider_response_present: true,
+        provider_status: response.status,
+        provider_status_class: providerStatusClass(response.status),
+        provider_error_code: extractProviderErrorCode(tokenResponse),
+      },
     )
   }
 
