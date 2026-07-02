@@ -34,6 +34,13 @@ export const FANVUE_PHOTO_UPLOAD_OPERATION = "upload_photo_only" as const
 export const FANVUE_PHOTO_UPLOAD_CONFIRMATION = "UPLOAD_ONE_FANVUE_PHOTO_NO_POST" as const
 export const FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENV = "FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENABLED" as const
 export const FANVUE_TOKEN_FRESHNESS_BUFFER_MS = 5 * 60 * 1000
+// Admin upload-only media processing wait. This is deliberately scoped to the
+// hard-gated upload/readback runner and is not public posting, dispatch,
+// scheduling, or launch-readiness behavior. Tests inject sleep so this real
+// runtime window does not slow local safety checks.
+export const FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_ATTEMPTS = 18
+export const FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_BACKOFF_BASE_MS = 5_000
+export const FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_DELAY_MS = 5_000
 
 const POST_RELATED_FIELDS = new Set([
   "caption",
@@ -448,7 +455,13 @@ export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploa
   const completed = await completeFanvueUploadSession(config, { uploadId: uploadSession.uploadId, parts: [uploaded.part] })
   if (!completed.ok) return fromApiFailure(completed as FanvueApiFailure, providerCallsAttempted, "complete_upload", "PATCH /media/uploads/:uploadId")
 
-  const ready = await waitForFanvueMediaReady(config, { uuid: uploadSession.mediaUuid, maxAttempts: 5, maxDelayMs: 1_000, sleep: deps.sleep })
+  const ready = await waitForFanvueMediaReady(config, {
+    uuid: uploadSession.mediaUuid,
+    maxAttempts: FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_ATTEMPTS,
+    maxDelayMs: FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_DELAY_MS,
+    backoffBaseMs: FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_BACKOFF_BASE_MS,
+    sleep: deps.sleep,
+  })
   if (!ready.ok) return fromApiFailure(ready as FanvueApiFailure, providerCallsAttempted, "media_readback", "GET /media/:uuid")
 
   return safeUploadOnlySuccess({ provider_media_uuid: ready.media.uuid, attempts: ready.attempts })

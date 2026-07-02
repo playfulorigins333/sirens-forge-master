@@ -177,6 +177,37 @@ async function run() {
   assert.equal(ready.attempts, 3)
   assert.deepEqual(sleeps, [5, 5])
 
+
+
+  const longProcessingSleeps: number[] = []
+  const longProcessingReady = await waitForFanvueMediaReady(config(queueFetch([
+    { status: 200, data: { uuid: mediaUuid, status: 'created' } },
+    { status: 200, data: { uuid: mediaUuid, status: 'processing' } },
+    { status: 200, data: { uuid: mediaUuid, status: 'processing' } },
+    { status: 200, data: { uuid: mediaUuid, status: 'processing' } },
+    { status: 200, data: { uuid: mediaUuid, status: 'ready' } },
+  ])), { uuid: mediaUuid, maxAttempts: 6, maxDelayMs: 5_000, backoffBaseMs: 5_000, sleep: async (ms) => { longProcessingSleeps.push(ms) } })
+  assert.equal(longProcessingReady.ok, true, 'created/processing may continue for several polls before ready')
+  assert.equal(longProcessingReady.attempts, 5)
+  assert.deepEqual(longProcessingSleeps, [5_000, 5_000, 5_000, 5_000])
+
+  for (const status of ['uploaded', 'complete', 'completed', 'available'] as const) {
+    const unexpected = await readFanvueMedia(config(queueFetch([{ status: 200, data: { uuid: mediaUuid, status } }])), { uuid: mediaUuid })
+    assert.equal(unexpected.ok, false, `${status} must not be silently treated as ready`)
+    assert.equal(unexpected.error_code, 'FANVUE_MEDIA_READBACK_MALFORMED')
+  }
+
+  for (const data of [
+    { uuid: mediaUuid },
+    { uuid: mediaUuid, state: 'ready' },
+    { uuid: mediaUuid, mediaStatus: 'ready' },
+    { id: mediaUuid, status: 'ready' },
+  ]) {
+    const malformed = await readFanvueMedia(config(queueFetch([{ status: 200, data }])), { uuid: mediaUuid })
+    assert.equal(malformed.ok, false, 'missing status or undocumented alternate fields must be rejected')
+    assert.equal(malformed.error_code, 'FANVUE_MEDIA_READBACK_MALFORMED')
+  }
+
   const errored = await waitForFanvueMediaReady(config(queueFetch([{ status: 200, data: { uuid: mediaUuid, status: 'error' } }])), { uuid: mediaUuid, maxAttempts: 3 })
   assert.equal(errored.ok, false)
   assert.equal(errored.error_code, 'FANVUE_MEDIA_PROCESSING_ERROR')
@@ -187,6 +218,13 @@ async function run() {
   ])), { uuid: mediaUuid, maxAttempts: 2 })
   assert.equal(timedOut.ok, false)
   assert.equal(timedOut.error_code, 'FANVUE_MEDIA_READY_TIMEOUT')
+  assert.equal(timedOut.safe_error_message, 'Fanvue upload completed, but media was still processing before the readiness retry limit.')
+  assert.doesNotMatch(JSON.stringify(timedOut), new RegExp(`${mediaUuid}|signed-upload|X-Amz-Signature|raw provider body`), 'timeout failure must not leak media UUID, signed URL, or raw body')
+
+  const non200Readback = await readFanvueMedia(config(queueFetch([{ status: 500, data: { uuid: mediaUuid, raw: 'raw provider body must not leak', signed_url: 'https://signed-upload.invalid/failure?X-Amz-Signature=secret' } }])), { uuid: mediaUuid })
+  assert.equal(non200Readback.ok, false)
+  assert.equal(non200Readback.error_code, 'FANVUE_SERVER_ERROR')
+  assert.doesNotMatch(JSON.stringify(non200Readback), /signed-upload|X-Amz-Signature|raw provider body/i, 'non-200 readback must not leak provider body')
 
   const rateLimitedPoll = await waitForFanvueMediaReady(config(queueFetch([
     { status: 429, data: { error: 'rate_limited' }, retryAfter: '1' },
