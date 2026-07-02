@@ -108,8 +108,10 @@ export type FanvueUploadBlockedResult = {
   posted_proof: false
   platform_post_id: null
   failed_step?: FanvueUploadFailedStep
-  provider_status?: number
-  provider_error_code?: string
+  provider_status?: number | null
+  provider_status_class?: string | null
+  provider_error_code?: string | null
+  provider_response_present?: boolean
   provider_route?: string
 }
 
@@ -408,7 +410,13 @@ export async function planFanvueLivePhotoUploadDryRun(args: FanvueLivePhotoUploa
     }))
     const refreshResult = await refresh(account)
     if ("blocked" in refreshResult) {
-      return failed(refreshResult.error_code, refreshResult.safe_error_message, false)
+      return {
+        ...failed(refreshResult.error_code, refreshResult.safe_error_message, false),
+        ...(typeof refreshResult.provider_response_present === "boolean" ? { provider_response_present: refreshResult.provider_response_present } : {}),
+        ...("provider_status" in refreshResult ? { provider_status: refreshResult.provider_status ?? null } : {}),
+        ...("provider_status_class" in refreshResult ? { provider_status_class: refreshResult.provider_status_class ?? null } : {}),
+        ...("provider_error_code" in refreshResult ? { provider_error_code: refreshResult.provider_error_code ?? null } : {}),
+      }
     }
 
     try {

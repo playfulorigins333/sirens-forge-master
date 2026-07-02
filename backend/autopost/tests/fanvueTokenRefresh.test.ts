@@ -30,6 +30,7 @@ async function runRefresh(input: {
   status?: number
   body?: unknown
   jsonThrows?: boolean
+  fetchThrows?: boolean
   persistError?: unknown
 }) {
   const fetchCalls: FetchCall[] = []
@@ -55,6 +56,7 @@ async function runRefresh(input: {
       assert.doesNotMatch(url, /api\.fanvue\.com/, 'refresh tests must not call live Fanvue API')
       assert.doesNotMatch(url, /\/media\/uploads|\/posts|\/users\/account|\/me|\/self/i, 'refresh helper tests must not call upload, posts, or identity routes')
       fetchCalls.push({ url, init })
+      if (input.fetchThrows) throw new Error('raw provider body with plain-new-access mock-client-secret https://signed-upload.invalid')
       if (input.jsonThrows) return { ok: true, status: 200, json: async () => { throw new Error('invalid json') } }
       const status = input.status ?? 200
       return { ok: status >= 200 && status < 300, status, json: async () => input.body ?? { access_token: 'plain-new-access', refresh_token: 'plain-new-refresh', token_type: 'Bearer', expires_in: 3600, scope: 'read:media write:media' } }
@@ -131,11 +133,47 @@ async function run() {
   assert.equal(decryptFailed.fetchCalls.length, 0)
   assertSafe(decryptFailed.result)
 
+  const threwBeforeResponse = await runRefresh({ fetchThrows: true })
+  assert.equal(threwBeforeResponse.result.ok, false)
+  assert.equal(threwBeforeResponse.result.error_code, 'FANVUE_REFRESH_FAILED')
+  assert.equal(threwBeforeResponse.result.safe_error_message, 'Fanvue token refresh request failed.')
+  assert.equal(threwBeforeResponse.result.provider_calls_attempted, true)
+  assert.equal(threwBeforeResponse.result.provider_response_present, false)
+  assert.equal(threwBeforeResponse.result.provider_status, null)
+  assert.equal(threwBeforeResponse.result.provider_status_class, null)
+  assert.equal(threwBeforeResponse.result.provider_error_code, null)
+  assert.equal(threwBeforeResponse.persistCalls.length, 0)
+  assertSafe(threwBeforeResponse.result)
+
+  const nonOkSafeError = await runRefresh({ status: 502, body: { error: 'temporarily_unavailable', error_description: 'raw provider body with plain-new-access' } })
+  assert.equal(nonOkSafeError.result.ok, false)
+  assert.equal(nonOkSafeError.result.error_code, 'FANVUE_REFRESH_FAILED')
+  assert.equal(nonOkSafeError.result.provider_response_present, true)
+  assert.equal(nonOkSafeError.result.provider_status, 502)
+  assert.equal(nonOkSafeError.result.provider_status_class, '5xx')
+  assert.equal(nonOkSafeError.result.provider_error_code, 'temporarily_unavailable')
+  assert.equal(nonOkSafeError.persistCalls.length, 0)
+  assertSafe(nonOkSafeError.result)
+
+  const nonOkUnsafeError = await runRefresh({ status: 429, body: { error_code: 'unsafe raw provider body with https://signed-upload.invalid/plain-new-access and mock-client-secret' } })
+  assert.equal(nonOkUnsafeError.result.ok, false)
+  assert.equal(nonOkUnsafeError.result.error_code, 'FANVUE_REFRESH_FAILED')
+  assert.equal(nonOkUnsafeError.result.provider_response_present, true)
+  assert.equal(nonOkUnsafeError.result.provider_status, 429)
+  assert.equal(nonOkUnsafeError.result.provider_status_class, '4xx')
+  assert.equal(nonOkUnsafeError.result.provider_error_code, null)
+  assert.equal(nonOkUnsafeError.persistCalls.length, 0)
+  assertSafe(nonOkUnsafeError.result)
+
   for (const status of [400, 401, 403, 500] as const) {
-    const failed = await runRefresh({ status, body: { error: 'raw provider body', access_token: 'plain-new-access' } })
+    const failed = await runRefresh({ status, body: { error_code: 'invalid_grant', error_description: 'raw provider body', access_token: 'plain-new-access' } })
     assert.equal(failed.result.ok, false)
     assert.equal(failed.result.error_code, status === 500 ? 'FANVUE_REFRESH_FAILED' : 'FANVUE_REFRESH_UNAUTHORIZED')
     assert.equal(failed.result.provider_calls_attempted, true)
+    assert.equal(failed.result.provider_response_present, true)
+    assert.equal(failed.result.provider_status, status)
+    assert.equal(failed.result.provider_status_class, `${Math.floor(status / 100)}xx`)
+    assert.equal(failed.result.provider_error_code, 'invalid_grant')
     assert.equal(failed.persistCalls.length, 0)
     assertSafe(failed.result)
   }
