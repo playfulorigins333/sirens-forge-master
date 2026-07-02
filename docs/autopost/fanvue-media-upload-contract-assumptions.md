@@ -28,3 +28,11 @@ That fallback behavior is an unsafe/unverified live-upload assumption and must n
 ## Scope note
 
 Current repository code does not require `write:creator` for the upload-only scaffold. Do not add `write:creator` to default scopes unless an official Fanvue contract in the repo proves it is required.
+
+## FV-40AH signed-part URL response shape
+
+The signed-part URL parser now treats the connected-user upload-only route as a signed-URL-specific response instead of a generic JSON endpoint. It supports a non-empty `text/plain` string URI response for `GET /media/uploads/{uploadId}/parts/{partNumber}/url`, while retaining mocked JSON string compatibility for local tests.
+
+Unsupported JSON object/envelope shapes, empty bodies, malformed URL strings, and non-2xx responses must fail with safe diagnostics only. Failures must not expose signed URLs, raw provider response bodies, authorization headers, bearer tokens, cookies, OAuth codes, token values, or other secrets.
+
+The indexed creator-scoped documentation for `GET /creators/{creatorUserUuid}/media/uploads/{uploadId}/parts/{partNumber}/url` is not approval to switch the connected-user upload-only path to `/creators`. The upload-only route guard must continue to block `/creators` and `/posts` routes. FV-40AH is code/test hardening only and does not approve a live upload retry.
