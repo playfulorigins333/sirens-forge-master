@@ -29,6 +29,8 @@ export type FanvueTokenRefreshErrorCode =
   | "FANVUE_REFRESH_TOKEN_DECRYPT_FAILED"
   | "FANVUE_REFRESH_FAILED"
   | "FANVUE_REFRESH_UNAUTHORIZED"
+  | "FANVUE_REFRESH_INVALID_GRANT_REAUTH_REQUIRED"
+  | "FANVUE_REFRESH_MISSING_ROTATED_TOKEN"
   | "FANVUE_REFRESH_RESPONSE_INVALID"
   | "FANVUE_REFRESH_PERSIST_FAILED"
 
@@ -52,6 +54,7 @@ export type FanvueTokenRefreshResult =
       provider_status?: number | null
       provider_status_class?: string | null
       provider_error_code?: string | null
+      requires_oauth_reconnect?: boolean
     }
 
 type FanvueRefreshFetch = (url: string, init: {
@@ -86,6 +89,7 @@ type FanvueRefreshFailureDiagnostics = {
   provider_status?: number | null
   provider_status_class?: string | null
   provider_error_code?: string | null
+  requires_oauth_reconnect?: boolean
 }
 
 function providerStatusClass(status: unknown): string | null {
@@ -135,10 +139,6 @@ function requireRefreshConfig(deps: FanvueTokenRefreshDependencies) {
   const clientSecret = deps.clientSecret ?? env("FANVUE_CLIENT_SECRET")
   if (!tokenUrl || !clientId || !clientSecret) throw new Error("FANVUE_REFRESH_CONFIG_INCOMPLETE")
   return { tokenUrl, clientId, clientSecret }
-}
-
-function getBasicAuthHeader(clientId: string, clientSecret: string) {
-  return `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`
 }
 
 function normalizeScopes(scope: unknown, fallback: FanvueRefreshAccount["scopes"]) {
@@ -191,11 +191,12 @@ export async function refreshFanvueAccessToken(
     response = await fetchImpl(tokenUrl, {
       method: "POST",
       headers: {
-        authorization: getBasicAuthHeader(clientId, clientSecret),
         "content-type": "application/x-www-form-urlencoded",
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
+        client_id: clientId,
+        client_secret: clientSecret,
         refresh_token: refreshToken,
       }),
     })
@@ -211,6 +212,21 @@ export async function refreshFanvueAccessToken(
   const tokenResponse = (await response.json().catch(() => null)) as FanvueRefreshTokenResponse | null
   if (!response.ok) {
     const unauthorized = response.status === 400 || response.status === 401 || response.status === 403
+    const providerErrorCode = extractProviderErrorCode(tokenResponse)
+    if (providerErrorCode === "invalid_grant") {
+      return safeFailure(
+        "FANVUE_REFRESH_INVALID_GRANT_REAUTH_REQUIRED",
+        "Fanvue refresh authorization is no longer valid; OAuth reconnect is required.",
+        true,
+        {
+          provider_response_present: true,
+          provider_status: response.status,
+          provider_status_class: providerStatusClass(response.status),
+          provider_error_code: providerErrorCode,
+          requires_oauth_reconnect: true,
+        },
+      )
+    }
     return safeFailure(
       unauthorized ? "FANVUE_REFRESH_UNAUTHORIZED" : "FANVUE_REFRESH_FAILED",
       unauthorized ? "Fanvue refresh token is unauthorized or expired." : "Fanvue token refresh failed.",
@@ -219,7 +235,7 @@ export async function refreshFanvueAccessToken(
         provider_response_present: true,
         provider_status: response.status,
         provider_status_class: providerStatusClass(response.status),
-        provider_error_code: extractProviderErrorCode(tokenResponse),
+        provider_error_code: providerErrorCode,
       },
     )
   }
@@ -232,11 +248,22 @@ export async function refreshFanvueAccessToken(
   if (!tokenExpiresAt) {
     return safeFailure("FANVUE_REFRESH_RESPONSE_INVALID", "Fanvue token refresh response was invalid.", true)
   }
+  if (typeof tokenResponse.refresh_token !== "string" || !tokenResponse.refresh_token) {
+    return safeFailure(
+      "FANVUE_REFRESH_MISSING_ROTATED_TOKEN",
+      "Fanvue token refresh did not return a replacement refresh token.",
+      true,
+      {
+        provider_response_present: true,
+        provider_status: response.status,
+        provider_status_class: providerStatusClass(response.status),
+        provider_error_code: null,
+      },
+    )
+  }
 
   const encryptedAccessToken = encryptToken(tokenResponse.access_token)
-  const encryptedRefreshToken = typeof tokenResponse.refresh_token === "string" && tokenResponse.refresh_token
-    ? encryptToken(tokenResponse.refresh_token)
-    : account.encrypted_refresh_token
+  const encryptedRefreshToken = encryptToken(tokenResponse.refresh_token)
   const tokenType = typeof tokenResponse.token_type === "string" && tokenResponse.token_type ? tokenResponse.token_type : account.token_type || "bearer"
   const scopes = normalizeScopes(tokenResponse.scope, account.scopes)
 
