@@ -367,16 +367,17 @@ export async function readFanvueMedia(config: FanvueApiClientConfig, input: { uu
   return { ok: true, media, ready: media.status === "ready", terminal_failure: media.status === "error" }
 }
 
-export async function waitForFanvueMediaReady(config: FanvueApiClientConfig, input: { uuid: string; maxAttempts: number; maxDelayMs?: number; sleep?: (ms: number) => Promise<void> }): Promise<FanvueMediaReadyResult> {
+export async function waitForFanvueMediaReady(config: FanvueApiClientConfig, input: { uuid: string; maxAttempts: number; maxDelayMs?: number; backoffBaseMs?: number; sleep?: (ms: number) => Promise<void> }): Promise<FanvueMediaReadyResult> {
   const maxAttempts = Math.max(1, Math.floor(input.maxAttempts))
   const maxDelayMs = Math.max(0, Math.floor(input.maxDelayMs ?? 0))
+  const backoffBaseMs = Math.max(0, Math.floor(input.backoffBaseMs ?? 100))
   const sleep = input.sleep ?? (async () => {})
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const result = await readFanvueMedia(config, { uuid: input.uuid })
     if (result.ok) {
       if (result.ready) return { ok: true, media: result.media, attempts: attempt, proof: "MEDIA_READY_READBACK" }
       if (result.terminal_failure) return { ...failure("FAILED", null, "FANVUE_MEDIA_PROCESSING_ERROR", "Fanvue media processing ended in error."), attempts: attempt, retryable: false }
-      if (attempt < maxAttempts) await sleep(Math.min(maxDelayMs, attempt * 100))
+      if (attempt < maxAttempts) await sleep(Math.min(maxDelayMs, attempt * backoffBaseMs))
       continue
     }
     const failed = result as FanvueApiFailure
@@ -386,7 +387,7 @@ export async function waitForFanvueMediaReady(config: FanvueApiClientConfig, inp
     }
     return { ...failed, attempts: attempt, retryable: failed.status === 429 }
   }
-  return { ...failure("FAILED", null, "FANVUE_MEDIA_READY_TIMEOUT", "Fanvue media did not become ready before the retry limit."), attempts: maxAttempts, retryable: true }
+  return { ...failure("FAILED", null, "FANVUE_MEDIA_READY_TIMEOUT", "Fanvue upload completed, but media was still processing before the readiness retry limit."), attempts: maxAttempts, retryable: true }
 }
 
 export async function createFanvueMediaPost(config: FanvueApiClientConfig, input: FanvueCreateMediaPostInput): Promise<FanvueCreatePostResult> {

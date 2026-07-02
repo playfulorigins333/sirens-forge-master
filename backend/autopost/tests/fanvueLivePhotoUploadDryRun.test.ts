@@ -3,6 +3,9 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import {
   FANVUE_ADMIN_LIVE_PHOTO_UPLOAD_ENV,
+  FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_BACKOFF_BASE_MS,
+  FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_ATTEMPTS,
+  FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_DELAY_MS,
   FANVUE_PHOTO_UPLOAD_CONFIRMATION,
   FANVUE_PHOTO_UPLOAD_OPERATION,
   guardFanvueUploadOnlyRoute,
@@ -111,6 +114,10 @@ async function run() {
   assert.equal((await validateLocalTestImageFile('/tmp/photo.jpg', async () => Buffer.from([]))).error_code, 'FANVUE_UPLOAD_EMPTY_FILE_REJECTED')
   assert.equal((await validateLocalTestImageFile('/tmp/photo.jpg', async () => Buffer.from('not-a-jpeg'))).error_code, 'FANVUE_UPLOAD_IMAGE_SIGNATURE_REJECTED')
   assert.equal((await validateLocalTestImageFile('/tmp/photo.png', async () => Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]))).ok, true)
+
+  assert.equal(FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_ATTEMPTS, 18)
+  assert.equal(FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_BACKOFF_BASE_MS, 5_000)
+  assert.equal(FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_DELAY_MS, 5_000)
 
 
   const blockedBeforeDeps = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, {}, {
@@ -241,6 +248,48 @@ async function run() {
   assert.equal(happy.platform_post_id, null)
   assert.deepEqual(calls, ['POST /media/uploads', 'GET /media/uploads/upload_1/parts/1/url', 'PATCH /media/uploads/upload_1', `GET /media/${mediaUuid}`])
 
+
+  const slowReadyCalls: string[] = []
+  const slowReadySleeps: number[] = []
+  let mediaPolls = 0
+  const slowReady = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, liveEnv, {
+    ...deps,
+    fanvueFetch: async (url, init) => {
+      slowReadyCalls.push(`${init.method} ${new URL(url).pathname}`)
+      if (init.method === 'POST') return { ok: true, status: 200, json: async () => ({ mediaUuid, uploadId: 'upload_1' }) }
+      if (init.method === 'GET' && url.includes('/parts/1/url')) return { ok: true, status: 200, json: async () => 'https://signed-upload.invalid/part-1?X-Amz-Signature=secret' }
+      if (init.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ status: 'processing' }) }
+      mediaPolls++
+      return { ok: true, status: 200, json: async () => ({ uuid: mediaUuid, status: mediaPolls < 6 ? 'processing' : 'ready', mediaType: 'image', name: 'photo.png' }) }
+    },
+    sleep: async (ms) => { slowReadySleeps.push(ms) },
+  })
+  assert.equal(slowReady.ok, true, 'admin upload-only runner must allow a longer processing window before ready')
+  assert.equal(slowReady.attempts, 6)
+  assert.deepEqual(slowReadySleeps, [5_000, 5_000, 5_000, 5_000, 5_000])
+  assert.equal(slowReady.posted_proof, false)
+  assert.equal(slowReady.platform_post_id, null)
+  assert.ok(slowReadyCalls.every((call) => !call.includes('/posts') && !call.includes('/creators')), 'admin upload-only calls must not include post or creator routes')
+
+  const timeoutSleeps: number[] = []
+  const timeout = await planFanvueLivePhotoUploadDryRun(futureReadyArgs, liveEnv, {
+    ...deps,
+    fanvueFetch: async (url, init) => {
+      if (init.method === 'POST') return { ok: true, status: 200, json: async () => ({ mediaUuid, uploadId: 'upload_1' }) }
+      if (init.method === 'GET' && url.includes('/parts/1/url')) return { ok: true, status: 200, json: async () => 'https://signed-upload.invalid/part-1?X-Amz-Signature=secret' }
+      if (init.method === 'PATCH') return { ok: true, status: 200, json: async () => ({ status: 'processing' }) }
+      return { ok: true, status: 200, json: async () => ({ uuid: mediaUuid, status: 'processing', raw: 'raw provider body must not leak' }) }
+    },
+    sleep: async (ms) => { timeoutSleeps.push(ms) },
+  })
+  assert.equal(timeout.ok, false)
+  assert.equal(timeout.error_code, 'FANVUE_MEDIA_READY_TIMEOUT')
+  assert.equal(timeout.failed_step, 'media_readback')
+  assert.equal(timeout.provider_route, 'GET /media/:uuid')
+  assert.equal(timeout.posted_proof, false)
+  assert.equal(timeout.platform_post_id, null)
+  assert.equal(timeoutSleeps.length, FANVUE_ADMIN_UPLOAD_ONLY_MEDIA_READY_MAX_ATTEMPTS - 1)
+  assert.doesNotMatch(JSON.stringify(timeout, (_key, value) => redactSensitiveLogValue(value)), new RegExp(`${mediaUuid}|signed-upload|X-Amz-Signature|raw provider body|decrypted-token-never-logged|Authorization|Bearer|Cookie`, 'i'))
 
 
   let refreshCalls = 0
