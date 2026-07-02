@@ -6,6 +6,7 @@ export type FanvueFetchResponse = {
   ok: boolean
   status: number
   json: () => Promise<unknown>
+  text?: () => Promise<string>
   headers?: { get: (name: string) => string | null }
 }
 
@@ -248,6 +249,45 @@ function parseUploadSession(data: unknown): FanvueUploadSession | null {
   return { mediaUuid, uploadId }
 }
 
+function parseSignedUrlValue(value: unknown): string | null {
+  const signedUrl = clean(value)
+  if (!signedUrl) return null
+  try {
+    const url = new URL(signedUrl)
+    return url.protocol === "https:" || url.protocol === "http:" ? signedUrl : null
+  } catch {
+    return null
+  }
+}
+
+async function requestSignedUrl(config: FanvueApiClientConfig, path: string) {
+  const configError = requireConfig(config)
+  if (configError) return { ok: false as const, failure: configError }
+  let response: FanvueFetchResponse
+  try {
+    response = await config.fetch(endpoint(config, path), { method: "GET", headers: headers(config) })
+  } catch {
+    return { ok: false as const, failure: failure("FAILED", null, "FANVUE_NETWORK_FAILED", "Fanvue request failed.") }
+  }
+  if (!response.ok) return { ok: false as const, failure: withRetryAfter(classifyStatus(response.status), response), response }
+
+  if (typeof response.text === "function") {
+    try {
+      const signedUrl = parseSignedUrlValue(await response.text())
+      if (!signedUrl) return { ok: false as const, failure: failure("MALFORMED_JSON", response.status, "FANVUE_SIGNED_URL_MISSING", "Fanvue signed upload URL response was empty or unsupported."), response }
+      return { ok: true as const, signedUrl, response }
+    } catch {
+      return { ok: false as const, failure: failure("MALFORMED_JSON", response.status, "FANVUE_SIGNED_URL_MISSING", "Fanvue signed upload URL response was empty or unsupported."), response }
+    }
+  }
+
+  const parsed = await safeJson(response)
+  if (!parsed.ok) return { ok: false as const, failure: parsed.error, response }
+  const signedUrl = parseSignedUrlValue(parsed.data)
+  if (!signedUrl) return { ok: false as const, failure: failure("MALFORMED_JSON", response.status, "FANVUE_SIGNED_URL_MISSING", "Fanvue signed upload URL response was empty or unsupported."), response }
+  return { ok: true as const, signedUrl, response }
+}
+
 async function requestJson(config: FanvueApiClientConfig, method: "GET" | "POST" | "PATCH", path: string, body?: Record<string, unknown>) {
   const configError = requireConfig(config)
   if (configError) return { ok: false as const, failure: configError }
@@ -280,11 +320,9 @@ export async function getFanvueUploadPartUrl(config: FanvueApiClientConfig, inpu
   const uploadId = clean(input.uploadId)
   if (!uploadId) return failure("FAILED", null, "FANVUE_UPLOAD_ID_REQUIRED", "Fanvue uploadId is required.")
   if (!Number.isInteger(input.partNumber) || input.partNumber < 1) return failure("FAILED", null, "FANVUE_UPLOAD_PART_NUMBER_INVALID", "Fanvue upload part number must be a positive integer.")
-  const requested = await requestJson(config, "GET", `/media/uploads/${encodeURIComponent(uploadId)}/parts/${input.partNumber}/url`)
+  const requested = await requestSignedUrl(config, `/media/uploads/${encodeURIComponent(uploadId)}/parts/${input.partNumber}/url`)
   if (!requested.ok) return requested.failure
-  const signedUrl = clean(requested.data)
-  if (!signedUrl) return failure("MALFORMED_JSON", requested.response.status, "FANVUE_SIGNED_URL_MISSING", "Fanvue signed upload URL response was empty.")
-  return { ok: true, signed_url: signedUrl, persisted: false }
+  return { ok: true, signed_url: requested.signedUrl, persisted: false }
 }
 
 export async function uploadFanvueSignedPart(input: { signedUrl: string; partNumber: number; body: unknown; uploader: FanvueSignedPartUploader }): Promise<FanvueUploadPartResult> {

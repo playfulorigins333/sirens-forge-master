@@ -30,6 +30,19 @@ function response(status: number, data: unknown, retryAfter?: string) {
   }
 }
 
+function textResponse(status: number, body: string, options: { jsonThrows?: boolean } = {}) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    text: async () => body,
+    json: async () => {
+      if (options.jsonThrows) throw new Error('mock json parser must not be used for text/plain signed URLs')
+      return JSON.parse(body)
+    },
+    headers: { get: () => null },
+  }
+}
+
 function queueFetch(items: Array<{ status: number; data: unknown; retryAfter?: string }>, calls: Call[] = []): FanvueFetch {
   return async (url, init) => {
     assert.doesNotMatch(url, /api\.fanvue\.com/, 'tests must not call live Fanvue API')
@@ -38,6 +51,15 @@ function queueFetch(items: Array<{ status: number; data: unknown; retryAfter?: s
     const item = items.shift()
     assert.ok(item, `unexpected request ${init.method} ${url}`)
     return response(item.status, item.data, item.retryAfter)
+  }
+}
+
+function singleFetch(responseFactory: () => ReturnType<typeof response> | ReturnType<typeof textResponse>, calls: Call[] = []): FanvueFetch {
+  return async (url, init) => {
+    assert.doesNotMatch(url, /api\.fanvue\.com/, 'tests must not call live Fanvue API')
+    assert.doesNotMatch(url, /\/creators\//, 'normal connected-user scaffold must not use creator-scoped routes')
+    calls.push({ url, init })
+    return responseFactory()
   }
 }
 
@@ -83,8 +105,32 @@ async function run() {
   assert.equal(calls[0].url, `${apiBaseUrl}/media/uploads/${uploadId}/parts/1/url`)
   assert.equal(calls[0].init.method, 'GET')
 
-  const signedFailure = await getFanvueUploadPartUrl(config(queueFetch([{ status: 500, data: {} }])), { uploadId, partNumber: 1 })
+  calls.length = 0
+  const textSigned = await getFanvueUploadPartUrl(config(singleFetch(() => textResponse(200, 'https://signed-upload.invalid/text-part?X-Amz-Signature=secret', { jsonThrows: true }), calls)), { uploadId, partNumber: 1 })
+  assert.equal(textSigned.ok, true, 'documented text/plain signed URL response must succeed without response.json()')
+  assert.equal(textSigned.persisted, false)
+  assert.equal(calls[0].url, `${apiBaseUrl}/media/uploads/${uploadId}/parts/1/url`)
+
+  for (const [body, label] of [
+    ['', 'empty text body'],
+    ['   ', 'blank text body'],
+    ['not a url', 'malformed text body'],
+  ] as const) {
+    const rejected = await getFanvueUploadPartUrl(config(singleFetch(() => textResponse(200, body, { jsonThrows: true }))), { uploadId, partNumber: 1 })
+    assert.equal(rejected.ok, false, `${label} must be rejected safely`)
+    assert.equal(rejected.error_code, 'FANVUE_SIGNED_URL_MISSING')
+    assert.doesNotMatch(JSON.stringify(rejected), /signed-upload|X-Amz-Signature|not a url|raw provider/i, `${label} failure must not leak raw body`)
+  }
+
+  const unsupportedEnvelope = await getFanvueUploadPartUrl(config(queueFetch([{ status: 200, data: { url: 'https://signed-upload.invalid/object-part?X-Amz-Signature=secret' } }])), { uploadId, partNumber: 1 })
+  assert.equal(unsupportedEnvelope.ok, false, 'unsupported JSON object/envelope signed URL response must be rejected')
+  assert.equal(unsupportedEnvelope.error_code, 'FANVUE_SIGNED_URL_MISSING')
+  assert.doesNotMatch(JSON.stringify(unsupportedEnvelope), /signed-upload|X-Amz-Signature|object-part/i, 'unsupported object failure must not leak signed URL or raw body')
+
+  const signedFailure = await getFanvueUploadPartUrl(config(queueFetch([{ status: 500, data: { raw: 'raw provider body must not leak', signed_url: 'https://signed-upload.invalid/failure?X-Amz-Signature=secret' } }])), { uploadId, partNumber: 1 })
   assert.equal(signedFailure.ok, false)
+  assert.equal(signedFailure.error_code, 'FANVUE_SERVER_ERROR')
+  assert.doesNotMatch(JSON.stringify(signedFailure), /signed-upload|X-Amz-Signature|raw provider body/i, 'non-200 signed URL failure must not leak provider body')
 
   const uploadedPart = await uploadFanvueSignedPart({
     signedUrl: 'https://signed-upload.invalid/part-1',
