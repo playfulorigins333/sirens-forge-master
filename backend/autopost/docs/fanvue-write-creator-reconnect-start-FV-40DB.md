@@ -96,3 +96,7 @@ First verification after reconnect must be row-only/preflight-only. Refresh-only
 ## CreatorUserUuid boundary
 
 `top_level_uuid` remains candidate-only. Reconnect does not prove `creatorUserUuid`. Post-reconnect preflight does not prove `creatorUserUuid`. Upload diagnostic remains blocked. `/creators` live remains blocked. `/posts` remains blocked.
+
+## FV-40DG follow-up
+
+FV-40DG keeps `top_level_uuid` diagnostic-scoped only. It may be used only inside the upload diagnostic after a fresh identity gate confirms `isCreator === true`, UUID shape, and any UUID-shaped `provider_account_id` match. This is not global `creatorUserUuid` proof. FV-40DG does not approve live upload execution, posting, dispatch, scheduling, public Fanvue exposure, or `/posts`.

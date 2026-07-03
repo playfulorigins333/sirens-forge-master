@@ -72,3 +72,9 @@ Evidence-ranked, without guessing beyond the checked contract:
 FV-40K should be a docs/support request pack or mocked-contract alignment gate, not a live upload. The smallest safe next step is to document the official connected-user upload-session proof and ask Fanvue support/docs to clarify the non-creator signed-part URL and whether connected-user multipart upload has a complete route set that does not require `creatorUserUuid`/`write:creator`.
 
 Do not run a live upload until the signed-URL route and token freshness/audience checks are resolved in a separate approved gate.
+
+## FV-40DG follow-up
+
+FV-40DG implements the future diagnostic around the creator-scoped route family because the full documented upload flow evidence includes creator-scoped signed URL retrieval. The connected-user `POST /media/uploads` route remains documented as requiring `write:media`, but it is not the recommended full diagnostic path while signed URL evidence is creator-scoped.
+
+This implementation does not approve live upload execution, posting, dispatch, scheduling, public Fanvue exposure, or `/posts`. Signed URLs must never be exposed. Future live execution requires a separate approval gate.

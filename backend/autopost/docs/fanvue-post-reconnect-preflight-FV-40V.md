@@ -47,3 +47,7 @@ If the preflight returns `blocked`, do not run upload. If it returns `ready_for_
 ## FV-40CY verification warning
 
 After any separately approved future admin-only `write:creator` reconnect, verification must remain row-only/preflight-only and confirm `scopes_include_write_creator: true`, `scopes_include_read_media: true`, `scopes_include_write_media: true`, and `connection_status: CONNECTED`. Do not call Fanvue, refresh, upload, post, dispatch, schedule, expose raw provider responses, expose token values, or expose encrypted token values. Refresh-only diagnostic must not be the first verification after reconnect. This does not prove `creatorUserUuid`; `top_level_uuid` remains candidate-only.
+
+## FV-40DG follow-up
+
+`write:creator` is required for the FV-40DG creator-scoped upload diagnostic route design. The row-only preflight still does not prove `creatorUserUuid`, does not approve live upload execution, does not approve posting, does not approve dispatch/scheduling, and does not make Fanvue public. `/posts` remains blocked.
