@@ -27,17 +27,26 @@ function assertSafe(result: unknown) {
 
 async function runRefresh(input: {
   account?: FanvueRefreshAccount
+  authMethod?: string | null
   status?: number
   body?: unknown
   jsonThrows?: boolean
   fetchThrows?: boolean
   persistError?: unknown
 }) {
+  const previousAuthMethod = process.env.FANVUE_OAUTH_CLIENT_AUTH_METHOD
+  if (Object.prototype.hasOwnProperty.call(input, 'authMethod')) {
+    if (input.authMethod === null) delete process.env.FANVUE_OAUTH_CLIENT_AUTH_METHOD
+    else process.env.FANVUE_OAUTH_CLIENT_AUTH_METHOD = input.authMethod
+  } else {
+    delete process.env.FANVUE_OAUTH_CLIENT_AUTH_METHOD
+  }
   const fetchCalls: FetchCall[] = []
   const persistCalls: PersistCall[] = []
   const decrypted: string[] = []
   const encrypted: string[] = []
-  const result = await refreshFanvueAccessToken(input.account ?? baseAccount, {
+  try {
+    const result = await refreshFanvueAccessToken(input.account ?? baseAccount, {
     tokenUrl,
     clientId,
     clientSecret,
@@ -65,8 +74,12 @@ async function runRefresh(input: {
       persistCalls.push(call)
       return input.persistError ? { error: input.persistError } : undefined
     },
-  })
-  return { result, fetchCalls, persistCalls, decrypted, encrypted }
+    })
+    return { result, fetchCalls, persistCalls, decrypted, encrypted }
+  } finally {
+    if (previousAuthMethod === undefined) delete process.env.FANVUE_OAUTH_CLIENT_AUTH_METHOD
+    else process.env.FANVUE_OAUTH_CLIENT_AUTH_METHOD = previousAuthMethod
+  }
 }
 
 async function run() {
@@ -101,6 +114,33 @@ async function run() {
     connection_status: 'CONNECTED',
   })
   assertSafe(success.result)
+
+  const explicitBody = await runRefresh({ authMethod: 'body' })
+  assert.equal(explicitBody.fetchCalls.length, 1)
+  assert.equal(explicitBody.fetchCalls[0].init.headers.authorization, undefined)
+  assert.equal(explicitBody.fetchCalls[0].init.body.get('client_id'), clientId)
+  assert.equal(explicitBody.fetchCalls[0].init.body.get('client_secret'), clientSecret)
+
+  const basic = await runRefresh({ authMethod: 'basic' })
+  assert.equal(basic.fetchCalls.length, 1, 'basic auth must make exactly one provider request with no fallback')
+  assert.equal(basic.fetchCalls[0].init.headers.authorization, `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`)
+  assert.equal(basic.fetchCalls[0].init.body.has('client_id'), false)
+  assert.equal(basic.fetchCalls[0].init.body.has('client_secret'), false)
+  assert.equal(basic.fetchCalls[0].init.body.get('grant_type'), 'refresh_token')
+  assert.equal(basic.fetchCalls[0].init.body.get('refresh_token'), 'plain-existing-refresh')
+  assert.equal(basic.fetchCalls[0].init.body.has('scope'), false)
+  assert.equal(basic.fetchCalls[0].init.body.has('redirect_uri'), false)
+  assert.equal(basic.fetchCalls[0].init.body.has('code'), false)
+  assert.equal(basic.fetchCalls[0].init.body.has('code_verifier'), false)
+  assertSafe({ ...basic.result, authorization: undefined })
+
+  const invalidAuth = await runRefresh({ authMethod: 'not-valid' })
+  assert.equal(invalidAuth.result.ok, false)
+  assert.equal(invalidAuth.result.error_code, 'FANVUE_OAUTH_CLIENT_AUTH_METHOD_INVALID')
+  assert.equal(invalidAuth.result.provider_calls_attempted, false)
+  assert.equal(invalidAuth.fetchCalls.length, 0, 'invalid auth method must fail closed before provider fetch')
+  assert.equal(invalidAuth.persistCalls.length, 0)
+  assertSafe(invalidAuth.result)
 
   const rotated = await runRefresh({ body: { access_token: 'plain-new-access', refresh_token: 'plain-new-refresh-2', expires_in: 60 } })
   assert.equal(rotated.persistCalls[0].updatePayload.encrypted_refresh_token, 'enc:plain-new-refresh-2')

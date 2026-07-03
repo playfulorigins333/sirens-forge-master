@@ -1,3 +1,5 @@
+import { applyFanvueOAuthClientAuth } from "./fanvueOAuthClientAuth"
+
 export function buildFanvueTokenExchangeRequestInit(input: {
   clientId: string
   clientSecret: string
@@ -5,17 +7,20 @@ export function buildFanvueTokenExchangeRequestInit(input: {
   redirectUri: string
   codeVerifier: string
 }) {
-  return {
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: input.clientId,
-      client_secret: input.clientSecret,
-      code: input.code,
-      redirect_uri: input.redirectUri,
-      code_verifier: input.codeVerifier,
-    }),
+  const headers = {
+    "content-type": "application/x-www-form-urlencoded",
   }
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: input.code,
+    redirect_uri: input.redirectUri,
+    code_verifier: input.codeVerifier,
+  })
+  applyFanvueOAuthClientAuth({
+    clientId: input.clientId,
+    clientSecret: input.clientSecret,
+    headers,
+    body,
+  })
+  return { headers, body }
 }

@@ -4,6 +4,7 @@ import {
   encryptAutopostToken,
   getAutopostTokenKeyVersion,
 } from "@/lib/autopost/tokenCryptoCore"
+import { applyFanvueOAuthClientAuth } from "@/lib/autopost/fanvueOAuthClientAuth"
 
 export type FanvueRefreshAccount = {
   user_id: string
@@ -33,6 +34,7 @@ export type FanvueTokenRefreshErrorCode =
   | "FANVUE_REFRESH_MISSING_ROTATED_TOKEN"
   | "FANVUE_REFRESH_RESPONSE_INVALID"
   | "FANVUE_REFRESH_PERSIST_FAILED"
+  | "FANVUE_OAUTH_CLIENT_AUTH_METHOD_INVALID"
 
 export type FanvueTokenRefreshResult =
   | {
@@ -184,21 +186,27 @@ export async function refreshFanvueAccessToken(
     return safeFailure("FANVUE_REFRESH_TOKEN_DECRYPT_FAILED", "Unable to decrypt Fanvue refresh token.", false)
   }
 
+  const { tokenUrl, clientId, clientSecret } = requireRefreshConfig(deps)
+  const headers = {
+    "content-type": "application/x-www-form-urlencoded",
+  }
+  const body = new URLSearchParams({
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  })
+  try {
+    applyFanvueOAuthClientAuth({ clientId, clientSecret, headers, body })
+  } catch {
+    return safeFailure("FANVUE_OAUTH_CLIENT_AUTH_METHOD_INVALID", "Fanvue OAuth client auth method is invalid.", false)
+  }
+
   let response: Awaited<ReturnType<FanvueRefreshFetch>>
   try {
-    const { tokenUrl, clientId, clientSecret } = requireRefreshConfig(deps)
     const fetchImpl = deps.fetch ?? fetch
     response = await fetchImpl(tokenUrl, {
       method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: clientId,
-        client_secret: clientSecret,
-        refresh_token: refreshToken,
-      }),
+      headers,
+      body,
     })
   } catch {
     return safeFailure("FANVUE_REFRESH_FAILED", "Fanvue token refresh request failed.", true, {
