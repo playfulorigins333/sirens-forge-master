@@ -43,3 +43,7 @@ If the preflight returns `blocked`, do not run upload. If it returns `ready_for_
 
 1. **FV-40W** — run this safe preflight locally/admin-only.
 2. **FV-40X** — controlled upload-only live retry only after FV-40W is ready and a human explicitly approves the live retry.
+
+## FV-40CY verification warning
+
+After any separately approved future admin-only `write:creator` reconnect, verification must remain row-only/preflight-only and confirm `scopes_include_write_creator: true`, `scopes_include_read_media: true`, `scopes_include_write_media: true`, and `connection_status: CONNECTED`. Do not call Fanvue, refresh, upload, post, dispatch, schedule, expose raw provider responses, expose token values, or expose encrypted token values. Refresh-only diagnostic must not be the first verification after reconnect. This does not prove `creatorUserUuid`; `top_level_uuid` remains candidate-only.

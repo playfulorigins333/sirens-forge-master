@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs'
 const oauth = readFileSync('lib/autopost/fanvueOAuth.ts', 'utf8')
 const availability = readFileSync('lib/autopost/platformAvailability.ts', 'utf8')
 const callback = readFileSync('app/api/autopost/connect/fanvue/callback/route.ts', 'utf8')
+const startRoute = readFileSync('app/api/autopost/connect/fanvue/start/route.ts', 'utf8')
+const adminWriteCreatorReconnectRoute = readFileSync('app/api/admin/autopost/fanvue/write-creator-reconnect/start/route.ts', 'utf8')
+const writeCreatorReconnectRouteHelper = readFileSync('lib/autopost/fanvueWriteCreatorReconnectRoute.ts', 'utf8')
 const tokenExchangeHelper = readFileSync('lib/autopost/fanvueOAuthTokenExchange.ts', 'utf8')
 const clientAuthHelper = readFileSync('lib/autopost/fanvueOAuthClientAuth.ts', 'utf8')
 const statusRoute = readFileSync('app/api/autopost/platforms/me/route.ts', 'utf8')
@@ -54,6 +57,22 @@ assert.doesNotMatch(oauth.match(/export const FANVUE_DEFAULT_REQUESTED_SCOPES[\s
 assert.match(oauth, /export function scopeList\(scopes: unknown\): string\[\]/, 'Fanvue OAuth must expose a safe local scope parser')
 assert.match(oauth, /export function hasFanvueScope\(scopes: unknown, scope: FanvueScope\): boolean/, 'Fanvue OAuth must expose safe local scope membership checks')
 assert.match(oauth, /export function hasFanvueWriteCreatorScope\(scopes: unknown\): boolean/, 'Fanvue OAuth must expose a safe write:creator scope check')
+assert.match(oauth, /FANVUE_CONNECT_OPERATION = \"fanvue_connect\"/, 'Fanvue OAuth state must support ordinary connect operation metadata')
+assert.match(oauth, /FANVUE_WRITE_CREATOR_RECONNECT_OPERATION = \"fanvue_write_creator_reconnect\"/, 'Fanvue OAuth state must support privileged write creator reconnect operation metadata')
+assert.match(oauth, /requested_scopes_hash/, 'Fanvue OAuth state must include requested scope integrity metadata')
+assert.match(oauth, /admin_reconnect_authorized/, 'Fanvue OAuth state must include an admin reconnect authorization marker')
+assert.match(startRoute, /hasFanvueWriteCreatorScope\(configStatus\.scopes\)/, 'Generic Fanvue start must block requested write:creator scopes')
+assert.match(startRoute, /FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_CODE/, 'Generic Fanvue start must use the required write creator admin-route safe code constant')
+assert.match(oauth, /FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_CODE = \"FANVUE_WRITE_CREATOR_RECONNECT_ADMIN_ROUTE_REQUIRED\"/, 'Fanvue OAuth must define the required write creator admin-route safe code')
+assert.match(startRoute, /FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_MESSAGE/, 'Generic Fanvue start must use the required safe message constant')
+assert.match(oauth, /Fanvue write:creator reconnect must be initiated through the admin-only reconnect route\./, 'Fanvue OAuth must define the required safe message')
+assert.match(adminWriteCreatorReconnectRoute, /export async function POST/, 'Privileged write creator reconnect start must be POST-only')
+assert.doesNotMatch(adminWriteCreatorReconnectRoute, /export async function GET/, 'Privileged write creator reconnect route must not expose GET')
+assert.match(writeCreatorReconnectRouteHelper, /FANVUE_WRITE_CREATOR_RECONNECT_CONFIRMATION = \"REQUEST_FANVUE_WRITE_CREATOR_RECONNECT_ONLY_NO_UPLOAD_NO_POST\"/, 'Privileged reconnect route must require the exact confirmation string')
+assert.match(writeCreatorReconnectRouteHelper, /will_upload: false/, 'Privileged reconnect preflight must declare no upload')
+assert.match(writeCreatorReconnectRouteHelper, /will_post: false/, 'Privileged reconnect preflight must declare no post')
+assert.match(writeCreatorReconnectRouteHelper, /will_dispatch: false/, 'Privileged reconnect preflight must declare no dispatch')
+assert.match(writeCreatorReconnectRouteHelper, /will_schedule: false/, 'Privileged reconnect preflight must declare no scheduling')
 
 const buildAuthorizeUrlSource = oauth.match(/export function buildFanvueAuthorizeUrl[\s\S]*?^}/m)?.[0] ?? ''
 assert.match(buildAuthorizeUrlSource, /searchParams\.set\("response_type", "code"\)/, 'Fanvue authorize URL must request authorization code flow')
@@ -77,6 +96,11 @@ assert.ok(requiredConnectionScopes.every((scope) => !['openid', 'offline_access'
 assert.ok(['read:self', 'read:media', 'write:media'].every((scope) => requiredConnectionScopes.includes(scope)), 'Fanvue callback still blocks when a required connection scope is missing')
 assert.match(callback, /const missingScopes = missingRequiredScopes\(scopes\)[\s\S]*?if \(missingScopes\.length > 0\)[\s\S]*?fanvue_oauth_missing_required_scopes/, 'Fanvue callback must keep rejecting missing required connection scopes')
 assert.match(callback, /const missingScopes = missingRequiredScopes\(scopes\)[\s\S]*?const identity = await fetchFanvueIdentity/s, 'Fanvue callback must validate required scopes before identity verification')
+assert.match(callback, /FANVUE_OAUTH_STATE_OPERATION_MISSING/, 'Fanvue callback must reject missing signed operation metadata')
+assert.match(callback, /FANVUE_OAUTH_STATE_OPERATION_INVALID/, 'Fanvue callback must reject invalid signed operation metadata')
+assert.match(callback, /FANVUE_WRITE_CREATOR_RECONNECT_STATE_INVALID/, 'Fanvue callback must reject invalid privileged reconnect state metadata')
+assert.match(callback, /FANVUE_WRITE_CREATOR_STATE_NOT_ADMIN_AUTHORIZED/, 'Fanvue callback must reject write:creator grants for ordinary connect state')
+assert.match(callback, /FANVUE_WRITE_CREATOR_EXPECTED_SCOPE_MISSING/, 'Fanvue callback must reject privileged reconnect missing expected write:creator scope')
 assert.match(callback, /const providerAccountId = getIdentityId\(identity\)[\s\S]*?if \(!providerAccountId\)[\s\S]*?fanvue_identity_unverified[\s\S]*?const encryptedAccessToken = encryptAutopostToken/s, 'Fanvue callback must not encrypt/store token material before required-scope and identity checks')
 assert.match(callback, /encryptAutopostToken\(tokenResponse\.access_token\)/, 'Fanvue access token must be encrypted before storage')
 assert.match(callback, /encrypted_refresh_token: encryptedRefreshToken/, 'Fanvue refresh token must use encrypted storage')
@@ -115,9 +139,11 @@ assert.match(refreshScopeNote, /does not initiate Fanvue reconnect/i, 'FV-40R do
 assert.match(refreshScopeNote, /does not prove that Fanvue will return a `refresh_token`/i, 'FV-40R docs must keep refresh-token issuance unproven')
 assert.match(refreshScopeNote, /does not approve live upload/i, 'FV-40R docs must not approve live upload')
 
-for (const source of [oauth, callback]) {
+for (const source of [oauth, callback, startRoute, adminWriteCreatorReconnectRoute, writeCreatorReconnectRouteHelper]) {
   assert.doesNotMatch(source, /\.env\.local|dotenv\/config|api\.fanvue\.com\/posts|\/media\/uploads|\/posts\//, 'OAuth source safety checks must not add env-local, upload, or posts behavior')
 }
-assert.doesNotMatch(oauth, /\/creators|createFanvueMediaPost|createFanvueTextPost|readFanvuePost|persistAutopostJobResult|calculateNextRunAtAfterPostedProof/, 'OAuth source must not add creator upload, posts, dispatch, or schedule-advance behavior')
+for (const source of [oauth, callback, startRoute, adminWriteCreatorReconnectRoute, writeCreatorReconnectRouteHelper]) {
+  assert.doesNotMatch(source, /\/creators|createFanvueMediaPost|createFanvueTextPost|readFanvuePost|persistAutopostJobResult|calculateNextRunAtAfterPostedProof/, 'Fanvue reconnect hardening source must not add creator upload, posts, dispatch, or schedule-advance behavior')
+}
 
 console.log('Fanvue OAuth source safety checks passed')

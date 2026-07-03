@@ -3,7 +3,10 @@ import { requireUserId } from "@/lib/supabaseServer"
 import {
   buildFanvueAuthorizeUrl,
   createFanvueOAuthState,
+  FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_CODE,
+  FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_MESSAGE,
   getFanvueOAuthConfigStatus,
+  hasFanvueWriteCreatorScope,
   setFanvueOAuthCookie,
 } from "@/lib/autopost/fanvueOAuth"
 
@@ -22,6 +25,12 @@ export async function GET(req: Request) {
   }
   if (!configStatus.configured) {
     return NextResponse.json({ error: configStatus.config_error ?? "FANVUE_OAUTH_CONFIG_INCOMPLETE" }, { status: 500 })
+  }
+  if (hasFanvueWriteCreatorScope(configStatus.scopes)) {
+    return NextResponse.json(
+      { error: FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_CODE, message: FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_MESSAGE },
+      { status: 403 },
+    )
   }
 
   try {
