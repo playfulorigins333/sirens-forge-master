@@ -172,3 +172,7 @@ FV-40T must not perform provider calls, token refresh, identity verification, up
 - No public selectability is approved by FV-40S.
 - No scheduling is approved by FV-40S.
 - Next action is manual reconnect only after human confirmation, then FV-40T preflight.
+
+## FV-40CY admin-only write:creator reconnect hardening note
+
+FV-40CY adds code-level hardening for future admin-only `write:creator` reconnect initiation, but it does not approve reconnect yet. It does not approve upload, post, dispatch, or scheduling. It does not prove `creatorUserUuid`; `top_level_uuid` remains candidate-only. Refresh-only diagnostic must not be the first verification after reconnect.

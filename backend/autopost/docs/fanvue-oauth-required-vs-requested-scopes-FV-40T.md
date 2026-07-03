@@ -53,3 +53,7 @@ FV-40T does not mark Fanvue upload-ready based on requested scopes. Upload readi
 ## Safety boundary
 
 FV-40T is a code/tests/docs gate only. It does not approve reconnect, OAuth-code use, live token exchange testing, provider identity calls, Fanvue API calls, media upload, `/posts`, dispatch wiring, public selectability, scheduling, Vercel env changes, local env changes, Supabase writes, SQL, or migrations.
+
+## FV-40CY admin-only write:creator reconnect hardening note
+
+`write:creator` remains approved/requestable but is not default and is not part of the base required connection scopes. Future `write:creator` reconnect initiation must use the admin-only hardening route; the generic Fanvue OAuth start route must refuse `write:creator`. This does not approve reconnect, upload, post, dispatch, scheduling, or `creatorUserUuid` proof.

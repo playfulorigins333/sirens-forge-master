@@ -45,6 +45,16 @@ export type FanvueScope = (typeof FANVUE_APPROVED_SCOPES)[number]
 
 export const FANVUE_DEFAULT_SCOPES = FANVUE_DEFAULT_REQUESTED_SCOPES.join(" ")
 
+export const FANVUE_CONNECT_OPERATION = "fanvue_connect" as const
+export const FANVUE_WRITE_CREATOR_RECONNECT_OPERATION = "fanvue_write_creator_reconnect" as const
+export const FANVUE_GENERIC_START_INITIATOR = "generic_fanvue_start" as const
+export const FANVUE_ADMIN_WRITE_CREATOR_RECONNECT_INITIATOR = "admin_write_creator_reconnect_start" as const
+export const FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_CODE = "FANVUE_WRITE_CREATOR_RECONNECT_ADMIN_ROUTE_REQUIRED" as const
+export const FANVUE_WRITE_CREATOR_ADMIN_ROUTE_REQUIRED_MESSAGE = "Fanvue write:creator reconnect must be initiated through the admin-only reconnect route." as const
+
+export type FanvueOAuthOperation = typeof FANVUE_CONNECT_OPERATION | typeof FANVUE_WRITE_CREATOR_RECONNECT_OPERATION
+export type FanvueOAuthInitiator = typeof FANVUE_GENERIC_START_INITIATOR | typeof FANVUE_ADMIN_WRITE_CREATOR_RECONNECT_INITIATOR
+
 export type FanvueOAuthCookiePayload = {
   provider: "fanvue"
   user_id: string
@@ -52,6 +62,11 @@ export type FanvueOAuthCookiePayload = {
   code_verifier: string
   created_at: string
   expires_at: string
+  operation: FanvueOAuthOperation
+  initiated_from: FanvueOAuthInitiator
+  requested_scopes_hash: string
+  requested_scopes_include_write_creator: boolean
+  admin_reconnect_authorized: boolean
 }
 
 export type FanvueOAuthConfigStatus = {
@@ -127,6 +142,14 @@ export function hasFanvueScope(scopes: unknown, scope: FanvueScope): boolean {
 
 export function hasFanvueWriteCreatorScope(scopes: unknown): boolean {
   return hasFanvueScope(scopes, "write:creator")
+}
+
+export function canonicalFanvueScopeString(scopes: unknown): string {
+  return Array.from(new Set(scopeList(scopes))).sort().join(" ")
+}
+
+export function hashFanvueScopes(scopes: unknown): string {
+  return sha256Base64Url(canonicalFanvueScopeString(scopes))
 }
 
 export function getFanvueRequestedScopes() {
@@ -218,11 +241,14 @@ export function verifySignedFanvueOAuthCookie(cookieValue: string) {
   return payload
 }
 
-export function createFanvueOAuthState(userId: string) {
+export function createFanvueOAuthState(userId: string, options?: { operation?: FanvueOAuthOperation; initiatedFrom?: FanvueOAuthInitiator; adminReconnectAuthorized?: boolean }) {
   const state = randomBase64Url(32)
   const codeVerifier = randomBase64Url(64)
   const now = new Date()
   const expiresAt = new Date(now.getTime() + FANVUE_OAUTH_EXPIRES_IN_SECONDS * 1000)
+  const requestedScopes = getFanvueRequestedScopes()
+  const operation = options?.operation ?? FANVUE_CONNECT_OPERATION
+  const initiatedFrom = options?.initiatedFrom ?? FANVUE_GENERIC_START_INITIATOR
   const payload: FanvueOAuthCookiePayload = {
     provider: "fanvue",
     user_id: userId,
@@ -230,6 +256,11 @@ export function createFanvueOAuthState(userId: string) {
     code_verifier: codeVerifier,
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
+    operation,
+    initiated_from: initiatedFrom,
+    requested_scopes_hash: hashFanvueScopes(requestedScopes),
+    requested_scopes_include_write_creator: hasFanvueWriteCreatorScope(requestedScopes),
+    admin_reconnect_authorized: options?.adminReconnectAuthorized === true,
   }
 
   return {

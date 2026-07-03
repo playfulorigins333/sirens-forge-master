@@ -210,3 +210,7 @@ rg -n "fanvue|validateFanvueScheduleAdvanceProof" app/api/autopost/run/route.ts 
 rg -n "FANVUE_CLIENT_SECRET=.+|FANVUE_CLIENT_ID=.+|fanvue_secret|real_fanvue|Bearer [A-Za-z0-9_-]{20,}" . --glob '!node_modules' --glob '!*.log' || true
 find supabase/migrations -type f | sort | tail -5
 ```
+
+## FV-40CY public exposure warning
+
+Fanvue remains internal/testing-only. FV-40CY does not approve reconnect, upload, post, dispatch, scheduling, public UI exposure, platform registry changes, launch-facing platform selection, or public platform lists. It does not prove `creatorUserUuid`; `top_level_uuid` remains candidate-only.

@@ -5,13 +5,18 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { encryptAutopostToken, getAutopostTokenKeyVersion } from "@/lib/autopost/tokenCrypto"
 import { buildFanvueTokenExchangeRequestInit } from "@/lib/autopost/fanvueOAuthTokenExchange"
 import {
+  FANVUE_ADMIN_WRITE_CREATOR_RECONNECT_INITIATOR,
+  FANVUE_CONNECT_OPERATION,
   FANVUE_REQUIRED_CONNECTION_SCOPES,
   FANVUE_OAUTH_COOKIE_NAME,
   clearFanvueOAuthCookie,
   getSafeFanvueRedirect,
+  hashFanvueScopes,
+  hasFanvueWriteCreatorScope,
   requireFanvueOAuthConfig,
   sha256Base64Url,
   verifySignedFanvueOAuthCookie,
+  FANVUE_WRITE_CREATOR_RECONNECT_OPERATION,
 } from "@/lib/autopost/fanvueOAuth"
 
 export const runtime = "nodejs"
@@ -54,6 +59,39 @@ function normalizeScopes(tokenResponse: FanvueTokenResponse, fallbackScopes: str
 function missingRequiredScopes(grantedScopes: string[]) {
   const granted = new Set(grantedScopes)
   return FANVUE_REQUIRED_CONNECTION_SCOPES.filter((scope) => !granted.has(scope))
+}
+
+function validateFanvueOAuthOperationState(input: { statePayload: ReturnType<typeof verifySignedFanvueOAuthCookie>; requestedScopes: string[] }) {
+  const { statePayload, requestedScopes } = input
+  if (!statePayload.operation) return "FANVUE_OAUTH_STATE_OPERATION_MISSING"
+  if (statePayload.operation !== FANVUE_CONNECT_OPERATION && statePayload.operation !== FANVUE_WRITE_CREATOR_RECONNECT_OPERATION) return "FANVUE_OAUTH_STATE_OPERATION_INVALID"
+  if (statePayload.requested_scopes_hash !== hashFanvueScopes(requestedScopes)) return "FANVUE_WRITE_CREATOR_RECONNECT_STATE_INVALID"
+
+  if (statePayload.operation === FANVUE_CONNECT_OPERATION) {
+    if (statePayload.initiated_from !== "generic_fanvue_start") return "FANVUE_OAUTH_STATE_OPERATION_INVALID"
+    if (statePayload.admin_reconnect_authorized) return "FANVUE_OAUTH_STATE_OPERATION_INVALID"
+    if (statePayload.requested_scopes_include_write_creator) return "FANVUE_WRITE_CREATOR_STATE_NOT_ADMIN_AUTHORIZED"
+    return null
+  }
+
+  if (
+    statePayload.initiated_from !== FANVUE_ADMIN_WRITE_CREATOR_RECONNECT_INITIATOR ||
+    statePayload.admin_reconnect_authorized !== true ||
+    statePayload.requested_scopes_include_write_creator !== true
+  ) {
+    return "FANVUE_WRITE_CREATOR_RECONNECT_STATE_INVALID"
+  }
+
+  return null
+}
+
+function redirectErrorForFanvueOAuthStateCode(code: string) {
+  if (code === "FANVUE_OAUTH_STATE_OPERATION_MISSING") return "fanvue_oauth_state_operation_missing"
+  if (code === "FANVUE_OAUTH_STATE_OPERATION_INVALID") return "fanvue_oauth_state_operation_invalid"
+  if (code === "FANVUE_WRITE_CREATOR_RECONNECT_STATE_INVALID") return "fanvue_write_creator_reconnect_state_invalid"
+  if (code === "FANVUE_WRITE_CREATOR_STATE_NOT_ADMIN_AUTHORIZED") return "fanvue_write_creator_state_not_admin_authorized"
+  if (code === "FANVUE_WRITE_CREATOR_EXPECTED_SCOPE_MISSING") return "fanvue_write_creator_expected_scope_missing"
+  return "fanvue_oauth_failed"
 }
 
 async function exchangeCodeForTokens(input: { code: string; codeVerifier: string }) {
@@ -119,7 +157,7 @@ export async function GET(req: Request) {
   if (!code || !returnedState) return redirectWithClearedCookie({ error: "fanvue_oauth_missing_code" })
 
   try {
-    requireFanvueOAuthConfig()
+    const config = requireFanvueOAuthConfig()
 
     const cookieStore = await cookies()
     const cookieValue = cookieStore.get(FANVUE_OAUTH_COOKIE_NAME)?.value
@@ -130,6 +168,8 @@ export async function GET(req: Request) {
     if (statePayload.state_hash !== sha256Base64Url(returnedState)) {
       return redirectWithClearedCookie({ error: "fanvue_oauth_state_mismatch" })
     }
+    const operationStateError = validateFanvueOAuthOperationState({ statePayload, requestedScopes: config.scopes })
+    if (operationStateError) return redirectWithClearedCookie({ error: redirectErrorForFanvueOAuthStateCode(operationStateError) })
 
     const { tokenResponse, requestedScopes, apiBaseUrl, apiVersion } = await exchangeCodeForTokens({
       code,
@@ -140,6 +180,13 @@ export async function GET(req: Request) {
     const missingScopes = missingRequiredScopes(scopes)
     if (missingScopes.length > 0) {
       return redirectWithClearedCookie({ error: "fanvue_oauth_missing_required_scopes" })
+    }
+    const grantedWriteCreator = hasFanvueWriteCreatorScope(scopes)
+    if (statePayload.operation === FANVUE_CONNECT_OPERATION && grantedWriteCreator) {
+      return redirectWithClearedCookie({ error: redirectErrorForFanvueOAuthStateCode("FANVUE_WRITE_CREATOR_STATE_NOT_ADMIN_AUTHORIZED") })
+    }
+    if (statePayload.operation === FANVUE_WRITE_CREATOR_RECONNECT_OPERATION && !grantedWriteCreator) {
+      return redirectWithClearedCookie({ error: redirectErrorForFanvueOAuthStateCode("FANVUE_WRITE_CREATOR_EXPECTED_SCOPE_MISSING") })
     }
 
     const identity = await fetchFanvueIdentity({
@@ -188,6 +235,8 @@ export async function GET(req: Request) {
             is_creator: identity?.isCreator ?? null,
             has_account: Boolean(identity?.account),
             has_creator: Boolean(identity?.creator),
+            oauth_operation: statePayload.operation,
+            scopes_include_write_creator: grantedWriteCreator,
           },
         },
         { onConflict: "user_id,platform" }
