@@ -23,7 +23,17 @@ assert.ok(approvedScopes.includes('offline_access'), 'Fanvue approved/default sc
 assert.ok(approvedScopes.includes('offline'), 'Fanvue approved/default scopes must include offline')
 assert.ok(approvedScopes.includes('read:media'), 'Fanvue approved/default scopes must preserve read:media')
 assert.ok(approvedScopes.includes('write:media'), 'Fanvue approved/default scopes must preserve write:media')
-assert.ok(!approvedScopes.includes('write:creator'), 'Fanvue approved/default scopes must not include write:creator')
+assert.ok(approvedScopes.includes('write:creator'), 'Fanvue approved scopes may include optional write:creator for explicit internal requests')
+const defaultRequestedScopesMatch = oauth.match(/export const FANVUE_DEFAULT_REQUESTED_SCOPES = \[([\s\S]*?)\] as const/)
+assert.ok(defaultRequestedScopesMatch, 'Fanvue default requested scopes must be declared separately from the approved/requestable allowlist')
+const defaultRequestedScopes = Array.from(defaultRequestedScopesMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1])
+assert.ok(defaultRequestedScopes.includes('openid'), 'Fanvue default requested scopes must include openid')
+assert.ok(defaultRequestedScopes.includes('offline_access'), 'Fanvue default requested scopes must include offline_access for refresh-token issuance')
+assert.ok(defaultRequestedScopes.includes('offline'), 'Fanvue default requested scopes must include offline')
+assert.ok(defaultRequestedScopes.includes('read:self'), 'Fanvue default requested scopes must preserve read:self')
+assert.ok(defaultRequestedScopes.includes('read:media'), 'Fanvue default requested scopes must preserve read:media')
+assert.ok(defaultRequestedScopes.includes('write:media'), 'Fanvue default requested scopes must preserve write:media')
+assert.ok(!defaultRequestedScopes.includes('write:creator'), 'Fanvue default requested scopes must not include write:creator')
 const requiredScopesMatch = oauth.match(/export const FANVUE_REQUIRED_CONNECTION_SCOPES = \[([\s\S]*?)\] as const/)
 assert.ok(requiredScopesMatch, 'Fanvue required connection scopes must be declared separately from approved/requestable scopes')
 const requiredConnectionScopes = Array.from(requiredScopesMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1])
@@ -35,7 +45,15 @@ assert.ok(!requiredConnectionScopes.includes('offline_access'), 'Fanvue required
 assert.ok(!requiredConnectionScopes.includes('offline'), 'Fanvue required connection scopes must not require offline echo')
 assert.ok(!requiredConnectionScopes.includes('write:creator'), 'Fanvue required connection scopes must not include write:creator')
 assert.ok(requiredConnectionScopes.length < approvedScopes.length, 'Fanvue required connection scopes must be smaller than the requestable allowlist')
-assert.match(oauth, /export const FANVUE_DEFAULT_SCOPES = FANVUE_APPROVED_SCOPES\.join\(" "\)/, 'Fanvue default scopes must derive from the approved allowlist')
+const optionalCreatorScopesMatch = oauth.match(/export const FANVUE_OPTIONAL_CREATOR_UPLOAD_SCOPES = \[([\s\S]*?)\] as const/)
+assert.ok(optionalCreatorScopesMatch, 'Fanvue optional creator upload scopes must be declared separately')
+const optionalCreatorScopes = Array.from(optionalCreatorScopesMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1])
+assert.deepEqual(optionalCreatorScopes, ['write:creator'], 'Fanvue optional creator upload scopes must contain only write:creator')
+assert.match(oauth, /export const FANVUE_DEFAULT_SCOPES = FANVUE_DEFAULT_REQUESTED_SCOPES\.join\(" "\)/, 'Fanvue default scopes must derive from default requested scopes, not the approved allowlist')
+assert.doesNotMatch(oauth.match(/export const FANVUE_DEFAULT_REQUESTED_SCOPES[\s\S]*?\] as const/)?.[0] ?? '', /write:creator/, 'write:creator must not appear in the default requested scope pathway')
+assert.match(oauth, /export function scopeList\(scopes: unknown\): string\[\]/, 'Fanvue OAuth must expose a safe local scope parser')
+assert.match(oauth, /export function hasFanvueScope\(scopes: unknown, scope: FanvueScope\): boolean/, 'Fanvue OAuth must expose safe local scope membership checks')
+assert.match(oauth, /export function hasFanvueWriteCreatorScope\(scopes: unknown\): boolean/, 'Fanvue OAuth must expose a safe write:creator scope check')
 
 const buildAuthorizeUrlSource = oauth.match(/export function buildFanvueAuthorizeUrl[\s\S]*?^}/m)?.[0] ?? ''
 assert.match(buildAuthorizeUrlSource, /searchParams\.set\("response_type", "code"\)/, 'Fanvue authorize URL must request authorization code flow')
@@ -47,7 +65,9 @@ assert.match(buildAuthorizeUrlSource, /searchParams\.set\("code_challenge", inpu
 assert.match(buildAuthorizeUrlSource, /searchParams\.set\("code_challenge_method", "S256"\)/, 'Fanvue authorize URL must include PKCE S256 method')
 assert.doesNotMatch(buildAuthorizeUrlSource, /prompt|access_type/, 'Fanvue authorize URL must not invent prompt=consent or access_type=offline params')
 assert.doesNotMatch(buildAuthorizeUrlSource, /clientSecret|FANVUE_CLIENT_SECRET/, 'Fanvue authorize URL must not leak client secrets')
-assert.doesNotMatch(oauth, /write:creator/, 'Fanvue text-only readiness must not add write:creator scope')
+assert.match(oauth, /FANVUE_OAUTH_SCOPES[\s\S]*FANVUE_DEFAULT_SCOPES/, 'Fanvue OAuth scopes must still use explicit env override or safe defaults')
+assert.match(oauth, /const approved = new Set<string>\(FANVUE_APPROVED_SCOPES\)/, 'Fanvue OAuth must validate explicit scopes against the approved/requestable allowlist')
+assert.match(oauth, /const disallowed = unique\.filter\(\(scope\) => !approved\.has\(scope\)\)/, 'Fanvue OAuth must fail closed on unknown scopes')
 
 const missingRequiredScopesSource = callback.match(/function missingRequiredScopes[\s\S]*?^}/m)?.[0] ?? ''
 assert.match(callback, /FANVUE_REQUIRED_CONNECTION_SCOPES/, 'Fanvue callback must import/use required connection scopes')
@@ -98,5 +118,6 @@ assert.match(refreshScopeNote, /does not approve live upload/i, 'FV-40R docs mus
 for (const source of [oauth, callback]) {
   assert.doesNotMatch(source, /\.env\.local|dotenv\/config|api\.fanvue\.com\/posts|\/media\/uploads|\/posts\//, 'OAuth source safety checks must not add env-local, upload, or posts behavior')
 }
+assert.doesNotMatch(oauth, /\/creators|createFanvueMediaPost|createFanvueTextPost|readFanvuePost|persistAutopostJobResult|calculateNextRunAtAfterPostedProof/, 'OAuth source must not add creator upload, posts, dispatch, or schedule-advance behavior')
 
 console.log('Fanvue OAuth source safety checks passed')

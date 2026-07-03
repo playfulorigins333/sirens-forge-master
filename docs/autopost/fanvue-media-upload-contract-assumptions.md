@@ -27,7 +27,9 @@ That fallback behavior is an unsafe/unverified live-upload assumption and must n
 
 ## Scope note
 
-Current repository code does not require `write:creator` for the upload-only scaffold. Do not add `write:creator` to default scopes unless an official Fanvue contract in the repo proves it is required.
+Current repository code does not require `write:creator` for the upload-only scaffold. `write:creator` may be treated as an explicitly approved/requestable optional scope for internal creator-scoped planning, but it must not be part of default requested scopes or base required connection scopes unless a later gate explicitly approves that change.
+
+Requesting `write:creator` through explicit OAuth scope configuration does not approve upload, signed URL acquisition, byte upload, media finalize/readiness polling, post creation, dispatch, scheduling, public platform selectability, or public Fanvue UI exposure. Fanvue remains internal/testing-only.
 
 ## FV-40AH signed-part URL response shape
 
