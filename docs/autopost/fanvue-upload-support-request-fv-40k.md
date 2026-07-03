@@ -130,6 +130,7 @@ The copy/paste support message above includes these exact question categories:
 ## Safe status
 
 - Fanvue native upload remains blocked.
+- Optional `write:creator` requestability, if configured in a later internal OAuth scope gate, is broader access only; it does not approve upload, signed URL acquisition, byte upload, finalize/readiness polling, post creation, dispatch, scheduling, public platform selectability, or public Fanvue UI exposure.
 - No future live upload is approved by this document.
 - No public user impact.
 - No dispatch/posting integration.

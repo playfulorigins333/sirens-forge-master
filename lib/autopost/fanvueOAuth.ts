@@ -16,6 +16,19 @@ export const FANVUE_APPROVED_SCOPES = [
   "write:post",
   "read:media",
   "write:media",
+  "write:creator",
+] as const
+
+export const FANVUE_DEFAULT_REQUESTED_SCOPES = [
+  "openid",
+  "offline_access",
+  "offline",
+  "read:self",
+  "read:creator",
+  "read:post",
+  "write:post",
+  "read:media",
+  "write:media",
 ] as const
 
 export const FANVUE_REQUIRED_CONNECTION_SCOPES = [
@@ -24,7 +37,13 @@ export const FANVUE_REQUIRED_CONNECTION_SCOPES = [
   "write:media",
 ] as const
 
-export const FANVUE_DEFAULT_SCOPES = FANVUE_APPROVED_SCOPES.join(" ")
+export const FANVUE_OPTIONAL_CREATOR_UPLOAD_SCOPES = [
+  "write:creator",
+] as const
+
+export type FanvueScope = (typeof FANVUE_APPROVED_SCOPES)[number]
+
+export const FANVUE_DEFAULT_SCOPES = FANVUE_DEFAULT_REQUESTED_SCOPES.join(" ")
 
 export type FanvueOAuthCookiePayload = {
   provider: "fanvue"
@@ -86,11 +105,32 @@ export function isFanvueConnectEnabled() {
   return env("FANVUE_CONNECT_ENABLED") === "true"
 }
 
+export function scopeList(scopes: unknown): string[] {
+  if (Array.isArray(scopes)) {
+    return scopes
+      .filter((scope): scope is string => typeof scope === "string")
+      .map((scope) => scope.trim())
+      .filter(Boolean)
+  }
+  if (typeof scopes === "string") {
+    return scopes
+      .split(/\s+/)
+      .map((scope) => scope.trim())
+      .filter(Boolean)
+  }
+  return []
+}
+
+export function hasFanvueScope(scopes: unknown, scope: FanvueScope): boolean {
+  return scopeList(scopes).includes(scope)
+}
+
+export function hasFanvueWriteCreatorScope(scopes: unknown): boolean {
+  return hasFanvueScope(scopes, "write:creator")
+}
+
 export function getFanvueRequestedScopes() {
-  const requested = (env("FANVUE_OAUTH_SCOPES") || FANVUE_DEFAULT_SCOPES)
-    .split(/\s+/)
-    .map((scope) => scope.trim())
-    .filter(Boolean)
+  const requested = scopeList(env("FANVUE_OAUTH_SCOPES") || FANVUE_DEFAULT_SCOPES)
 
   const approved = new Set<string>(FANVUE_APPROVED_SCOPES)
   const unique = Array.from(new Set(requested))

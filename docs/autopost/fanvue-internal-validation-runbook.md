@@ -98,6 +98,24 @@ The following are explicitly out of scope and not enabled:
 - No fake `platform_post_id`
 - No treating create response as posted proof
 
+## 8A. Optional `write:creator` scope posture
+
+`write:creator` is broader Fanvue access. It is optional, internal-only, and may be requested only through explicit approved OAuth scope configuration.
+
+Requesting or storing `write:creator` does not approve:
+
+- media upload
+- signed upload URL acquisition
+- byte upload
+- media finalize or readiness polling
+- post creation
+- dispatch
+- scheduling
+- public platform selectability
+- public Fanvue UI exposure
+
+Fanvue remains internal/testing-only. Existing connected accounts without `write:creator` remain valid for base internal validation, but any future creator-scoped upload diagnostic must block safely before provider calls if `write:creator` is absent.
+
 ## 9. Known issues / deferred
 
 - Fanvue validation drafts may still show an Approve button in My Rules.
