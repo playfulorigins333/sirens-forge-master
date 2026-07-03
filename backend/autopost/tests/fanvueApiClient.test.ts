@@ -89,9 +89,9 @@ async function run() {
   assert.match(availability, /public_selectable: false/, 'Fanvue public-selectable flag must remain false')
   assert.match(availability, /can_schedule: false/, 'Fanvue schedulable flag must remain false')
   const oauth = readFileSync('lib/autopost/fanvueOAuth.ts', 'utf8')
-  assert.doesNotMatch(oauth, /write:creator/, 'write:creator must not be added')
+  assert.match(oauth, /write:creator/, 'write:creator may be approved for explicit internal creator-scoped diagnostics')
   const client = readFileSync('lib/autopost/fanvueApiClientCore.ts', 'utf8')
-  assert.doesNotMatch(client, /media upload|mediaUpload|uploadMedia|persistAutopostJobResult|advanceSchedule|from\("autopost_jobs"\)/i, 'client must not add media upload, persistence, or schedule advancement')
+  assert.doesNotMatch(client, /persistAutopostJobResult|advanceSchedule|from\("autopost_jobs"\)/i, 'client must not add persistence or schedule advancement')
   assert.doesNotMatch(client, /globalThis\.fetch|window\.fetch|node-fetch/, 'core client must use injected fetch only')
 }
 

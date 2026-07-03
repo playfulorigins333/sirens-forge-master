@@ -316,11 +316,37 @@ export async function createFanvueUploadSession(config: FanvueApiClientConfig, i
   return { ok: true, ...session }
 }
 
+export async function createFanvueCreatorUploadSession(config: FanvueApiClientConfig, input: FanvueCreateUploadSessionInput & { creatorUserUuid: string }): Promise<FanvueUploadSessionResult> {
+  const creatorUserUuid = clean(input.creatorUserUuid)
+  if (!creatorUserUuid || !isUuid(creatorUserUuid)) return failure("FAILED", null, "FANVUE_CREATOR_USER_UUID_REQUIRED", "Fanvue creator user UUID is required.")
+  const name = clean(input.name)
+  const filename = clean(input.filename)
+  if (!name) return failure("FAILED", null, "FANVUE_UPLOAD_NAME_REQUIRED", "Fanvue upload name is required.")
+  if (!filename) return failure("FAILED", null, "FANVUE_UPLOAD_FILENAME_REQUIRED", "Fanvue upload filename is required.")
+  if (input.mediaType !== "image" && input.mediaType !== "video") return failure("FAILED", null, "FANVUE_UPLOAD_MEDIA_TYPE_UNSUPPORTED", "Fanvue mocked scaffold only accepts image or video media types.")
+  const requested = await requestJson(config, "POST", `/creators/${encodeURIComponent(creatorUserUuid)}/media/uploads`, { name, filename, mediaType: input.mediaType })
+  if (!requested.ok) return requested.failure
+  const session = parseUploadSession(requested.data)
+  if (!session) return failure("MALFORMED_JSON", requested.response.status, "FANVUE_UPLOAD_SESSION_MALFORMED", "Fanvue upload session response was missing mediaUuid or uploadId.")
+  return { ok: true, ...session }
+}
+
 export async function getFanvueUploadPartUrl(config: FanvueApiClientConfig, input: { uploadId: string; partNumber: number }): Promise<FanvueSignedUrlResult> {
   const uploadId = clean(input.uploadId)
   if (!uploadId) return failure("FAILED", null, "FANVUE_UPLOAD_ID_REQUIRED", "Fanvue uploadId is required.")
   if (!Number.isInteger(input.partNumber) || input.partNumber < 1) return failure("FAILED", null, "FANVUE_UPLOAD_PART_NUMBER_INVALID", "Fanvue upload part number must be a positive integer.")
   const requested = await requestSignedUrl(config, `/media/uploads/${encodeURIComponent(uploadId)}/parts/${input.partNumber}/url`)
+  if (!requested.ok) return requested.failure
+  return { ok: true, signed_url: requested.signedUrl, persisted: false }
+}
+
+export async function getFanvueCreatorUploadPartUrl(config: FanvueApiClientConfig, input: { creatorUserUuid: string; uploadId: string; partNumber: number }): Promise<FanvueSignedUrlResult> {
+  const creatorUserUuid = clean(input.creatorUserUuid)
+  if (!creatorUserUuid || !isUuid(creatorUserUuid)) return failure("FAILED", null, "FANVUE_CREATOR_USER_UUID_REQUIRED", "Fanvue creator user UUID is required.")
+  const uploadId = clean(input.uploadId)
+  if (!uploadId) return failure("FAILED", null, "FANVUE_UPLOAD_ID_REQUIRED", "Fanvue uploadId is required.")
+  if (!Number.isInteger(input.partNumber) || input.partNumber < 1) return failure("FAILED", null, "FANVUE_UPLOAD_PART_NUMBER_INVALID", "Fanvue upload part number must be a positive integer.")
+  const requested = await requestSignedUrl(config, `/creators/${encodeURIComponent(creatorUserUuid)}/media/uploads/${encodeURIComponent(uploadId)}/parts/${input.partNumber}/url`)
   if (!requested.ok) return requested.failure
   return { ok: true, signed_url: requested.signedUrl, persisted: false }
 }
