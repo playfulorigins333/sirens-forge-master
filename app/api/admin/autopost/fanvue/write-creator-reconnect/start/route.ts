@@ -32,5 +32,7 @@ export async function POST(req: Request) {
     return redirect
   }
 
-  return NextResponse.json(response.body, { status: response.status })
+  const json = NextResponse.json(response.body, { status: response.status })
+  if (response.type === "json_redirect") setFanvueOAuthCookie(json, response.cookieValue)
+  return json
 }

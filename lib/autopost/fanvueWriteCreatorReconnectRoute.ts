@@ -8,6 +8,9 @@ export const FANVUE_WRITE_CREATOR_RECONNECT_CONFIRMATION = "REQUEST_FANVUE_WRITE
 export const FANVUE_WRITE_CREATOR_RECONNECT_OPERATION = "fanvue_write_creator_reconnect" as const
 export const FANVUE_ADMIN_WRITE_CREATOR_RECONNECT_INITIATOR = "admin_write_creator_reconnect_start" as const
 export const FANVUE_WRITE_CREATOR_SCOPE = "write:creator" as const
+export const FANVUE_WRITE_CREATOR_RECONNECT_JSON_REDIRECT_MODE = "json_redirect" as const
+export const FANVUE_WRITE_CREATOR_RECONNECT_REDIRECT_TYPE = "fanvue_write_creator_reconnect_redirect" as const
+export const FANVUE_WRITE_CREATOR_RECONNECT_NEXT_STEP = "window.location.assign(redirect_url)" as const
 
 export type FanvueWriteCreatorReconnectConfigStatus = {
   connect_enabled: boolean
@@ -35,6 +38,12 @@ export type FanvueWriteCreatorReconnectSafeResponse = {
   will_schedule: false
 }
 
+export type FanvueWriteCreatorReconnectJsonRedirectResponse = FanvueWriteCreatorReconnectSafeResponse & {
+  type: typeof FANVUE_WRITE_CREATOR_RECONNECT_REDIRECT_TYPE
+  redirect_url: string
+  next_step: typeof FANVUE_WRITE_CREATOR_RECONNECT_NEXT_STEP
+}
+
 type RouteErrorCode =
   | FanvueWriteCreatorReconnectAuthErrorCode
   | "FANVUE_WRITE_CREATOR_RECONNECT_OPERATION_INVALID"
@@ -45,6 +54,7 @@ type RouteErrorCode =
 
 export type FanvueWriteCreatorReconnectRouteResponse =
   | { type: "json"; status: number; body: FanvueWriteCreatorReconnectSafeResponse }
+  | { type: "json_redirect"; status: 200; body: FanvueWriteCreatorReconnectJsonRedirectResponse; cookieValue: string }
   | { type: "redirect"; status: 302; redirectUrl: URL; cookieValue: string }
 
 export type FanvueWriteCreatorReconnectRouteDependencies = {
@@ -64,6 +74,7 @@ type RequestBody = {
   operation?: unknown
   confirm?: unknown
   start?: unknown
+  response_mode?: unknown
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -151,5 +162,20 @@ export async function handleFanvueWriteCreatorReconnectRoute(
     adminReconnectAuthorized: true,
   })
   const redirectUrl = dependencies.buildAuthorizeUrl({ state: oauthState.state, codeChallenge: oauthState.codeChallenge })
+
+  if (body.response_mode === FANVUE_WRITE_CREATOR_RECONNECT_JSON_REDIRECT_MODE) {
+    return {
+      type: "json_redirect",
+      status: 200,
+      cookieValue: oauthState.cookieValue,
+      body: {
+        ...preflight,
+        type: FANVUE_WRITE_CREATOR_RECONNECT_REDIRECT_TYPE,
+        redirect_url: redirectUrl.toString(),
+        next_step: FANVUE_WRITE_CREATOR_RECONNECT_NEXT_STEP,
+      },
+    }
+  }
+
   return { type: "redirect", status: 302, redirectUrl, cookieValue: oauthState.cookieValue }
 }
