@@ -12,6 +12,7 @@ const clientAuthHelper = readFileSync('lib/autopost/fanvueOAuthClientAuth.ts', '
 const statusRoute = readFileSync('app/api/autopost/platforms/me/route.ts', 'utf8')
 const envExample = readFileSync('.env.example', 'utf8')
 const refreshScopeNote = readFileSync('backend/autopost/docs/fanvue-oauth-refresh-scopes-FV-40R.md', 'utf8')
+const reconnectStartRunbook = readFileSync('backend/autopost/docs/fanvue-write-creator-reconnect-start-FV-40DB.md', 'utf8')
 
 assert.match(oauth, /FANVUE_CONNECT_ENABLED"\) === "true"/, 'Fanvue connect must default off unless exactly true')
 assert.match(oauth, /provider: "fanvue"/, 'Fanvue OAuth state must bind provider')
@@ -73,6 +74,10 @@ assert.match(writeCreatorReconnectRouteHelper, /will_upload: false/, 'Privileged
 assert.match(writeCreatorReconnectRouteHelper, /will_post: false/, 'Privileged reconnect preflight must declare no post')
 assert.match(writeCreatorReconnectRouteHelper, /will_dispatch: false/, 'Privileged reconnect preflight must declare no dispatch')
 assert.match(writeCreatorReconnectRouteHelper, /will_schedule: false/, 'Privileged reconnect preflight must declare no scheduling')
+assert.match(writeCreatorReconnectRouteHelper, /FANVUE_WRITE_CREATOR_RECONNECT_JSON_REDIRECT_MODE = "json_redirect"/, 'Privileged reconnect route must expose explicit browser-safe json redirect mode')
+assert.match(writeCreatorReconnectRouteHelper, /FANVUE_WRITE_CREATOR_RECONNECT_REDIRECT_TYPE = "fanvue_write_creator_reconnect_redirect"/, 'Privileged reconnect route must classify json redirect responses safely')
+assert.match(writeCreatorReconnectRouteHelper, /next_step: FANVUE_WRITE_CREATOR_RECONNECT_NEXT_STEP/, 'Privileged reconnect json mode must return a safe manual navigation instruction')
+assert.match(adminWriteCreatorReconnectRoute, /response\.type === "json_redirect"[\s\S]*setFanvueOAuthCookie\(json, response\.cookieValue\)/, 'Privileged reconnect json redirect responses must set the existing OAuth cookie')
 
 const buildAuthorizeUrlSource = oauth.match(/export function buildFanvueAuthorizeUrl[\s\S]*?^}/m)?.[0] ?? ''
 assert.match(buildAuthorizeUrlSource, /searchParams\.set\("response_type", "code"\)/, 'Fanvue authorize URL must request authorization code flow')
@@ -138,6 +143,15 @@ assert.match(envExample, /FANVUE_CLIENT_SECRET=\n/, 'Fanvue client secret placeh
 assert.match(refreshScopeNote, /does not initiate Fanvue reconnect/i, 'FV-40R docs must not approve reconnect')
 assert.match(refreshScopeNote, /does not prove that Fanvue will return a `refresh_token`/i, 'FV-40R docs must keep refresh-token issuance unproven')
 assert.match(refreshScopeNote, /does not approve live upload/i, 'FV-40R docs must not approve live upload')
+assert.match(reconnectStartRunbook, /response_mode:\s*\"json_redirect\"/, 'FV-40DB runbook must require json_redirect start mode')
+assert.match(reconnectStartRunbook, /Do not use fetch-followed redirects for OAuth consent/i, 'FV-40DB runbook must forbid fetch-followed redirects for consent')
+assert.match(reconnectStartRunbook, /Do not run start:true more than once/i, 'FV-40DB runbook must forbid repeated start execution')
+assert.match(reconnectStartRunbook, /do not paste the secret into chat/i, 'FV-40DB runbook must protect the reconnect secret')
+assert.match(reconnectStartRunbook, /First verification after reconnect must be row-only\/preflight-only/i, 'FV-40DB runbook must require row-only first verification')
+assert.match(reconnectStartRunbook, /Reconnect does not prove `creatorUserUuid`/i, 'FV-40DB runbook must preserve creatorUserUuid boundary')
+assert.match(reconnectStartRunbook, /Upload diagnostic remains blocked/i, 'FV-40DB runbook must keep upload diagnostic blocked')
+assert.match(reconnectStartRunbook, /\/creators` live remains blocked/i, 'FV-40DB runbook must keep creators live blocked')
+assert.match(reconnectStartRunbook, /\/posts` remains blocked/i, 'FV-40DB runbook must keep posts blocked')
 
 for (const source of [oauth, callback, startRoute, adminWriteCreatorReconnectRoute, writeCreatorReconnectRouteHelper]) {
   assert.doesNotMatch(source, /\.env\.local|dotenv\/config|api\.fanvue\.com\/posts|\/media\/uploads|\/posts\//, 'OAuth source safety checks must not add env-local, upload, or posts behavior')
