@@ -59,6 +59,13 @@ Do not include caller-supplied `creatorUserUuid`, post fields, captions, audienc
 
 The route returns booleans and classifications only. Provider status class may be returned. Sensitive material must never be returned or logged.
 
+
+## FV-40DJ preflight-only mode
+
+FV-40DJ adds a preflight-only mode to the same admin route. Use `preflight: true` with confirmation `PREFLIGHT_FANVUE_UPLOAD_DIAGNOSTIC_ONLY_NO_PROVIDER_CALL_NO_UPLOAD_NO_POST` to validate env/auth/body and stored account readiness before any live upload diagnostic is separately approved.
+
+Preflight does not call Fanvue, decrypt tokens, upload, request signed upload URLs, finalize media, poll readiness, post, dispatch, schedule, expose Fanvue publicly, or touch `platformRegistry`. A green preflight is not live upload approval. The live upload diagnostic still requires a separate gate. `/posts` remains blocked.
+
 ## STOP
 
 Do not run this route live from an implementation PR. Do not call Fanvue from Codex. Do not upload, post, dispatch, schedule, reconnect, revoke, change envs, change Supabase, run SQL, or expose Fanvue publicly.
