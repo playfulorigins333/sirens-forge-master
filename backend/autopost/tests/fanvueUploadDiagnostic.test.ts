@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { runFanvueUploadDiagnostic, type FanvueUploadDiagnosticAccount } from '../../../lib/autopost/fanvueUploadDiagnostic'
+import { runFanvueUploadDiagnostic, runFanvueUploadDiagnosticPreflight, type FanvueUploadDiagnosticAccount } from '../../../lib/autopost/fanvueUploadDiagnostic'
 import type { FanvueFetchResponse } from '../../../lib/autopost/fanvueApiClientCore'
 
 const userId = '123e4567-e89b-42d3-a456-426614174000'
@@ -78,6 +78,39 @@ function assertBoundaries(value: any) {
 }
 
 async function run() {
+
+  const preflightMissing = await runFanvueUploadDiagnosticPreflight({ userId }, { loadAccount: async () => null, now: () => new Date('2026-07-03T00:00:00.000Z') })
+  assert.equal(preflightMissing.safe_code, 'FANVUE_UPLOAD_PREFLIGHT_ACCOUNT_NOT_FOUND')
+  assert.equal(preflightMissing.will_call_fanvue, false)
+  assert.equal(preflightMissing.will_decrypt_access_token, false)
+  assert.equal(preflightMissing.will_create_upload_session, false)
+  assert.equal(preflightMissing.will_request_signed_upload_url, false)
+  assert.equal(preflightMissing.will_upload_bytes, false)
+  assert.equal(preflightMissing.will_finalize_media, false)
+  assert.equal(preflightMissing.will_poll_media_readiness, false)
+  assert.equal(preflightMissing.will_post, false)
+  assert.equal(preflightMissing.will_dispatch, false)
+  assert.equal(preflightMissing.will_schedule, false)
+
+  const preflightMissingScope = await runFanvueUploadDiagnosticPreflight({ userId }, { loadAccount: async () => ({ ...baseAccount, scopes: ['read:media', 'write:media'] }), now: () => new Date('2026-07-03T00:00:00.000Z') })
+  assert.equal(preflightMissingScope.ready_for_live_upload_diagnostic_gate, false)
+  assert.match(preflightMissingScope.blockers.join('|'), /write:creator scope missing/)
+
+  const preflightExpired = await runFanvueUploadDiagnosticPreflight({ userId }, { loadAccount: async () => ({ ...baseAccount, token_expires_at: '2020-01-01T00:00:00.000Z' }), now: () => new Date('2026-07-03T00:00:00.000Z') })
+  assert.equal(preflightExpired.token_freshness, 'stale_or_expired')
+  assert.match(preflightExpired.blockers.join('|'), /access token freshness invalid/)
+
+  const preflightReady = await runFanvueUploadDiagnosticPreflight({ userId }, { loadAccount: async () => ({ ...baseAccount, provider_username: 'provider-username-never-returned', encrypted_refresh_token: 'encrypted-refresh-never-returned', metadata: { provider: 'fanvue', identity_fetched: true, isCreator: true, raw: 'raw-never-returned' } }), now: () => new Date('2026-07-03T00:00:00.000Z') })
+  assert.equal(preflightReady.ok, true)
+  assert.equal(preflightReady.gate, 'FV-40DJ')
+  assert.equal(preflightReady.ready_for_live_upload_diagnostic_gate, true)
+  assert.equal(preflightReady.provider_account_id_present, true)
+  assert.equal(preflightReady.provider_username_present, true)
+  assert.equal(preflightReady.encrypted_access_token_present, true)
+  assert.equal(preflightReady.encrypted_refresh_token_present, true)
+  assert.equal(preflightReady.token_freshness, 'fresh')
+  assertNoSensitiveLeak(preflightReady)
+
   const missing = await exercise({ account: null })
   assert.equal(missing.result.safe_code, 'FANVUE_UPLOAD_ACCOUNT_NOT_FOUND')
   assert.equal(missing.identityCalls.length, 0)

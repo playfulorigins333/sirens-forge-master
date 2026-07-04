@@ -15,6 +15,9 @@ export const FANVUE_UPLOAD_DIAGNOSTIC_GATE = "FV-40DG" as const
 export const FANVUE_UPLOAD_DIAGNOSTIC_MODE = "fanvue_creator_scoped_upload_diagnostic_no_post" as const
 export const FANVUE_UPLOAD_DIAGNOSTIC_OPERATION = "fanvue_creator_scoped_upload_diagnostic_no_post" as const
 export const FANVUE_UPLOAD_DIAGNOSTIC_CONFIRMATION = "RUN_FANVUE_CREATOR_SCOPED_UPLOAD_DIAGNOSTIC_ONLY_NO_POST_NO_DISPATCH_NO_SCHEDULE_NO_PUBLIC_EXPOSURE" as const
+export const FANVUE_UPLOAD_DIAGNOSTIC_PREFLIGHT_CONFIRMATION = "PREFLIGHT_FANVUE_UPLOAD_DIAGNOSTIC_ONLY_NO_PROVIDER_CALL_NO_UPLOAD_NO_POST" as const
+export const FANVUE_UPLOAD_DIAGNOSTIC_PREFLIGHT_GATE = "FV-40DJ" as const
+export const FANVUE_UPLOAD_DIAGNOSTIC_PREFLIGHT_MODE = "fanvue_upload_diagnostic_preflight_only" as const
 export const FANVUE_UPLOAD_DIAGNOSTIC_FILENAME = "fanvue-upload-diagnostic-1x1.png" as const
 export const FANVUE_UPLOAD_DIAGNOSTIC_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", "base64")
 
@@ -23,8 +26,10 @@ export type FanvueUploadDiagnosticAccount = {
   platform: string
   connection_status?: string | null
   provider_account_id?: string | null
+  provider_username?: string | null
   scopes?: string[] | string | null
   encrypted_access_token?: string | null
+  encrypted_refresh_token?: string | null
   token_expires_at?: string | null
   token_type?: string | null
   token_key_version?: number | null
@@ -47,6 +52,43 @@ export type FanvueUploadDiagnosticDependencies = {
 }
 
 export type FanvueUploadDiagnosticInput = { userId: string }
+
+
+export type FanvueUploadDiagnosticPreflightResult = {
+  ok: boolean
+  gate: typeof FANVUE_UPLOAD_DIAGNOSTIC_PREFLIGHT_GATE
+  mode: typeof FANVUE_UPLOAD_DIAGNOSTIC_PREFLIGHT_MODE
+  operation: typeof FANVUE_UPLOAD_DIAGNOSTIC_OPERATION
+  account_row_present: boolean
+  connection_status_connected: boolean
+  provider_account_id_present: boolean
+  provider_username_present: boolean
+  encrypted_access_token_present: boolean
+  encrypted_refresh_token_present: boolean
+  token_expires_at_present: boolean
+  token_freshness: "fresh" | "stale_or_expired" | "missing" | "invalid" | "unknown"
+  metadata_provider_is_fanvue: boolean
+  metadata_identity_fetched: boolean
+  metadata_is_creator_true: boolean
+  scopes_include_read_media: boolean
+  scopes_include_write_media: boolean
+  scopes_include_write_creator: boolean
+  ready_for_live_upload_diagnostic_gate: boolean
+  will_call_fanvue: false
+  will_decrypt_access_token: false
+  will_create_upload_session: false
+  will_request_signed_upload_url: false
+  will_upload_bytes: false
+  will_finalize_media: false
+  will_poll_media_readiness: false
+  will_post: false
+  will_dispatch: false
+  will_schedule: false
+  public_exposure_attempted: false
+  platform_registry_changed: false
+  safe_code: string | null
+  blockers: string[]
+}
 
 export type FanvueUploadDiagnosticResult = {
   ok: boolean
@@ -154,6 +196,105 @@ function tokenFresh(account: FanvueUploadDiagnosticAccount, now: Date) {
   if (!account.token_expires_at) return false
   const expires = new Date(account.token_expires_at).getTime()
   return Number.isFinite(expires) && expires > now.getTime() + TOKEN_FRESHNESS_BUFFER_MS
+}
+
+
+function tokenFreshness(account: FanvueUploadDiagnosticAccount | null, now: Date): FanvueUploadDiagnosticPreflightResult["token_freshness"] {
+  if (!account) return "unknown"
+  if (!account.token_expires_at) return "missing"
+  const expires = new Date(account.token_expires_at).getTime()
+  if (!Number.isFinite(expires)) return "invalid"
+  return expires > now.getTime() + TOKEN_FRESHNESS_BUFFER_MS ? "fresh" : "stale_or_expired"
+}
+
+function basePreflightResult(overrides: Partial<FanvueUploadDiagnosticPreflightResult> = {}): FanvueUploadDiagnosticPreflightResult {
+  return {
+    ok: false,
+    gate: FANVUE_UPLOAD_DIAGNOSTIC_PREFLIGHT_GATE,
+    mode: FANVUE_UPLOAD_DIAGNOSTIC_PREFLIGHT_MODE,
+    operation: FANVUE_UPLOAD_DIAGNOSTIC_OPERATION,
+    account_row_present: false,
+    connection_status_connected: false,
+    provider_account_id_present: false,
+    provider_username_present: false,
+    encrypted_access_token_present: false,
+    encrypted_refresh_token_present: false,
+    token_expires_at_present: false,
+    token_freshness: "unknown",
+    metadata_provider_is_fanvue: false,
+    metadata_identity_fetched: false,
+    metadata_is_creator_true: false,
+    scopes_include_read_media: false,
+    scopes_include_write_media: false,
+    scopes_include_write_creator: false,
+    ready_for_live_upload_diagnostic_gate: false,
+    will_call_fanvue: false,
+    will_decrypt_access_token: false,
+    will_create_upload_session: false,
+    will_request_signed_upload_url: false,
+    will_upload_bytes: false,
+    will_finalize_media: false,
+    will_poll_media_readiness: false,
+    will_post: false,
+    will_dispatch: false,
+    will_schedule: false,
+    public_exposure_attempted: false,
+    platform_registry_changed: false,
+    safe_code: null,
+    blockers: [],
+    ...overrides,
+  }
+}
+
+export async function runFanvueUploadDiagnosticPreflight(input: FanvueUploadDiagnosticInput, dependencies: Pick<FanvueUploadDiagnosticDependencies, "loadAccount" | "now">): Promise<FanvueUploadDiagnosticPreflightResult> {
+  let account: FanvueUploadDiagnosticAccount | null
+  try {
+    account = await dependencies.loadAccount(input.userId)
+  } catch {
+    return basePreflightResult({ safe_code: "FANVUE_UPLOAD_PREFLIGHT_ACCOUNT_LOOKUP_FAILED", blockers: ["account lookup failed safely"] })
+  }
+
+  if (!account) return basePreflightResult({ safe_code: "FANVUE_UPLOAD_PREFLIGHT_ACCOUNT_NOT_FOUND", blockers: ["account row missing"] })
+
+  const scopes = scopeList(account.scopes)
+  const freshness = tokenFreshness(account, dependencies.now?.() ?? new Date())
+  const result = basePreflightResult({
+    account_row_present: true,
+    connection_status_connected: account.connection_status === "CONNECTED",
+    provider_account_id_present: nonEmptyString(account.provider_account_id),
+    provider_username_present: nonEmptyString(account.provider_username),
+    encrypted_access_token_present: nonEmptyString(account.encrypted_access_token),
+    encrypted_refresh_token_present: nonEmptyString(account.encrypted_refresh_token),
+    token_expires_at_present: nonEmptyString(account.token_expires_at),
+    token_freshness: freshness,
+    metadata_provider_is_fanvue: account.metadata?.provider === "fanvue",
+    metadata_identity_fetched: account.metadata?.identity_fetched === true,
+    metadata_is_creator_true: account.metadata?.is_creator === true || account.metadata?.isCreator === true,
+    scopes_include_read_media: scopes.includes("read:media"),
+    scopes_include_write_media: scopes.includes("write:media"),
+    scopes_include_write_creator: scopes.includes("write:creator"),
+  })
+  const blockers: string[] = []
+  if (account.platform !== "fanvue") blockers.push("account platform is not fanvue")
+  if (account.user_id !== input.userId) blockers.push("account user mismatch")
+  if (!result.connection_status_connected) blockers.push("connection_status is not CONNECTED")
+  if (!result.provider_account_id_present) blockers.push("provider account id missing")
+  if (!result.encrypted_access_token_present) blockers.push("encrypted access token missing")
+  if (freshness !== "fresh") blockers.push("access token freshness invalid")
+  if (!result.scopes_include_read_media) blockers.push("read:media scope missing")
+  if (!result.scopes_include_write_media) blockers.push("write:media scope missing")
+  if (!result.scopes_include_write_creator) blockers.push("write:creator scope missing")
+  if (!result.metadata_provider_is_fanvue) blockers.push("metadata provider is not fanvue")
+  if (!result.metadata_identity_fetched) blockers.push("metadata identity_fetched is not true")
+
+  const ready = blockers.length === 0
+  return {
+    ...result,
+    ok: ready,
+    ready_for_live_upload_diagnostic_gate: ready,
+    safe_code: ready ? "FANVUE_UPLOAD_PREFLIGHT_READY" : "FANVUE_UPLOAD_PREFLIGHT_BLOCKED",
+    blockers,
+  }
 }
 
 function readTopLevelUuid(identity: unknown) {
