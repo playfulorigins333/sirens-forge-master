@@ -8,7 +8,13 @@ import {
   FANVUE_MEDIA_POST_DIAGNOSTIC_TEXT,
   handleFanvueMediaPostDiagnosticRoute,
 } from '../../../lib/autopost/fanvueMediaPostDiagnosticRoute'
-import { FANVUE_UPLOAD_DIAGNOSTIC_FILENAME, FANVUE_UPLOAD_DIAGNOSTIC_PNG } from '../../../lib/autopost/fanvueUploadDiagnostic'
+import {
+  FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS,
+  FANVUE_MEDIA_READINESS_DIAGNOSTIC_FILENAME,
+  FANVUE_MEDIA_READINESS_DIAGNOSTIC_PNG,
+  FANVUE_MEDIA_READINESS_MAX_ATTEMPTS,
+  FANVUE_MEDIA_READINESS_MAX_DELAY_MS,
+} from '../../../lib/autopost/fanvueMediaReadinessDiagnostic'
 import type { FanvueFetch } from '../../../lib/autopost/fanvueApiClientCore'
 
 const userId = '879c8a17-f9e8-473d-8de1-1fd1a77c080e'
@@ -53,7 +59,7 @@ async function route(input: { requestBody?: unknown; requestSecret?: string | nu
     apiBaseUrl: 'https://api.test.fanvue.example',
     apiVersion: '2025-01-01',
     fanvueFetch,
-    signedPartUploader: input.signedPartUploader ?? (async ({ body }) => { uploads += 1; assert.deepEqual(body, FANVUE_UPLOAD_DIAGNOSTIC_PNG); return { ETag: 'etag-one' } }),
+    signedPartUploader: input.signedPartUploader ?? (async ({ body }) => { uploads += 1; assert.deepEqual(body, FANVUE_MEDIA_READINESS_DIAGNOSTIC_PNG); return { ETag: 'etag-one' } }),
     decryptAccessToken: input.decryptAccessToken ?? (() => token),
     refreshAccessToken: input.refreshAccessToken,
     now: () => now,
@@ -96,7 +102,7 @@ async function run() {
   assert.equal(live.calls.length, 5)
   assert.equal(live.calls[0].init.method, 'POST')
   assert.match(live.calls[0].url, new RegExp(`/creators/${creatorUuid}/media/uploads$`))
-  assert.deepEqual(JSON.parse(live.calls[0].init.body ?? '{}'), { name: FANVUE_UPLOAD_DIAGNOSTIC_FILENAME, filename: FANVUE_UPLOAD_DIAGNOSTIC_FILENAME, mediaType: 'image' })
+  assert.deepEqual(JSON.parse(live.calls[0].init.body ?? '{}'), { name: FANVUE_MEDIA_READINESS_DIAGNOSTIC_FILENAME, filename: FANVUE_MEDIA_READINESS_DIAGNOSTIC_FILENAME, mediaType: 'image' })
   assert.equal(live.calls[3].init.method, 'POST')
   assert.deepEqual(JSON.parse(live.calls[3].init.body ?? '{}'), { audience: FANVUE_MEDIA_POST_DIAGNOSTIC_AUDIENCE, mediaUuids: [mediaUuid], text: FANVUE_MEDIA_POST_DIAGNOSTIC_TEXT })
   assert.equal(live.calls[4].init.method, 'DELETE')
@@ -114,11 +120,19 @@ async function run() {
   noLeak(liveBody)
 
   let readinessCalls = 0
-  const readinessBlocked = await route({ requestBody: body({ preflight: false, confirm: FANVUE_MEDIA_POST_DIAGNOSTIC_CONFIRMATION }), waitForMediaReady: async () => { readinessCalls++; return { ok: false, status: 200, error_code: 'FANVUE_MEDIA_READY_TIMEOUT', safe_error_message: 'safe' } } })
+  const readinessBlocked = await route({ requestBody: body({ preflight: false, confirm: FANVUE_MEDIA_POST_DIAGNOSTIC_CONFIRMATION }), waitForMediaReady: async (_config: any, args: any) => { readinessCalls++; assert.equal(args.maxAttempts, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS); assert.equal(args.maxDelayMs, FANVUE_MEDIA_READINESS_MAX_DELAY_MS); assert.equal(args.backoffBaseMs, FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS); return { ok: false, status: 200, error_code: 'FANVUE_MEDIA_READY_TIMEOUT', safe_error_message: 'safe' } } })
   assert.equal(readinessCalls, 1)
+  assert.equal((readinessBlocked.response.body as any).safe_code, 'FANVUE_MEDIA_NOT_READY_TIMEOUT')
   assert.equal((readinessBlocked.response.body as any).create_attempted, false)
   assert.equal(readinessBlocked.calls.filter((call) => call.init.method === 'POST' && /\/posts$/.test(call.url)).length, 0)
   noLeak(readinessBlocked.response.body)
+
+
+  const hardProcessingFailure = await route({ requestBody: body({ preflight: false, confirm: FANVUE_MEDIA_POST_DIAGNOSTIC_CONFIRMATION }), waitForMediaReady: async () => ({ ok: false, status: null, error_code: 'FANVUE_MEDIA_PROCESSING_ERROR', safe_error_message: 'safe' }) })
+  assert.equal((hardProcessingFailure.response.body as any).safe_code, 'FANVUE_MEDIA_PROCESSING_ERROR')
+  assert.equal((hardProcessingFailure.response.body as any).create_attempted, false)
+  assert.equal(hardProcessingFailure.calls.filter((call) => call.init.method === 'POST' && /\/posts$/.test(call.url)).length, 0)
+  noLeak(hardProcessingFailure.response.body)
 
   const createFailed = await route({ requestBody: body({ preflight: false, confirm: FANVUE_MEDIA_POST_DIAGNOSTIC_CONFIRMATION }), fetch: async (url, init) => {
     if (init.method === 'POST' && /media\/uploads$/.test(url)) return { ok: true, status: 200, json: async () => ({ uploadId, mediaUuid }) }

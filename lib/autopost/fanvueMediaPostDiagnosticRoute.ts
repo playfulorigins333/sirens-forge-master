@@ -1,7 +1,8 @@
 import { decryptAutopostToken } from "./tokenCryptoCore"
 import { createFanvueMediaPost, deleteFanvuePost, completeFanvueUploadSession, createFanvueCreatorUploadSession, getFanvueCreatorUploadPartUrl, uploadFanvueSignedPart, waitForFanvueMediaReady, type FanvueApiClientConfig, type FanvueApiFailure, type FanvueFetch, type FanvueSignedPartUploader } from "./fanvueApiClientCore"
 import { authorizeFanvueUploadDiagnosticRequest, FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER, type FanvueUploadDiagnosticAuthInput, type FanvueUploadDiagnosticAuthErrorCode } from "./fanvueUploadDiagnosticAuth"
-import { FANVUE_UPLOAD_DIAGNOSTIC_FILENAME, FANVUE_UPLOAD_DIAGNOSTIC_PNG, type FanvueIdentityFetch, type FanvueUploadDiagnosticAccount } from "./fanvueUploadDiagnostic"
+import { type FanvueIdentityFetch, type FanvueUploadDiagnosticAccount } from "./fanvueUploadDiagnostic"
+import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_DIAGNOSTIC_FILENAME, FANVUE_MEDIA_READINESS_DIAGNOSTIC_PNG, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS } from "./fanvueMediaReadinessDiagnostic"
 import { refreshFanvueAccessToken, type FanvueTokenRefreshResult } from "./fanvueTokenRefresh"
 
 export const FANVUE_MEDIA_POST_DIAGNOSTIC_ROUTE = "/api/admin/autopost/fanvue/media-post-diagnostic" as const
@@ -134,16 +135,20 @@ export async function handleFanvueMediaPostDiagnosticRoute(dependencies: FanvueM
 
   const config: FanvueApiClientConfig = { accessToken, apiBaseUrl: dependencies.apiBaseUrl, apiVersion: dependencies.apiVersion, fetch: dependencies.fanvueFetch }
   const upload = { live_attempted: true, token_refresh_attempted: refreshAttempted, token_refresh_status_class: refreshStatusClass, upload_attempted: true, media_attempted: true, uploaded_media_may_remain_in_creator_media_library: true, supabase_mutated: supabaseMutated }
-  const session = await createFanvueCreatorUploadSession(config, { creatorUserUuid: creator.creatorUserUuid, name: FANVUE_UPLOAD_DIAGNOSTIC_FILENAME, filename: FANVUE_UPLOAD_DIAGNOSTIC_FILENAME, mediaType: "image" })
+  const session = await createFanvueCreatorUploadSession(config, { creatorUserUuid: creator.creatorUserUuid, name: FANVUE_MEDIA_READINESS_DIAGNOSTIC_FILENAME, filename: FANVUE_MEDIA_READINESS_DIAGNOSTIC_FILENAME, mediaType: "image" })
   if (!session.ok) { const failure = session as FanvueApiFailure; return { status: 200, body: baseResult({ ...upload, upload_session_status_class: statusClass(failure.status), safe_code: failure.error_code }) } }
   const signed = await getFanvueCreatorUploadPartUrl(config, { creatorUserUuid: creator.creatorUserUuid, uploadId: session.uploadId, partNumber: 1 })
   if (!signed.ok) { const failure = signed as FanvueApiFailure; return { status: 200, body: baseResult({ ...upload, upload_session_status_class: "2xx", signed_url_status_class: statusClass(failure.status), provider_media_uuid_present: true, safe_code: failure.error_code }) } }
-  const byteUpload = await uploadFanvueSignedPart({ signedUrl: signed.signed_url, partNumber: 1, body: FANVUE_UPLOAD_DIAGNOSTIC_PNG, uploader: dependencies.signedPartUploader })
+  const byteUpload = await uploadFanvueSignedPart({ signedUrl: signed.signed_url, partNumber: 1, body: FANVUE_MEDIA_READINESS_DIAGNOSTIC_PNG, uploader: dependencies.signedPartUploader })
   if (!byteUpload.ok) { const failure = byteUpload as FanvueApiFailure; return { status: 200, body: baseResult({ ...upload, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: statusClass(failure.status), provider_media_uuid_present: true, safe_code: failure.error_code }) } }
   const finalized = await completeFanvueUploadSession(config, { uploadId: session.uploadId, parts: [byteUpload.part] })
   if (!finalized.ok) { const failure = finalized as FanvueApiFailure; return { status: 200, body: baseResult({ ...upload, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: "2xx", finalize_status_class: statusClass(failure.status), provider_media_uuid_present: true, safe_code: failure.error_code }) } }
-  const ready = await (dependencies.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, maxAttempts: 2, maxDelayMs: 0, backoffBaseMs: 0 })
-  if (!ready.ok) { const failure = ready as FanvueApiFailure; return { status: 200, body: baseResult({ ...upload, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: "2xx", finalize_status_class: "2xx", readiness_checked: true, provider_media_uuid_present: true, safe_code: failure.error_code }) } }
+  const ready = await (dependencies.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, maxAttempts: FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS })
+  if (!ready.ok) {
+    const failure = ready as FanvueApiFailure
+    const safeCode = failure.error_code === "FANVUE_MEDIA_READY_TIMEOUT" ? "FANVUE_MEDIA_NOT_READY_TIMEOUT" : failure.error_code
+    return { status: 200, body: baseResult({ ...upload, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: "2xx", finalize_status_class: "2xx", readiness_checked: true, provider_media_uuid_present: true, safe_code: safeCode }) }
+  }
 
   const created = await createFanvueMediaPost(config, { text: FANVUE_MEDIA_POST_DIAGNOSTIC_TEXT, audience: FANVUE_MEDIA_POST_DIAGNOSTIC_AUDIENCE, mediaUuids: [session.mediaUuid] })
   const readyFlags = { ...upload, upload_session_status_class: "2xx" as const, signed_url_status_class: "2xx" as const, byte_upload_status_class: "2xx" as const, finalize_status_class: "2xx" as const, readiness_checked: true, readiness_ready: true, provider_media_uuid_present: true, create_attempted: true }
