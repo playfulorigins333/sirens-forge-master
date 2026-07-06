@@ -5,11 +5,14 @@ export {
   createFanvueMediaPost,
   createFanvueTextPost,
   createFanvueUploadSession,
+  deleteFanvuePost,
+  FANVUE_PROVIDER_AUDIENCES,
   getFanvueUploadPartUrl,
   readFanvueMedia,
   readFanvuePost,
   uploadFanvueSignedPart,
   waitForFanvueMediaReady,
+  isFanvueProviderAudience,
 } from "./fanvueApiClientCore"
 export type {
   FanvueApiClientConfig,
@@ -20,6 +23,8 @@ export type {
   FanvueCreatePostResult,
   FanvueCreateTextPostInput,
   FanvueCreateUploadSessionInput,
+  FanvueDeletePostInput,
+  FanvueDeletePostResult,
   FanvueFetch,
   FanvueFetchResponse,
   FanvueMediaReadyResult,
@@ -34,5 +39,6 @@ export type {
   FanvueUploadPartResult,
   FanvueUploadSession,
   FanvueUploadSessionResult,
+  FanvueProviderAudience,
   NormalizedPost,
 } from "./fanvueApiClientCore"
