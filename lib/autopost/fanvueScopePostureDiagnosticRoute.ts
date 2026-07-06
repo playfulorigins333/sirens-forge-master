@@ -72,7 +72,7 @@ function parseScopes(scopes: unknown): { ok: true; scopes: Set<string> } | { ok:
   if (Array.isArray(scopes)) { if (scopes.length === 0) return { ok: false, blocker: "FANVUE_STORED_SCOPES_MISSING" }; if (scopes.some((scope) => typeof scope !== "string" || !scope.trim())) return { ok: false, blocker: "FANVUE_STORED_SCOPES_UNEXPECTED_SHAPE" }; return { ok: true, scopes: new Set(scopes.map((scope) => scope.trim())) } }
   return { ok: false, blocker: "FANVUE_STORED_SCOPES_UNEXPECTED_SHAPE" }
 }
-function statusOf(account: FanvueScopePostureAccount) { return typeof account.connection_status === "string" ? account.connection_status : typeof account.status === "string" ? account.status : "" }
+function statusOf(account: FanvueScopePostureAccount) { return (typeof account.connection_status === "string" ? account.connection_status : typeof account.status === "string" ? account.status : "").trim().toLowerCase() }
 
 export async function handleFanvueScopePostureDiagnosticRoute(dependencies: FanvueScopePostureDiagnosticRouteDependencies) {
   if (dependencies.request.method.toUpperCase() !== "POST") return { status: 405, body: baseBlocked(["METHOD_NOT_ALLOWED"]) }

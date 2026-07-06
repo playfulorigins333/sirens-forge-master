@@ -44,6 +44,16 @@ async function run() {
   assert.deepEqual(((await route({ rows: [{ ...baseAccount, scopes: ['read:post'] }] })).body as any).blockers, ['FANVUE_WRITE_POST_SCOPE_MISSING'])
   for (const scopes of [{}, 1, ['read:post', 1], [['read:post']]]) assert.deepEqual(((await route({ rows: [{ ...baseAccount, scopes }] })).body as any).blockers, ['FANVUE_STORED_SCOPES_UNEXPECTED_SHAPE'])
   assert.deepEqual(((await route({ rows: [] })).body as any).blockers, ['FANVUE_CONNECTED_ROW_NOT_FOUND'])
+  for (const account of [
+    { ...baseAccount, connection_status: 'connected' },
+    { ...baseAccount, connection_status: 'CONNECTED' },
+    { ...baseAccount, connection_status: undefined, status: 'connected' },
+    { ...baseAccount, connection_status: undefined, status: 'CONNECTED' },
+  ]) {
+    const body: any = (await route({ rows: [account] })).body
+    assert.equal(body.ok, true)
+    assert.equal(body.connection_status_connected, true)
+  }
   assert.deepEqual(((await route({ rows: [{ ...baseAccount, connection_status: 'expired' }] })).body as any).blockers, ['FANVUE_CONNECTION_STATUS_NOT_CONNECTED'])
   assert.deepEqual(((await route({ rows: [baseAccount, baseAccount] })).body as any).blockers, ['FANVUE_MULTIPLE_CONNECTION_ROWS_BLOCKED'])
   assert.deepEqual(((await route({ rows: [{ ...baseAccount, user_id: otherUserId }] })).body as any).blockers, ['FANVUE_TARGET_USER_MISMATCH'])
@@ -53,8 +63,11 @@ async function run() {
   assert.doesNotMatch(helper, /decryptAutopostToken|refreshFanvueAccessToken|grant_type\s*[:=]|token endpoint|fanvueApiClient|fetch\(|createFanvueTextPost|createFanvueMediaPost|readFanvuePost|upload session|signed URL|byte upload|finalize|readiness polling|schedule advancement|autopost\/run|import .*platformRegistry/i)
   assert.doesNotMatch(helper, /\/posts|\/creators/)
   const routeSource = readFileSync('app/api/admin/autopost/fanvue/scope-posture-diagnostic/route.ts', 'utf8')
-  assert.match(routeSource, /\.from\("autopost_accounts"\)[\s\S]*\.select\(FANVUE_SCOPE_POSTURE_ACCOUNT_SELECT\)[\s\S]*\.eq\("user_id", userId\)[\s\S]*\.eq\("platform", "fanvue"\)[\s\S]*\.limit\(2\)/)
-  assert.doesNotMatch(routeSource, /encrypted_access_token|encrypted_refresh_token|provider_account_id|provider_username|metadata|insert\(|upsert\(|update\(|delete\(|rpc\(|fetch\(|createFanvue|readFanvue|upload|dispatch|schedule|platformRegistry/i)
+  assert.match(routeSource, /FANVUE_SCOPE_POSTURE_CONNECTION_STATUS_SELECT = \["user_id", "platform", "connection_status", "scopes"\]\.join\(", "\)/)
+  assert.match(routeSource, /FANVUE_SCOPE_POSTURE_STATUS_SELECT = \["user_id", "platform", "status", "scopes"\]\.join\(", "\)/)
+  assert.match(routeSource, /\.from\("autopost_accounts"\)[\s\S]*\.select\(selectColumns\)[\s\S]*\.eq\("user_id", userId\)[\s\S]*\.eq\("platform", "fanvue"\)[\s\S]*\.limit\(2\)/)
+  assert.match(routeSource, /selectFanvueScopePostureAccounts\(userId, FANVUE_SCOPE_POSTURE_CONNECTION_STATUS_SELECT\)[\s\S]*isUnavailableStatusColumnError\(error\)[\s\S]*selectFanvueScopePostureAccounts\(userId, FANVUE_SCOPE_POSTURE_STATUS_SELECT\)/)
+  assert.doesNotMatch(routeSource, /select\(\s*[`'"]\*|encrypted_access_token|encrypted_refresh_token|provider_account_id|provider_username|metadata|insert\(|upsert\(|update\(|delete\(|rpc\(|fetch\(|createFanvue|readFanvue|upload|dispatch|schedule|platformRegistry/i)
   assert.equal(existsSync('supabase/migrations/fv-40dz.sql'), false)
   const fanvue = getAutopostPlatformRegistry().find((platform) => platform.id === 'fanvue')
   assert.equal(fanvue?.public_selectable, false); assert.equal(fanvue?.supports_real_posting, false); assert.equal(fanvue?.supports_async_dispatch, false)
