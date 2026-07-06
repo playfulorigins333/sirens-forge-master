@@ -1,6 +1,9 @@
 import { buildFanvueProofCandidateFromReadback, validateFanvueLivePostProof, type FanvueProofValidationResult } from "./fanvueProof"
 
-export type FanvueFetch = (url: string, init: { method: "GET" | "POST" | "PATCH"; headers: Record<string, string>; body?: string }) => Promise<FanvueFetchResponse>
+export type FanvueFetch = (url: string, init: { method: "GET" | "POST" | "PATCH" | "DELETE"; headers: Record<string, string>; body?: string }) => Promise<FanvueFetchResponse>
+
+export const FANVUE_PROVIDER_AUDIENCES = ["subscribers", "followers-and-subscribers"] as const
+export type FanvueProviderAudience = (typeof FANVUE_PROVIDER_AUDIENCES)[number]
 
 export type FanvueFetchResponse = {
   ok: boolean
@@ -43,6 +46,10 @@ export type FanvueReadPostInput = {
   userId?: string | null
   scheduledFor?: string | null
   expectedMediaUuids?: string[] | null
+}
+
+export type FanvueDeletePostInput = {
+  uuid: string
 }
 
 export type FanvueMediaStatus = "created" | "processing" | "ready" | "error"
@@ -121,6 +128,8 @@ export type FanvueReadPostResult =
     }
   | FanvueApiFailure
 
+export type FanvueDeletePostResult = { ok: true; status: 204; deleted: true; provider_response_body_exposed: false; post_uuid_exposed: false } | FanvueApiFailure
+
 function clean(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
 }
@@ -134,6 +143,17 @@ function isoOrNull(value: unknown) {
 
 function failure(kind: FanvueApiFailureKind, status: number | null, error_code: string, safe_error_message: string): FanvueApiFailure {
   return { ok: false, kind, status, error_code, safe_error_message }
+}
+
+export function isFanvueProviderAudience(value: unknown): value is FanvueProviderAudience {
+  return typeof value === "string" && (FANVUE_PROVIDER_AUDIENCES as readonly string[]).includes(value)
+}
+
+function requireProviderAudience(value: unknown): FanvueProviderAudience | FanvueApiFailure {
+  const audience = clean(value)
+  if (!audience) return failure("FAILED", null, "FANVUE_AUDIENCE_REQUIRED", "Fanvue audience is required.")
+  if (!isFanvueProviderAudience(audience)) return failure("FAILED", null, "FANVUE_PROVIDER_AUDIENCE_INVALID", "Fanvue audience must be a provider-owned audience value.")
+  return audience
 }
 
 function isFanvueApiFailure(value: unknown): value is FanvueApiFailure {
@@ -303,6 +323,19 @@ async function requestJson(config: FanvueApiClientConfig, method: "GET" | "POST"
   return { ok: true as const, data: parsed.data, response }
 }
 
+async function requestNoBody(config: FanvueApiClientConfig, method: "DELETE", path: string) {
+  const configError = requireConfig(config)
+  if (configError) return { ok: false as const, failure: configError }
+  let response: FanvueFetchResponse
+  try {
+    response = await config.fetch(endpoint(config, path), { method, headers: headers(config) })
+  } catch {
+    return { ok: false as const, failure: failure("FAILED", null, "FANVUE_NETWORK_FAILED", "Fanvue request failed.") }
+  }
+  if (!response.ok) return { ok: false as const, failure: withRetryAfter(classifyStatus(response.status), response), response }
+  return { ok: true as const, response }
+}
+
 export async function createFanvueUploadSession(config: FanvueApiClientConfig, input: FanvueCreateUploadSessionInput): Promise<FanvueUploadSessionResult> {
   const name = clean(input.name)
   const filename = clean(input.filename)
@@ -417,8 +450,8 @@ export async function waitForFanvueMediaReady(config: FanvueApiClientConfig, inp
 }
 
 export async function createFanvueMediaPost(config: FanvueApiClientConfig, input: FanvueCreateMediaPostInput): Promise<FanvueCreatePostResult> {
-  const audience = clean(input.audience)
-  if (!audience) return failure("FAILED", null, "FANVUE_AUDIENCE_REQUIRED", "Fanvue audience is required.")
+  const audience = requireProviderAudience(input.audience)
+  if (typeof audience !== "string") return audience
   const mediaUuids = stringArray(input.mediaUuids)
   if (mediaUuids.length === 0) return failure("FAILED", null, "FANVUE_MEDIA_UUIDS_REQUIRED", "Fanvue media post requires mediaUuids.")
   if (mediaUuids.some((uuid) => !isUuid(uuid))) return failure("FAILED", null, "FANVUE_MEDIA_UUID_INVALID", "Fanvue mediaUuids must be UUIDs.")
@@ -445,8 +478,8 @@ export async function createFanvueTextPost(config: FanvueApiClientConfig, input:
   if (configError) return configError
   const text = clean(input.text)
   if (!text) return failure("FAILED", null, "FANVUE_TEXT_REQUIRED", "Fanvue text is required.")
-  const audience = clean(input.audience)
-  if (!audience) return failure("FAILED", null, "FANVUE_AUDIENCE_REQUIRED", "Fanvue audience is required.")
+  const audience = requireProviderAudience(input.audience)
+  if (typeof audience !== "string") return audience
 
   const body: Record<string, string> = { text, audience }
   const publishAt = isoOrNull(input.publishAt)
@@ -464,6 +497,15 @@ export async function createFanvueTextPost(config: FanvueApiClientConfig, input:
   const post = normalizePost(parsed.data)
   if (!post) return failure("MALFORMED_JSON", response.status, "FANVUE_POST_UUID_MISSING", "Fanvue response did not include a post UUID.")
   return { ok: true, result_kind: "SCHEDULED_CREATED", post: { uuid: post.uuid, publishAt: post.publishAt, publishedAt: post.publishedAt }, posted_proof: false }
+}
+
+export async function deleteFanvuePost(config: FanvueApiClientConfig, input: FanvueDeletePostInput): Promise<FanvueDeletePostResult> {
+  const uuid = requireUuid(input.uuid, "FANVUE_POST_UUID_REQUIRED", "Fanvue post UUID is required.")
+  if (typeof uuid !== "string") return uuid
+  const requested = await requestNoBody(config, "DELETE", `/posts/${encodeURIComponent(uuid)}`)
+  if (!requested.ok) return requested.failure
+  if (requested.response.status !== 204) return failure("FAILED", requested.response.status, "FANVUE_DELETE_POST_UNEXPECTED_STATUS", "Fanvue post delete returned an unexpected status.")
+  return { ok: true, status: 204, deleted: true, provider_response_body_exposed: false, post_uuid_exposed: false }
 }
 
 export async function readFanvuePost(config: FanvueApiClientConfig, input: FanvueReadPostInput): Promise<FanvueReadPostResult> {
