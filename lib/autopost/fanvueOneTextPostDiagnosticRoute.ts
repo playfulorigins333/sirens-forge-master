@@ -1,6 +1,7 @@
 import { decryptAutopostToken } from "./tokenCryptoCore"
 import { createFanvueTextPost, deleteFanvuePost, type FanvueApiClientConfig, type FanvueApiFailure, type FanvueFetch } from "./fanvueApiClientCore"
 import { authorizeFanvueUploadDiagnosticRequest, FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER, type FanvueUploadDiagnosticAuthInput, type FanvueUploadDiagnosticAuthErrorCode } from "./fanvueUploadDiagnosticAuth"
+import { refreshFanvueAccessToken, type FanvueTokenRefreshResult } from "./fanvueTokenRefresh"
 
 export const FANVUE_ONE_TEXT_POST_DIAGNOSTIC_ROUTE = "/api/admin/autopost/fanvue/one-text-post-diagnostic" as const
 export const FANVUE_ONE_TEXT_POST_DIAGNOSTIC_OPERATION = "fanvue_one_text_post_diagnostic_create_and_delete_no_upload_no_media_no_price_no_schedule_no_dispatch" as const
@@ -16,6 +17,11 @@ export type FanvueOneTextPostDiagnosticAccount = {
   platform?: string | null
   connection_status?: string | null
   encrypted_access_token?: string | null
+  encrypted_refresh_token?: string | null
+  token_expires_at?: string | null
+  token_type?: string | null
+  token_key_version?: number | null
+  scopes?: string[] | string | null
 }
 
 export type FanvueOneTextPostDiagnosticResult = {
@@ -34,7 +40,7 @@ export type FanvueOneTextPostDiagnosticResult = {
   publishAt_used: false
   dispatch_attempted: false
   schedule_attempted: false
-  supabase_mutated: false
+  supabase_mutated: boolean
   platform_registry_changed: false
 }
 
@@ -54,6 +60,8 @@ export type FanvueOneTextPostDiagnosticRouteDependencies = {
   apiVersion: string
   fanvueFetch: FanvueFetch
   decryptAccessToken?: (encryptedToken: string) => string
+  refreshAccessToken?: (account: FanvueOneTextPostDiagnosticAccount) => Promise<FanvueTokenRefreshResult>
+  now?: () => Date
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -69,6 +77,12 @@ function statusClass(status: number | null | undefined): StatusClass {
   if (status >= 400 && status < 500) return "4xx"
   if (status >= 500) return "5xx"
   return "unknown"
+}
+
+function tokenFresh(account: FanvueOneTextPostDiagnosticAccount, now: Date) {
+  if (typeof account.token_expires_at !== "string") return false
+  const expiresAt = Date.parse(account.token_expires_at)
+  return Number.isFinite(expiresAt) && expiresAt > now.getTime() + 60_000
 }
 
 function baseResult(overrides: Partial<FanvueOneTextPostDiagnosticResult> = {}): FanvueOneTextPostDiagnosticResult {
@@ -114,31 +128,60 @@ export async function handleFanvueOneTextPostDiagnosticRoute(dependencies: Fanvu
   if (!validation.ok) return { status: 400, body: { ok: false, error_code: validation.error_code } }
   if (validation.preflight) return { status: 200, body: baseResult() }
 
-  const account = await dependencies.createLoadAccount()(validation.userId)
+  const loadAccount = dependencies.createLoadAccount()
+  let account = await loadAccount(validation.userId)
   if (!account || account.platform !== "fanvue" || account.connection_status !== "CONNECTED" || typeof account.encrypted_access_token !== "string") {
     return { status: 200, body: baseResult({ live_attempted: true, safe_code: "FANVUE_ONE_TEXT_POST_DIAGNOSTIC_CONNECTED_ACCOUNT_REQUIRED" }) }
+  }
+
+  let supabaseMutated = false
+  if (!tokenFresh(account, dependencies.now?.() ?? new Date())) {
+    if (typeof account.encrypted_refresh_token !== "string" || !account.encrypted_refresh_token) {
+      return { status: 200, body: baseResult({ live_attempted: true, safe_code: "FANVUE_REFRESH_TOKEN_MISSING" }) }
+    }
+    const refresh = dependencies.refreshAccessToken ?? ((refreshAccount) => refreshFanvueAccessToken({
+      user_id: String(refreshAccount.user_id),
+      platform: String(refreshAccount.platform),
+      encrypted_refresh_token: String(refreshAccount.encrypted_refresh_token),
+      token_expires_at: typeof refreshAccount.token_expires_at === "string" ? refreshAccount.token_expires_at : null,
+      token_type: typeof refreshAccount.token_type === "string" ? refreshAccount.token_type : null,
+      token_key_version: typeof refreshAccount.token_key_version === "number" ? refreshAccount.token_key_version : null,
+      scopes: Array.isArray(refreshAccount.scopes) || typeof refreshAccount.scopes === "string" ? refreshAccount.scopes : null,
+    }))
+    const refreshResult = await refresh(account)
+    if ("blocked" in refreshResult) {
+      return { status: 200, body: baseResult({ live_attempted: true, safe_code: refreshResult.error_code }) }
+    }
+    supabaseMutated = true
+    account = await loadAccount(validation.userId)
+    if (!account || account.platform !== "fanvue" || account.connection_status !== "CONNECTED" || typeof account.encrypted_access_token !== "string") {
+      return { status: 200, body: baseResult({ live_attempted: true, safe_code: "FANVUE_ONE_TEXT_POST_DIAGNOSTIC_CONNECTED_ACCOUNT_REQUIRED", supabase_mutated: supabaseMutated }) }
+    }
+    if (!tokenFresh(account, dependencies.now?.() ?? new Date())) {
+      return { status: 200, body: baseResult({ live_attempted: true, safe_code: "FANVUE_TOKEN_REFRESH_STALE", supabase_mutated: supabaseMutated }) }
+    }
   }
 
   let accessToken = ""
   try {
     accessToken = (dependencies.decryptAccessToken ?? decryptAutopostToken)(account.encrypted_access_token)
   } catch {
-    return { status: 200, body: baseResult({ live_attempted: true, safe_code: "FANVUE_ONE_TEXT_POST_DIAGNOSTIC_TOKEN_DECRYPT_FAILED" }) }
+    return { status: 200, body: baseResult({ live_attempted: true, safe_code: "FANVUE_ONE_TEXT_POST_DIAGNOSTIC_TOKEN_DECRYPT_FAILED", supabase_mutated: supabaseMutated }) }
   }
 
   const config: FanvueApiClientConfig = { accessToken, apiBaseUrl: dependencies.apiBaseUrl, apiVersion: dependencies.apiVersion, fetch: dependencies.fanvueFetch }
   const created = await createFanvueTextPost(config, { text: FANVUE_ONE_TEXT_POST_DIAGNOSTIC_TEXT, audience: FANVUE_ONE_TEXT_POST_DIAGNOSTIC_AUDIENCE })
   if (!created.ok) {
     const failure = created as FanvueApiFailure
-    return { status: 200, body: baseResult({ live_attempted: true, create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code }) }
+    return { status: 200, body: baseResult({ live_attempted: true, create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code, supabase_mutated: supabaseMutated }) }
   }
 
   const postUuid = created.post.uuid
   const cleaned = await deleteFanvuePost(config, { uuid: postUuid })
   if (!cleaned.ok) {
     const failure = cleaned as FanvueApiFailure
-    return { status: 200, body: baseResult({ live_attempted: true, create_attempted: true, create_status_class: "2xx", provider_post_uuid_present: true, cleanup_attempted: true, cleanup_status_class: statusClass(failure.status), safe_code: failure.error_code }) }
+    return { status: 200, body: baseResult({ live_attempted: true, create_attempted: true, create_status_class: "2xx", provider_post_uuid_present: true, cleanup_attempted: true, cleanup_status_class: statusClass(failure.status), safe_code: failure.error_code, supabase_mutated: supabaseMutated }) }
   }
 
-  return { status: 200, body: baseResult({ ok: true, safe_code: "FANVUE_ONE_TEXT_POST_DIAGNOSTIC_CREATE_DELETE_OK", live_attempted: true, create_attempted: true, create_status_class: "2xx", provider_post_uuid_present: true, cleanup_attempted: true, cleanup_status_class: "2xx", cleanup_ok: true }) }
+  return { status: 200, body: baseResult({ ok: true, safe_code: "FANVUE_ONE_TEXT_POST_DIAGNOSTIC_CREATE_DELETE_OK", live_attempted: true, create_attempted: true, create_status_class: "2xx", provider_post_uuid_present: true, cleanup_attempted: true, cleanup_status_class: "2xx", cleanup_ok: true, supabase_mutated: supabaseMutated }) }
 }

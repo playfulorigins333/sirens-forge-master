@@ -7,7 +7,17 @@ import { handleFanvueOneTextPostDiagnosticRoute, type FanvueOneTextPostDiagnosti
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const FANVUE_ONE_TEXT_POST_DIAGNOSTIC_ACCOUNT_SELECT = ["user_id", "platform", "connection_status", "encrypted_access_token"].join(", ")
+const FANVUE_ONE_TEXT_POST_DIAGNOSTIC_ACCOUNT_SELECT = [
+  "user_id",
+  "platform",
+  "connection_status",
+  "encrypted_access_token",
+  "encrypted_refresh_token",
+  "token_expires_at",
+  "token_type",
+  "token_key_version",
+  "scopes",
+].join(", ")
 
 async function loadFanvueOneTextPostDiagnosticAccount(userId: string): Promise<FanvueOneTextPostDiagnosticAccount | null> {
   const supabaseAdmin = getSupabaseAdmin()
