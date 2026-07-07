@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import {
   FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION,
   FANVUE_INTERNAL_SINGLE_POST_OPERATION,
@@ -36,7 +37,7 @@ async function route(input: Record<string, any> = {}) {
       if (input.authenticatedUserId === null) throw new Error('missing auth')
       return input.authenticatedUserId ?? userId
     },
-    loadJob: input.loadJob ?? (async () => ({ id: jobId, user_id: userId, rule_id: ruleId, platform: 'fanvue', payload: {}, state: 'QUEUED', result_status: 'PENDING' })),
+    loadJob: input.loadJob ?? (async () => ({ id: jobId, user_id: userId, rule_id: ruleId, platform: 'fanvue', payload: {}, state: 'QUEUED', result: null, error: null })),
     loadRule: input.loadRule ?? (async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, selected_platforms: ['fanvue'], content_payload: { platform: 'fanvue', content_type: 'text', text: 'Approved Fanvue caption' }, paused_at: null, revoked_at: null })),
     loadAccount: input.loadAccount ?? (async () => ({ user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['read:media', 'write:media', 'write:creator'] })),
     persistProof: input.persistProof ?? (async (proof: any) => { persisted++; assert.equal(proof.providerPostUuid, postUuid); return { ok: true } }),
@@ -54,6 +55,28 @@ function noLeak(value: unknown) {
 }
 
 async function run() {
+
+  const appRouteSource = readFileSync('app/api/admin/autopost/fanvue/internal-single-post/route.ts', 'utf8')
+  assert.match(appRouteSource, /\.select\("id,user_id,rule_id,platform,payload,state,result,error"\)/, 'loadJob must select only production autopost_jobs columns')
+  assert.doesNotMatch(appRouteSource, /select\([^)]*result_status/, 'loadJob query must not request result_status')
+  const updateMatch = appRouteSource.match(/\.update\(\{([\s\S]*?)\}\)\n    \.eq\("id"/)
+  assert.ok(updateMatch, 'persistProof update shape must be present')
+  const updateShape = updateMatch[1]
+  for (const existingColumn of ['state:', 'result:', 'error:', 'updated_at:']) assert.match(updateShape, new RegExp(existingColumn), `persistProof must update ${existingColumn}`)
+  for (const missingColumn of ['platform_post_id:', 'error_code:', 'error_message:', 'locked_at:', 'lock_id:']) {
+    assert.doesNotMatch(updateShape, new RegExp(`^\\s*${missingColumn}`, 'm'), `persistProof must not update missing production column ${missingColumn}`)
+  }
+  assert.match(updateShape, /result_status: "POSTED"/, 'persistProof stores result_status inside result JSON')
+  assert.match(updateShape, /provider_post_uuid_present: true/, 'persistProof stores UUID presence only')
+  assert.doesNotMatch(updateShape, /providerPostUuid/, 'persistProof update must not store full provider UUID')
+  const logMetaMatch = appRouteSource.match(/meta: \{([\s\S]*?)\},\n  \}\)/)
+  assert.ok(logMetaMatch, 'audit log meta must be present')
+  assert.doesNotMatch(logMetaMatch![1], /providerPostUuid|platform_post_id|provider_post_uuid\s*:/, 'audit log meta must not leak full provider UUID')
+
+  const platformRegistrySource = readFileSync('lib/autopost/platformRegistry.ts', 'utf8')
+  assert.doesNotMatch(platformRegistrySource, /id:\s*["']fanvue["'][\s\S]{0,500}public_selectable:\s*true/, 'Fanvue must not be publicly selectable')
+  const runRouteSource = readFileSync('app/api/autopost/run/route.ts', 'utf8')
+  assert.doesNotMatch(runRouteSource, /fanvueInternalSinglePost|postFanvueInternalSinglePost|fanvue\/internal-single-post/, 'run route must not wire Fanvue internal single-post dispatch')
   const preflight = await route()
   assert.equal(preflight.response.status, 200)
   assert.equal((preflight.response.body as any).dry_run, true)

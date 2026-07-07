@@ -145,3 +145,77 @@ Before Fanvue native posting can ever be enabled, complete this checklist in exp
 - Do not treat saved validation drafts as posted content.
 - Do not change Supabase without backup and final human confirmation.
 - Do not paste secrets into issues, PRs, Codex, logs, or chat.
+
+## 12. FV-40EQ production-schema-compatible internal single-post proof storage
+
+The internal Fanvue single-post route must use only the currently available production `autopost_jobs` and `autopost_job_logs` columns until a separately approved schema migration exists.
+
+### Production-compatible job lookup
+
+Use this lookup shape only:
+
+```sql
+select id, user_id, rule_id, platform, payload, state, result, error
+from public.autopost_jobs
+where id = :autopost_job_id;
+```
+
+Do not reference these missing `autopost_jobs` columns in the internal Fanvue route lookup or proof update: `result_status`, `platform_post_id`, `external_job_id`, `error_code`, `error_message`, `attempt_count`, `locked_at`, `lock_id`, `posted_at`, `next_attempt_at`, or `completed_at`.
+
+### Production-compatible proof update
+
+After adapter success only, update the job with existing columns:
+
+```sql
+update public.autopost_jobs
+set
+  state = 'SUCCEEDED',
+  result = jsonb_build_object(
+    'platform', 'fanvue',
+    'result_status', 'POSTED',
+    'provider_post_uuid_present', true,
+    'posted_at', :completed_at,
+    'completed_at', :completed_at
+  ),
+  error = null,
+  updated_at = :completed_at
+where id = :autopost_job_id;
+```
+
+The route may include additional safe adapter flags in `result`, but it must not return or log the full Fanvue provider post UUID. Full provider UUID storage remains limited to any separately approved internal result-storage policy; otherwise store only `provider_post_uuid_present: true`.
+
+### Production-compatible audit log insert
+
+Insert only safe audit metadata:
+
+```sql
+insert into public.autopost_job_logs (job_id, level, message, meta)
+values (
+  :autopost_job_id,
+  'info',
+  'fanvue_internal_single_post_proof_persisted',
+  jsonb_build_object(
+    'platform', 'fanvue',
+    'result_status', 'POSTED',
+    'provider_post_uuid_present', true
+  )
+);
+```
+
+### Production-compatible verification query
+
+Use existing columns for verification:
+
+```sql
+select id, user_id, rule_id, platform, state, result, error, updated_at
+from public.autopost_jobs
+where id = :autopost_job_id;
+
+select id, job_id, level, message, meta, created_at
+from public.autopost_job_logs
+where job_id = :autopost_job_id
+order by created_at desc
+limit 10;
+```
+
+Expected verification values are `state = 'SUCCEEDED'`, `error is null`, `result->>'platform' = 'fanvue'`, `result->>'result_status' = 'POSTED'`, `result->>'provider_post_uuid_present' = 'true'`, and matching safe audit log metadata. Do not verify with missing columns.
