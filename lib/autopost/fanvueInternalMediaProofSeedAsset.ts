@@ -1,12 +1,12 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3"
-import { FANVUE_UPLOAD_DIAGNOSTIC_PNG } from "./fanvueUploadDiagnostic"
+import { FANVUE_MEDIA_READINESS_DIAGNOSTIC_PNG } from "./fanvueMediaReadinessDiagnostic"
 import { authorizeFanvueUploadDiagnosticRequest, FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER, type FanvueUploadDiagnosticAuthInput, type FanvueUploadDiagnosticAuthErrorCode } from "./fanvueUploadDiagnosticAuth"
 
 export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_OPERATION = "fanvue_internal_media_proof_seed_asset_r2_supabase_only" as const
 export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_CONFIRMATION = "CREATE_ONE_SERVER_OWNED_R2_BACKED_GENERATION_FOR_FANVUE_INTERNAL_MEDIA_PROOF_ONLY" as const
 export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_ROUTE = "/api/admin/autopost/fanvue/internal-media-proof-seed" as const
-export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_ASSET_PROFILE = "fanvue_internal_media_proof_seed_safe_static_png_v1" as const
-export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_FILENAME = "fanvue-internal-media-proof-seed-safe-static-v1.png" as const
+export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_ASSET_PROFILE = "fanvue_internal_media_proof_seed_safe_static_png_v2" as const
+export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_FILENAME = "fanvue-internal-media-proof-seed-safe-static-v2.png" as const
 export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_CONTENT_TYPE = "image/png" as const
 export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_MODE = "fanvue_internal_media_proof_seed" as const
 export const FANVUE_INTERNAL_MEDIA_PROOF_SEED_SECRET_HEADER = FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER
@@ -74,7 +74,7 @@ const FORBIDDEN_BODY_FIELDS = new Set([
 ])
 
 export function buildFanvueInternalMediaProofSeedR2Key(userId: string) {
-  return `fanvue/internal-media-proof-seeds/${userId}/safe-static-v1.png`
+  return `fanvue/internal-media-proof-seeds/${userId}/safe-static-v2.png`
 }
 
 export function buildFanvueInternalMediaProofSeedMetadata() {
@@ -86,7 +86,7 @@ export function buildFanvueInternalMediaProofSeedMetadata() {
     test: false,
     unsafe: false,
     asset_profile: FANVUE_INTERNAL_MEDIA_PROOF_SEED_ASSET_PROFILE,
-    source: "server_bundled_safe_static_png",
+    source: "server_bundled_safe_static_png_64x64_readiness_diagnostic",
     fanvue_upload_attempted: false,
     fanvue_post_attempted: false,
     dispatch_attempted: false,
@@ -177,7 +177,7 @@ export async function createOrReuseFanvueInternalMediaProofSeedAsset(input: { us
   }
 
   try {
-    await (dependencies.r2PutObject ?? defaultR2PutObject)({ bucket, key: r2Key, body: FANVUE_UPLOAD_DIAGNOSTIC_PNG, contentType: FANVUE_INTERNAL_MEDIA_PROOF_SEED_CONTENT_TYPE })
+    await (dependencies.r2PutObject ?? defaultR2PutObject)({ bucket, key: r2Key, body: FANVUE_MEDIA_READINESS_DIAGNOSTIC_PNG, contentType: FANVUE_INTERNAL_MEDIA_PROOF_SEED_CONTENT_TYPE })
   } catch {
     return baseResult({ safe_code: "FANVUE_INTERNAL_MEDIA_PROOF_SEED_UPLOAD_FAILED" })
   }
