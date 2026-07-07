@@ -23,7 +23,7 @@ const ACCOUNT_SELECT = [
 async function loadJob(jobId: string): Promise<FanvueInternalSinglePostJob | null> {
   const { data, error } = await getSupabaseAdmin()
     .from("autopost_jobs")
-    .select("id,user_id,rule_id,platform,payload,state,result_status")
+    .select("id,user_id,rule_id,platform,payload,state,result,error")
     .eq("id", jobId)
     .maybeSingle()
   if (error) throw error
@@ -59,15 +59,16 @@ async function persistProof(input: { autopostJobId: string; providerPostUuid: st
     .from("autopost_jobs")
     .update({
       state: "SUCCEEDED",
-      result_status: "POSTED",
-      platform_post_id: input.providerPostUuid,
-      result: input.result,
-      error_code: null,
-      error_message: null,
-      posted_at: completedAt,
-      completed_at: completedAt,
-      locked_at: null,
-      lock_id: null,
+      result: {
+        ...input.result,
+        platform: "fanvue",
+        result_status: "POSTED",
+        provider_post_uuid_present: true,
+        posted_at: completedAt,
+        completed_at: completedAt,
+      },
+      error: null,
+      updated_at: completedAt,
     })
     .eq("id", input.autopostJobId)
   if (error) return { ok: false }

@@ -18,7 +18,8 @@ export type FanvueInternalSinglePostJob = {
   platform?: string | null
   payload?: unknown
   state?: string | null
-  result_status?: string | null
+  result?: unknown
+  error?: unknown
 }
 
 export type FanvueInternalSinglePostRule = {
