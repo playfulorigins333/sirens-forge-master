@@ -90,6 +90,22 @@ async function run() {
   assert.equal((success.result as any).media.mediaType, 'image')
   assert((success.result as any).media.bytes instanceof Blob)
 
+  const noKindContentType = await exercise({ row: { ...baseRow, job_type: null, mode: null, metadata: {}, r2_key: 'generations/asset.bin' }, contentType: 'image/png' })
+  assert.equal(noKindContentType.result.ok, true)
+  assert.equal((noKindContentType.result as any).media.mediaType, 'image')
+
+  const noKindMetadata = await exercise({ row: { ...baseRow, job_type: null, mode: null, metadata: { kind: 'image' }, r2_key: 'generations/asset.bin' }, contentType: null })
+  assert.equal(noKindMetadata.result.ok, true)
+  assert.equal((noKindMetadata.result as any).media.mediaType, 'image')
+
+  const noKindJobType = await exercise({ row: { ...baseRow, job_type: 'image', mode: null, metadata: {}, r2_key: 'generations/asset.bin' }, contentType: null })
+  assert.equal(noKindJobType.result.ok, true)
+  assert.equal((noKindJobType.result as any).media.mediaType, 'image')
+
+  const noKindR2Extension = await exercise({ row: { ...baseRow, job_type: null, mode: null, metadata: {}, r2_key: 'generations/asset.webp' }, contentType: null })
+  assert.equal(noKindR2Extension.result.ok, true)
+  assert.equal((noKindR2Extension.result as any).media.mediaType, 'image')
+
   const leaked = JSON.stringify(success.result)
   assert.doesNotMatch(leaked, /server-owned-bucket-never-returned|generations\/asset\.png|safe-test-bytes/)
 }

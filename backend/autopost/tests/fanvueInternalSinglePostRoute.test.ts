@@ -59,6 +59,9 @@ async function run() {
 
   const appRouteSource = readFileSync('app/api/admin/autopost/fanvue/internal-single-post/route.ts', 'utf8')
   assert.match(appRouteSource, /\.select\("id,user_id,rule_id,platform,payload,state,result,error"\)/, 'loadJob must select only production autopost_jobs columns')
+  assert.match(appRouteSource, /\.select\("id,user_id,status,job_type,mode,metadata,r2_bucket,r2_key"\)/, 'loadGeneration must select only production generations columns')
+  const missingGenerationKindSelect = ['id,user_id,status,job_type,', 'kind', ',mode,metadata,', 'r2', '_bucket,r2_key'].join('')
+  assert.doesNotMatch(appRouteSource, new RegExp(missingGenerationKindSelect), 'loadGeneration query must not request missing generations.kind')
   assert.doesNotMatch(appRouteSource, /select\([^)]*result_status/, 'loadJob query must not request result_status')
   const updateMatch = appRouteSource.match(/\.update\(\{([\s\S]*?)\}\)\n    \.eq\("id"/)
   assert.ok(updateMatch, 'persistProof update shape must be present')
