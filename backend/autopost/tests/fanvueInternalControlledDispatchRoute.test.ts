@@ -124,6 +124,21 @@ async function run() {
     await expectSafeCode({ requestBody: requestBody({ [key]: 'caller-supplied' }) }, 'CALLER_SUPPLIED_FORBIDDEN_FIELD', 400)
   }
 
+
+  for (const key of ['scan', 'list', 'bulk', 'limit', 'cursor', 'job_ids', 'autopost_job_ids', 'platform', 'payload', 'content_payload', 'random_unknown_key']) {
+    for (const makeBody of [requestBody, liveBody]) {
+      const result = await exercise({ requestBody: makeBody({ [key]: 'caller-supplied' }) })
+      assert.equal(result.response.status, 400, key)
+      assert.equal((result.response.body as any).safe_code, 'CALLER_SUPPLIED_UNKNOWN_FIELD', key)
+      assert.equal(result.loadJobCalls, 0, key)
+      assert.equal(result.loadRuleCalls, 0, key)
+      assert.equal(result.loadAccountCalls, 0, key)
+      assert.equal(result.loadApprovedMediaCalls, 0, key)
+      assert.equal(result.adapterCalls, 0, key)
+      assert.equal(result.persisted, 0, key)
+    }
+  }
+
   await expectSafeCode({ loadJob: async () => null }, 'AUTOPOST_JOB_NOT_FOUND')
   await expectSafeCode({ loadJob: async () => ({ id: jobId, user_id: userId, rule_id: ruleId, platform: 'x', state: 'QUEUED', result: null }) }, 'FANVUE_JOB_PLATFORM_INVALID')
   await expectSafeCode({ loadJob: async () => ({ id: jobId, user_id: userId, rule_id: ruleId, platform: 'fanvue', state: 'PENDING', result: null }) }, 'FANVUE_JOB_STATE_NOT_QUEUED')

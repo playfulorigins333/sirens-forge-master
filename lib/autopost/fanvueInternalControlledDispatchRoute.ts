@@ -69,6 +69,7 @@ export type FanvueInternalControlledDispatchRouteDependencies = {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const TEXT_MAX = 5000
+const ALLOWED_BODY_FIELDS = new Set(["operation", "autopost_job_id", "dry_run", "confirm"])
 const FORBIDDEN_FIELDS = new Set([
   "text", "caption", "media", "file", "bytes", "fileBytes", "file_bytes", "file_url", "fileUrl", "url", "source_asset_urls", "sourceAssetUrls", "providerId", "provider_id", "providerPostId", "provider_post_id", "providerPostUuid", "provider_post_uuid", "providerAccountId", "provider_account_id", "mediaUuid", "mediaUuids", "media_uuid", "media_uuids", "fanvueMediaUuid", "fanvue_media_uuid", "uploadId", "upload_id", "postId", "post_id", "postUuid", "post_uuid", "creatorUserUuid", "creator_user_uuid", "audience", "price", "amount", "currency", "paywall", "publishAt", "publish_at", "schedule", "scheduled", "dispatch", "platformRegistry", "platform_registry", "publicUi", "public_ui", "publicUI", "dryRun", "providerPayload", "provider_payload",
 ])
@@ -147,7 +148,10 @@ function baseResult(overrides: Record<string, unknown> = {}) {
 
 function parseBody(body: unknown) {
   if (!isRecord(body)) return { ok: false as const, status: 400, error_code: "INVALID_BODY" }
-  for (const key of Object.keys(body)) if (FORBIDDEN_FIELDS.has(key)) return { ok: false as const, status: 400, error_code: "CALLER_SUPPLIED_FORBIDDEN_FIELD" }
+  for (const key of Object.keys(body)) {
+    if (FORBIDDEN_FIELDS.has(key)) return { ok: false as const, status: 400, error_code: "CALLER_SUPPLIED_FORBIDDEN_FIELD" }
+    if (!ALLOWED_BODY_FIELDS.has(key)) return { ok: false as const, status: 400, error_code: "CALLER_SUPPLIED_UNKNOWN_FIELD" }
+  }
   const live = body.dry_run === false
   if (live) {
     if (body.operation !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION) return { ok: false as const, status: 400, error_code: "INVALID_OPERATION" }
