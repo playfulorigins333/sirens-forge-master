@@ -1,9 +1,18 @@
 import { authorizeFanvueUploadDiagnosticRequest, FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER, type FanvueUploadDiagnosticAuthInput, type FanvueUploadDiagnosticAuthErrorCode } from "./fanvueUploadDiagnosticAuth"
 import type { FanvueApprovedMediaLoaderResult } from "./fanvueApprovedMediaLoader"
+import {
+  postFanvueInternalSinglePost,
+  redactFanvueInternalPostResult,
+  type FanvueInternalApprovedContent,
+  type FanvueInternalPostInput,
+} from "./fanvueInternalAdapter"
 
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION = "fanvue_internal_controlled_dispatch_dry_run" as const
+export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION = "fanvue_internal_controlled_dispatch_live_single_post_no_price_no_schedule_no_retry" as const
+export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION = "REQUEST_FANVUE_CONTROLLED_LIVE_DISPATCH_ONE_APPROVED_JOB_ONE_SERVER_OWNED_IMAGE_NO_PRICE_NO_SCHEDULE_NO_RETRY_NO_PUBLIC_EXPOSURE" as const
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_SECRET_HEADER = FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER
 export const FANVUE_ADMIN_CONTROLLED_DISPATCH_ENV = "FANVUE_ADMIN_CONTROLLED_DISPATCH_ENABLED" as const
+export const FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_ENV = "FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_ENABLED" as const
 
 export type FanvueControlledDispatchJob = {
   id: string
@@ -31,6 +40,11 @@ export type FanvueControlledDispatchAccount = {
   user_id?: string | null
   platform?: string | null
   connection_status?: string | null
+  encrypted_access_token?: string | null
+  encrypted_refresh_token?: string | null
+  token_expires_at?: string | null
+  token_type?: string | null
+  token_key_version?: number | null
   scopes?: string[] | string | null
 }
 
@@ -46,6 +60,11 @@ export type FanvueInternalControlledDispatchRouteDependencies = {
   loadRule: (ruleId: string, userId: string) => Promise<FanvueControlledDispatchRule | null>
   loadAccount: (userId: string) => Promise<FanvueControlledDispatchAccount | null>
   loadApprovedMedia?: (input: { userId: string; sourceAssetIds: string[] }) => Promise<FanvueApprovedMediaLoaderResult>
+  persistProof?: (input: { autopostJobId: string; providerPostUuid: string; result: Record<string, unknown>; now: Date }) => Promise<{ ok: boolean; job_proof_persisted: boolean; audit_log_persisted: boolean }>
+  adapter?: typeof postFanvueInternalSinglePost
+  adapterDependencies?: Pick<FanvueInternalPostInput, "apiBaseUrl" | "apiVersion" | "fanvueFetch" | "fetchIdentity" | "signedPartUploader" | "decryptAccessToken" | "refreshAccessToken" | "waitForMediaReady" | "now">
+  getAdapterDependencies?: () => Pick<FanvueInternalPostInput, "apiBaseUrl" | "apiVersion" | "fanvueFetch" | "fetchIdentity" | "signedPartUploader" | "decryptAccessToken" | "refreshAccessToken" | "waitForMediaReady" | "now">
+  now?: () => Date
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -109,6 +128,19 @@ function baseResult(overrides: Record<string, unknown> = {}) {
     public_ui_added: false,
     autopost_run_wired: false,
     provider_post_uuid_present: false,
+    proof_persisted: false,
+    audit_log_persisted: false,
+    live_attempted: false,
+    token_refresh_attempted: false,
+    token_refresh_status_class: "not_attempted",
+    upload_attempted: false,
+    readiness_checked: false,
+    readiness_ready: false,
+    create_attempted: false,
+    create_status_class: "not_attempted",
+    price_used: false,
+    publishAt_used: false,
+    schedule_attempted: false,
     ...overrides,
   }
 }
@@ -116,13 +148,18 @@ function baseResult(overrides: Record<string, unknown> = {}) {
 function parseBody(body: unknown) {
   if (!isRecord(body)) return { ok: false as const, status: 400, error_code: "INVALID_BODY" }
   for (const key of Object.keys(body)) if (FORBIDDEN_FIELDS.has(key)) return { ok: false as const, status: 400, error_code: "CALLER_SUPPLIED_FORBIDDEN_FIELD" }
-  if (body.operation !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION) return { ok: false as const, status: 400, error_code: "INVALID_OPERATION" }
-  if (body.dry_run === false) return { ok: false as const, status: 200, error_code: "FANVUE_CONTROLLED_DISPATCH_LIVE_NOT_ENABLED" }
-  if (body.dry_run !== undefined && body.dry_run !== true) return { ok: false as const, status: 400, error_code: "INVALID_DRY_RUN" }
+  const live = body.dry_run === false
+  if (live) {
+    if (body.operation !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION) return { ok: false as const, status: 400, error_code: "INVALID_OPERATION" }
+    if (body.confirm !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION) return { ok: false as const, status: 400, error_code: "INVALID_CONFIRMATION" }
+  } else {
+    if (body.operation !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION) return { ok: false as const, status: 400, error_code: "INVALID_OPERATION" }
+    if (body.dry_run !== undefined && body.dry_run !== true) return { ok: false as const, status: 400, error_code: "INVALID_DRY_RUN" }
+  }
   const autopostJobId = clean(body.autopost_job_id)
   if (!autopostJobId) return { ok: false as const, status: 400, error_code: "AUTOPOST_JOB_ID_REQUIRED" }
   if (!UUID_RE.test(autopostJobId)) return { ok: false as const, status: 400, error_code: "AUTOPOST_JOB_ID_INVALID" }
-  return { ok: true as const, autopostJobId }
+  return { ok: true as const, autopostJobId, dryRun: !live }
 }
 
 function contentFromJobOrRule(job: FanvueControlledDispatchJob, rule: FanvueControlledDispatchRule) {
@@ -144,7 +181,7 @@ async function validateContent(payload: unknown, input: { userId: string; loadAp
   if (contentType === "text") {
     if (!text) return { ok: false as const, safe_code: "FANVUE_INTERNAL_TEXT_REQUIRED", content_type: contentType, media_source_asset_count: 0 }
     if (Array.from(text).length > TEXT_MAX) return { ok: false as const, safe_code: "FANVUE_INTERNAL_TEXT_TOO_LONG", content_type: contentType, text_present: true, media_source_asset_count: 0 }
-    return { ok: true as const, content_type: contentType, text_present: true, media_asset_present: false, media_source_asset_count: 0, server_owned_media_validated: false }
+    return { ok: true as const, content_type: contentType, text_present: true, media_asset_present: false, media_source_asset_count: 0, server_owned_media_validated: false, approvedContent: { platform: "fanvue", content_type: "text", text } satisfies FanvueInternalApprovedContent }
   }
   if (assetIds.length === 0) return { ok: false as const, safe_code: "FANVUE_SERVER_OWNED_MEDIA_ASSET_ID_REQUIRED", content_type: contentType, text_present: Boolean(text), media_source_asset_count: 0 }
   if (assetIds.length !== 1) return { ok: false as const, safe_code: "FANVUE_SERVER_OWNED_MEDIA_SINGLE_ASSET_ONLY", content_type: contentType, text_present: Boolean(text), media_source_asset_count: assetIds.length }
@@ -152,7 +189,13 @@ async function validateContent(payload: unknown, input: { userId: string; loadAp
   const media = await input.loadApprovedMedia({ userId: input.userId, sourceAssetIds: assetIds })
   if (media.ok === false) return { ok: false as const, safe_code: media.safe_code, content_type: contentType, text_present: Boolean(text), media_source_asset_count: assetIds.length }
   if (media.media.mediaType !== "image") return { ok: false as const, safe_code: "FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE", content_type: contentType, text_present: Boolean(text), media_source_asset_count: assetIds.length }
-  return { ok: true as const, content_type: contentType, text_present: Boolean(text), media_asset_present: true, media_source_asset_count: assetIds.length, server_owned_media_validated: true }
+  return { ok: true as const, content_type: contentType, text_present: Boolean(text), media_asset_present: true, media_source_asset_count: assetIds.length, server_owned_media_validated: true, approvedContent: { platform: "fanvue", content_type: "media", text, media: media.media } satisfies FanvueInternalApprovedContent }
+}
+
+
+function redactedContentFlags<T extends Record<string, unknown>>(content: T) {
+  const { approvedContent: _approvedContent, ...safeContent } = content
+  return safeContent
 }
 
 function validateAccount(account: FanvueControlledDispatchAccount | null, userId: string, contentType: "text" | "media") {
@@ -170,6 +213,7 @@ export async function handleFanvueInternalControlledDispatchRoute(dependencies: 
 
   const parsed = parseBody(await dependencies.request.json().catch(() => null))
   if (!parsed.ok) return { status: parsed.status, body: { ...baseResult({ safe_code: parsed.error_code, autopost_job_id_present: parsed.error_code !== "AUTOPOST_JOB_ID_REQUIRED" }), error_code: parsed.error_code } }
+  if (!parsed.dryRun && (dependencies.env ?? process.env)[FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_ENV] !== "true") return { status: 200, body: { ...baseResult({ safe_code: "FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_GATE_DISABLED", autopost_job_id_present: true, dry_run: false }), error_code: "FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_GATE_DISABLED" } }
 
   const job = await dependencies.loadJob(parsed.autopostJobId)
   if (!job || job.id !== parsed.autopostJobId || !job.user_id || !job.rule_id) return { status: 200, body: { ...baseResult({ safe_code: "AUTOPOST_JOB_NOT_FOUND", autopost_job_id_present: true }), error_code: "AUTOPOST_JOB_NOT_FOUND" } }
@@ -188,9 +232,42 @@ export async function handleFanvueInternalControlledDispatchRoute(dependencies: 
   const content = await validateContent(contentFromJobOrRule(job, rule), { userId: job.user_id, loadApprovedMedia: dependencies.loadApprovedMedia })
   if (!content.ok) return { status: 200, body: { ...baseResult({ ...ruleFlags, safe_code: content.safe_code, autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true, content_type: content.content_type ?? null, text_present: content.text_present ?? false, media_source_asset_count: content.media_source_asset_count ?? 0 }), error_code: content.safe_code } }
 
+  const safeContent = redactedContentFlags(content)
   const accountState = validateAccount(await dependencies.loadAccount(job.user_id), job.user_id, content.content_type as "text" | "media")
-  if (!accountState.account_connected) return { status: 200, body: { ...baseResult({ ...ruleFlags, ...content, ...accountState, safe_code: "FANVUE_ACCOUNT_NOT_CONNECTED", autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true }), error_code: "FANVUE_ACCOUNT_NOT_CONNECTED" } }
-  if (!accountState.required_scopes_present) return { status: 200, body: { ...baseResult({ ...ruleFlags, ...content, ...accountState, safe_code: "FANVUE_REQUIRED_SCOPES_MISSING", autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true }), error_code: "FANVUE_REQUIRED_SCOPES_MISSING" } }
+  if (!accountState.account_connected) return { status: 200, body: { ...baseResult({ ...ruleFlags, ...safeContent, ...accountState, safe_code: "FANVUE_ACCOUNT_NOT_CONNECTED", autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true }), error_code: "FANVUE_ACCOUNT_NOT_CONNECTED" } }
+  if (!accountState.required_scopes_present) return { status: 200, body: { ...baseResult({ ...ruleFlags, ...safeContent, ...accountState, safe_code: "FANVUE_REQUIRED_SCOPES_MISSING", autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true }), error_code: "FANVUE_REQUIRED_SCOPES_MISSING" } }
 
-  return { status: 200, body: baseResult({ ...ruleFlags, ...content, ...accountState, ok: true, safe_code: "FANVUE_CONTROLLED_DISPATCH_DRY_RUN_ELIGIBLE", would_dispatch: true, autopost_job_id_present: true, job_state: job.state, content_reference_present: true }) }
+  if (parsed.dryRun) return { status: 200, body: baseResult({ ...ruleFlags, ...safeContent, ...accountState, ok: true, safe_code: "FANVUE_CONTROLLED_DISPATCH_DRY_RUN_ELIGIBLE", would_dispatch: true, autopost_job_id_present: true, job_state: job.state, content_reference_present: true }) }
+
+  const adapterDependencies = dependencies.adapterDependencies ?? dependencies.getAdapterDependencies?.()
+  if (!adapterDependencies) throw new Error("FANVUE_CONTROLLED_DISPATCH_ADAPTER_DEPENDENCIES_REQUIRED")
+  if (!dependencies.persistProof) throw new Error("FANVUE_CONTROLLED_DISPATCH_PERSIST_PROOF_REQUIRED")
+  const adapter = dependencies.adapter ?? postFanvueInternalSinglePost
+  const adapterResult = await adapter({
+    ...adapterDependencies,
+    userId: job.user_id,
+    account: await dependencies.loadAccount(job.user_id),
+    content: content.approvedContent,
+    reloadAccountAfterRefresh: dependencies.loadAccount,
+    now: adapterDependencies.now ?? dependencies.now,
+  })
+  const safeAdapter = redactFanvueInternalPostResult(adapterResult)
+  let proofPersisted = false
+  let auditLogPersisted = false
+  let proofMutation = false
+  let proofResultOk: boolean | null = null
+  if (adapterResult.ok && adapterResult.provider_post_uuid) {
+    const persisted = await dependencies.persistProof({
+      autopostJobId: job.id,
+      providerPostUuid: adapterResult.provider_post_uuid,
+      result: { ...safeAdapter, provider_post_uuid_present: true },
+      now: dependencies.now?.() ?? new Date(),
+    })
+    proofResultOk = persisted.ok
+    proofPersisted = persisted.job_proof_persisted
+    auditLogPersisted = persisted.audit_log_persisted
+    proofMutation = persisted.job_proof_persisted || persisted.audit_log_persisted
+  }
+
+  return { status: 200, body: baseResult({ ...ruleFlags, ...safeContent, ...accountState, ...safeAdapter, ok: proofResultOk === null ? safeAdapter.ok : Boolean(safeAdapter.ok && proofResultOk), safe_code: safeAdapter.safe_code, dry_run: false, would_dispatch: false, autopost_job_id_present: true, job_state: job.state, content_reference_present: true, proof_persisted: proofPersisted, audit_log_persisted: auditLogPersisted, supabase_mutated: Boolean(adapterResult.supabase_mutated || proofMutation) }) }
 }
