@@ -40,8 +40,9 @@ async function route(input: Record<string, any> = {}) {
     loadJob: input.loadJob ?? (async () => ({ id: jobId, user_id: userId, rule_id: ruleId, platform: 'fanvue', payload: {}, state: 'QUEUED', result: null, error: null })),
     loadRule: input.loadRule ?? (async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, selected_platforms: ['fanvue'], content_payload: { platform: 'fanvue', content_type: 'text', text: 'Approved Fanvue caption' }, paused_at: null, revoked_at: null })),
     loadAccount: input.loadAccount ?? (async () => ({ user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['read:media', 'write:media', 'write:creator'] })),
+    loadApprovedMedia: input.loadApprovedMedia,
     persistProof: input.persistProof ?? (async (proof: any) => { persisted++; assert.equal(proof.providerPostUuid, postUuid); return { ok: true, job_proof_persisted: true, audit_log_persisted: true } }),
-    adapter: input.adapter ?? (async (adapterInput: any) => { adapterCalls++; assert.equal(adapterInput.content.text, 'Approved Fanvue caption'); return { ok: true, safe_code: 'FANVUE_INTERNAL_SINGLE_POST_CREATED', platform: 'fanvue', live_attempted: true, content_type: 'text', text_present: true, media_asset_present: false, token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: false, upload_session_status_class: 'not_attempted', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', readiness_checked: false, readiness_ready: false, create_attempted: true, create_status_class: '2xx', provider_post_uuid_present: true, provider_post_uuid: postUuid, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: false, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: null } }),
+    adapter: input.adapter ?? (async (adapterInput: any) => { adapterCalls++; assert.equal(adapterInput.content.text, input.expectedText ?? 'Approved Fanvue caption'); return { ok: true, safe_code: 'FANVUE_INTERNAL_SINGLE_POST_CREATED', platform: 'fanvue', live_attempted: true, content_type: adapterInput.content.content_type, text_present: Boolean(adapterInput.content.text), media_asset_present: Boolean(adapterInput.content.media), token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: false, upload_session_status_class: 'not_attempted', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', readiness_checked: false, readiness_ready: false, create_attempted: true, create_status_class: '2xx', provider_post_uuid_present: true, provider_post_uuid: postUuid, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: false, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: null } }),
     adapterDependencies: { apiBaseUrl: 'https://api.test.fanvue.example', apiVersion: '2025-01-01', fanvueFetch: async () => { throw new Error('mock adapter prevents provider calls') }, fetchIdentity: async () => { throw new Error('mock adapter prevents identity calls') }, signedPartUploader: async () => { throw new Error('mock adapter prevents uploads') } },
     now: () => now,
   })
@@ -93,7 +94,7 @@ async function run() {
   assert.equal(((await route({ authenticatedUserId: nonAdminUserId })).response.body as any).error_code, 'FANVUE_UPLOAD_DIAGNOSTIC_ADMIN_REQUIRED')
   assert.equal(((await route({ requestBody: body({ dry_run: false, confirm: 'bad' }) })).response.body as any).error_code, 'INVALID_CONFIRMATION')
 
-  for (const key of ['text', 'audience', 'mediaUuid', 'mediaUuids', 'uploadId', 'postUuid', 'providerPostUuid', 'creatorUserUuid', 'providerAccountId', 'username', 'email', 'price', 'publishAt', 'expiresAt', 'collectionUuids', 'schedule', 'dispatch', 'platformRegistry', 'public_ui', 'fileBytes', 'fileUrl']) {
+  for (const key of ['text', 'audience', 'media', 'mediaUuid', 'mediaUuids', 'upload', 'uploadId', 'postUuid', 'providerPostUuid', 'creatorUserUuid', 'providerAccountId', 'username', 'email', 'price', 'publishAt', 'expiresAt', 'collectionUuids', 'schedule', 'dispatch', 'platformRegistry', 'public_ui', 'bytes', 'file', 'fileBytes', 'fileUrl', 'url']) {
     const result = await route({ requestBody: body({ [key]: 'caller-supplied' }) })
     assert.equal(result.response.status, 400, key)
     assert.equal((result.response.body as any).error_code, 'CALLER_SUPPLIED_FORBIDDEN_FIELD', key)
@@ -136,9 +137,50 @@ async function run() {
   assert.equal(createFailed.persisted, 0, 'proof persists only after successful create')
   noLeak(createFailed.response.body)
 
-  const mediaBlocked = await route({ requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }), loadRule: async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, content_payload: { platform: 'fanvue', content_type: 'media', source_asset_ids: ['asset_1'] }, paused_at: null, revoked_at: null }) })
+  const mediaUrlsOnlyBlocked = await route({ requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }), loadRule: async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, content_payload: { platform: 'fanvue', content_type: 'media', source_asset_urls: ['https://public.example/not-used.png'] }, paused_at: null, revoked_at: null }) })
+  assert.equal((mediaUrlsOnlyBlocked.response.body as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_ASSET_ID_REQUIRED')
+  assert.equal(mediaUrlsOnlyBlocked.adapterCalls, 0)
+
+  const mediaZeroIdsBlocked = await route({ requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }), loadRule: async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, content_payload: { platform: 'fanvue', content_type: 'media', source_asset_ids: [] }, paused_at: null, revoked_at: null }) })
+  assert.equal((mediaZeroIdsBlocked.response.body as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_ASSET_ID_REQUIRED')
+  assert.equal(mediaZeroIdsBlocked.adapterCalls, 0)
+
+  const mediaMultipleIdsBlocked = await route({ requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }), loadRule: async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, content_payload: { platform: 'fanvue', content_type: 'media', source_asset_ids: ['623e4567-e89b-42d3-a456-426614174001', '623e4567-e89b-42d3-a456-426614174002'] }, paused_at: null, revoked_at: null }) })
+  assert.equal((mediaMultipleIdsBlocked.response.body as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_SINGLE_ASSET_ONLY')
+  assert.equal(mediaMultipleIdsBlocked.adapterCalls, 0)
+
+  const mediaBlocked = await route({ requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }), loadRule: async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, content_payload: { platform: 'fanvue', content_type: 'media', source_asset_ids: ['623e4567-e89b-42d3-a456-426614174001'] }, paused_at: null, revoked_at: null }) })
   assert.equal((mediaBlocked.response.body as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_BYTES_REQUIRED')
   assert.equal(mediaBlocked.adapterCalls, 0)
+
+  const loaderFailure = await route({ requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }), loadRule: async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, content_payload: { platform: 'fanvue', content_type: 'media', source_asset_ids: ['623e4567-e89b-42d3-a456-426614174001'] }, paused_at: null, revoked_at: null }), loadApprovedMedia: async () => ({ ok: false, safe_code: 'FANVUE_SERVER_OWNED_MEDIA_R2_OBJECT_REQUIRED' }) })
+  assert.equal((loaderFailure.response.body as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_R2_OBJECT_REQUIRED')
+  assert.equal(loaderFailure.adapterCalls, 0)
+
+  let mediaAdapterCalls = 0
+  const loaderSuccess = await route({
+    requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }),
+    expectedText: 'Approved media caption',
+    loadRule: async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, content_payload: { platform: 'fanvue', content_type: 'text_media', text: 'Approved media caption', source_asset_ids: ['623e4567-e89b-42d3-a456-426614174001'], source_asset_urls: ['https://public.example/not-used.png'] }, paused_at: null, revoked_at: null }),
+    loadApprovedMedia: async ({ userId: loaderUserId, sourceAssetIds }: any) => {
+      assert.equal(loaderUserId, userId)
+      assert.deepEqual(sourceAssetIds, ['623e4567-e89b-42d3-a456-426614174001'])
+      return { ok: true, media: { filename: 'fanvue-approved.png', mediaType: 'image', bytes: new Blob(['safe-test-bytes']) } }
+    },
+    adapter: async (adapterInput: any) => {
+      mediaAdapterCalls++
+      assert.equal(adapterInput.content.content_type, 'media')
+      assert.equal(adapterInput.content.text, 'Approved media caption')
+      assert.equal(adapterInput.content.media.filename, 'fanvue-approved.png')
+      assert.equal(adapterInput.content.media.mediaType, 'image')
+      assert(adapterInput.content.media.bytes instanceof Blob)
+      return { ok: true, safe_code: 'FANVUE_INTERNAL_SINGLE_POST_CREATED', platform: 'fanvue', live_attempted: true, content_type: 'media', text_present: true, media_asset_present: true, token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: true, upload_session_status_class: '2xx', signed_url_status_class: '2xx', byte_upload_status_class: '2xx', finalize_status_class: '2xx', readiness_checked: true, readiness_ready: true, create_attempted: true, create_status_class: '2xx', provider_post_uuid_present: true, provider_post_uuid: postUuid, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: true, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: null }
+    },
+  })
+  assert.equal((loaderSuccess.response.body as any).ok, true)
+  assert.equal((loaderSuccess.response.body as any).media_asset_present, true)
+  assert.equal((loaderSuccess.response.body as any).upload_attempted, true)
+  assert.equal(mediaAdapterCalls, 1)
 }
 
 run().then(() => console.log('Fanvue internal single-post route tests passed')).catch((error) => { console.error(error); process.exit(1) })

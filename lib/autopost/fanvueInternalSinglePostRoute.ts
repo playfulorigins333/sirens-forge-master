@@ -8,6 +8,7 @@ import {
   type FanvueInternalApprovedContent,
   type FanvueInternalPostInput,
 } from "./fanvueInternalAdapter"
+import type { FanvueApprovedMediaLoaderResult } from "./fanvueApprovedMediaLoader"
 
 export const FANVUE_INTERNAL_SINGLE_POST_SECRET_HEADER = FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER
 
@@ -54,6 +55,7 @@ export type FanvueInternalSinglePostRouteDependencies = {
   loadJob: (jobId: string) => Promise<FanvueInternalSinglePostJob | null>
   loadRule: (ruleId: string, userId: string) => Promise<FanvueInternalSinglePostRule | null>
   loadAccount: (userId: string) => Promise<FanvueInternalAccount | null>
+  loadApprovedMedia?: (input: { userId: string; sourceAssetIds: string[] }) => Promise<FanvueApprovedMediaLoaderResult>
   persistProof: (input: PersistProofInput) => Promise<{ ok: boolean; job_proof_persisted: boolean; audit_log_persisted: boolean }>
   adapter?: typeof postFanvueInternalSinglePost
   adapterDependencies?: Pick<FanvueInternalPostInput, "apiBaseUrl" | "apiVersion" | "fanvueFetch" | "fetchIdentity" | "signedPartUploader" | "decryptAccessToken" | "refreshAccessToken" | "waitForMediaReady" | "now">
@@ -123,7 +125,7 @@ function validateBody(body: unknown) {
   return { ok: true as const, autopostJobId, dryRun }
 }
 
-function payloadToApprovedContent(payload: unknown): { ok: true; content: FanvueInternalApprovedContent } | { ok: false; reason: string } {
+async function payloadToApprovedContent(payload: unknown, input: { userId: string; loadApprovedMedia?: FanvueInternalSinglePostRouteDependencies["loadApprovedMedia"] }): Promise<{ ok: true; content: FanvueInternalApprovedContent } | { ok: false; reason: string }> {
   if (!isRecord(payload)) return { ok: false, reason: "CONTENT_PAYLOAD_INVALID" }
   if (payload.platform !== "fanvue") return { ok: false, reason: "CONTENT_PLATFORM_MISMATCH" }
   const rawType = clean(payload.content_type)
@@ -134,10 +136,16 @@ function payloadToApprovedContent(payload: unknown): { ok: true; content: Fanvue
   const text = clean(payload.text)
   if (contentType === "text") return { ok: true, content: { platform: "fanvue", content_type: "text", text } }
 
-  // The current repo stores Fanvue media references as asset ids/urls metadata on
-  // autopost_rules.content_payload. That is not server-owned media bytes, so live
-  // media execution is blocked until a secure asset-byte loader is wired in.
-  return { ok: false, reason: "FANVUE_SERVER_OWNED_MEDIA_BYTES_REQUIRED" }
+  if (assetIds.length === 0) return { ok: false, reason: "FANVUE_SERVER_OWNED_MEDIA_ASSET_ID_REQUIRED" }
+  if (assetIds.length !== 1) return { ok: false, reason: "FANVUE_SERVER_OWNED_MEDIA_SINGLE_ASSET_ONLY" }
+  if (!input.loadApprovedMedia) return { ok: false, reason: "FANVUE_SERVER_OWNED_MEDIA_BYTES_REQUIRED" }
+
+  // source_asset_urls are retained only as inert metadata. They are never fetched
+  // or treated as proof of server ownership by this internal route.
+  void assetUrls
+  const media = await input.loadApprovedMedia({ userId: input.userId, sourceAssetIds: assetIds })
+  if (media.ok === false) return { ok: false, reason: media.safe_code }
+  return { ok: true, content: { platform: "fanvue", content_type: "media", text, media: media.media } }
 }
 
 export async function handleFanvueInternalSinglePostRoute(dependencies: FanvueInternalSinglePostRouteDependencies): Promise<FanvueInternalSinglePostRouteResponse> {
@@ -158,7 +166,7 @@ export async function handleFanvueInternalSinglePostRoute(dependencies: FanvueIn
     return { status: 200, body: baseRouteResult({ ...contentReference, dry_run: false, safe_code: "APPROVED_RULE_NOT_FOUND" }) }
   }
 
-  const content = payloadToApprovedContent(job.payload && isRecord(job.payload) && isRecord(job.payload.content_payload) ? job.payload.content_payload : rule.content_payload)
+  const content = await payloadToApprovedContent(job.payload && isRecord(job.payload) && isRecord(job.payload.content_payload) ? job.payload.content_payload : rule.content_payload, { userId: job.user_id, loadApprovedMedia: dependencies.loadApprovedMedia })
   if (content.ok === false) {
     return { status: 200, body: baseRouteResult({ ...contentReference, dry_run: false, approved_content_loaded: false, safe_code: content.reason }) }
   }
