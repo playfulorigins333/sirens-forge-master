@@ -80,9 +80,26 @@ async function run() {
   assert.equal(loadFailed.result.ok, false)
   assert.equal((loadFailed.result as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_LOAD_FAILED')
 
-  const videoRejected = await exercise({ row: { ...baseRow, job_type: 'video', r2_key: 'generations/asset.mp4' }, contentType: 'video/mp4' })
-  assert.equal(videoRejected.result.ok, false)
-  assert.equal((videoRejected.result as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
+  const videoSuccess = await exercise({ row: { ...baseRow, job_type: 'video', metadata: { kind: 'video', placeholder: false, test: false, unsafe: false }, r2_key: 'generations/asset.mp4' }, contentType: 'video/mp4' })
+  assert.equal(videoSuccess.result.ok, true)
+  assert.equal((videoSuccess.result as any).media.filename, `fanvue-approved-${assetId}.mp4`)
+  assert.equal((videoSuccess.result as any).media.mediaType, 'video')
+
+  const ambiguousVideo = await exercise({ row: { ...baseRow, job_type: 'video', r2_key: 'generations/asset.bin' }, contentType: 'application/octet-stream' })
+  assert.equal(ambiguousVideo.result.ok, false)
+  assert.equal((ambiguousVideo.result as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
+
+  const wrongVideoMime = await exercise({ row: { ...baseRow, job_type: 'video', r2_key: 'generations/asset.mp4' }, contentType: 'video/quicktime' })
+  assert.equal(wrongVideoMime.result.ok, false)
+  assert.equal((wrongVideoMime.result as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
+
+  const wrongVideoExt = await exercise({ row: { ...baseRow, job_type: 'video', r2_key: 'generations/asset.mov' }, contentType: 'video/mp4' })
+  assert.equal(wrongVideoExt.result.ok, false)
+  assert.equal((wrongVideoExt.result as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
+
+  const unsafeVideo = await exercise({ row: { ...baseRow, job_type: 'video', r2_key: 'generations/asset.mp4', metadata: { kind: 'video', unsafe: true } }, contentType: 'video/mp4' })
+  assert.equal(unsafeVideo.result.ok, false)
+  assert.equal((unsafeVideo.result as any).safe_code, 'FANVUE_SERVER_OWNED_MEDIA_GENERATION_NOT_COMPLETED')
 
   const success = await exercise()
   assert.equal(success.result.ok, true)
@@ -107,7 +124,7 @@ async function run() {
   assert.equal((noKindR2Extension.result as any).media.mediaType, 'image')
 
   const leaked = JSON.stringify(success.result)
-  assert.doesNotMatch(leaked, /server-owned-bucket-never-returned|generations\/asset\.png|safe-test-bytes/)
+  assert.doesNotMatch(leaked, /server-owned-bucket-never-returned|generations\/asset\.(png|mp4)|safe-test-bytes|signed/i)
 }
 
 run().then(() => console.log('Fanvue approved media loader tests passed')).catch((error) => { console.error(error); process.exit(1) })

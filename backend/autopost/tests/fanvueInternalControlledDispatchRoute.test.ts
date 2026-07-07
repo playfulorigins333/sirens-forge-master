@@ -7,6 +7,8 @@ import {
   FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION,
   FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION,
   FANVUE_INTERNAL_CONTROLLED_DISPATCH_SECRET_HEADER,
+  FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_CONFIRMATION,
+  FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_OPERATION,
   handleFanvueInternalControlledDispatchRoute,
 } from '../../../lib/autopost/fanvueInternalControlledDispatchRoute'
 
@@ -21,6 +23,7 @@ const now = new Date('2026-07-07T00:00:00.000Z')
 const routePath = '/api/admin/autopost/fanvue/internal-controlled-dispatch'
 
 const requestBody = (overrides: Record<string, unknown> = {}) => ({ operation: FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION, autopost_job_id: jobId, ...overrides })
+const videoBody = (overrides: Record<string, unknown> = {}) => ({ operation: FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_OPERATION, autopost_job_id: jobId, dry_run: true, confirm: FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_CONFIRMATION, ...overrides })
 const liveBody = (overrides: Record<string, unknown> = {}) => ({ operation: FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION, autopost_job_id: jobId, dry_run: false, confirm: FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION, ...overrides })
 function req(body: unknown, headers: HeadersInit = {}, method = 'POST') {
   return new Request(`https://sirensforge.test${routePath}`, { method, headers: new Headers({ 'content-type': 'application/json', ...headers }), body: method === 'POST' ? JSON.stringify(body) : undefined })
@@ -105,6 +108,8 @@ async function run() {
   await expectSafeCode({ authenticatedUserId: nonAdminUserId }, 'FANVUE_UPLOAD_DIAGNOSTIC_ADMIN_REQUIRED', 403)
   await expectSafeCode({ requestBody: { autopost_job_id: jobId } }, 'INVALID_OPERATION', 400)
   await expectSafeCode({ requestBody: requestBody({ operation: 'wrong' }) }, 'INVALID_OPERATION', 400)
+  await expectSafeCode({ requestBody: videoBody({ confirm: 'bad' }) }, 'INVALID_CONFIRMATION', 400)
+  await expectSafeCode({ requestBody: videoBody({ dry_run: false }) }, 'INVALID_DRY_RUN', 400)
   await expectSafeCode({ requestBody: liveBody(), liveEnvGate: 'false' }, 'FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_GATE_DISABLED')
   await expectSafeCode({ requestBody: requestBody({ dry_run: false, confirm: FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION }) }, 'INVALID_OPERATION', 400)
   for (const confirm of [undefined, 'bad', FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION.toLowerCase(), ` ${FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION}`]) {
@@ -126,7 +131,7 @@ async function run() {
 
 
   for (const key of ['scan', 'list', 'bulk', 'limit', 'cursor', 'job_ids', 'autopost_job_ids', 'platform', 'payload', 'content_payload', 'random_unknown_key']) {
-    for (const makeBody of [requestBody, liveBody]) {
+    for (const makeBody of [requestBody, liveBody, videoBody]) {
       const result = await exercise({ requestBody: makeBody({ [key]: 'caller-supplied' }) })
       assert.equal(result.response.status, 400, key)
       assert.equal((result.response.body as any).safe_code, 'CALLER_SUPPLIED_UNKNOWN_FIELD', key)
@@ -179,6 +184,23 @@ async function run() {
   await expectSafeCode({ ruleContent: { platform: 'fanvue', content_type: 'media', source_asset_ids: [assetId] }, loadApprovedMedia: async () => ({ ok: false, safe_code: 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE' }) }, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
   await expectSafeCode({ ruleContent: { platform: 'fanvue', content_type: 'media', source_asset_ids: [assetId] }, loadApprovedMedia: async () => ({ ok: true, media: { filename: 'video.mp4', mediaType: 'video', bytes: new Blob(['video']) } }) }, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
   await expectSafeCode({ ruleContent: { platform: 'fanvue', content_type: 'media', source_asset_ids: [assetId] }, scopes: [] }, 'FANVUE_REQUIRED_SCOPES_MISSING')
+
+  await expectSafeCode({ requestBody: videoBody(), ruleContent: { platform: 'fanvue', content_type: 'media_video', source_asset_urls: ['https://example.test/unsafe.mp4'] } }, 'FANVUE_SERVER_OWNED_MEDIA_ASSET_ID_REQUIRED')
+  await expectSafeCode({ requestBody: videoBody(), ruleContent: { platform: 'fanvue', content_type: 'media_video', source_asset_ids: [] } }, 'FANVUE_SERVER_OWNED_MEDIA_ASSET_ID_REQUIRED')
+  await expectSafeCode({ requestBody: videoBody(), ruleContent: { platform: 'fanvue', content_type: 'media_video', source_asset_ids: [assetId, '923e4567-e89b-42d3-a456-426614174000'] } }, 'FANVUE_SERVER_OWNED_MEDIA_SINGLE_ASSET_ONLY')
+  await expectSafeCode({ requestBody: videoBody(), ruleContent: { platform: 'fanvue', content_type: 'media_video', source_asset_ids: [assetId] }, loadApprovedMedia: async () => ({ ok: false, safe_code: 'FANVUE_SERVER_OWNED_MEDIA_LOAD_FAILED' }) }, 'FANVUE_SERVER_OWNED_MEDIA_LOAD_FAILED')
+
+  const validVideo = await exercise({ requestBody: videoBody(), ruleContent: { platform: 'fanvue', content_type: 'media_video', text: 'Approved video', source_asset_ids: [assetId] }, loadApprovedMedia: async () => ({ ok: true, media: { filename: 'video.mp4', mediaType: 'video', bytes: new Blob(['video']) } }) })
+  const validVideoBody = validVideo.response.body as any
+  assert.equal(validVideoBody.ok, true)
+  assert.equal(validVideoBody.safe_code, 'FANVUE_CONTROLLED_VIDEO_DISPATCH_DRY_RUN_ELIGIBLE')
+  assert.equal(validVideoBody.would_dispatch, true)
+  assert.equal(validVideoBody.media_type, 'video')
+  assert.equal(validVideoBody.media_asset_present, true)
+  assert.equal(validVideoBody.server_owned_media_validated, true)
+  assert.equal(validVideo.adapterCalls, 0)
+  assert.equal(validVideo.persisted, 0)
+  assertDryRunOnly(validVideoBody)
 
   const validMedia = await exercise({ ruleContent: { platform: 'fanvue', content_type: 'media', text: 'Approved media', source_asset_ids: [assetId] } })
   const validMediaBody = validMedia.response.body as any
