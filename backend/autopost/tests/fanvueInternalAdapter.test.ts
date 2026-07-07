@@ -6,6 +6,7 @@ import {
   type FanvueInternalAccount,
 } from '../../../lib/autopost/fanvueInternalAdapter'
 import type { FanvueFetch } from '../../../lib/autopost/fanvueApiClientCore'
+import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS } from '../../../lib/autopost/fanvueMediaReadinessDiagnostic'
 
 const userId = '879c8a17-f9e8-473d-8de1-1fd1a77c080e'
 const mediaUuid = '223e4567-e89b-42d3-a456-426614174000'
@@ -92,8 +93,13 @@ async function run() {
   assert.equal(blockedRefresh.result.create_attempted, false)
   assert.equal(blockedRefresh.calls.length, 0)
 
-  const media = await runAdapter({ content: { platform: 'fanvue', content_type: 'media', text: 'Approved media caption', media: { filename: 'approved.png', mediaType: 'image', bytes: new Blob(['safe-bytes']) } } })
+  let readinessArgs: any = null
+  const media = await runAdapter({
+    content: { platform: 'fanvue', content_type: 'media', text: 'Approved media caption', media: { filename: 'approved.png', mediaType: 'image', bytes: new Blob(['safe-bytes']) } },
+    waitForMediaReady: async (_config: any, args: any) => { readinessArgs = args; return { ok: true, media: { uuid: args.uuid, status: 'ready' }, attempts: 1, proof: 'MEDIA_READY_READBACK' } },
+  })
   assert.equal(media.result.ok, true)
+  assert.deepEqual(readinessArgs, { uuid: mediaUuid, maxAttempts: FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS })
   assert.equal(media.uploads, 1)
   assert.equal(media.calls.length, 4)
   assert.match(media.calls[0].url, new RegExp(`/creators/${creatorUuid}/media/uploads$`))
@@ -105,9 +111,9 @@ async function run() {
 
   const notReady = await runAdapter({
     content: { platform: 'fanvue', content_type: 'media', media: { filename: 'approved.png', mediaType: 'image', bytes: new Blob(['safe-bytes']) } },
-    waitForMediaReady: async () => ({ ok: false, status: null, error_code: 'FANVUE_MEDIA_READY_TIMEOUT', safe_error_message: 'safe' }),
+    waitForMediaReady: async () => ({ ok: false, status: null, error_code: 'FANVUE_MEDIA_PROCESSING_ERROR', safe_error_message: 'safe' }),
   })
-  assert.equal(notReady.result.safe_code, 'FANVUE_INTERNAL_MEDIA_NOT_READY')
+  assert.equal(notReady.result.safe_code, 'FANVUE_MEDIA_PROCESSING_ERROR')
   assert.equal(notReady.result.create_attempted, false)
   assert.equal(notReady.calls.filter((call) => call.init.method === 'POST' && /\/posts$/.test(call.url)).length, 0)
 

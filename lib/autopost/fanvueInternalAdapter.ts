@@ -13,6 +13,7 @@ import {
   type FanvueSignedPartUploader,
 } from "./fanvueApiClientCore"
 import { refreshFanvueAccessToken, type FanvueTokenRefreshResult } from "./fanvueTokenRefresh"
+import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS } from "./fanvueMediaReadinessDiagnostic"
 
 export const FANVUE_INTERNAL_SINGLE_POST_AUDIENCE = "subscribers" as const
 export const FANVUE_INTERNAL_SINGLE_POST_ROUTE = "/api/admin/autopost/fanvue/internal-single-post" as const
@@ -279,7 +280,7 @@ export async function postFanvueInternalSinglePost(input: FanvueInternalPostInpu
   if (!byteUpload.ok) { const failure = byteUpload as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
   const finalized = await completeFanvueUploadSession(config, { uploadId: session.uploadId, parts: [byteUpload.part] })
   if (!finalized.ok) { const failure = finalized as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: "2xx", finalize_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
-  const ready = await (input.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, maxAttempts: 8, maxDelayMs: 2000, backoffBaseMs: 250 })
+  const ready = await (input.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, maxAttempts: FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS })
   const readyFlags = { ...uploadFlags, upload_session_status_class: "2xx" as const, signed_url_status_class: "2xx" as const, byte_upload_status_class: "2xx" as const, finalize_status_class: "2xx" as const, readiness_checked: true }
   if (!ready.ok) { const failure = ready as FanvueApiFailure; return baseResult({ ...readyFlags, safe_code: failure.error_code === "FANVUE_MEDIA_READY_TIMEOUT" ? "FANVUE_INTERNAL_MEDIA_NOT_READY" : failure.error_code, safe_error_message: failure.safe_error_message }) }
   const created = await createFanvueMediaPost(config, { text: validation.text, audience: FANVUE_INTERNAL_SINGLE_POST_AUDIENCE, mediaUuids: [session.mediaUuid] })

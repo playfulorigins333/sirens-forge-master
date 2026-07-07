@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
+import { FANVUE_MEDIA_READINESS_DIAGNOSTIC_PNG } from '../../../lib/autopost/fanvueMediaReadinessDiagnostic'
+import { FANVUE_UPLOAD_DIAGNOSTIC_PNG } from '../../../lib/autopost/fanvueUploadDiagnostic'
 import {
   FANVUE_INTERNAL_MEDIA_PROOF_SEED_ASSET_PROFILE,
   FANVUE_INTERNAL_MEDIA_PROOF_SEED_CONTENT_TYPE,
+  FANVUE_INTERNAL_MEDIA_PROOF_SEED_FILENAME,
   FANVUE_INTERNAL_MEDIA_PROOF_SEED_MODE,
   buildFanvueInternalMediaProofSeedMetadata,
   buildFanvueInternalMediaProofSeedR2Key,
@@ -51,7 +54,7 @@ async function run() {
     test: false,
     unsafe: false,
     asset_profile: FANVUE_INTERNAL_MEDIA_PROOF_SEED_ASSET_PROFILE,
-    source: 'server_bundled_safe_static_png',
+    source: 'server_bundled_safe_static_png_64x64_readiness_diagnostic',
     fanvue_upload_attempted: false,
     fanvue_post_attempted: false,
     dispatch_attempted: false,
@@ -76,6 +79,11 @@ async function run() {
   assert.equal(uploaded[0].bucket, bucket)
   assert.equal(uploaded[0].key, r2Key)
   assert.equal(uploaded[0].contentType, FANVUE_INTERNAL_MEDIA_PROOF_SEED_CONTENT_TYPE)
+  assert.equal(FANVUE_INTERNAL_MEDIA_PROOF_SEED_ASSET_PROFILE, 'fanvue_internal_media_proof_seed_safe_static_png_v2')
+  assert.equal(FANVUE_INTERNAL_MEDIA_PROOF_SEED_FILENAME, 'fanvue-internal-media-proof-seed-safe-static-v2.png')
+  assert.equal(r2Key, `fanvue/internal-media-proof-seeds/${userId}/safe-static-v2.png`)
+  assert.equal(uploaded[0].body, FANVUE_MEDIA_READINESS_DIAGNOSTIC_PNG)
+  assert.notEqual(uploaded[0].body, FANVUE_UPLOAD_DIAGNOSTIC_PNG)
   assert(Buffer.isBuffer(uploaded[0].body))
   assert.equal(createDb.inserted.length, 1)
   assert.equal(createDb.inserted[0].user_id, userId)
@@ -87,6 +95,16 @@ async function run() {
   assert.deepEqual(createDb.inserted[0].metadata, metadata)
 
   const existing = { id: generationId, user_id: userId, status: 'completed', job_type: 'image', mode: FANVUE_INTERNAL_MEDIA_PROOF_SEED_MODE, metadata, r2_bucket: bucket, r2_key: r2Key }
+  const oldV1 = { ...existing, metadata: { ...metadata, asset_profile: 'fanvue_internal_media_proof_seed_safe_static_png_v1' }, r2_key: `fanvue/internal-media-proof-seeds/${userId}/safe-static-v1.png` }
+  uploaded = []
+  const oldOnlyDb = mockSupabase([oldV1])
+  const ignoresOldV1 = await createOrReuseFanvueInternalMediaProofSeedAsset({ userId }, { supabaseAdmin: oldOnlyDb.supabaseAdmin as any, r2Bucket: bucket, r2PutObject: async (input) => { uploaded.push(input) } })
+  assert.equal(ignoresOldV1.ok, true)
+  assert.equal(ignoresOldV1.generation_inserted, true)
+  assert.equal(ignoresOldV1.generation_reused, false)
+  assert.equal(uploaded.length, 1)
+  assert.equal(oldOnlyDb.inserted.length, 1)
+
   uploaded = []
   const reuseDb = mockSupabase([existing])
   const reused = await createOrReuseFanvueInternalMediaProofSeedAsset({ userId }, { supabaseAdmin: reuseDb.supabaseAdmin as any, r2Bucket: bucket, r2PutObject: async (input) => { uploaded.push(input) } })
