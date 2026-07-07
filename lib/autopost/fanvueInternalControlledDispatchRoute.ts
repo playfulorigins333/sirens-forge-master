@@ -8,6 +8,8 @@ import {
 } from "./fanvueInternalAdapter"
 
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION = "fanvue_internal_controlled_dispatch_dry_run" as const
+export const FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_OPERATION = "fanvue_internal_controlled_video_dispatch_dry_run" as const
+export const FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_CONFIRMATION = "REQUEST_FANVUE_CONTROLLED_VIDEO_DRY_RUN_ONE_APPROVED_JOB_ONE_SERVER_OWNED_VIDEO_NO_UPLOAD_NO_POST_NO_PRICE_NO_SCHEDULE_NO_RETRY_NO_PUBLIC_EXPOSURE" as const
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION = "fanvue_internal_controlled_dispatch_live_single_post_no_price_no_schedule_no_retry" as const
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION = "REQUEST_FANVUE_CONTROLLED_LIVE_DISPATCH_ONE_APPROVED_JOB_ONE_SERVER_OWNED_IMAGE_NO_PRICE_NO_SCHEDULE_NO_RETRY_NO_PUBLIC_EXPOSURE" as const
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_SECRET_HEADER = FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER
@@ -117,6 +119,7 @@ function baseResult(overrides: Record<string, unknown> = {}) {
     media_asset_present: false,
     media_source_asset_count: 0,
     server_owned_media_validated: false,
+    media_type: null,
     account_connected: false,
     required_scopes_present: false,
     fanvue_upload_attempted: false,
@@ -152,7 +155,12 @@ function parseBody(body: unknown) {
     if (FORBIDDEN_FIELDS.has(key)) return { ok: false as const, status: 400, error_code: "CALLER_SUPPLIED_FORBIDDEN_FIELD" }
     if (!ALLOWED_BODY_FIELDS.has(key)) return { ok: false as const, status: 400, error_code: "CALLER_SUPPLIED_UNKNOWN_FIELD" }
   }
+  const videoDryRun = body.operation === FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_OPERATION
   const live = body.dry_run === false
+  if (videoDryRun) {
+    if (body.dry_run !== undefined && body.dry_run !== true) return { ok: false as const, status: 400, error_code: "INVALID_DRY_RUN" }
+    if (body.confirm !== FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_CONFIRMATION) return { ok: false as const, status: 400, error_code: "INVALID_CONFIRMATION" }
+  } else
   if (live) {
     if (body.operation !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION) return { ok: false as const, status: 400, error_code: "INVALID_OPERATION" }
     if (body.confirm !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION) return { ok: false as const, status: 400, error_code: "INVALID_CONFIRMATION" }
@@ -163,7 +171,7 @@ function parseBody(body: unknown) {
   const autopostJobId = clean(body.autopost_job_id)
   if (!autopostJobId) return { ok: false as const, status: 400, error_code: "AUTOPOST_JOB_ID_REQUIRED" }
   if (!UUID_RE.test(autopostJobId)) return { ok: false as const, status: 400, error_code: "AUTOPOST_JOB_ID_INVALID" }
-  return { ok: true as const, autopostJobId, dryRun: !live }
+  return { ok: true as const, autopostJobId, dryRun: !live, videoDryRun }
 }
 
 function contentFromJobOrRule(job: FanvueControlledDispatchJob, rule: FanvueControlledDispatchRule) {
@@ -171,7 +179,7 @@ function contentFromJobOrRule(job: FanvueControlledDispatchJob, rule: FanvueCont
   return rule.content_payload
 }
 
-async function validateContent(payload: unknown, input: { userId: string; loadApprovedMedia?: FanvueInternalControlledDispatchRouteDependencies["loadApprovedMedia"] }) {
+async function validateContent(payload: unknown, input: { userId: string; loadApprovedMedia?: FanvueInternalControlledDispatchRouteDependencies["loadApprovedMedia"]; allowVideo?: boolean }) {
   if (!isRecord(payload)) return { ok: false as const, safe_code: "CONTENT_PAYLOAD_INVALID" }
   if (payload.platform !== "fanvue") return { ok: false as const, safe_code: "CONTENT_PLATFORM_MISMATCH" }
   const rawType = clean(payload.content_type)
@@ -179,7 +187,7 @@ async function validateContent(payload: unknown, input: { userId: string; loadAp
   const assetUrls = stringArray(payload.source_asset_urls)
   if (assetUrls.length > 0 && assetIds.length === 0) return { ok: false as const, safe_code: "FANVUE_SERVER_OWNED_MEDIA_ASSET_ID_REQUIRED", content_type: rawType, media_source_asset_count: 0 }
   if (assetUrls.length > 0) return { ok: false as const, safe_code: "FANVUE_SOURCE_ASSET_URLS_NOT_EXECUTABLE", content_type: rawType, media_source_asset_count: assetIds.length }
-  const contentType = rawType === "text" ? "text" : rawType === "media" || rawType === "text_media" || assetIds.length > 0 ? "media" : null
+  const contentType = rawType === "text" ? "text" : rawType === "media" || rawType === "text_media" || rawType === "video" || rawType === "media_video" || assetIds.length > 0 ? "media" : null
   if (!contentType) return { ok: false as const, safe_code: "CONTENT_TYPE_UNSUPPORTED" }
   const text = clean(payload.text)
   if (contentType === "text") {
@@ -192,8 +200,9 @@ async function validateContent(payload: unknown, input: { userId: string; loadAp
   if (!input.loadApprovedMedia) return { ok: false as const, safe_code: "FANVUE_SERVER_OWNED_MEDIA_BYTES_REQUIRED", content_type: contentType, text_present: Boolean(text), media_source_asset_count: assetIds.length }
   const media = await input.loadApprovedMedia({ userId: input.userId, sourceAssetIds: assetIds })
   if (media.ok === false) return { ok: false as const, safe_code: media.safe_code, content_type: contentType, text_present: Boolean(text), media_source_asset_count: assetIds.length }
-  if (media.media.mediaType !== "image") return { ok: false as const, safe_code: "FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE", content_type: contentType, text_present: Boolean(text), media_source_asset_count: assetIds.length }
-  return { ok: true as const, content_type: contentType, text_present: Boolean(text), media_asset_present: true, media_source_asset_count: assetIds.length, server_owned_media_validated: true, approvedContent: { platform: "fanvue", content_type: "media", text, media: media.media } satisfies FanvueInternalApprovedContent }
+  const expectedMediaType = input.allowVideo ? "video" : "image"
+  if (media.media.mediaType !== expectedMediaType) return { ok: false as const, safe_code: "FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE", content_type: contentType, text_present: Boolean(text), media_source_asset_count: assetIds.length, media_type: media.media.mediaType }
+  return { ok: true as const, content_type: contentType, text_present: Boolean(text), media_asset_present: true, media_source_asset_count: assetIds.length, server_owned_media_validated: true, media_type: media.media.mediaType, approvedContent: { platform: "fanvue", content_type: "media", text, media: media.media } satisfies FanvueInternalApprovedContent }
 }
 
 
@@ -233,15 +242,15 @@ export async function handleFanvueInternalControlledDispatchRoute(dependencies: 
   if (!ruleFlags.rule_not_paused) return { status: 200, body: { ...baseResult({ ...ruleFlags, safe_code: "FANVUE_RULE_PAUSED", autopost_job_id_present: true, job_state: job.state ?? null }), error_code: "FANVUE_RULE_PAUSED" } }
   if (!ruleFlags.rule_not_revoked) return { status: 200, body: { ...baseResult({ ...ruleFlags, safe_code: "FANVUE_RULE_REVOKED", autopost_job_id_present: true, job_state: job.state ?? null }), error_code: "FANVUE_RULE_REVOKED" } }
 
-  const content = await validateContent(contentFromJobOrRule(job, rule), { userId: job.user_id, loadApprovedMedia: dependencies.loadApprovedMedia })
-  if (!content.ok) return { status: 200, body: { ...baseResult({ ...ruleFlags, safe_code: content.safe_code, autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true, content_type: content.content_type ?? null, text_present: content.text_present ?? false, media_source_asset_count: content.media_source_asset_count ?? 0 }), error_code: content.safe_code } }
+  const content = await validateContent(contentFromJobOrRule(job, rule), { userId: job.user_id, loadApprovedMedia: dependencies.loadApprovedMedia, allowVideo: parsed.videoDryRun })
+  if (!content.ok) return { status: 200, body: { ...baseResult({ ...ruleFlags, safe_code: content.safe_code, autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true, content_type: content.content_type ?? null, text_present: content.text_present ?? false, media_source_asset_count: content.media_source_asset_count ?? 0, media_type: content.media_type ?? null }), error_code: content.safe_code } }
 
   const safeContent = redactedContentFlags(content)
   const accountState = validateAccount(await dependencies.loadAccount(job.user_id), job.user_id, content.content_type as "text" | "media")
   if (!accountState.account_connected) return { status: 200, body: { ...baseResult({ ...ruleFlags, ...safeContent, ...accountState, safe_code: "FANVUE_ACCOUNT_NOT_CONNECTED", autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true }), error_code: "FANVUE_ACCOUNT_NOT_CONNECTED" } }
   if (!accountState.required_scopes_present) return { status: 200, body: { ...baseResult({ ...ruleFlags, ...safeContent, ...accountState, safe_code: "FANVUE_REQUIRED_SCOPES_MISSING", autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true }), error_code: "FANVUE_REQUIRED_SCOPES_MISSING" } }
 
-  if (parsed.dryRun) return { status: 200, body: baseResult({ ...ruleFlags, ...safeContent, ...accountState, ok: true, safe_code: "FANVUE_CONTROLLED_DISPATCH_DRY_RUN_ELIGIBLE", would_dispatch: true, autopost_job_id_present: true, job_state: job.state, content_reference_present: true }) }
+  if (parsed.dryRun) return { status: 200, body: baseResult({ ...ruleFlags, ...safeContent, ...accountState, ok: true, safe_code: parsed.videoDryRun ? "FANVUE_CONTROLLED_VIDEO_DISPATCH_DRY_RUN_ELIGIBLE" : "FANVUE_CONTROLLED_DISPATCH_DRY_RUN_ELIGIBLE", would_dispatch: true, autopost_job_id_present: true, job_state: job.state, content_reference_present: true }) }
 
   const adapterDependencies = dependencies.adapterDependencies ?? dependencies.getAdapterDependencies?.()
   if (!adapterDependencies) throw new Error("FANVUE_CONTROLLED_DISPATCH_ADAPTER_DEPENDENCIES_REQUIRED")

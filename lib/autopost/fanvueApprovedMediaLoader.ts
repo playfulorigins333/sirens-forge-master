@@ -36,6 +36,8 @@ export type FanvueApprovedMediaLoaderInput = {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const SAFE_FILENAME_CHARS_RE = /[^A-Za-z0-9._-]+/g
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"])
+const VIDEO_EXTENSIONS = new Set([".mp4"])
+const VIDEO_CONTENT_TYPES = new Set(["video/mp4"])
 
 function clean(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
@@ -57,7 +59,7 @@ function extensionFromKey(key: string) {
   return match?.[0] ?? ""
 }
 
-function inferImageMediaType(row: FanvueApprovedMediaGenerationRow, contentType: string | null) {
+function inferApprovedMediaType(row: FanvueApprovedMediaGenerationRow, contentType: string | null) {
   const metadata = asRecord(row.metadata)
   const metadataKind = clean(metadata?.kind)?.toLowerCase()
   const metadataMode = clean(metadata?.mode)?.toLowerCase()
@@ -67,7 +69,9 @@ function inferImageMediaType(row: FanvueApprovedMediaGenerationRow, contentType:
   const content = contentType?.toLowerCase() ?? ""
   const ext = extensionFromKey(clean(row.r2_key) ?? "")
 
-  if (content.startsWith("video/") || metadataKind === "video" || rowKind === "video" || rowJobType?.includes("video") || rowMode?.includes("video") || metadataMode?.includes("video")) {
+  const declaresVideo = metadataKind === "video" || rowKind === "video" || rowJobType?.includes("video") || rowMode?.includes("video") || metadataMode?.includes("video")
+  if (declaresVideo || content.startsWith("video/") || VIDEO_EXTENSIONS.has(ext)) {
+    if (declaresVideo && VIDEO_CONTENT_TYPES.has(content) && VIDEO_EXTENSIONS.has(ext)) return "video" as const
     return null
   }
 
@@ -79,7 +83,8 @@ function inferImageMediaType(row: FanvueApprovedMediaGenerationRow, contentType:
 }
 
 function safeFilename(assetId: string, key: string) {
-  const ext = IMAGE_EXTENSIONS.has(extensionFromKey(key)) ? extensionFromKey(key) : ".png"
+  const keyExt = extensionFromKey(key)
+  const ext = IMAGE_EXTENSIONS.has(keyExt) || VIDEO_EXTENSIONS.has(keyExt) ? keyExt : ".png"
   const base = `fanvue-approved-${assetId}`.replace(SAFE_FILENAME_CHARS_RE, "-").slice(0, 96)
   return `${base}${ext}`
 }
@@ -146,7 +151,7 @@ export async function loadFanvueApprovedMedia(input: FanvueApprovedMediaLoaderIn
     return { ok: false, safe_code: "FANVUE_SERVER_OWNED_MEDIA_LOAD_FAILED" }
   }
 
-  const mediaType = inferImageMediaType(row, clean(object.contentType))
+  const mediaType = inferApprovedMediaType(row, clean(object.contentType))
   if (!mediaType) return { ok: false, safe_code: "FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE" }
 
   return { ok: true, media: { filename: safeFilename(assetId, key), mediaType, bytes: object.bytes } }
