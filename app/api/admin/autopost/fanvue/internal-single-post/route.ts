@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { requireFanvueOAuthConfig } from "@/lib/autopost/fanvueOAuth"
 import { handleFanvueInternalSinglePostRoute, type FanvueInternalSinglePostJob, type FanvueInternalSinglePostRule } from "@/lib/autopost/fanvueInternalSinglePostRoute"
 import type { FanvueInternalAccount } from "@/lib/autopost/fanvueInternalAdapter"
+import { loadFanvueApprovedMedia, type FanvueApprovedMediaGenerationRow } from "@/lib/autopost/fanvueApprovedMediaLoader"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -52,6 +53,17 @@ async function loadAccount(userId: string): Promise<FanvueInternalAccount | null
   return (data ?? null) as FanvueInternalAccount | null
 }
 
+async function loadGeneration(input: { userId: string; assetId: string }): Promise<FanvueApprovedMediaGenerationRow | null> {
+  const { data, error } = await getSupabaseAdmin()
+    .from("generations")
+    .select("id,user_id,status,job_type,kind,mode,metadata,r2_bucket,r2_key")
+    .eq("id", input.assetId)
+    .eq("user_id", input.userId)
+    .maybeSingle()
+  if (error) throw error
+  return (data ?? null) as FanvueApprovedMediaGenerationRow | null
+}
+
 async function persistProof(input: { autopostJobId: string; providerPostUuid: string; result: Record<string, unknown>; now: Date }) {
   const completedAt = input.now.toISOString()
   const admin = getSupabaseAdmin()
@@ -97,6 +109,7 @@ export async function POST(req: Request) {
     loadJob,
     loadRule,
     loadAccount,
+    loadApprovedMedia: ({ userId, sourceAssetIds }) => loadFanvueApprovedMedia({ userId, sourceAssetIds, loadGeneration }),
     persistProof,
     adapterDependencies: {
       apiBaseUrl: config.apiBaseUrl,
