@@ -71,11 +71,11 @@ async function persistProof(input: { autopostJobId: string; providerPostUuid: st
       updated_at: completedAt,
     })
     .eq("id", input.autopostJobId)
-  if (error) return { ok: false }
+  if (error) return { ok: false, job_proof_persisted: false, audit_log_persisted: false }
 
-  await admin.from("autopost_job_logs").insert({
+  const { error: logError } = await admin.from("autopost_job_logs").insert({
     job_id: input.autopostJobId,
-    level: "info",
+    level: "INFO",
     message: "fanvue_internal_single_post_proof_persisted",
     meta: {
       platform: "fanvue",
@@ -83,7 +83,8 @@ async function persistProof(input: { autopostJobId: string; providerPostUuid: st
       provider_post_uuid_present: true,
     },
   })
-  return { ok: true }
+  if (logError) return { ok: false, job_proof_persisted: true, audit_log_persisted: false }
+  return { ok: true, job_proof_persisted: true, audit_log_persisted: true }
 }
 
 export async function POST(req: Request) {

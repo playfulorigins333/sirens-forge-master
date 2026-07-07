@@ -54,7 +54,7 @@ export type FanvueInternalSinglePostRouteDependencies = {
   loadJob: (jobId: string) => Promise<FanvueInternalSinglePostJob | null>
   loadRule: (ruleId: string, userId: string) => Promise<FanvueInternalSinglePostRule | null>
   loadAccount: (userId: string) => Promise<FanvueInternalAccount | null>
-  persistProof: (input: PersistProofInput) => Promise<{ ok: boolean }>
+  persistProof: (input: PersistProofInput) => Promise<{ ok: boolean; job_proof_persisted: boolean; audit_log_persisted: boolean }>
   adapter?: typeof postFanvueInternalSinglePost
   adapterDependencies?: Pick<FanvueInternalPostInput, "apiBaseUrl" | "apiVersion" | "fanvueFetch" | "fetchIdentity" | "signedPartUploader" | "decryptAccessToken" | "refreshAccessToken" | "waitForMediaReady" | "now">
   now?: () => Date
@@ -98,6 +98,7 @@ function baseRouteResult(overrides: Record<string, unknown> = {}) {
     create_status_class: "not_attempted",
     provider_post_uuid_present: false,
     proof_persisted: false,
+    audit_log_persisted: false,
     upload_cleanup_supported: false,
     uploaded_media_may_remain_in_creator_media_library: false,
     price_used: false,
@@ -177,7 +178,9 @@ export async function handleFanvueInternalSinglePostRoute(dependencies: FanvueIn
 
   const safeAdapter = redactFanvueInternalPostResult(adapterResult)
   let proofPersisted = false
+  let auditLogPersisted = false
   let proofMutation = false
+  let proofResultOk: boolean | null = null
   if (adapterResult.ok && adapterResult.provider_post_uuid) {
     const persisted = await dependencies.persistProof({
       autopostJobId: job.id,
@@ -185,8 +188,10 @@ export async function handleFanvueInternalSinglePostRoute(dependencies: FanvueIn
       result: { ...safeAdapter, provider_post_uuid_present: true },
       now: dependencies.now?.() ?? new Date(),
     })
-    proofPersisted = persisted.ok
-    proofMutation = true
+    proofResultOk = persisted.ok
+    proofPersisted = persisted.job_proof_persisted
+    auditLogPersisted = persisted.audit_log_persisted
+    proofMutation = persisted.job_proof_persisted || persisted.audit_log_persisted
   }
 
   return {
@@ -196,7 +201,9 @@ export async function handleFanvueInternalSinglePostRoute(dependencies: FanvueIn
       ...safeAdapter,
       dry_run: false,
       approved_content_loaded: true,
+      ok: proofResultOk === null ? safeAdapter.ok : Boolean(safeAdapter.ok && proofResultOk),
       proof_persisted: proofPersisted,
+      audit_log_persisted: auditLogPersisted,
       supabase_mutated: Boolean(adapterResult.supabase_mutated || proofMutation),
     }),
   }

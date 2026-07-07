@@ -40,7 +40,7 @@ async function route(input: Record<string, any> = {}) {
     loadJob: input.loadJob ?? (async () => ({ id: jobId, user_id: userId, rule_id: ruleId, platform: 'fanvue', payload: {}, state: 'QUEUED', result: null, error: null })),
     loadRule: input.loadRule ?? (async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, selected_platforms: ['fanvue'], content_payload: { platform: 'fanvue', content_type: 'text', text: 'Approved Fanvue caption' }, paused_at: null, revoked_at: null })),
     loadAccount: input.loadAccount ?? (async () => ({ user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['read:media', 'write:media', 'write:creator'] })),
-    persistProof: input.persistProof ?? (async (proof: any) => { persisted++; assert.equal(proof.providerPostUuid, postUuid); return { ok: true } }),
+    persistProof: input.persistProof ?? (async (proof: any) => { persisted++; assert.equal(proof.providerPostUuid, postUuid); return { ok: true, job_proof_persisted: true, audit_log_persisted: true } }),
     adapter: input.adapter ?? (async (adapterInput: any) => { adapterCalls++; assert.equal(adapterInput.content.text, 'Approved Fanvue caption'); return { ok: true, safe_code: 'FANVUE_INTERNAL_SINGLE_POST_CREATED', platform: 'fanvue', live_attempted: true, content_type: 'text', text_present: true, media_asset_present: false, token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: false, upload_session_status_class: 'not_attempted', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', readiness_checked: false, readiness_ready: false, create_attempted: true, create_status_class: '2xx', provider_post_uuid_present: true, provider_post_uuid: postUuid, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: false, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: null } }),
     adapterDependencies: { apiBaseUrl: 'https://api.test.fanvue.example', apiVersion: '2025-01-01', fanvueFetch: async () => { throw new Error('mock adapter prevents provider calls') }, fetchIdentity: async () => { throw new Error('mock adapter prevents identity calls') }, signedPartUploader: async () => { throw new Error('mock adapter prevents uploads') } },
     now: () => now,
@@ -72,6 +72,9 @@ async function run() {
   const logMetaMatch = appRouteSource.match(/meta: \{([\s\S]*?)\},\n  \}\)/)
   assert.ok(logMetaMatch, 'audit log meta must be present')
   assert.doesNotMatch(logMetaMatch![1], /providerPostUuid|platform_post_id|provider_post_uuid\s*:/, 'audit log meta must not leak full provider UUID')
+  assert.match(appRouteSource, /level: \"INFO\"/, 'audit log insert must use schema-compatible uppercase INFO')
+  assert.match(appRouteSource, /error: logError/, 'audit log insert error must be captured')
+  assert.match(appRouteSource, /audit_log_persisted: false/, 'audit log insert failure must be reported safely')
 
   const platformRegistrySource = readFileSync('lib/autopost/platformRegistry.ts', 'utf8')
   assert.doesNotMatch(platformRegistrySource, /id:\s*["']fanvue["'][\s\S]{0,500}public_selectable:\s*true/, 'Fanvue must not be publicly selectable')
@@ -102,6 +105,8 @@ async function run() {
   assert.equal(live.adapterCalls, 1)
   assert.equal(live.persisted, 1)
   assert.equal((live.response.body as any).proof_persisted, true)
+  assert.equal((live.response.body as any).audit_log_persisted, true)
+  assert.equal((live.response.body as any).supabase_mutated, true)
   assert.equal((live.response.body as any).provider_post_uuid_present, true)
   assert.equal((live.response.body as any).price_used, false)
   assert.equal((live.response.body as any).publishAt_used, false)
@@ -110,6 +115,20 @@ async function run() {
   assert.equal((live.response.body as any).platform_registry_changed, false)
   assert.equal((live.response.body as any).public_ui_added, false)
   noLeak(live.response.body)
+
+
+  const auditLogFailed = await route({
+    requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }),
+    persistProof: async (proof: any) => {
+      assert.equal(proof.providerPostUuid, postUuid)
+      return { ok: false, job_proof_persisted: true, audit_log_persisted: false }
+    },
+  })
+  assert.equal((auditLogFailed.response.body as any).ok, false, 'audit log failure prevents reporting full success')
+  assert.equal((auditLogFailed.response.body as any).proof_persisted, true)
+  assert.equal((auditLogFailed.response.body as any).audit_log_persisted, false)
+  assert.equal((auditLogFailed.response.body as any).supabase_mutated, true)
+  noLeak(auditLogFailed.response.body)
 
   const createFailed = await route({ requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }), adapter: async () => ({ ok: false, safe_code: 'FANVUE_REQUEST_FAILED', platform: 'fanvue', live_attempted: true, content_type: 'text', text_present: true, media_asset_present: false, token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: false, upload_session_status_class: 'not_attempted', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', readiness_checked: false, readiness_ready: false, create_attempted: true, create_status_class: '5xx', provider_post_uuid_present: false, provider_post_uuid: null, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: false, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: 'safe' }) })
   assert.equal((createFailed.response.body as any).ok, false)
