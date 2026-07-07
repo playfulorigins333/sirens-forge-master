@@ -56,7 +56,7 @@ async function loadAccount(userId: string): Promise<FanvueInternalAccount | null
 async function loadGeneration(input: { userId: string; assetId: string }): Promise<FanvueApprovedMediaGenerationRow | null> {
   const { data, error } = await getSupabaseAdmin()
     .from("generations")
-    .select("id,user_id,status,job_type,kind,mode,metadata,r2_bucket,r2_key")
+    .select("id,user_id,status,job_type,mode,metadata,r2_bucket,r2_key")
     .eq("id", input.assetId)
     .eq("user_id", input.userId)
     .maybeSingle()
