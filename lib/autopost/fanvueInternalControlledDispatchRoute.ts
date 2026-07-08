@@ -65,6 +65,7 @@ export type FanvueInternalControlledDispatchRouteDependencies = {
   loadAccount: (userId: string) => Promise<FanvueControlledDispatchAccount | null>
   loadApprovedMedia?: (input: { userId: string; sourceAssetIds: string[] }) => Promise<FanvueApprovedMediaLoaderResult>
   persistProof?: (input: { autopostJobId: string; providerPostUuid: string; result: Record<string, unknown>; now: Date }) => Promise<{ ok: boolean; job_proof_persisted: boolean; audit_log_persisted: boolean }>
+  persistFailure?: (input: { autopostJobId: string; failure: Record<string, unknown>; now: Date }) => Promise<{ ok: boolean; job_failure_persisted: boolean; audit_log_persisted: boolean }>
   adapter?: typeof postFanvueInternalSinglePost
   adapterDependencies?: Pick<FanvueInternalPostInput, "apiBaseUrl" | "apiVersion" | "fanvueFetch" | "fetchIdentity" | "signedPartUploader" | "decryptAccessToken" | "refreshAccessToken" | "waitForMediaReady" | "now">
   getAdapterDependencies?: () => Pick<FanvueInternalPostInput, "apiBaseUrl" | "apiVersion" | "fanvueFetch" | "fetchIdentity" | "signedPartUploader" | "decryptAccessToken" | "refreshAccessToken" | "waitForMediaReady" | "now">
@@ -218,6 +219,41 @@ function redactedContentFlags<T extends Record<string, unknown>>(content: T) {
   return safeContent
 }
 
+const SAFE_ADAPTER_RESPONSE_KEYS = new Set([
+  "ok", "safe_code", "platform", "live_attempted", "content_type", "text_present", "media_asset_present", "token_refresh_attempted", "token_refresh_status_class", "upload_attempted", "upload_session_status_class", "signed_url_status_class", "byte_upload_status_class", "finalize_status_class", "readiness_checked", "readiness_ready", "create_attempted", "create_status_class", "provider_post_uuid_present", "upload_cleanup_supported", "uploaded_media_may_remain_in_creator_media_library", "price_used", "publishAt_used", "dispatch_attempted", "schedule_attempted", "platform_registry_changed", "public_ui_added", "supabase_mutated",
+])
+
+function pickSafeAdapterResponse(adapter: Record<string, unknown>) {
+  const out: Record<string, unknown> = {}
+  for (const key of SAFE_ADAPTER_RESPONSE_KEYS) if (key in adapter) out[key] = adapter[key]
+  return out
+}
+
+function pickSafeFailureDetails(adapter: Record<string, unknown>, input: { mediaType: unknown; dryRun: boolean; safeErrorMessage?: unknown }) {
+  const out: Record<string, unknown> = {
+    safe_code: adapter.safe_code,
+    media_type: input.mediaType ?? null,
+    dry_run: input.dryRun,
+    live_attempted: adapter.live_attempted === true,
+    upload_attempted: adapter.upload_attempted === true,
+    create_attempted: adapter.create_attempted === true,
+    fanvue_upload_attempted: adapter.upload_attempted === true,
+    fanvue_post_attempted: adapter.create_attempted === true,
+    provider_post_uuid_present: adapter.provider_post_uuid_present === true,
+    schedule_advanced: false,
+    schedule_attempted: adapter.schedule_attempted === true,
+    dispatch_attempted: adapter.dispatch_attempted === true,
+    platform_registry_changed: adapter.platform_registry_changed === true,
+    public_ui_added: adapter.public_ui_added === true,
+    autopost_run_wired: false,
+  }
+  for (const key of ["upload_session_status_class", "signed_url_status_class", "byte_upload_status_class", "finalize_status_class", "create_status_class", "safe_error_message"]) {
+    if (typeof adapter[key] === "string") out[key] = adapter[key]
+  }
+  if (typeof input.safeErrorMessage === "string") out.safe_error_message = input.safeErrorMessage
+  return out
+}
+
 function validateAccount(account: FanvueControlledDispatchAccount | null, userId: string, contentType: "text" | "media") {
   if (!account || account.user_id !== userId || account.platform !== "fanvue" || account.connection_status !== "CONNECTED") return { account_connected: false, required_scopes_present: false }
   const scopes = scopeList(account.scopes)
@@ -271,7 +307,7 @@ export async function handleFanvueInternalControlledDispatchRoute(dependencies: 
     reloadAccountAfterRefresh: dependencies.loadAccount,
     now: adapterDependencies.now ?? dependencies.now,
   })
-  const safeAdapter = redactFanvueInternalPostResult(adapterResult)
+  const safeAdapter = pickSafeAdapterResponse(redactFanvueInternalPostResult(adapterResult))
   let proofPersisted = false
   let auditLogPersisted = false
   let proofMutation = false
@@ -287,6 +323,16 @@ export async function handleFanvueInternalControlledDispatchRoute(dependencies: 
     proofPersisted = persisted.job_proof_persisted
     auditLogPersisted = persisted.audit_log_persisted
     proofMutation = persisted.job_proof_persisted || persisted.audit_log_persisted
+  } else if (!adapterResult.ok && dependencies.persistFailure) {
+    const persisted = await dependencies.persistFailure({
+      autopostJobId: job.id,
+      failure: pickSafeFailureDetails(safeAdapter, { mediaType: safeContent.media_type ?? null, dryRun: false, safeErrorMessage: adapterResult.safe_error_message }),
+      now: dependencies.now?.() ?? new Date(),
+    })
+    proofResultOk = false
+    proofPersisted = persisted.job_failure_persisted
+    auditLogPersisted = persisted.audit_log_persisted
+    proofMutation = persisted.job_failure_persisted || persisted.audit_log_persisted
   }
 
   return { status: 200, body: baseResult({ ...ruleFlags, ...safeContent, ...accountState, ...safeAdapter, ok: proofResultOk === null ? safeAdapter.ok : Boolean(safeAdapter.ok && proofResultOk), safe_code: safeAdapter.safe_code, dry_run: false, would_dispatch: false, autopost_job_id_present: true, job_state: job.state, content_reference_present: true, fanvue_upload_attempted: safeAdapter.upload_attempted, fanvue_post_attempted: safeAdapter.create_attempted, proof_persisted: proofPersisted, audit_log_persisted: auditLogPersisted, supabase_mutated: Boolean(adapterResult.supabase_mutated || proofMutation) }) }

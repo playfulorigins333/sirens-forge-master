@@ -39,6 +39,7 @@ async function exercise(input: Record<string, any> = {}) {
   let loadApprovedMediaCalls = 0
   let adapterCalls = 0
   let persisted = 0
+  let failurePersisted = 0
   const headers: Record<string, string> = {}
   if (input.requestSecret !== null) headers[FANVUE_INTERNAL_CONTROLLED_DISPATCH_SECRET_HEADER] = input.requestSecret ?? secret
   const response = await handleFanvueInternalControlledDispatchRoute({
@@ -55,11 +56,12 @@ async function exercise(input: Record<string, any> = {}) {
     loadAccount: input.loadAccount ?? (async () => { loadAccountCalls++; return { user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: new Date(now.getTime() + 3600000).toISOString(), scopes: input.scopes ?? ['read:media', 'write:media', 'write:creator'] } }),
     loadApprovedMedia: input.loadApprovedMedia ?? (async ({ userId: loaderUserId, sourceAssetIds }: any) => { loadApprovedMediaCalls++; assert.equal(loaderUserId, userId); assert.deepEqual(sourceAssetIds, [assetId]); return { ok: true, media: { filename: 'safe.png', mediaType: 'image', bytes: new Blob(['safe-test-bytes']) } } }),
     persistProof: input.persistProof ?? (async (proof: any) => { persisted++; assert.equal(proof.providerPostUuid, postUuid); return { ok: true, job_proof_persisted: true, audit_log_persisted: true } }),
+    persistFailure: input.persistFailure ?? (async (failure: any) => { failurePersisted++; return { ok: true, job_failure_persisted: true, audit_log_persisted: true } }),
     adapter: input.adapter ?? (async (adapterInput: any) => { adapterCalls++; assert.equal(adapterInput.content.platform, 'fanvue'); return { ok: true, safe_code: 'FANVUE_INTERNAL_SINGLE_POST_CREATED', platform: 'fanvue', live_attempted: true, content_type: adapterInput.content.content_type, text_present: Boolean(adapterInput.content.text), media_asset_present: Boolean(adapterInput.content.media), token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: Boolean(adapterInput.content.media), upload_session_status_class: adapterInput.content.media ? '2xx' : 'not_attempted', signed_url_status_class: adapterInput.content.media ? '2xx' : 'not_attempted', byte_upload_status_class: adapterInput.content.media ? '2xx' : 'not_attempted', finalize_status_class: adapterInput.content.media ? '2xx' : 'not_attempted', readiness_checked: Boolean(adapterInput.content.media), readiness_ready: Boolean(adapterInput.content.media), create_attempted: true, create_status_class: '2xx', provider_post_uuid_present: true, provider_post_uuid: postUuid, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: Boolean(adapterInput.content.media), price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: null } }),
     adapterDependencies: { apiBaseUrl: 'https://api.test.fanvue.example', apiVersion: '2025-01-01', fanvueFetch: async () => { throw new Error('mock adapter prevents provider calls') }, fetchIdentity: async () => { throw new Error('mock adapter prevents identity calls') }, signedPartUploader: async () => { throw new Error('mock adapter prevents uploads') } },
     now: () => now,
   })
-  return { response, loadJobCalls, loadRuleCalls, loadAccountCalls, loadApprovedMediaCalls, adapterCalls, persisted }
+  return { response, loadJobCalls, loadRuleCalls, loadAccountCalls, loadApprovedMediaCalls, adapterCalls, persisted, failurePersisted }
 }
 
 function assertDryRunOnly(body: any) {
@@ -275,6 +277,36 @@ async function run() {
   assert.equal(liveVideo.adapterCalls, 1)
   assert.equal(liveVideo.persisted, 1)
   assert.doesNotMatch(JSON.stringify(liveVideoBody), new RegExp('523e4567-e89b-42d3-a456-426614174000|provider_post_uuid\":|providerPostUuid|raw provider|https://signed|signed_url\":|r2_key|video-bytes-never-returned|encrypted-token|encrypted-refresh|Bearer', 'i'))
+
+
+  let persistedFailurePayload: any = null
+  const liveVideoUploadFailed = await exercise({
+    requestBody: videoLiveBody(),
+    ruleContent: { platform: 'fanvue', content_type: 'media_video', text: 'Approved live video', source_asset_ids: [assetId] },
+    loadApprovedMedia: async () => ({ ok: true, media: { filename: 'video.mp4', mediaType: 'video', bytes: new Blob(['video-bytes-never-returned']) } }),
+    adapter: async () => ({ ok: false, safe_code: 'FANVUE_REQUEST_FAILED', platform: 'fanvue', live_attempted: true, content_type: 'media', text_present: true, media_asset_present: true, token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: true, upload_session_status_class: '5xx', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', readiness_checked: false, readiness_ready: false, create_attempted: false, create_status_class: 'not_attempted', provider_post_uuid_present: false, provider_post_uuid: '923e4567-e89b-42d3-a456-426614174000', upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: false, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: 'safe sanitized upload failure', raw_provider_response: { secret: 'must-not-persist' }, signed_url: 'https://signed.example/leak', r2_key: 'leaky/key', media_bytes: 'video-bytes-never-returned' }),
+    persistFailure: async (input: any) => { persistedFailurePayload = input; return { ok: true, job_failure_persisted: true, audit_log_persisted: true } },
+  })
+  const liveVideoUploadFailedBody = liveVideoUploadFailed.response.body as any
+  assert.equal(liveVideoUploadFailedBody.ok, false)
+  assert.equal(liveVideoUploadFailedBody.safe_code, 'FANVUE_REQUEST_FAILED')
+  assert.equal(liveVideoUploadFailedBody.media_type, 'video')
+  assert.equal(liveVideoUploadFailedBody.dry_run, false)
+  assert.equal(liveVideoUploadFailedBody.live_attempted, true)
+  assert.equal(liveVideoUploadFailedBody.upload_attempted, true)
+  assert.equal(liveVideoUploadFailedBody.create_attempted, false)
+  assert.equal(liveVideoUploadFailedBody.fanvue_upload_attempted, true)
+  assert.equal(liveVideoUploadFailedBody.fanvue_post_attempted, false)
+  assert.equal(liveVideoUploadFailedBody.provider_post_uuid_present, false)
+  assert.equal(liveVideoUploadFailedBody.proof_persisted, true)
+  assert.equal(liveVideoUploadFailedBody.audit_log_persisted, true)
+  assert.equal(liveVideoUploadFailedBody.supabase_mutated, true)
+  assert.equal(liveVideoUploadFailed.persisted, 0)
+  assert.ok(persistedFailurePayload)
+  assert.equal(persistedFailurePayload.autopostJobId, jobId)
+  assert.deepEqual(persistedFailurePayload.failure, { safe_code: 'FANVUE_REQUEST_FAILED', media_type: 'video', dry_run: false, live_attempted: true, upload_attempted: true, create_attempted: false, fanvue_upload_attempted: true, fanvue_post_attempted: false, provider_post_uuid_present: false, schedule_advanced: false, schedule_attempted: false, dispatch_attempted: false, platform_registry_changed: false, public_ui_added: false, autopost_run_wired: false, upload_session_status_class: '5xx', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', create_status_class: 'not_attempted', safe_error_message: 'safe sanitized upload failure' })
+  assert.doesNotMatch(JSON.stringify(liveVideoUploadFailedBody), /923e4567-e89b-42d3-a456-426614174000|provider_post_uuid":|raw_provider_response|must-not-persist|https:\/\/signed|signed_url":|r2_key|video-bytes-never-returned|media_bytes|encrypted-token|encrypted-refresh|Bearer/i)
+  assert.doesNotMatch(JSON.stringify(persistedFailurePayload), /923e4567-e89b-42d3-a456-426614174000|provider_post_uuid":|raw_provider_response|must-not-persist|https:\/\/signed|signed_url":|r2_key|video-bytes-never-returned|media_bytes|encrypted-token|encrypted-refresh|Bearer/i)
 
   await expectSafeCode({ requestBody: videoLiveBody(), ruleContent: { platform: 'fanvue', content_type: 'media', text: 'Wrong image', source_asset_ids: [assetId] } }, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
 
