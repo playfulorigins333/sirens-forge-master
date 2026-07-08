@@ -97,6 +97,7 @@ async function run() {
   assert.equal(db.inserted.autopost_jobs[0].rule_id, ruleId)
   assert.equal(db.inserted.autopost_jobs[0].result, null)
   assert.equal(db.inserted.autopost_jobs[0].error, null)
+  assert.equal(db.inserted.autopost_jobs[0].scheduled_for, '2026-07-07T00:00:00.000Z')
 
   const existingGeneration = { id: generationId, user_id: userId, status: 'completed', job_type: 'video', mode: FANVUE_INTERNAL_VIDEO_PROOF_SEED_MODE, metadata, r2_bucket: bucket, r2_key: r2Key }
   const existingRule = { id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, content_payload: buildFanvueInternalVideoProofSeedContentPayload(generationId), paused_at: null, revoked_at: null }
