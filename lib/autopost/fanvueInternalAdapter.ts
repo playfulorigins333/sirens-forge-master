@@ -40,6 +40,8 @@ export type FanvueInternalApprovedMedia = {
   filename: string
   mediaType: "image" | "video"
   bytes: BodyInit
+  contentType?: string | null
+  size?: number | null
 }
 
 export type FanvueInternalApprovedContent = {
@@ -165,6 +167,28 @@ function baseResult(overrides: Partial<FanvueInternalPostResult> = {}): FanvueIn
   }
 }
 
+
+function inferContentType(media: FanvueInternalApprovedMedia) {
+  const declared = clean(media.contentType)
+  if (declared) return declared
+  if (media.mediaType === "video") return "video/mp4"
+  const filename = clean(media.filename)?.toLowerCase() ?? ""
+  if (filename.endsWith(".png")) return "image/png"
+  if (filename.endsWith(".jpg") || filename.endsWith(".jpeg")) return "image/jpeg"
+  if (filename.endsWith(".webp")) return "image/webp"
+  if (filename.endsWith(".gif")) return "image/gif"
+  return null
+}
+
+function inferByteSize(media: FanvueInternalApprovedMedia) {
+  if (typeof media.size === "number" && Number.isFinite(media.size) && media.size > 0) return Math.floor(media.size)
+  const bytes = media.bytes as { size?: unknown; byteLength?: unknown; length?: unknown }
+  for (const value of [bytes?.size, bytes?.byteLength, bytes?.length]) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value)
+  }
+  return null
+}
+
 function accountHasScopes(account: FanvueInternalAccount, contentType: FanvueInternalContentType) {
   const scopes = scopeList(account.scopes)
   if (contentType === "text") return true
@@ -272,13 +296,15 @@ export async function postFanvueInternalSinglePost(input: FanvueInternalPostInpu
 
   const media = input.content.media!
   const uploadFlags = { ...contentFlags, live_attempted: true, token_refresh_attempted: refreshAttempted, token_refresh_status_class: refreshStatusClass, supabase_mutated: supabaseMutated, upload_attempted: true, uploaded_media_may_remain_in_creator_media_library: true }
-  const session = await createFanvueCreatorUploadSession(config, { creatorUserUuid: creator.creatorUserUuid, name: media.filename, filename: media.filename, mediaType: media.mediaType })
+  const contentType = inferContentType(media)
+  const mediaSize = inferByteSize(media)
+  const session = await createFanvueCreatorUploadSession(config, { creatorUserUuid: creator.creatorUserUuid, name: media.filename, filename: media.filename, mediaType: media.mediaType, contentType, size: mediaSize })
   if (!session.ok) { const failure = session as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
   const signed = await getFanvueCreatorUploadPartUrl(config, { creatorUserUuid: creator.creatorUserUuid, uploadId: session.uploadId, partNumber: 1 })
   if (!signed.ok) { const failure = signed as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
-  const byteUpload = await uploadFanvueSignedPart({ signedUrl: signed.signed_url, partNumber: 1, body: media.bytes, uploader: input.signedPartUploader })
+  const byteUpload = await uploadFanvueSignedPart({ signedUrl: signed.signed_url, partNumber: 1, body: media.bytes, contentType, uploader: input.signedPartUploader })
   if (!byteUpload.ok) { const failure = byteUpload as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
-  const finalized = await completeFanvueCreatorUploadSession(config, { creatorUserUuid: creator.creatorUserUuid, uploadId: session.uploadId, parts: [byteUpload.part] })
+  const finalized = await completeFanvueCreatorUploadSession(config, { creatorUserUuid: creator.creatorUserUuid, uploadId: session.uploadId, parts: [byteUpload.part], mediaType: media.mediaType, filename: media.filename, contentType, size: mediaSize })
   if (!finalized.ok) { const failure = finalized as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: "2xx", finalize_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
   const ready = await (input.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, maxAttempts: FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS })
   const readyFlags = { ...uploadFlags, upload_session_status_class: "2xx" as const, signed_url_status_class: "2xx" as const, byte_upload_status_class: "2xx" as const, finalize_status_class: "2xx" as const, readiness_checked: true }

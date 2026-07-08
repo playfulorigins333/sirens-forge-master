@@ -175,8 +175,9 @@ export async function POST(req: Request) {
         apiVersion: config.apiVersion,
         fanvueFetch: (url, init) => fetch(url, init),
         fetchIdentity: (url, init) => fetch(url, init),
-        signedPartUploader: async ({ signedUrl, body }) => {
-          const upload = await fetch(signedUrl, { method: "PUT", body: body as BodyInit })
+        signedPartUploader: async ({ signedUrl, body, contentType }) => {
+          const headers = contentType ? { "Content-Type": contentType } : undefined
+          const upload = await fetch(signedUrl, { method: "PUT", body: body as BodyInit, headers })
           const ETag = upload.headers.get("etag") ?? upload.headers.get("ETag") ?? ""
           if (!upload.ok || !ETag) throw new Error("Signed upload part failed")
           return { ETag }
