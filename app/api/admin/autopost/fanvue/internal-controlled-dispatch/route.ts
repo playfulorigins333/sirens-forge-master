@@ -117,6 +117,43 @@ async function persistProof(input: { autopostJobId: string; providerPostUuid: st
   if (logError) return { ok: false, job_proof_persisted: true, audit_log_persisted: false }
   return { ok: true, job_proof_persisted: true, audit_log_persisted: true }
 }
+async function persistFailure(input: { autopostJobId: string; failure: Record<string, unknown>; now: Date }) {
+  const failedAt = input.now.toISOString()
+  const admin = getSupabaseAdmin()
+  const failure = {
+    ...input.failure,
+    platform: "fanvue",
+    result_status: "FAILED",
+    failed_at: failedAt,
+  }
+  const { data: updatedJob, error } = await admin
+    .from("autopost_jobs")
+    .update({
+      state: "FAILED",
+      result: failure,
+      error: failure,
+      updated_at: failedAt,
+    })
+    .eq("id", input.autopostJobId)
+    .eq("state", "QUEUED")
+    .select("id")
+    .maybeSingle()
+  if (error || !updatedJob) return { ok: false, job_failure_persisted: false, audit_log_persisted: false }
+
+  const { error: logError } = await admin.from("autopost_job_logs").insert({
+    job_id: input.autopostJobId,
+    level: "ERROR",
+    message: "fanvue_controlled_live_dispatch_failed",
+    meta: {
+      ...failure,
+      route: "internal-controlled-dispatch",
+      controlled_live_dispatch: true,
+    },
+  })
+  if (logError) return { ok: false, job_failure_persisted: true, audit_log_persisted: false }
+  return { ok: true, job_failure_persisted: true, audit_log_persisted: true }
+}
+
 
 export async function POST(req: Request) {
   const response = await handleFanvueInternalControlledDispatchRoute({
@@ -130,6 +167,7 @@ export async function POST(req: Request) {
     loadAccount,
     loadApprovedMedia: ({ userId, sourceAssetIds }) => loadFanvueApprovedMedia({ userId, sourceAssetIds, loadGeneration }),
     persistProof,
+    persistFailure,
     getAdapterDependencies: () => {
       const config = requireFanvueOAuthConfig()
       return {
