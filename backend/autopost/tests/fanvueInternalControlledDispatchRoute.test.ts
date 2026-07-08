@@ -308,6 +308,28 @@ async function run() {
   assert.doesNotMatch(JSON.stringify(liveVideoUploadFailedBody), /923e4567-e89b-42d3-a456-426614174000|provider_post_uuid":|raw_provider_response|must-not-persist|https:\/\/signed|signed_url":|r2_key|video-bytes-never-returned|media_bytes|encrypted-token|encrypted-refresh|Bearer/i)
   assert.doesNotMatch(JSON.stringify(persistedFailurePayload), /923e4567-e89b-42d3-a456-426614174000|provider_post_uuid":|raw_provider_response|must-not-persist|https:\/\/signed|signed_url":|r2_key|video-bytes-never-returned|media_bytes|encrypted-token|encrypted-refresh|Bearer/i)
 
+  let persistedReadinessFailurePayload: any = null
+  const liveVideoReadinessFailed = await exercise({
+    requestBody: videoLiveBody(),
+    ruleContent: { platform: 'fanvue', content_type: 'media_video', text: 'Approved live video', source_asset_ids: [assetId] },
+    loadApprovedMedia: async () => ({ ok: true, media: { filename: 'video.mp4', mediaType: 'video', bytes: new Blob(['video-bytes-never-returned']) } }),
+    adapter: async () => ({ ok: false, safe_code: 'FANVUE_INTERNAL_MEDIA_NOT_READY', platform: 'fanvue', live_attempted: true, content_type: 'media', text_present: true, media_asset_present: true, token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: true, upload_session_status_class: '2xx', signed_url_status_class: '2xx', byte_upload_status_class: '2xx', finalize_status_class: '2xx', readiness_checked: true, readiness_ready: false, readiness_status_class: 'timeout', readiness_attempts_used: 24, readiness_final_state: 'timeout', create_attempted: false, create_status_class: 'not_attempted', provider_post_uuid_present: false, provider_post_uuid: null, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: true, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: 'Fanvue upload completed, but media was still processing before the readiness retry limit.', raw_provider_response: { mediaUuid: '923e4567-e89b-42d3-a456-426614174000' }, signed_url: 'https://signed.example/leak', r2_key: 'leaky/key', media_bytes: 'video-bytes-never-returned' }),
+    persistFailure: async (input: any) => { persistedReadinessFailurePayload = input; return { ok: true, job_failure_persisted: true, audit_log_persisted: true } },
+  })
+  const liveVideoReadinessFailedBody = liveVideoReadinessFailed.response.body as any
+  assert.equal(liveVideoReadinessFailedBody.safe_code, 'FANVUE_INTERNAL_MEDIA_NOT_READY')
+  assert.equal(liveVideoReadinessFailedBody.readiness_checked, true)
+  assert.equal(liveVideoReadinessFailedBody.readiness_status_class, 'timeout')
+  assert.equal(liveVideoReadinessFailedBody.readiness_attempts_used, 24)
+  assert.equal(liveVideoReadinessFailedBody.readiness_final_state, 'timeout')
+  assert.equal(liveVideoReadinessFailedBody.create_attempted, false)
+  assert.equal(persistedReadinessFailurePayload.failure.readiness_checked, true)
+  assert.equal(persistedReadinessFailurePayload.failure.readiness_status_class, 'timeout')
+  assert.equal(persistedReadinessFailurePayload.failure.readiness_attempts_used, 24)
+  assert.equal(persistedReadinessFailurePayload.failure.readiness_final_state, 'timeout')
+  assert.doesNotMatch(JSON.stringify(liveVideoReadinessFailedBody), /923e4567-e89b-42d3-a456-426614174000|provider_post_uuid":|raw_provider_response|mediaUuid|https:\/\/signed|signed_url":|r2_key|video-bytes-never-returned|media_bytes|encrypted-token|encrypted-refresh|Bearer/i)
+  assert.doesNotMatch(JSON.stringify(persistedReadinessFailurePayload), /923e4567-e89b-42d3-a456-426614174000|provider_post_uuid":|raw_provider_response|mediaUuid|https:\/\/signed|signed_url":|r2_key|video-bytes-never-returned|media_bytes|encrypted-token|encrypted-refresh|Bearer/i)
+
   await expectSafeCode({ requestBody: videoLiveBody(), ruleContent: { platform: 'fanvue', content_type: 'media', text: 'Wrong image', source_asset_ids: [assetId] } }, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
 
   const providerFailed = await exercise({ requestBody: liveBody(), adapter: async () => ({ ok: false, safe_code: 'FANVUE_REQUEST_FAILED', platform: 'fanvue', live_attempted: true, content_type: 'text', text_present: true, media_asset_present: false, token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: false, upload_session_status_class: 'not_attempted', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', readiness_checked: false, readiness_ready: false, create_attempted: true, create_status_class: '5xx', provider_post_uuid_present: false, provider_post_uuid: null, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: false, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: 'raw provider failure' }) })

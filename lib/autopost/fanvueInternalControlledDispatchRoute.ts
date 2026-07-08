@@ -220,7 +220,7 @@ function redactedContentFlags<T extends Record<string, unknown>>(content: T) {
 }
 
 const SAFE_ADAPTER_RESPONSE_KEYS = new Set([
-  "ok", "safe_code", "platform", "live_attempted", "content_type", "text_present", "media_asset_present", "token_refresh_attempted", "token_refresh_status_class", "upload_attempted", "upload_session_status_class", "signed_url_status_class", "byte_upload_status_class", "finalize_status_class", "readiness_checked", "readiness_ready", "create_attempted", "create_status_class", "provider_post_uuid_present", "upload_cleanup_supported", "uploaded_media_may_remain_in_creator_media_library", "price_used", "publishAt_used", "dispatch_attempted", "schedule_attempted", "platform_registry_changed", "public_ui_added", "supabase_mutated",
+  "ok", "safe_code", "platform", "live_attempted", "content_type", "text_present", "media_asset_present", "token_refresh_attempted", "token_refresh_status_class", "upload_attempted", "upload_session_status_class", "signed_url_status_class", "byte_upload_status_class", "finalize_status_class", "readiness_checked", "readiness_ready", "readiness_status_class", "readiness_attempts_used", "readiness_final_state", "create_attempted", "create_status_class", "provider_post_uuid_present", "upload_cleanup_supported", "uploaded_media_may_remain_in_creator_media_library", "price_used", "publishAt_used", "dispatch_attempted", "schedule_attempted", "platform_registry_changed", "public_ui_added", "supabase_mutated",
 ])
 
 function pickSafeAdapterResponse(adapter: Record<string, unknown>) {
@@ -247,9 +247,11 @@ function pickSafeFailureDetails(adapter: Record<string, unknown>, input: { media
     public_ui_added: adapter.public_ui_added === true,
     autopost_run_wired: false,
   }
-  for (const key of ["upload_session_status_class", "signed_url_status_class", "byte_upload_status_class", "finalize_status_class", "create_status_class", "safe_error_message"]) {
+  for (const key of ["upload_session_status_class", "signed_url_status_class", "byte_upload_status_class", "finalize_status_class", "readiness_status_class", "readiness_final_state", "create_status_class", "safe_error_message"]) {
     if (typeof adapter[key] === "string") out[key] = adapter[key]
   }
+  if (adapter.readiness_checked === true) out.readiness_checked = true
+  if (typeof adapter.readiness_attempts_used === "number") out.readiness_attempts_used = adapter.readiness_attempts_used
   if (typeof input.safeErrorMessage === "string") out.safe_error_message = input.safeErrorMessage
   return out
 }

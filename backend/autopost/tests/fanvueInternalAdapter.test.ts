@@ -6,7 +6,7 @@ import {
   type FanvueInternalAccount,
 } from '../../../lib/autopost/fanvueInternalAdapter'
 import type { FanvueFetch } from '../../../lib/autopost/fanvueApiClientCore'
-import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS } from '../../../lib/autopost/fanvueMediaReadinessDiagnostic'
+import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS, FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS } from '../../../lib/autopost/fanvueMediaReadinessDiagnostic'
 
 const userId = '879c8a17-f9e8-473d-8de1-1fd1a77c080e'
 const mediaUuid = '223e4567-e89b-42d3-a456-426614174000'
@@ -111,11 +111,18 @@ async function run() {
   assert.equal(media.result.uploaded_media_may_remain_in_creator_media_library, true)
   noLeak(redactFanvueInternalPostResult(media.result))
 
+  let videoReadinessArgs: any = null
   const video = await runAdapter({
     content: { platform: 'fanvue', content_type: 'media', text: 'Approved video caption', media: { filename: 'approved.mp4', mediaType: 'video', bytes: new Blob(['safe-video-bytes'], { type: 'video/mp4' }) } },
+    waitForMediaReady: async (_config: any, args: any) => { videoReadinessArgs = args; return { ok: true, media: { uuid: args.uuid, status: 'ready' }, attempts: 3, proof: 'MEDIA_READY_READBACK' } },
   })
   assert.equal(video.result.ok, true)
   assert.equal(video.uploads, 1)
+  assert.deepEqual(videoReadinessArgs, { uuid: mediaUuid, maxAttempts: FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS })
+  assert(FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS * FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS > FANVUE_MEDIA_READINESS_MAX_ATTEMPTS * FANVUE_MEDIA_READINESS_MAX_DELAY_MS)
+  assert.equal(video.result.readiness_attempts_used, 3)
+  assert.equal(video.result.readiness_status_class, '2xx')
+  assert.equal(video.result.readiness_final_state, 'ready')
   assert.deepEqual(JSON.parse(video.calls[2].init.body ?? '{}'), { parts: [{ ETag: 'etag-one', PartNumber: 1 }], filename: 'approved.mp4', contentType: 'video/mp4', size: 16 })
   assert.deepEqual(JSON.parse(video.calls[3].init.body ?? '{}'), { audience: FANVUE_INTERNAL_SINGLE_POST_AUDIENCE, mediaUuids: [mediaUuid], text: 'Approved video caption' })
   noLeak(redactFanvueInternalPostResult(video.result))
@@ -126,6 +133,9 @@ async function run() {
   })
   assert.equal(notReady.result.safe_code, 'FANVUE_MEDIA_PROCESSING_ERROR')
   assert.equal(notReady.result.create_attempted, false)
+  assert.equal(notReady.result.readiness_checked, true)
+  assert.equal(notReady.result.readiness_status_class, 'not_ready')
+  assert.equal(notReady.result.readiness_final_state, 'error')
   assert.equal(notReady.calls.filter((call) => call.init.method === 'POST' && /\/posts$/.test(call.url)).length, 0)
 
   const missingScopes = await runAdapter({ account: account({ scopes: [] }), content: { platform: 'fanvue', content_type: 'media', media: { filename: 'approved.png', mediaType: 'image', bytes: new Blob(['safe-bytes']) } } })
