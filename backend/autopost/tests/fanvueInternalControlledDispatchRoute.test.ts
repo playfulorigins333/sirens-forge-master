@@ -8,6 +8,8 @@ import {
   FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION,
   FANVUE_INTERNAL_CONTROLLED_DISPATCH_SECRET_HEADER,
   FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_CONFIRMATION,
+  FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_CONFIRMATION,
+  FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_OPERATION,
   FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_OPERATION,
   handleFanvueInternalControlledDispatchRoute,
 } from '../../../lib/autopost/fanvueInternalControlledDispatchRoute'
@@ -25,6 +27,7 @@ const routePath = '/api/admin/autopost/fanvue/internal-controlled-dispatch'
 const requestBody = (overrides: Record<string, unknown> = {}) => ({ operation: FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION, autopost_job_id: jobId, ...overrides })
 const videoBody = (overrides: Record<string, unknown> = {}) => ({ operation: FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_OPERATION, autopost_job_id: jobId, dry_run: true, confirm: FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_CONFIRMATION, ...overrides })
 const liveBody = (overrides: Record<string, unknown> = {}) => ({ operation: FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION, autopost_job_id: jobId, dry_run: false, confirm: FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION, ...overrides })
+const videoLiveBody = (overrides: Record<string, unknown> = {}) => ({ operation: FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_OPERATION, autopost_job_id: jobId, dry_run: false, confirm: FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_CONFIRMATION, ...overrides })
 function req(body: unknown, headers: HeadersInit = {}, method = 'POST') {
   return new Request(`https://sirensforge.test${routePath}`, { method, headers: new Headers({ 'content-type': 'application/json', ...headers }), body: method === 'POST' ? JSON.stringify(body) : undefined })
 }
@@ -111,9 +114,15 @@ async function run() {
   await expectSafeCode({ requestBody: videoBody({ confirm: 'bad' }) }, 'INVALID_CONFIRMATION', 400)
   await expectSafeCode({ requestBody: videoBody({ dry_run: false }) }, 'INVALID_DRY_RUN', 400)
   await expectSafeCode({ requestBody: liveBody(), liveEnvGate: 'false' }, 'FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_GATE_DISABLED')
+  await expectSafeCode({ requestBody: videoLiveBody(), liveEnvGate: 'false' }, 'FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_GATE_DISABLED')
+  await expectSafeCode({ requestBody: videoLiveBody({ dry_run: undefined }), liveEnvGate: 'false' }, 'FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_GATE_DISABLED')
   await expectSafeCode({ requestBody: requestBody({ dry_run: false, confirm: FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION }) }, 'INVALID_OPERATION', 400)
   for (const confirm of [undefined, 'bad', FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION.toLowerCase(), ` ${FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION}`]) {
     await expectSafeCode({ requestBody: liveBody({ confirm }) }, 'INVALID_CONFIRMATION', 400)
+  }
+  await expectSafeCode({ requestBody: videoLiveBody({ dry_run: true }) }, 'INVALID_OPERATION', 400)
+  for (const confirm of [undefined, 'bad', FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_CONFIRMATION.toLowerCase(), ` ${FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_CONFIRMATION}`]) {
+    await expectSafeCode({ requestBody: videoLiveBody({ confirm }) }, 'INVALID_CONFIRMATION', 400)
   }
   await expectSafeCode({ requestBody: requestBody({ dry_run: 'true' }) }, 'INVALID_DRY_RUN', 400)
   await expectSafeCode({ requestBody: { operation: FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION } }, 'AUTOPOST_JOB_ID_REQUIRED', 400)
@@ -242,6 +251,32 @@ async function run() {
   assert.equal(liveMedia.adapterCalls, 1)
   assert.equal(liveMedia.persisted, 1)
   assert.doesNotMatch(JSON.stringify(liveMediaBody), /safe-test-bytes|https:\/\/signed|encrypted-token|encrypted-refresh|Bearer/i)
+
+
+  const liveVideo = await exercise({ requestBody: videoLiveBody(), ruleContent: { platform: 'fanvue', content_type: 'media_video', text: 'Approved live video', source_asset_ids: [assetId] }, loadApprovedMedia: async () => ({ ok: true, media: { filename: 'video.mp4', mediaType: 'video', bytes: new Blob(['video-bytes-never-returned']) } }) })
+  const liveVideoBody = liveVideo.response.body as any
+  assert.equal(liveVideoBody.ok, true)
+  assert.equal(liveVideoBody.dry_run, false)
+  assert.equal(liveVideoBody.media_type, 'video')
+  assert.equal(liveVideoBody.live_attempted, true)
+  assert.equal(liveVideoBody.upload_attempted, true)
+  assert.equal(liveVideoBody.create_attempted, true)
+  assert.equal(liveVideoBody.fanvue_upload_attempted, true)
+  assert.equal(liveVideoBody.fanvue_post_attempted, true)
+  assert.equal(liveVideoBody.supabase_mutated, true)
+  assert.equal(liveVideoBody.provider_post_uuid_present, true)
+  assert.equal(liveVideoBody.schedule_advanced, false)
+  assert.equal(liveVideoBody.schedule_attempted, false)
+  assert.equal(liveVideoBody.dispatch_attempted, false)
+  assert.equal(liveVideoBody.platform_registry_changed, false)
+  assert.equal(liveVideoBody.public_ui_added, false)
+  assert.equal(liveVideoBody.autopost_run_wired, false)
+  assert.equal(liveVideo.loadApprovedMediaCalls, 0)
+  assert.equal(liveVideo.adapterCalls, 1)
+  assert.equal(liveVideo.persisted, 1)
+  assert.doesNotMatch(JSON.stringify(liveVideoBody), new RegExp('523e4567-e89b-42d3-a456-426614174000|provider_post_uuid\":|providerPostUuid|raw provider|https://signed|signed_url\":|r2_key|video-bytes-never-returned|encrypted-token|encrypted-refresh|Bearer', 'i'))
+
+  await expectSafeCode({ requestBody: videoLiveBody(), ruleContent: { platform: 'fanvue', content_type: 'media', text: 'Wrong image', source_asset_ids: [assetId] } }, 'FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE')
 
   const providerFailed = await exercise({ requestBody: liveBody(), adapter: async () => ({ ok: false, safe_code: 'FANVUE_REQUEST_FAILED', platform: 'fanvue', live_attempted: true, content_type: 'text', text_present: true, media_asset_present: false, token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: false, upload_session_status_class: 'not_attempted', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', readiness_checked: false, readiness_ready: false, create_attempted: true, create_status_class: '5xx', provider_post_uuid_present: false, provider_post_uuid: null, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: false, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: 'raw provider failure' }) })
   assert.equal((providerFailed.response.body as any).ok, false)
