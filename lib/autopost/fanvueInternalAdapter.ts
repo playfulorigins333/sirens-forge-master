@@ -1,6 +1,6 @@
 import { decryptAutopostToken } from "./tokenCryptoCore"
 import {
-  completeFanvueUploadSession,
+  completeFanvueCreatorUploadSession,
   createFanvueCreatorUploadSession,
   createFanvueMediaPost,
   createFanvueTextPost,
@@ -278,7 +278,7 @@ export async function postFanvueInternalSinglePost(input: FanvueInternalPostInpu
   if (!signed.ok) { const failure = signed as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
   const byteUpload = await uploadFanvueSignedPart({ signedUrl: signed.signed_url, partNumber: 1, body: media.bytes, uploader: input.signedPartUploader })
   if (!byteUpload.ok) { const failure = byteUpload as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
-  const finalized = await completeFanvueUploadSession(config, { uploadId: session.uploadId, parts: [byteUpload.part] })
+  const finalized = await completeFanvueCreatorUploadSession(config, { creatorUserUuid: creator.creatorUserUuid, uploadId: session.uploadId, parts: [byteUpload.part] })
   if (!finalized.ok) { const failure = finalized as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: "2xx", finalize_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
   const ready = await (input.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, maxAttempts: FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS })
   const readyFlags = { ...uploadFlags, upload_session_status_class: "2xx" as const, signed_url_status_class: "2xx" as const, byte_upload_status_class: "2xx" as const, finalize_status_class: "2xx" as const, readiness_checked: true }
