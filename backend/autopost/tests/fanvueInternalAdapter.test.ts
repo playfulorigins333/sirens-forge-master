@@ -42,7 +42,7 @@ async function runAdapter(input: Partial<Parameters<typeof postFanvueInternalSin
     apiVersion: '2025-01-01',
     fanvueFetch,
     fetchIdentity: input.fetchIdentity ?? (async () => ({ ok: true, status: 200, json: async () => ({ uuid: creatorUuid, isCreator: true, email: 'creator@example.test' }) })),
-    signedPartUploader: input.signedPartUploader ?? (async () => { uploads++; return { ETag: 'etag-one' } }),
+    signedPartUploader: input.signedPartUploader ?? (async (uploadInput: any) => { uploads++; if (input.content && (input.content as any).media?.mediaType === 'video') assert.equal(uploadInput.contentType, 'video/mp4'); return { ETag: 'etag-one' } }),
     decryptAccessToken: input.decryptAccessToken ?? (() => token),
     refreshAccessToken: input.refreshAccessToken,
     reloadAccountAfterRefresh: input.reloadAccountAfterRefresh,
@@ -110,6 +110,15 @@ async function run() {
   assert.equal(media.result.upload_cleanup_supported, false)
   assert.equal(media.result.uploaded_media_may_remain_in_creator_media_library, true)
   noLeak(redactFanvueInternalPostResult(media.result))
+
+  const video = await runAdapter({
+    content: { platform: 'fanvue', content_type: 'media', text: 'Approved video caption', media: { filename: 'approved.mp4', mediaType: 'video', bytes: new Blob(['safe-video-bytes'], { type: 'video/mp4' }) } },
+  })
+  assert.equal(video.result.ok, true)
+  assert.equal(video.uploads, 1)
+  assert.deepEqual(JSON.parse(video.calls[2].init.body ?? '{}'), { parts: [{ ETag: 'etag-one', PartNumber: 1 }], filename: 'approved.mp4', contentType: 'video/mp4', size: 16 })
+  assert.deepEqual(JSON.parse(video.calls[3].init.body ?? '{}'), { audience: FANVUE_INTERNAL_SINGLE_POST_AUDIENCE, mediaUuids: [mediaUuid], text: 'Approved video caption' })
+  noLeak(redactFanvueInternalPostResult(video.result))
 
   const notReady = await runAdapter({
     content: { platform: 'fanvue', content_type: 'media', media: { filename: 'approved.png', mediaType: 'image', bytes: new Blob(['safe-bytes']) } },

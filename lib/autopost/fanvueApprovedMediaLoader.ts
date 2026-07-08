@@ -154,5 +154,5 @@ export async function loadFanvueApprovedMedia(input: FanvueApprovedMediaLoaderIn
   const mediaType = inferApprovedMediaType(row, clean(object.contentType))
   if (!mediaType) return { ok: false, safe_code: "FANVUE_SERVER_OWNED_MEDIA_UNSUPPORTED_TYPE" }
 
-  return { ok: true, media: { filename: safeFilename(assetId, key), mediaType, bytes: object.bytes } }
+  return { ok: true, media: { filename: safeFilename(assetId, key), mediaType, bytes: object.bytes, contentType: clean(object.contentType), size: typeof (object.bytes as { size?: unknown }).size === "number" ? (object.bytes as { size: number }).size : null } }
 }
