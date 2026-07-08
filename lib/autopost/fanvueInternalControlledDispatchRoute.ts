@@ -10,6 +10,8 @@ import {
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION = "fanvue_internal_controlled_dispatch_dry_run" as const
 export const FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_OPERATION = "fanvue_internal_controlled_video_dispatch_dry_run" as const
 export const FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_CONFIRMATION = "REQUEST_FANVUE_CONTROLLED_VIDEO_DRY_RUN_ONE_APPROVED_JOB_ONE_SERVER_OWNED_VIDEO_NO_UPLOAD_NO_POST_NO_PRICE_NO_SCHEDULE_NO_RETRY_NO_PUBLIC_EXPOSURE" as const
+export const FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_OPERATION = "fanvue_internal_controlled_video_dispatch_live_single_post_no_price_no_schedule_no_retry" as const
+export const FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_CONFIRMATION = "REQUEST_FANVUE_CONTROLLED_VIDEO_LIVE_DISPATCH_ONE_APPROVED_JOB_ONE_SERVER_OWNED_VIDEO_UPLOAD_AND_POST" as const
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION = "fanvue_internal_controlled_dispatch_live_single_post_no_price_no_schedule_no_retry" as const
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION = "REQUEST_FANVUE_CONTROLLED_LIVE_DISPATCH_ONE_APPROVED_JOB_ONE_SERVER_OWNED_IMAGE_NO_PRICE_NO_SCHEDULE_NO_RETRY_NO_PUBLIC_EXPOSURE" as const
 export const FANVUE_INTERNAL_CONTROLLED_DISPATCH_SECRET_HEADER = FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER
@@ -156,14 +158,19 @@ function parseBody(body: unknown) {
     if (!ALLOWED_BODY_FIELDS.has(key)) return { ok: false as const, status: 400, error_code: "CALLER_SUPPLIED_UNKNOWN_FIELD" }
   }
   const videoDryRun = body.operation === FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_OPERATION
-  const live = body.dry_run === false
+  const videoLive = body.operation === FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_OPERATION
+  const live = body.dry_run === false || (videoLive && body.dry_run === undefined)
   if (videoDryRun) {
     if (body.dry_run !== undefined && body.dry_run !== true) return { ok: false as const, status: 400, error_code: "INVALID_DRY_RUN" }
     if (body.confirm !== FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_CONFIRMATION) return { ok: false as const, status: 400, error_code: "INVALID_CONFIRMATION" }
   } else
   if (live) {
-    if (body.operation !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION) return { ok: false as const, status: 400, error_code: "INVALID_OPERATION" }
-    if (body.confirm !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION) return { ok: false as const, status: 400, error_code: "INVALID_CONFIRMATION" }
+    if (videoLive) {
+      if (body.confirm !== FANVUE_INTERNAL_CONTROLLED_VIDEO_DISPATCH_LIVE_CONFIRMATION) return { ok: false as const, status: 400, error_code: "INVALID_CONFIRMATION" }
+    } else {
+      if (body.operation !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_OPERATION) return { ok: false as const, status: 400, error_code: "INVALID_OPERATION" }
+      if (body.confirm !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_LIVE_CONFIRMATION) return { ok: false as const, status: 400, error_code: "INVALID_CONFIRMATION" }
+    }
   } else {
     if (body.operation !== FANVUE_INTERNAL_CONTROLLED_DISPATCH_OPERATION) return { ok: false as const, status: 400, error_code: "INVALID_OPERATION" }
     if (body.dry_run !== undefined && body.dry_run !== true) return { ok: false as const, status: 400, error_code: "INVALID_DRY_RUN" }
@@ -171,7 +178,7 @@ function parseBody(body: unknown) {
   const autopostJobId = clean(body.autopost_job_id)
   if (!autopostJobId) return { ok: false as const, status: 400, error_code: "AUTOPOST_JOB_ID_REQUIRED" }
   if (!UUID_RE.test(autopostJobId)) return { ok: false as const, status: 400, error_code: "AUTOPOST_JOB_ID_INVALID" }
-  return { ok: true as const, autopostJobId, dryRun: !live, videoDryRun }
+  return { ok: true as const, autopostJobId, dryRun: !live, videoDryRun, videoLive }
 }
 
 function contentFromJobOrRule(job: FanvueControlledDispatchJob, rule: FanvueControlledDispatchRule) {
@@ -242,7 +249,7 @@ export async function handleFanvueInternalControlledDispatchRoute(dependencies: 
   if (!ruleFlags.rule_not_paused) return { status: 200, body: { ...baseResult({ ...ruleFlags, safe_code: "FANVUE_RULE_PAUSED", autopost_job_id_present: true, job_state: job.state ?? null }), error_code: "FANVUE_RULE_PAUSED" } }
   if (!ruleFlags.rule_not_revoked) return { status: 200, body: { ...baseResult({ ...ruleFlags, safe_code: "FANVUE_RULE_REVOKED", autopost_job_id_present: true, job_state: job.state ?? null }), error_code: "FANVUE_RULE_REVOKED" } }
 
-  const content = await validateContent(contentFromJobOrRule(job, rule), { userId: job.user_id, loadApprovedMedia: dependencies.loadApprovedMedia, allowVideo: parsed.videoDryRun })
+  const content = await validateContent(contentFromJobOrRule(job, rule), { userId: job.user_id, loadApprovedMedia: dependencies.loadApprovedMedia, allowVideo: parsed.videoDryRun || parsed.videoLive })
   if (!content.ok) return { status: 200, body: { ...baseResult({ ...ruleFlags, safe_code: content.safe_code, autopost_job_id_present: true, job_state: job.state ?? null, content_reference_present: true, content_type: content.content_type ?? null, text_present: content.text_present ?? false, media_source_asset_count: content.media_source_asset_count ?? 0, media_type: content.media_type ?? null }), error_code: content.safe_code } }
 
   const safeContent = redactedContentFlags(content)
@@ -282,5 +289,5 @@ export async function handleFanvueInternalControlledDispatchRoute(dependencies: 
     proofMutation = persisted.job_proof_persisted || persisted.audit_log_persisted
   }
 
-  return { status: 200, body: baseResult({ ...ruleFlags, ...safeContent, ...accountState, ...safeAdapter, ok: proofResultOk === null ? safeAdapter.ok : Boolean(safeAdapter.ok && proofResultOk), safe_code: safeAdapter.safe_code, dry_run: false, would_dispatch: false, autopost_job_id_present: true, job_state: job.state, content_reference_present: true, proof_persisted: proofPersisted, audit_log_persisted: auditLogPersisted, supabase_mutated: Boolean(adapterResult.supabase_mutated || proofMutation) }) }
+  return { status: 200, body: baseResult({ ...ruleFlags, ...safeContent, ...accountState, ...safeAdapter, ok: proofResultOk === null ? safeAdapter.ok : Boolean(safeAdapter.ok && proofResultOk), safe_code: safeAdapter.safe_code, dry_run: false, would_dispatch: false, autopost_job_id_present: true, job_state: job.state, content_reference_present: true, fanvue_upload_attempted: safeAdapter.upload_attempted, fanvue_post_attempted: safeAdapter.create_attempted, proof_persisted: proofPersisted, audit_log_persisted: auditLogPersisted, supabase_mutated: Boolean(adapterResult.supabase_mutated || proofMutation) }) }
 }
