@@ -23,6 +23,9 @@ export const FANVUE_MEDIA_READINESS_DIAGNOSTIC_FILENAME = "fanvue-media-readines
 export const FANVUE_MEDIA_READINESS_MAX_ATTEMPTS = 6 as const
 export const FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS = 5_000 as const
 export const FANVUE_MEDIA_READINESS_MAX_DELAY_MS = 5_000 as const
+export const FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS = 24 as const
+export const FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS = 5_000 as const
+export const FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS = 5_000 as const
 
 export type FanvueMediaReadinessClass =
   | "ready"

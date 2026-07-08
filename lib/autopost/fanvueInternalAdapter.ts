@@ -13,7 +13,7 @@ import {
   type FanvueSignedPartUploader,
 } from "./fanvueApiClientCore"
 import { refreshFanvueAccessToken, type FanvueTokenRefreshResult } from "./fanvueTokenRefresh"
-import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS } from "./fanvueMediaReadinessDiagnostic"
+import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS, FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS } from "./fanvueMediaReadinessDiagnostic"
 
 export const FANVUE_INTERNAL_SINGLE_POST_AUDIENCE = "subscribers" as const
 export const FANVUE_INTERNAL_SINGLE_POST_ROUTE = "/api/admin/autopost/fanvue/internal-single-post" as const
@@ -22,6 +22,8 @@ export const FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION = "REQUEST_FANVUE_INTERNAL
 
 export type FanvueInternalContentType = "text" | "media"
 export type FanvueInternalStatusClass = "not_attempted" | "2xx" | "4xx" | "5xx" | "unknown"
+export type FanvueInternalReadinessStatusClass = FanvueInternalStatusClass | "timeout" | "processing" | "not_ready" | "other"
+export type FanvueInternalReadinessFinalState = "ready" | "processing" | "error" | "timeout" | "unknown"
 export type FanvueInternalRefreshStatusClass = FanvueInternalStatusClass | "blocked"
 
 export type FanvueInternalAccount = {
@@ -84,6 +86,9 @@ export type FanvueInternalPostResult = {
   finalize_status_class: FanvueInternalStatusClass
   readiness_checked: boolean
   readiness_ready: boolean
+  readiness_status_class: FanvueInternalReadinessStatusClass | null
+  readiness_attempts_used: number | null
+  readiness_final_state: FanvueInternalReadinessFinalState | null
   create_attempted: boolean
   create_status_class: FanvueInternalStatusClass
   provider_post_uuid_present: boolean
@@ -149,6 +154,9 @@ function baseResult(overrides: Partial<FanvueInternalPostResult> = {}): FanvueIn
     finalize_status_class: "not_attempted",
     readiness_checked: false,
     readiness_ready: false,
+    readiness_status_class: null,
+    readiness_attempts_used: null,
+    readiness_final_state: null,
     create_attempted: false,
     create_status_class: "not_attempted",
     provider_post_uuid_present: false,
@@ -187,6 +195,23 @@ function inferByteSize(media: FanvueInternalApprovedMedia) {
     if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value)
   }
   return null
+}
+
+function readinessConfig(mediaType: FanvueInternalApprovedMedia["mediaType"]) {
+  if (mediaType === "video") return { maxAttempts: FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS }
+  return { maxAttempts: FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS }
+}
+
+function readinessFailureStatusClass(failure: FanvueApiFailure): FanvueInternalReadinessStatusClass {
+  if (failure.error_code === "FANVUE_MEDIA_READY_TIMEOUT") return "timeout"
+  if (failure.error_code === "FANVUE_MEDIA_PROCESSING_ERROR") return "not_ready"
+  return statusClass(failure.status) === "unknown" ? "other" : statusClass(failure.status)
+}
+
+function readinessFailureFinalState(failure: FanvueApiFailure): FanvueInternalReadinessFinalState {
+  if (failure.error_code === "FANVUE_MEDIA_READY_TIMEOUT") return "timeout"
+  if (failure.error_code === "FANVUE_MEDIA_PROCESSING_ERROR") return "error"
+  return "unknown"
 }
 
 function accountHasScopes(account: FanvueInternalAccount, contentType: FanvueInternalContentType) {
@@ -306,12 +331,12 @@ export async function postFanvueInternalSinglePost(input: FanvueInternalPostInpu
   if (!byteUpload.ok) { const failure = byteUpload as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
   const finalized = await completeFanvueCreatorUploadSession(config, { creatorUserUuid: creator.creatorUserUuid, uploadId: session.uploadId, parts: [byteUpload.part], mediaType: media.mediaType, filename: media.filename, contentType, size: mediaSize })
   if (!finalized.ok) { const failure = finalized as FanvueApiFailure; return baseResult({ ...uploadFlags, upload_session_status_class: "2xx", signed_url_status_class: "2xx", byte_upload_status_class: "2xx", finalize_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
-  const ready = await (input.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, maxAttempts: FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, maxDelayMs: FANVUE_MEDIA_READINESS_MAX_DELAY_MS, backoffBaseMs: FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS })
-  const readyFlags = { ...uploadFlags, upload_session_status_class: "2xx" as const, signed_url_status_class: "2xx" as const, byte_upload_status_class: "2xx" as const, finalize_status_class: "2xx" as const, readiness_checked: true }
-  if (!ready.ok) { const failure = ready as FanvueApiFailure; return baseResult({ ...readyFlags, safe_code: failure.error_code === "FANVUE_MEDIA_READY_TIMEOUT" ? "FANVUE_INTERNAL_MEDIA_NOT_READY" : failure.error_code, safe_error_message: failure.safe_error_message }) }
+  const ready = await (input.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, ...readinessConfig(media.mediaType) })
+  const readyFlags = { ...uploadFlags, upload_session_status_class: "2xx" as const, signed_url_status_class: "2xx" as const, byte_upload_status_class: "2xx" as const, finalize_status_class: "2xx" as const, readiness_checked: true, readiness_attempts_used: ready.attempts ?? null }
+  if (!ready.ok) { const failure = ready as FanvueApiFailure; return baseResult({ ...readyFlags, readiness_status_class: readinessFailureStatusClass(failure), readiness_final_state: readinessFailureFinalState(failure), safe_code: failure.error_code === "FANVUE_MEDIA_READY_TIMEOUT" ? "FANVUE_INTERNAL_MEDIA_NOT_READY" : failure.error_code, safe_error_message: failure.safe_error_message }) }
   const created = await createFanvueMediaPost(config, { text: validation.text, audience: FANVUE_INTERNAL_SINGLE_POST_AUDIENCE, mediaUuids: [session.mediaUuid] })
-  if (!created.ok) { const failure = created as FanvueApiFailure; return baseResult({ ...readyFlags, readiness_ready: true, create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
-  return baseResult({ ...readyFlags, ok: true, safe_code: "FANVUE_INTERNAL_SINGLE_POST_CREATED", readiness_ready: true, create_attempted: true, create_status_class: "2xx", provider_post_uuid_present: true, provider_post_uuid: created.post.uuid })
+  if (!created.ok) { const failure = created as FanvueApiFailure; return baseResult({ ...readyFlags, readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
+  return baseResult({ ...readyFlags, ok: true, safe_code: "FANVUE_INTERNAL_SINGLE_POST_CREATED", readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", create_attempted: true, create_status_class: "2xx", provider_post_uuid_present: true, provider_post_uuid: created.post.uuid })
 }
 
 export function redactFanvueInternalPostResult(result: FanvueInternalPostResult): Omit<FanvueInternalPostResult, "provider_post_uuid" | "safe_error_message"> {
