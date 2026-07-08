@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  completeFanvueCreatorUploadSession,
   completeFanvueUploadSession,
   createFanvueMediaPost,
   createFanvueUploadSession,
@@ -157,6 +158,14 @@ async function run() {
   assert.equal(calls[0].url, `${apiBaseUrl}/media/uploads/${uploadId}`)
   assert.equal(calls[0].init.method, 'PATCH')
   assert.deepEqual(JSON.parse(calls[0].init.body ?? '{}'), { parts: [{ ETag: 'mock-etag-1', PartNumber: 1 }] })
+
+  calls.length = 0
+  const creatorComplete = await completeFanvueCreatorUploadSession(config(async (url, init) => { calls.push({ url, init }); return response(200, { status: 'processing' }) }), { creatorUserUuid: mediaUuid, uploadId, parts: [{ ETag: 'mock-video-etag-1', PartNumber: 1 }] })
+  assert.equal(creatorComplete.ok, true)
+  assert.equal(calls[0].url, `${apiBaseUrl}/creators/${mediaUuid}/media/uploads/${uploadId}`)
+  assert.equal(calls[0].init.method, 'PATCH')
+  assert.deepEqual(JSON.parse(calls[0].init.body ?? '{}'), { parts: [{ ETag: 'mock-video-etag-1', PartNumber: 1 }] }, 'creator video finalize must keep the safe multipart parts payload')
+  assert.doesNotMatch(calls[0].init.body ?? '', /signed|url|token|cookie|authorization|r2|bytes|provider|uuid/i, 'creator finalize payload must not include unsafe provider details')
 
   const invalidComplete = await completeFanvueUploadSession(config(queueFetch([])), { uploadId, parts: [{ ETag: '', PartNumber: 1 }] })
   assert.equal(invalidComplete.ok, false, 'complete upload must reject missing ETag before provider call')

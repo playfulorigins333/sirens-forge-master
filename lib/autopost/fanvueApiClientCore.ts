@@ -400,19 +400,39 @@ export async function uploadFanvueSignedPart(input: { signedUrl: string; partNum
   }
 }
 
-export async function completeFanvueUploadSession(config: FanvueApiClientConfig, input: { uploadId: string; parts: FanvueUploadPart[] }): Promise<FanvueCompleteUploadResult> {
-  const uploadId = clean(input.uploadId)
-  if (!uploadId) return failure("FAILED", null, "FANVUE_UPLOAD_ID_REQUIRED", "Fanvue uploadId is required.")
-  if (!Array.isArray(input.parts) || input.parts.length === 0) return failure("FAILED", null, "FANVUE_UPLOAD_PARTS_REQUIRED", "Fanvue upload completion requires parts.")
-  const parts = input.parts.map((part) => ({ ETag: clean(part?.ETag), PartNumber: Number(part?.PartNumber) }))
+function normalizeUploadCompletionParts(partsInput: FanvueUploadPart[] | undefined): FanvueUploadPart[] | FanvueApiFailure {
+  if (!Array.isArray(partsInput) || partsInput.length === 0) return failure("FAILED", null, "FANVUE_UPLOAD_PARTS_REQUIRED", "Fanvue upload completion requires parts.")
+  const parts = partsInput.map((part) => ({ ETag: clean(part?.ETag) ?? "", PartNumber: Number(part?.PartNumber) }))
   if (parts.some((part) => !part.ETag || !Number.isInteger(part.PartNumber) || part.PartNumber < 1)) {
     return failure("FAILED", null, "FANVUE_UPLOAD_PARTS_INVALID", "Fanvue upload completion requires ETag and positive PartNumber for every part.")
   }
-  const requested = await requestJson(config, "PATCH", `/media/uploads/${encodeURIComponent(uploadId)}`, { parts })
+  return parts
+}
+
+async function completeUploadSessionAtPath(config: FanvueApiClientConfig, path: string, input: { uploadId: string; parts: FanvueUploadPart[] }): Promise<FanvueCompleteUploadResult> {
+  const uploadId = clean(input.uploadId)
+  if (!uploadId) return failure("FAILED", null, "FANVUE_UPLOAD_ID_REQUIRED", "Fanvue uploadId is required.")
+  const parts = normalizeUploadCompletionParts(input.parts)
+  if (!Array.isArray(parts)) return parts
+  const requested = await requestJson(config, "PATCH", path, { parts })
   if (!requested.ok) return requested.failure
   const status = clean((requested.data as Record<string, unknown>)?.status)
   if (status !== "created" && status !== "processing" && status !== "ready" && status !== "error") return failure("MALFORMED_JSON", requested.response.status, "FANVUE_UPLOAD_COMPLETE_STATUS_INVALID", "Fanvue upload completion returned an invalid status.")
   return { ok: true, status }
+}
+
+export async function completeFanvueUploadSession(config: FanvueApiClientConfig, input: { uploadId: string; parts: FanvueUploadPart[] }): Promise<FanvueCompleteUploadResult> {
+  const uploadId = clean(input.uploadId)
+  if (!uploadId) return failure("FAILED", null, "FANVUE_UPLOAD_ID_REQUIRED", "Fanvue uploadId is required.")
+  return completeUploadSessionAtPath(config, `/media/uploads/${encodeURIComponent(uploadId)}`, input)
+}
+
+export async function completeFanvueCreatorUploadSession(config: FanvueApiClientConfig, input: { creatorUserUuid: string; uploadId: string; parts: FanvueUploadPart[] }): Promise<FanvueCompleteUploadResult> {
+  const creatorUserUuid = clean(input.creatorUserUuid)
+  if (!creatorUserUuid || !isUuid(creatorUserUuid)) return failure("FAILED", null, "FANVUE_CREATOR_USER_UUID_REQUIRED", "Fanvue creator user UUID is required.")
+  const uploadId = clean(input.uploadId)
+  if (!uploadId) return failure("FAILED", null, "FANVUE_UPLOAD_ID_REQUIRED", "Fanvue uploadId is required.")
+  return completeUploadSessionAtPath(config, `/creators/${encodeURIComponent(creatorUserUuid)}/media/uploads/${encodeURIComponent(uploadId)}`, input)
 }
 
 export async function readFanvueMedia(config: FanvueApiClientConfig, input: { uuid: string }): Promise<FanvueReadMediaResult> {

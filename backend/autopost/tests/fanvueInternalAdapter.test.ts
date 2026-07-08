@@ -103,6 +103,8 @@ async function run() {
   assert.equal(media.uploads, 1)
   assert.equal(media.calls.length, 4)
   assert.match(media.calls[0].url, new RegExp(`/creators/${creatorUuid}/media/uploads$`))
+  assert.match(media.calls[2].url, new RegExp(`/creators/${creatorUuid}/media/uploads/${uploadId}$`))
+  assert.deepEqual(JSON.parse(media.calls[2].init.body ?? '{}'), { parts: [{ ETag: 'etag-one', PartNumber: 1 }] })
   assert.deepEqual(JSON.parse(media.calls[3].init.body ?? '{}'), { audience: FANVUE_INTERNAL_SINGLE_POST_AUDIENCE, mediaUuids: [mediaUuid], text: 'Approved media caption' })
   assert.equal(media.calls.some((call) => call.init.method === 'DELETE'), false)
   assert.equal(media.result.upload_cleanup_supported, false)
