@@ -88,6 +88,8 @@ async function run() {
   assert.equal(db.inserted.generations[0].r2_bucket, bucket)
   assert.equal(db.inserted.generations[0].r2_key, r2Key)
   assert.deepEqual(db.inserted.autopost_rules[0].content_payload, buildFanvueInternalVideoProofSeedContentPayload(generationId))
+  assert.equal(Object.prototype.hasOwnProperty.call(db.inserted.autopost_rules[0], 'platform'), false)
+  assert.deepEqual(db.inserted.autopost_rules[0].selected_platforms, ['fanvue'])
   assert.equal(db.inserted.autopost_rules[0].approval_state, 'APPROVED')
   assert.equal(db.inserted.autopost_rules[0].enabled, true)
   assert.equal(db.inserted.autopost_jobs[0].platform, 'fanvue')
