@@ -9,6 +9,7 @@ import {
   FANVUE_INTERNAL_SINGLE_POST_SECRET_HEADER,
   handleFanvueInternalSinglePostRoute,
 } from '../../../lib/autopost/fanvueInternalSinglePostRoute'
+import { FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_ENV } from '../../../lib/autopost/fanvueInternalControlledDispatchRoute'
 
 const userId = '879c8a17-f9e8-473d-8de1-1fd1a77c080e'
 const nonAdminUserId = '123e4567-e89b-42d3-a456-426614174000'
@@ -27,26 +28,30 @@ function req(requestBody: unknown, headers: HeadersInit = {}, method = 'POST') {
 async function route(input: Record<string, any> = {}) {
   let adapterCalls = 0
   let persisted = 0
+  let loadJobCalls = 0
+  let loadRuleCalls = 0
+  let loadAccountCalls = 0
   const headers: Record<string, string> = {}
   if (input.requestSecret !== null) headers[FANVUE_INTERNAL_SINGLE_POST_SECRET_HEADER] = input.requestSecret ?? secret
   const response = await handleFanvueInternalSinglePostRoute({
     request: req(input.requestBody === undefined ? body() : input.requestBody, headers, input.method),
     expectedSecret: secret,
     adminUserIds: userId,
+    env: { [FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_ENV]: input.liveGateEnabled === false ? 'false' : 'true', ...(input.env ?? {}) },
     getAuthenticatedUserId: async () => {
       if (input.authenticatedUserId === null) throw new Error('missing auth')
       return input.authenticatedUserId ?? userId
     },
-    loadJob: input.loadJob ?? (async () => ({ id: jobId, user_id: userId, rule_id: ruleId, platform: 'fanvue', payload: {}, state: 'QUEUED', result: null, error: null })),
-    loadRule: input.loadRule ?? (async () => ({ id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, selected_platforms: ['fanvue'], content_payload: { platform: 'fanvue', content_type: 'text', text: 'Approved Fanvue caption' }, paused_at: null, revoked_at: null })),
-    loadAccount: input.loadAccount ?? (async () => ({ user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['read:media', 'write:media', 'write:creator'] })),
+    loadJob: async (id: string) => { loadJobCalls++; return input.loadJob ? input.loadJob(id) : { id: jobId, user_id: userId, rule_id: ruleId, platform: 'fanvue', payload: {}, state: 'QUEUED', result: null, error: null } },
+    loadRule: async (id: string, ruleUserId: string) => { loadRuleCalls++; return input.loadRule ? input.loadRule(id, ruleUserId) : { id: ruleId, user_id: userId, approval_state: 'APPROVED', enabled: true, selected_platforms: ['fanvue'], content_payload: { platform: 'fanvue', content_type: 'text', text: 'Approved Fanvue caption' }, paused_at: null, revoked_at: null } },
+    loadAccount: async (accountUserId: string) => { loadAccountCalls++; return input.loadAccount ? input.loadAccount(accountUserId) : { user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['read:media', 'write:media', 'write:creator'] } },
     loadApprovedMedia: input.loadApprovedMedia,
     persistProof: input.persistProof ?? (async (proof: any) => { persisted++; assert.equal(proof.providerPostUuid, postUuid); return { ok: true, job_proof_persisted: true, audit_log_persisted: true } }),
     adapter: input.adapter ?? (async (adapterInput: any) => { adapterCalls++; assert.equal(adapterInput.content.text, input.expectedText ?? 'Approved Fanvue caption'); return { ok: true, safe_code: 'FANVUE_INTERNAL_SINGLE_POST_CREATED', platform: 'fanvue', live_attempted: true, content_type: adapterInput.content.content_type, text_present: Boolean(adapterInput.content.text), media_asset_present: Boolean(adapterInput.content.media), token_refresh_attempted: false, token_refresh_status_class: 'not_attempted', upload_attempted: false, upload_session_status_class: 'not_attempted', signed_url_status_class: 'not_attempted', byte_upload_status_class: 'not_attempted', finalize_status_class: 'not_attempted', readiness_checked: false, readiness_ready: false, create_attempted: true, create_status_class: '2xx', provider_post_uuid_present: true, provider_post_uuid: postUuid, upload_cleanup_supported: false, uploaded_media_may_remain_in_creator_media_library: false, price_used: false, publishAt_used: false, dispatch_attempted: false, schedule_attempted: false, platform_registry_changed: false, public_ui_added: false, supabase_mutated: false, safe_error_message: null } }),
     adapterDependencies: { apiBaseUrl: 'https://api.test.fanvue.example', apiVersion: '2025-01-01', fanvueFetch: async () => { throw new Error('mock adapter prevents provider calls') }, fetchIdentity: async () => { throw new Error('mock adapter prevents identity calls') }, signedPartUploader: async () => { throw new Error('mock adapter prevents uploads') } },
     now: () => now,
   })
-  return { response, adapterCalls, persisted }
+  return { response, adapterCalls, persisted, loadJobCalls, loadRuleCalls, loadAccountCalls }
 }
 
 function noLeak(value: unknown) {
@@ -92,6 +97,14 @@ async function run() {
   assert.equal(preflight.persisted, 0)
   noLeak(preflight.response.body)
 
+  const preflightGateDisabled = await route({ liveGateEnabled: false })
+  assert.equal(preflightGateDisabled.response.status, 200)
+  assert.equal((preflightGateDisabled.response.body as any).dry_run, true)
+  assert.equal((preflightGateDisabled.response.body as any).live_attempted, false)
+  assert.equal(preflightGateDisabled.adapterCalls, 0)
+  assert.equal(preflightGateDisabled.persisted, 0)
+  noLeak(preflightGateDisabled.response.body)
+
   assert.equal((await route({ requestSecret: null })).response.status, 401)
   assert.equal(((await route({ authenticatedUserId: null })).response.body as any).error_code, 'UNAUTHENTICATED')
   assert.equal(((await route({ authenticatedUserId: nonAdminUserId })).response.body as any).error_code, 'FANVUE_UPLOAD_DIAGNOSTIC_ADMIN_REQUIRED')
@@ -119,6 +132,26 @@ async function run() {
   assert.equal((live.response.body as any).platform_registry_changed, false)
   assert.equal((live.response.body as any).public_ui_added, false)
   noLeak(live.response.body)
+
+  const liveGateDisabled = await route({ liveGateEnabled: false, requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }) })
+  assert.equal(liveGateDisabled.response.status, 200)
+  assert.equal((liveGateDisabled.response.body as any).ok, false)
+  assert.equal((liveGateDisabled.response.body as any).safe_code, 'FANVUE_INTERNAL_SINGLE_POST_LIVE_GATE_DISABLED')
+  assert.equal((liveGateDisabled.response.body as any).dry_run, false)
+  assert.equal((liveGateDisabled.response.body as any).live_attempted, false)
+  assert.equal((liveGateDisabled.response.body as any).supabase_mutated, false)
+  assert.equal(liveGateDisabled.loadJobCalls, 0)
+  assert.equal(liveGateDisabled.loadRuleCalls, 0)
+  assert.equal(liveGateDisabled.loadAccountCalls, 0)
+  assert.equal(liveGateDisabled.adapterCalls, 0)
+  assert.equal(liveGateDisabled.persisted, 0)
+  noLeak(liveGateDisabled.response.body)
+
+  const liveGateMissing = await route({ env: { [FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_ENV]: undefined }, requestBody: body({ dry_run: false, confirm: FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION }) })
+  assert.equal((liveGateMissing.response.body as any).safe_code, 'FANVUE_INTERNAL_SINGLE_POST_LIVE_GATE_DISABLED')
+  assert.equal(liveGateMissing.adapterCalls, 0)
+  assert.equal(liveGateMissing.persisted, 0)
+  noLeak(liveGateMissing.response.body)
 
 
   const auditLogFailed = await route({
