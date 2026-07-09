@@ -1,6 +1,7 @@
 import { buildFanvueMockedRunnerPersistenceBridge, type FanvueRunnerPersistenceBridgeResult } from "./fanvueRunnerPersistenceBridge"
 
 export const FANVUE_RUN_DRY_RUN_BRANCH_GATE = "FANVUE_RUN_DRY_RUN_BRANCH_ENABLED" as const
+export const FANVUE_RUN_DRY_RUN_CONFIRMATION = "REQUEST_FANVUE_RUN_DRY_RUN_BRANCH_ONLY_NO_LIVE_DISPATCH" as const
 
 export type FanvueRunDryRunBranchRule = {
   id: string
@@ -16,6 +17,7 @@ export type FanvueRunDryRunBranchRule = {
 
 type FanvueRunDryRunBranchSafeCode =
   | "FANVUE_RUN_DRY_RUN_BRANCH_GATE_DISABLED"
+  | "FANVUE_RUN_DRY_RUN_BRANCH_CONFIRMATION_REQUIRED"
   | "FANVUE_RUN_DRY_RUN_BRANCH_NOT_ELIGIBLE"
   | "FANVUE_RUN_DRY_RUN_BRANCH_NOT_DUE"
   | "FANVUE_RUN_DRY_RUN_BRANCH_PLATFORM_NOT_SELECTED"
@@ -58,16 +60,25 @@ export function isFanvueRunDryRunBranchEnabled(env: Record<string, string | unde
   return env[FANVUE_RUN_DRY_RUN_BRANCH_GATE] === "true"
 }
 
+export function isFanvueRunDryRunConfirmed(confirmation: unknown) {
+  return confirmation === FANVUE_RUN_DRY_RUN_CONFIRMATION
+}
+
 export function runFanvueDryRunBranch(args: {
   rule: FanvueRunDryRunBranchRule
   now: Date
   env?: Record<string, string | undefined>
+  request_confirmation?: unknown
 }): FanvueRunDryRunBranchResult {
   const env = args.env ?? process.env
   const rule = args.rule
 
   if (!isFanvueRunDryRunBranchEnabled(env)) {
     return disabledResult("FANVUE_RUN_DRY_RUN_BRANCH_GATE_DISABLED", "Fanvue run dry-run branch is disabled.")
+  }
+
+  if (!isFanvueRunDryRunConfirmed(args.request_confirmation)) {
+    return disabledResult("FANVUE_RUN_DRY_RUN_BRANCH_CONFIRMATION_REQUIRED", "Fanvue run dry-run branch requires exact request confirmation.")
   }
 
   if (rule.approval_state !== "APPROVED" || rule.enabled !== true || rule.paused_at || rule.revoked_at || !rule.next_run_at) {

@@ -11,7 +11,7 @@ import {
 import { persistAutopostJobResult } from "@/lib/autopost/jobResults";
 import { calculateNextRunAtAfterPostedProof } from "@/lib/autopost/scheduleAdvance";
 import { postXTextOnlyAutopost } from "@/lib/autopost/xAdapter";
-import { runFanvueDryRunBranch } from "@/lib/autopost/fanvueRunDryRunBranch";
+import { FANVUE_RUN_DRY_RUN_CONFIRMATION, runFanvueDryRunBranch } from "@/lib/autopost/fanvueRunDryRunBranch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -124,6 +124,10 @@ function isDispatchGateEnabled(req: Request) {
   const url = new URL(req.url);
   const requested = url.searchParams.get("dispatch") === "1" || url.searchParams.get("execute") === "1";
   return requested && process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED === "true";
+}
+
+function getFanvueDryRunConfirmation(req: Request) {
+  return new URL(req.url).searchParams.get("fanvue_dry_run_confirm") || "";
 }
 
 /* ──────────────────────────────────────────────
@@ -357,6 +361,7 @@ async function executeAutopost(req: Request) {
 
   const now = new Date();
   const dispatchEnabled = isDispatchGateEnabled(req);
+  const fanvueDryRunConfirmation = getFanvueDryRunConfirmation(req);
   const schedulablePlatforms: AutopostProofPlatform[] = dispatchEnabled ? ["x"] : getFoundationSchedulablePlatforms(req);
   const claimJobs = shouldClaimJobs(req) || dispatchEnabled;
 
@@ -400,7 +405,7 @@ async function executeAutopost(req: Request) {
 
   for (const rule of (rules ?? []) as AutopostRuleForJobs[]) {
     if (Array.isArray(rule.selected_platforms) && rule.selected_platforms.includes("fanvue")) {
-      const fanvueDryRun = runFanvueDryRunBranch({ rule, now });
+      const fanvueDryRun = runFanvueDryRunBranch({ rule, now, request_confirmation: fanvueDryRunConfirmation });
       if (fanvueDryRun.safe_code === "FANVUE_MOCKED_RUNNER_PERSISTENCE_SUCCESS") {
         summary.fanvue_dry_runs++;
       } else {
@@ -511,6 +516,7 @@ async function executeAutopost(req: Request) {
     schedule_advancement_enabled: dispatchEnabled,
     schedulable_platforms: schedulablePlatforms,
     claim_jobs: claimJobs,
+    fanvue_dry_run_confirmed: fanvueDryRunConfirmation === FANVUE_RUN_DRY_RUN_CONFIRMATION,
     summary,
     fanvue_dry_run_results: fanvueDryRunResults,
   });

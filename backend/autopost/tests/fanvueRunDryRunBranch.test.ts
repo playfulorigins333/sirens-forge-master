@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { runFanvueDryRunBranch } from '../../../lib/autopost/fanvueRunDryRunBranch'
+import { FANVUE_RUN_DRY_RUN_CONFIRMATION, runFanvueDryRunBranch } from '../../../lib/autopost/fanvueRunDryRunBranch'
 
 const now = new Date('2026-07-09T00:00:00.000Z')
 const enabledEnv = {
@@ -39,9 +39,23 @@ for (const env of [{}, { FANVUE_RUN_DRY_RUN_BRANCH_ENABLED: 'false' }]) {
     rule: { ...baseRule, content_payload: { platform: 'fanvue', content_type: 'text', text: 'Blocked' } },
     now,
     env,
+    request_confirmation: FANVUE_RUN_DRY_RUN_CONFIRMATION,
   })
   assertSafe(result)
   assert.equal(result.safe_code, 'FANVUE_RUN_DRY_RUN_BRANCH_GATE_DISABLED')
+  assert.equal(result.payload, null)
+}
+
+
+for (const request_confirmation of [undefined, '', 'wrong-confirmation']) {
+  const result = runFanvueDryRunBranch({
+    rule: { ...baseRule, content_payload: { platform: 'fanvue', content_type: 'text', text: 'Env alone is not enough.' } },
+    now,
+    env: enabledEnv,
+    request_confirmation,
+  })
+  assertSafe(result)
+  assert.equal(result.safe_code, 'FANVUE_RUN_DRY_RUN_BRANCH_CONFIRMATION_REQUIRED')
   assert.equal(result.payload, null)
 }
 
@@ -50,7 +64,7 @@ for (const content_payload of [
   { platform: 'fanvue', content_type: 'image', text: 'Image caption', asset_id: 'asset-image-1', media_type: 'image', filename: 'safe.png', mime_type: 'image/png', size: 123 },
   { platform: 'fanvue', content_type: 'video', asset_id: 'asset-video-1', media_type: 'video', filename: 'safe.mp4', mime_type: 'video/mp4' },
 ]) {
-  const result = runFanvueDryRunBranch({ rule: { ...baseRule, content_payload }, now, env: enabledEnv })
+  const result = runFanvueDryRunBranch({ rule: { ...baseRule, content_payload }, now, env: enabledEnv, request_confirmation: FANVUE_RUN_DRY_RUN_CONFIRMATION })
   assertSafe(result)
   assert.equal(result.safe_code, 'FANVUE_MOCKED_RUNNER_PERSISTENCE_SUCCESS')
 }
@@ -59,6 +73,7 @@ const forbidden = runFanvueDryRunBranch({
   rule: { ...baseRule, content_payload: { platform: 'fanvue', content_type: 'text', text: 'Safe', provider_post_id: 'provider-uuid-secret-value' } },
   now,
   env: enabledEnv,
+  request_confirmation: FANVUE_RUN_DRY_RUN_CONFIRMATION,
 })
 assertSafe(forbidden)
 assert.equal(forbidden.safe_code, 'FANVUE_FORBIDDEN_PROVIDER_FIELD')
