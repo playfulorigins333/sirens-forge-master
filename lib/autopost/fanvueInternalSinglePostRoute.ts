@@ -1,4 +1,5 @@
 import { authorizeFanvueUploadDiagnosticRequest, FANVUE_UPLOAD_DIAGNOSTIC_SECRET_HEADER, type FanvueUploadDiagnosticAuthInput, type FanvueUploadDiagnosticAuthErrorCode } from "./fanvueUploadDiagnosticAuth"
+import { FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_ENV } from "./fanvueInternalControlledDispatchRoute"
 import {
   FANVUE_INTERNAL_SINGLE_POST_CONFIRMATION,
   FANVUE_INTERNAL_SINGLE_POST_OPERATION,
@@ -52,6 +53,7 @@ export type FanvueInternalSinglePostRouteDependencies = {
   expectedSecret: string | null | undefined
   adminUserIds: string[] | string | null | undefined
   getAuthenticatedUserId: FanvueUploadDiagnosticAuthInput["getAuthenticatedUserId"]
+  env?: Record<string, string | undefined>
   loadJob: (jobId: string) => Promise<FanvueInternalSinglePostJob | null>
   loadRule: (ruleId: string, userId: string) => Promise<FanvueInternalSinglePostRule | null>
   loadAccount: (userId: string) => Promise<FanvueInternalAccount | null>
@@ -158,6 +160,16 @@ export async function handleFanvueInternalSinglePostRoute(dependencies: FanvueIn
 
   const contentReference = { content_reference_present: true }
   if (validation.dryRun) return { status: 200, body: baseRouteResult(contentReference) }
+  if ((dependencies.env ?? process.env)[FANVUE_ADMIN_CONTROLLED_LIVE_DISPATCH_ENV] !== "true") {
+    return {
+      status: 200,
+      body: baseRouteResult({
+        ...contentReference,
+        dry_run: false,
+        safe_code: "FANVUE_INTERNAL_SINGLE_POST_LIVE_GATE_DISABLED",
+      }),
+    }
+  }
 
   const job = await dependencies.loadJob(validation.autopostJobId)
   if (!job || job.id !== validation.autopostJobId || !job.user_id || !job.rule_id) return { status: 200, body: baseRouteResult({ ...contentReference, dry_run: false, safe_code: "AUTOPOST_JOB_NOT_FOUND" }) }

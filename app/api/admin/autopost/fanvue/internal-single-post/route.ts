@@ -105,6 +105,7 @@ export async function POST(req: Request) {
     request: req,
     expectedSecret: process.env.FANVUE_UPLOAD_DIAGNOSTIC_SECRET,
     adminUserIds: process.env.FANVUE_UPLOAD_DIAGNOSTIC_ADMIN_USER_IDS,
+    env: process.env,
     getAuthenticatedUserId: (request) => requireUserId({ request }),
     loadJob,
     loadRule,
