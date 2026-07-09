@@ -44,3 +44,13 @@ Fanvue remains publicly blocked. The repository already has a locked internal/ad
 - Added route-level dry-run verification around app-shaped Fanvue rule rows for text, image, and video payloads; missing env gate or missing/wrong request confirmation blocks safely.
 - Added a pure mocked/dry-run runner persistence bridge that reuses the launch-readiness payload validator and returns safe success/failure persistence plus schedule advancement intent only.
 - Did not change public registry availability, public UI, cron/scheduler behavior, bulk/retry behavior, live gates, native Fanvue scheduling, price/paywall, or provider calls.
+
+## Scheduled rule creation bridge checkpoint
+
+- Internal/test-gated Fanvue scheduled rule creation bridge is complete behind `FANVUE_INTERNAL_SCHEDULE_RULE_CREATION_BRIDGE_ENABLED=true`.
+- Text, image, and video inputs now produce app-shaped `autopost_rules` rows with `selected_platforms: ["fanvue"]`, sanitized Fanvue `content_payload`, due `next_run_at`, schedule fields, and route-compatible `approval_state`, `enabled`, `paused_at`, and `revoked_at` values.
+- The created rows are proven compatible with `/api/autopost/run` dry-run verification when the existing run dry-run env gates and exact request confirmation are supplied.
+- Public Fanvue remains blocked: no `platformRegistry` public availability changes were made.
+- Live/public Fanvue runner dispatch remains blocked; the bridge does not call Fanvue, upload media, decrypt tokens, use provider clients, or mutate production Supabase.
+- Scheduler, cron, bulk, and retry paths remain blocked for Fanvue.
+- No public UI was added.
