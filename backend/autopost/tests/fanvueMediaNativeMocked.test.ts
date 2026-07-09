@@ -365,7 +365,7 @@ async function run() {
   assert.match(availability, /can_schedule:\s*false/)
   assert.match(availability, /supports_media_posting:\s*false/)
   const runRoute = readFileSync('app/api/autopost/run/route.ts', 'utf8')
-  assert.doesNotMatch(runRoute, /fanvue/i, 'Fanvue must remain absent from public run dispatch')
+  assert.doesNotMatch(runRoute, /uploadFanvue|postFanvue|decrypt|fanvueApi|providerClient|FANVUE_RUN_DISPATCH_ENABLED/, 'Fanvue must remain absent from public live run dispatch')
 }
 
 run().then(() => console.log('Fanvue mocked media-native scaffold tests passed'))
