@@ -11,7 +11,8 @@ import {
 import { persistAutopostJobResult } from "@/lib/autopost/jobResults";
 import { calculateNextRunAtAfterPostedProof } from "@/lib/autopost/scheduleAdvance";
 import { postXTextOnlyAutopost } from "@/lib/autopost/xAdapter";
-import { FANVUE_RUN_DRY_RUN_CONFIRMATION, runFanvueDryRunBranch } from "@/lib/autopost/fanvueRunDryRunBranch";
+import { runFanvueRouteDryRunVerification, isFanvueRouteDryRunConfirmed } from "@/lib/autopost/fanvueRunRouteDryRunVerifier";
+// Fanvue route dry-run verification delegates to runFanvueDryRunBranch without live dispatch.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,13 @@ const CRON_SECRET = process.env.CRON_SECRET || process.env.VERCEL_CRON_SECRET ||
 const LOCK_TTL_MS = 15 * 60 * 1000;
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+type AutopostRunDbClient = typeof supabaseAdmin;
+type ExecuteAutopostDeps = {
+  supabaseAdmin?: AutopostRunDbClient;
+  cronSecret?: string;
+  env?: Record<string, string | undefined>;
+};
 
 /* ──────────────────────────────────────────────
    Types
@@ -120,10 +128,10 @@ function shouldClaimJobs(req: Request) {
   return new URL(req.url).searchParams.get("claim") === "1";
 }
 
-function isDispatchGateEnabled(req: Request) {
+function isDispatchGateEnabled(req: Request, env: Record<string, string | undefined> = process.env) {
   const url = new URL(req.url);
   const requested = url.searchParams.get("dispatch") === "1" || url.searchParams.get("execute") === "1";
-  return requested && process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED === "true";
+  return requested && env.AUTOPOST_X_RUN_DISPATCH_ENABLED === "true";
 }
 
 function getFanvueDryRunConfirmation(req: Request) {
@@ -133,16 +141,16 @@ function getFanvueDryRunConfirmation(req: Request) {
 /* ──────────────────────────────────────────────
    Cron Auth
 ────────────────────────────────────────────── */
-function assertCronAuth(req: Request) {
-  if (!CRON_SECRET) {
+function assertCronAuth(req: Request, cronSecret = CRON_SECRET) {
+  if (!cronSecret) {
     return { ok: false as const, error: "CRON_SECRET_NOT_CONFIGURED" };
   }
 
   const auth = req.headers.get("authorization") || "";
   const xCron = req.headers.get("x-vercel-cron-secret") || "";
 
-  if (auth === `Bearer ${CRON_SECRET}`) return { ok: true as const };
-  if (xCron === CRON_SECRET) return { ok: true as const };
+  if (auth === `Bearer ${cronSecret}`) return { ok: true as const };
+  if (xCron === cronSecret) return { ok: true as const };
 
   return { ok: false as const, error: "UNAUTHORIZED" };
 }
@@ -355,17 +363,19 @@ async function lockJobIfAvailable(job: AutopostJobRow, now: Date, countAttempt: 
 /* ──────────────────────────────────────────────
    Executor
 ────────────────────────────────────────────── */
-async function executeAutopost(req: Request) {
-  const auth = assertCronAuth(req);
+export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = {}) {
+  const db = deps.supabaseAdmin ?? supabaseAdmin;
+  const env = deps.env ?? process.env;
+  const auth = assertCronAuth(req, deps.cronSecret);
   if (!auth.ok) return json(401, auth);
 
   const now = new Date();
-  const dispatchEnabled = isDispatchGateEnabled(req);
+  const dispatchEnabled = isDispatchGateEnabled(req, env);
   const fanvueDryRunConfirmation = getFanvueDryRunConfirmation(req);
   const schedulablePlatforms: AutopostProofPlatform[] = dispatchEnabled ? ["x"] : getFoundationSchedulablePlatforms(req);
   const claimJobs = shouldClaimJobs(req) || dispatchEnabled;
 
-  const { data: rules, error } = await supabaseAdmin
+  const { data: rules, error } = await db
     .from("autopost_rules")
     .select(
       "id,user_id,approval_state,enabled,selected_platforms,next_run_at,timezone,start_date,end_date,posts_per_day,time_slots,paused_at,revoked_at,content_payload"
@@ -401,19 +411,16 @@ async function executeAutopost(req: Request) {
     fanvue_dry_run_blocked: 0,
     lock_mode: dispatchEnabled ? "dispatch_gate" : "foundation_no_dispatch",
   };
-  const fanvueDryRunResults: unknown[] = [];
+  const typedRules = (rules ?? []) as AutopostRuleForJobs[];
+  const fanvueDryRunResults = runFanvueRouteDryRunVerification({
+    rules: typedRules,
+    now,
+    env,
+    request_confirmation: fanvueDryRunConfirmation,
+    summary,
+  });
 
-  for (const rule of (rules ?? []) as AutopostRuleForJobs[]) {
-    if (Array.isArray(rule.selected_platforms) && rule.selected_platforms.includes("fanvue")) {
-      const fanvueDryRun = runFanvueDryRunBranch({ rule, now, request_confirmation: fanvueDryRunConfirmation });
-      if (fanvueDryRun.safe_code === "FANVUE_MOCKED_RUNNER_PERSISTENCE_SUCCESS") {
-        summary.fanvue_dry_runs++;
-      } else {
-        summary.fanvue_dry_run_blocked++;
-      }
-      fanvueDryRunResults.push(fanvueDryRun);
-    }
-
+  for (const rule of typedRules) {
     const eligibility = evaluateRunRuleEligibility(rule, now, schedulablePlatforms);
     if (!eligibility.eligible) {
       summary.skipped++;
@@ -516,7 +523,7 @@ async function executeAutopost(req: Request) {
     schedule_advancement_enabled: dispatchEnabled,
     schedulable_platforms: schedulablePlatforms,
     claim_jobs: claimJobs,
-    fanvue_dry_run_confirmed: fanvueDryRunConfirmation === FANVUE_RUN_DRY_RUN_CONFIRMATION,
+    fanvue_dry_run_confirmed: isFanvueRouteDryRunConfirmed(fanvueDryRunConfirmation),
     summary,
     fanvue_dry_run_results: fanvueDryRunResults,
   });
