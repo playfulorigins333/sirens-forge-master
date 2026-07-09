@@ -28,7 +28,7 @@ for (const forbidden of ['price', 'paywall', 'publishAt', 'fanvue_media_uuid', '
 }
 
 const runRoute = readFileSync('app/api/autopost/run/route.ts', 'utf8')
-assert.doesNotMatch(runRoute, /fanvue/i, 'normal runner must remain publicly blocked until a separately gated adapter PR')
+assert.doesNotMatch(runRoute, /uploadFanvue|postFanvue|decrypt|fanvueApi|providerClient|FANVUE_RUN_DISPATCH_ENABLED/, 'normal runner must not reference Fanvue live/provider/upload/token dispatch')
 
 const source = readFileSync('lib/autopost/fanvueLaunchReadiness.ts', 'utf8')
 assert.doesNotMatch(source, /fetch\(|createFanvue|uploadFanvue|decryptAutopostToken|from\("autopost_jobs"\)|from\('autopost_jobs'\)/, 'bridge must stay dry-run/payload-only')

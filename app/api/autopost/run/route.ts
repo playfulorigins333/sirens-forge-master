@@ -11,6 +11,7 @@ import {
 import { persistAutopostJobResult } from "@/lib/autopost/jobResults";
 import { calculateNextRunAtAfterPostedProof } from "@/lib/autopost/scheduleAdvance";
 import { postXTextOnlyAutopost } from "@/lib/autopost/xAdapter";
+import { FANVUE_RUN_DRY_RUN_CONFIRMATION, runFanvueDryRunBranch } from "@/lib/autopost/fanvueRunDryRunBranch";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,6 +83,8 @@ type RunSummary = {
   results_unsupported: number;
   schedule_advancements: number;
   schedule_advancement_skipped: number;
+  fanvue_dry_runs: number;
+  fanvue_dry_run_blocked: number;
   lock_mode: "foundation_no_dispatch" | "dispatch_gate";
 };
 
@@ -121,6 +124,10 @@ function isDispatchGateEnabled(req: Request) {
   const url = new URL(req.url);
   const requested = url.searchParams.get("dispatch") === "1" || url.searchParams.get("execute") === "1";
   return requested && process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED === "true";
+}
+
+function getFanvueDryRunConfirmation(req: Request) {
+  return new URL(req.url).searchParams.get("fanvue_dry_run_confirm") || "";
 }
 
 /* ──────────────────────────────────────────────
@@ -354,6 +361,7 @@ async function executeAutopost(req: Request) {
 
   const now = new Date();
   const dispatchEnabled = isDispatchGateEnabled(req);
+  const fanvueDryRunConfirmation = getFanvueDryRunConfirmation(req);
   const schedulablePlatforms: AutopostProofPlatform[] = dispatchEnabled ? ["x"] : getFoundationSchedulablePlatforms(req);
   const claimJobs = shouldClaimJobs(req) || dispatchEnabled;
 
@@ -389,10 +397,23 @@ async function executeAutopost(req: Request) {
     results_unsupported: 0,
     schedule_advancements: 0,
     schedule_advancement_skipped: 0,
+    fanvue_dry_runs: 0,
+    fanvue_dry_run_blocked: 0,
     lock_mode: dispatchEnabled ? "dispatch_gate" : "foundation_no_dispatch",
   };
+  const fanvueDryRunResults: unknown[] = [];
 
   for (const rule of (rules ?? []) as AutopostRuleForJobs[]) {
+    if (Array.isArray(rule.selected_platforms) && rule.selected_platforms.includes("fanvue")) {
+      const fanvueDryRun = runFanvueDryRunBranch({ rule, now, request_confirmation: fanvueDryRunConfirmation });
+      if (fanvueDryRun.safe_code === "FANVUE_MOCKED_RUNNER_PERSISTENCE_SUCCESS") {
+        summary.fanvue_dry_runs++;
+      } else {
+        summary.fanvue_dry_run_blocked++;
+      }
+      fanvueDryRunResults.push(fanvueDryRun);
+    }
+
     const eligibility = evaluateRunRuleEligibility(rule, now, schedulablePlatforms);
     if (!eligibility.eligible) {
       summary.skipped++;
@@ -495,7 +516,9 @@ async function executeAutopost(req: Request) {
     schedule_advancement_enabled: dispatchEnabled,
     schedulable_platforms: schedulablePlatforms,
     claim_jobs: claimJobs,
+    fanvue_dry_run_confirmed: fanvueDryRunConfirmation === FANVUE_RUN_DRY_RUN_CONFIRMATION,
     summary,
+    fanvue_dry_run_results: fanvueDryRunResults,
   });
 }
 

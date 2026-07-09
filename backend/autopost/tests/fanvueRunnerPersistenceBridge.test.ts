@@ -94,7 +94,7 @@ const bridgeSource = readFileSync('lib/autopost/fanvueRunnerPersistenceBridge.ts
 assert.doesNotMatch(bridgeSource, /fetch\(|createFanvue|uploadFanvue|postFanvue|decrypt|createClient|from\(|fanvueApi|providerClient/, 'mocked runner bridge must not reference live/provider/upload/token/decrypt/database clients')
 
 const runRoute = readFileSync('app/api/autopost/run/route.ts', 'utf8')
-assert.doesNotMatch(runRoute, /fanvue/i, '/api/autopost/run must remain Fanvue-free')
+assert.doesNotMatch(runRoute, /uploadFanvue|postFanvue|decrypt|fanvueApi|providerClient|FANVUE_RUN_DISPATCH_ENABLED/, '/api/autopost/run must not reference Fanvue live/provider/upload/token dispatch')
 
 for (const file of [
   'lib/autopost/platformRegistry.ts',
