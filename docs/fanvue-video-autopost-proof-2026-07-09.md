@@ -1,6 +1,6 @@
 # Fanvue Video Autopost Proof Checkpoint — 2026-07-09
 
-This checkpoint records the current production proof state for the controlled, admin-only Fanvue video autopost path. It is documentation only and does not approve, add, or imply runtime behavior.
+This checkpoint records the current successful production proof state for the controlled, admin-only Fanvue video autopost path. It is documentation only and does not approve, add, or imply runtime behavior.
 
 ## Scope
 
@@ -10,60 +10,86 @@ This checkpoint records the current production proof state for the controlled, a
 - Execution mode proven: controlled internal live video dispatch attempt from an approved queued job.
 - Route family: admin-only internal Fanvue proof and controlled dispatch routes.
 
-## What is now proven
+## Successful production proof
 
-The real MP4 upload/finalize path reached Fanvue successfully before post creation:
-
-- Upload session creation was attempted and returned a safe `2xx` status class.
-- Signed upload URL retrieval was attempted and returned a safe `2xx` status class.
-- Byte upload was attempted and returned a safe `2xx` status class.
-- Upload finalization was attempted and returned a safe `2xx` status class.
-- Fanvue post creation was not attempted because the uploaded video was not ready within the current bounded readiness window.
-
-## Latest safe persisted outcome
-
-The latest safe persisted failure is:
+The controlled live video autopost proof succeeded for this job:
 
 ```text
-state FAILED
-result_safe_code FANVUE_INTERNAL_MEDIA_NOT_READY
-result_media_type video
-dry_run false
-live_attempted true
-upload_attempted true
-create_attempted false
-fanvue_upload_attempted true
-fanvue_post_attempted false
-provider_post_uuid_present false
-upload_session_status_class 2xx
-signed_url_status_class 2xx
-byte_upload_status_class 2xx
-finalize_status_class 2xx
-readiness_checked null
-readiness_status_class null
-create_status_class not_attempted
-safe_error_message Fanvue upload completed, but media was still processing before the readiness retry limit.
+autopost_job_id: 34e47c4d-092c-40d8-9b87-75f5bfa55ade
+state: SUCCEEDED
+safe_code: FANVUE_INTERNAL_SINGLE_POST_CREATED
+media_type: video
+live_attempted: true
+readiness_checked: true
+readiness_ready: true
+readiness_status_class: 2xx
+readiness_attempts_used: 11
+readiness_final_state: ready
+create_attempted: true
+create_status_class: 2xx
+provider_post_uuid_present: true
 ```
 
-## Interpretation
+## Audit log checkpoint
 
-The production proof no longer points to upload session creation, signed URL retrieval, byte transfer, or finalize as the next blocker. Those steps safely completed with `2xx` status classes.
+The corresponding audit log recorded the controlled live dispatch as posted:
 
-The current blocker is video media readiness timing: the controlled path gave up before Fanvue marked the uploaded MP4 ready for post creation.
+```text
+message: fanvue_controlled_live_dispatch_posted
+result_status: POSTED
+controlled_live_dispatch: true
+```
 
-## Safety boundaries preserved
+## What is now proven
+
+The real MP4 upload, readiness, and post creation path is production-proven for the controlled internal route:
+
+- The server-owned MP4 proof asset was used for video media.
+- The controlled live dispatch path was attempted.
+- Media readiness was checked.
+- The uploaded video became ready after 11 readiness attempts.
+- Readiness completed with a safe `2xx` status class and final state `ready`.
+- Fanvue media post creation was attempted.
+- Post creation completed with a safe `2xx` status class.
+- A provider post UUID was present in the internal proof path, while this document does not expose the UUID value.
+
+## Safety state after proof
+
+Safety controls were restored and verified after the successful proof:
+
+- Live gate was turned back OFF.
+- Production redeployed GREEN after disabling the live gate.
+- No public UI was added.
+- No `/api/autopost/run` wiring was added.
+- No scheduler, cron, bulk, or retry behavior was added.
+- No price, paywall, `publishAt`, or native scheduling was used.
+- No `platformRegistry` changes were made.
+- R2 mutated false during live dispatch.
+
+## Redaction checks
+
+Post-proof redaction checks remained safe:
+
+- Job result scan matched only `signed_url_status_class`, which is safe because it stores only a status class, not a signed URL.
+- Audit log forbidden-key scan returned no rows.
 
 This checkpoint does not include or expose:
 
 - Provider media UUIDs.
-- Provider post UUIDs.
+- Provider post UUID values.
 - Raw provider responses.
 - Signed URLs.
 - R2 keys.
 - Media bytes.
 - Tokens, cookies, headers, or secrets.
 
-This checkpoint does not add or request:
+## Historical pre-fix context
+
+An earlier production-controlled MP4 attempt had safely reached upload/finalize but failed readiness timing with `FANVUE_INTERNAL_MEDIA_NOT_READY`. That state is now historical pre-fix context only. The main checkpoint for 2026-07-09 is the successful video autopost proof above.
+
+## Explicit non-actions
+
+This documentation update does not add or request:
 
 - Runtime code changes.
 - Test changes.
@@ -72,14 +98,3 @@ This checkpoint does not add or request:
 - `/api/autopost/run` wiring.
 - Cron, scheduler, bulk, retry, or queue-drain behavior.
 - Price, paywall, `publishAt`, or native scheduling behavior.
-
-## Next engineering checkpoint
-
-The next code change, if separately approved, should focus only on controlled/internal Fanvue video media readiness handling:
-
-- Use a longer bounded readiness window for videos than images.
-- Keep image behavior unchanged or minimally affected.
-- Persist safe readiness diagnostics when readiness is checked and fails.
-- Continue redacting provider identifiers and raw provider details.
-
-No such runtime change is made by this document.
