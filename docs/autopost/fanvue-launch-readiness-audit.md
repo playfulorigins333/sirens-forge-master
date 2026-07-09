@@ -17,7 +17,7 @@ Fanvue remains publicly blocked. The repository already has a locked internal/ad
 | `/api/autopost/run` / runner path | Normal runner is X-only and has no Fanvue dispatch eligibility. | Still blocked. A future PR can add a separately gated adapter branch only if `FANVUE_RUN_DISPATCH_ENABLED=true`; this PR intentionally does not. |
 | Feature flags/env gates | Internal Fanvue proof routes use explicit gates; live gate is off. | New payload bridge is dry-run only and gated by `FANVUE_INTERNAL_LAUNCH_READINESS_ENABLED=true`; live execution remains blocked. |
 | Text/image/video media payload handling | Internal adapter supports text and approved media. | Bridge validates text/image/video data using server-owned `asset_id` references only; no media bytes, signed URLs, R2 keys, or provider UUIDs. |
-| Success/failure persistence | Existing internal controlled dispatch can persist proof/audit in admin paths; normal runner persistence is X-only. | Gap remains for normal runner Fanvue persistence. Safe next PR should add mocked/dry-run persistence tests before any live branch. |
+| Success/failure persistence | Existing internal controlled dispatch can persist proof/audit in admin paths; normal runner persistence is X-only. | Mocked/dry-run runner persistence bridge is now complete behind an internal gate. It proves safe success/failure persistence intent and schedule advancement intent without Supabase mutation, live dispatch, upload, token decrypt, cron, retry, or public wiring. |
 | User-facing safe status/error shape | Platform availability returns safe blockers and no secrets. Internal routes redact provider UUIDs/details from route responses. | Maintained. Bridge returns safe error codes/messages only. |
 | Tests covering normal scheduling paths | Existing tests assert Fanvue stays non-public and the run route does not dispatch Fanvue. | Added text/image/video bridge tests proving normal job payload shape while blocked. |
 
@@ -33,12 +33,13 @@ Fanvue remains publicly blocked. The repository already has a locked internal/ad
 
 1. Public platform selection remains intentionally disabled.
 2. Normal `/api/autopost/run` does not route Fanvue jobs to an adapter branch yet.
-3. Normal runner Fanvue result persistence and schedule advancement are not wired.
+3. Live normal runner Fanvue result persistence and schedule advancement are not wired; only mocked/dry-run intent is proven behind the internal bridge gate.
 4. No public scheduler/cron/bulk/retry path should include Fanvue until explicit live gates and proof persistence are reviewed.
 5. Public UI copy and controls are intentionally absent and must be added only when public blocks are ready to lift.
 
 ## Smallest safe PR made
 
 - Added a pure backend Fanvue launch-readiness payload bridge for text, image, and video job shapes.
-- Added tests proving the bridge is internal-flag gated, dispatch-disabled, provider-data-free, and that `/api/autopost/run` remains without Fanvue runtime dispatch.
-- Did not change public registry availability, public UI, cron/scheduler behavior, live gates, native Fanvue scheduling, price/paywall, or provider calls.
+- Added tests proving the payload bridge is internal-flag gated, dispatch-disabled, provider-data-free, and that `/api/autopost/run` remains without Fanvue runtime dispatch.
+- Added a pure mocked/dry-run runner persistence bridge that reuses the launch-readiness payload validator and returns safe success/failure persistence plus schedule advancement intent only.
+- Did not change public registry availability, public UI, cron/scheduler behavior, bulk/retry behavior, live gates, native Fanvue scheduling, price/paywall, or provider calls.
