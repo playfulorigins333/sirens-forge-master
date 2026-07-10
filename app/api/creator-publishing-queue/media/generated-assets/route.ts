@@ -1,8 +1,3 @@
-import { NextResponse } from "next/server"
-import { attachGeneratedMediaToCreatorPackage, GeneratedMediaError } from "@/lib/creator-publishing-queue/media/generatedMedia"
-const noStore = { "Cache-Control": "no-store" }
-const allowed = new Set(["contentPackageId", "generationId"])
-const uuidRe=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-function status(code:string){ return code==="UNAUTHENTICATED"?401:code==="INVALID_REQUEST"?400:code==="NOT_FOUND"?404:code==="PACKAGE_LOCKED"?409:code==="PRIVATE_OBJECT_CONFLICT"?409:code==="OBJECT_TOO_LARGE"?413:code==="UNSUPPORTED_MEDIA_TYPE"?415:422 }
-export async function handleGeneratedAssetsPost(request: Request, attach = attachGeneratedMediaToCreatorPackage) { try { const body=await request.json().catch(()=>null); if(!body||typeof body!=="object"||Array.isArray(body)) throw new GeneratedMediaError("INVALID_REQUEST"); const keys=Object.keys(body); if(keys.some(k=>!allowed.has(k))||keys.length!==2) throw new GeneratedMediaError("INVALID_REQUEST"); const contentPackageId=body.contentPackageId, generationId=body.generationId; if(typeof contentPackageId!=="string"||typeof generationId!=="string"||!uuidRe.test(contentPackageId)||!uuidRe.test(generationId)) throw new GeneratedMediaError("INVALID_REQUEST"); const result=await attach({contentPackageId,generationId}); return NextResponse.json({ ok:true, idempotent: result.idempotent, mediaAssetId: result.mediaAssetId }, { headers: noStore }) } catch (e) { const code=e instanceof GeneratedMediaError ? e.code : "ASSOCIATION_FAILED"; return NextResponse.json({ error: code }, { status: status(code), headers: noStore }) } }
-export async function POST(request: Request) { return handleGeneratedAssetsPost(request) }
+import { attachGeneratedMediaToCreatorPackage } from "@/lib/creator-publishing-queue/media/generatedMedia"
+import { handleGeneratedAssetsPost } from "@/lib/creator-publishing-queue/media/generatedAssetsRouteCore"
+export async function POST(request: Request) { return handleGeneratedAssetsPost(request, attachGeneratedMediaToCreatorPackage) }

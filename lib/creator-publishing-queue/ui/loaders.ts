@@ -26,7 +26,7 @@ type PackageListRow = Pick<CreatorPublishingPackageForApproval, "id" | "creator_
 type MediaListRow = { id: string; content_package_id: string; storage_key: string; mime_type: string }
 type LoaderResult<T> = { data: T | null; error: unknown }
 
-async function currentCreatorIdentity() { const supabase = await supabaseServer(); const { data, error } = await supabase.auth.getUser(); if (error || !data.user?.id) redirect("/login"); const profile = await supabase.from("profiles").select("id,user_id").eq("user_id", data.user.id).maybeSingle(); return { authUserId: data.user.id, profileId: profile.data?.id ?? null } }
+async function currentCreatorIdentity() { const supabase = await supabaseServer(); const { data, error } = await supabase.auth.getUser(); if (error || !data.user?.id) redirect("/login"); const profile = await supabase.from("profiles").select("id,user_id").eq("user_id", data.user.id).maybeSingle(); if (profile.error) throw new Error("Creator profile compatibility could not be loaded."); return { authUserId: data.user.id, profileId: profile.data?.id ?? null } }
 async function currentCreatorId() { return (await currentCreatorIdentity()).authUserId }
 async function signedPreviewUrl(mediaAssetId: string, creatorId: string) { const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId, mode: "preview", authenticatedCreatorId: creatorId }); return result.ok ? result.value.signedUrl : null }
 function taskKey(contentPackageId: string, targetPlatform: string) { return `${contentPackageId}:${targetPlatform}` }
