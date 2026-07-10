@@ -1,0 +1,7 @@
+export type CreatorPlatform = "onlyfans" | "fansly"
+export type VerificationStatus = "unattested" | "creator_attested" | "revoked"
+export type AccountErrorCode = "UNAUTHENTICATED" | "INVALID_FORM" | "UNSUPPORTED_PLATFORM" | "FANVUE_NOT_AVAILABLE" | "INVALID_USERNAME" | "INVALID_PROFILE_URL" | "ACCOUNT_NOT_FOUND" | "ACCOUNT_REVOKED" | "ACCOUNT_CONFLICT" | "IDEMPOTENCY_CONFLICT" | "SAVE_FAILED"
+export type PlatformAccountInput = { accountId?: string | null; platform: string; platformUsername: string; profileUrl?: string | null; isVirtualEntity?: boolean; creatorAttested?: boolean; idempotencyKey?: string | null; creatorId?: unknown; password?: unknown; token?: unknown; cookie?: unknown; apiKey?: unknown; session?: unknown }
+export type PlatformAccount = { id: string; platform: CreatorPlatform; platformUsername: string; profileUrl: string | null; isVirtualEntity: boolean; verificationStatus: VerificationStatus; verificationAttestedAt: string | null; createdAt?: string | null; updatedAt?: string | null }
+export type AccountServiceResult = { ok: true; account: PlatformAccount } | { ok: false; code: AccountErrorCode; message: string }
+export type AccountDeps = { getAuthenticatedUserId: () => Promise<string | null>; getAdminClient: () => { rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>; from: (table: string) => any }; randomUUID: () => string }
