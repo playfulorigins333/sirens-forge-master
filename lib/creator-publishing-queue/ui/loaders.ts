@@ -7,6 +7,7 @@ import type { CreatorPublishingApprovalReviewEvidence } from "../approval/servic
 import type { CreatorPublishingMediaAssetForApproval, CreatorPublishingPackageForApproval, CreatorPublishingQueueTaskStatus } from "../approval/types"
 import { getSupabaseAdmin } from "../../supabaseAdmin"
 import { createCreatorPublishingSignedMediaUrl } from "../media"
+import { isEligibleGeneratedMediaRecord, resolveGeneratedMediaKind, resolveGeneratedMediaPreviewUrl } from "../media/generatedMediaEligibility"
 import { supabaseServer } from "../../supabaseServer"
 import { complianceStatusLabel, queueStatusLabel } from "./status"
 import { CREATOR_APPROVAL_QUEUE_TASK_SELECT, baseCreatorApprovalEligible, creatorApprovalListEligibility } from "./viewModel"
@@ -25,13 +26,11 @@ type PackageListRow = Pick<CreatorPublishingPackageForApproval, "id" | "creator_
 type MediaListRow = { id: string; content_package_id: string; storage_key: string; mime_type: string }
 type LoaderResult<T> = { data: T | null; error: unknown }
 
-async function currentCreatorId() { const supabase = await supabaseServer(); const { data, error } = await supabase.auth.getUser(); if (error || !data.user?.id) redirect("/login"); return data.user.id }
+async function currentCreatorIdentity() { const supabase = await supabaseServer(); const { data, error } = await supabase.auth.getUser(); if (error || !data.user?.id) redirect("/login"); const profile = await supabase.from("profiles").select("id,user_id").eq("user_id", data.user.id).maybeSingle(); return { authUserId: data.user.id, profileId: profile.data?.id ?? null } }
+async function currentCreatorId() { return (await currentCreatorIdentity()).authUserId }
 async function signedPreviewUrl(mediaAssetId: string, creatorId: string) { const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId, mode: "preview", authenticatedCreatorId: creatorId }); return result.ok ? result.value.signedUrl : null }
 function taskKey(contentPackageId: string, targetPlatform: string) { return `${contentPackageId}:${targetPlatform}` }
 function ensureRead<T>(result: LoaderResult<T>, label: string): T { if (result.error) throw new Error(`Creator approval ${label} could not be loaded.`); return result.data as T }
-function generatedKind(row: any): "image" | "video" { return row?.job_type === "video" || row?.metadata?.generation_kind === "video" || row?.metadata?.kind === "video" ? "video" : "image" }
-function generatedBadMetadata(metadata: any): boolean { const text = JSON.stringify(metadata ?? {}).toLowerCase(); return text.includes("placeholder") || text.includes("test") || text.includes("unsafe") || metadata?.placeholder === true || metadata?.is_placeholder === true || metadata?.test === true || metadata?.unsafe === true || metadata?.safety === "unsafe" }
-function generatedPreviewUrl(row: any): string | null { const url = typeof row?.image_url === "string" ? row.image_url.trim() : ""; return /^https?:\/\//.test(url) || url.startsWith("/api/generated-output/") ? url : null }
 function promptExcerpt(prompt: unknown): string { const text = typeof prompt === "string" ? prompt.replace(/\s+/g, " ").trim() : ""; return text.length > 140 ? `${text.slice(0, 137)}…` : text }
 function selectionBlockedReason(pkg: any, task: QueueTaskRow | null): string | null { if (pkg.target_platform === "fanvue") return "Generated media cannot be added to Fanvue packages right now."; if (pkg.creator_approval_status === "approved") return "This package is already approved, so media cannot be changed."; if (task) return "This package has an active publishing task, so media cannot be changed."; return null }
 function ineligibleReason(pkg: Pick<CreatorPublishingPackageForApproval,"target_platform"|"creator_approval_status"|"compliance_status"|"compliance_policy_version">, evidence: unknown, blocking: unknown) { if (pkg.target_platform === "fanvue") return "Fanvue packages are not routed through creator approval."; if (pkg.creator_approval_status !== "pending") return null; if (!["passed","escalated_approved"].includes(pkg.compliance_status)) return "Compliance review must be completed before approval."; if (!pkg.compliance_policy_version || pkg.compliance_policy_version === "unassigned") return "A current policy version is required before approval."; if (!evidence) return "Current compliance evidence is required before approval."; if (blocking) return "A later blocking or unresolved review prevents approval."; return null }
@@ -55,7 +54,7 @@ export async function loadCreatorApprovalList(): Promise<ApprovalListView> {
 }
 
 export async function loadCreatorApprovalDetail(contentPackageId: string): Promise<ApprovalDetailView> {
-  const creatorId = await currentCreatorId(); const admin = getSupabaseAdmin()
+  const identity = await currentCreatorIdentity(); const creatorId = identity.authUserId; const generationOwnerIds = [creatorId, identity.profileId].filter(Boolean); const admin = getSupabaseAdmin()
   const { data: pkg, error } = await admin.from("creator_publishing_content_packages").select("id,creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,second_person_present,compliance_status,compliance_policy_version,creator_approval_status,creator_approved_at,creator_approved_by,scheduled_for,created_at,updated_at").eq("id", contentPackageId).eq("creator_id", creatorId).neq("target_platform", "fanvue").maybeSingle()
   if (error) throw new Error("Creator approval package could not be loaded."); if (!pkg) notFound()
   const [mediaRes, reviewsRes, taskRes] = await Promise.all([
@@ -66,10 +65,10 @@ export async function loadCreatorApprovalDetail(contentPackageId: string): Promi
   const media = ensureRead<CreatorPublishingMediaAssetForApproval[]>(mediaRes, "media") ?? []
   const reviews = ensureRead<CreatorPublishingApprovalReviewEvidence[]>(reviewsRes, "compliance reviews") ?? []
   const queueTask = ensureRead<QueueTaskRow | null>(taskRes, "queue status") ?? null
-  const genRes = await admin.from("generations").select("id,user_id,status,prompt,image_url,mode,body_type,job_type,created_at,r2_bucket,r2_key,metadata").in("user_id", [creatorId]).eq("status", "completed").not("r2_bucket", "is", null).not("r2_key", "is", null).order("created_at", { ascending: false }).limit(80)
+  const genRes = await admin.from("generations").select("id,user_id,status,prompt,image_url,mode,body_type,job_type,created_at,r2_bucket,r2_key,metadata").in("user_id", generationOwnerIds).eq("status", "completed").not("r2_bucket", "is", null).not("r2_key", "is", null).order("created_at", { ascending: false }).limit(80)
   const generations = ensureRead<any[]>(genRes, "generated media") ?? []
   const attachedGenerationIds = new Set(media.filter((m: any) => m.source === "ai_pipeline" && typeof m.ai_generation_metadata?.generation_id === "string").map((m: any) => m.ai_generation_metadata.generation_id))
-  const generatedMediaCandidates = generations.filter((g: any) => g.user_id === creatorId && g.status === "completed" && !generatedBadMetadata(g.metadata) && g.r2_bucket && g.r2_key && generatedPreviewUrl(g) && ["image", "video"].includes(generatedKind(g))).map((g: any) => ({ generationId: g.id, kind: generatedKind(g), previewUrl: generatedPreviewUrl(g)!, promptExcerpt: promptExcerpt(g.prompt), createdAt: g.created_at ?? null, mode: g.mode ?? null, alreadyAttached: attachedGenerationIds.has(g.id) }))
+  const generatedMediaCandidates = generations.filter((g: any) => generationOwnerIds.includes(g.user_id) && isEligibleGeneratedMediaRecord(g) && resolveGeneratedMediaPreviewUrl(g)).map((g: any) => ({ generationId: g.id, kind: resolveGeneratedMediaKind(g, resolveGeneratedMediaPreviewUrl(g)!), previewUrl: resolveGeneratedMediaPreviewUrl(g)!, promptExcerpt: promptExcerpt(g.prompt), createdAt: g.created_at ?? null, mode: g.mode ?? null, alreadyAttached: attachedGenerationIds.has(g.id) }))
   const generatedMediaSelectionBlockedReason = selectionBlockedReason(pkg as any, queueTask)
   const { evidence, laterBlockingReview } = selectCurrentCreatorApprovalComplianceEvidence(pkg as any, reviews)
   const { snapshot, hash } = buildCreatorPublishingApprovalSnapshot(pkg as any, media, evidence ?? null)

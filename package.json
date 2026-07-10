@@ -38,7 +38,8 @@
     "stripe": "^20.0.0",
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7",
-    "zod": "^4.2.1"
+    "zod": "^4.2.1",
+    "server-only": "file:./lib/creator-publishing-queue/media/server-only-stub"
   },
   "devDependencies": {
     "@types/node": "^24.10.9",
