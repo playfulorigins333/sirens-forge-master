@@ -11,6 +11,7 @@ export type CreatorPublishingReviewErrorCode =
   | "REVIEW_UNAUTHORIZED" | "REVIEW_SELF_REVIEW_FORBIDDEN" | "REVIEW_PACKAGE_NOT_FOUND" | "REVIEW_INVALID_CURRENT_STATUS"
   | "REVIEW_STALE_POLICY_VERSION" | "REVIEW_REASON_REQUIRED" | "REVIEW_DUPLICATE" | "REVIEW_CONFLICT"
   | "REVIEW_FANVUE_NOT_SUPPORTED" | "REVIEW_BLOCKED_NOT_ESCALATABLE" | "REVIEW_INVALID_DECISION" | "REVIEW_POLICY_VERSION_UNASSIGNED"
+  | "REVIEW_IDENTITY_MISMATCH" | "REVIEW_AUTOMATED_REVIEW_REQUIRED"
 
 export class CreatorPublishingReviewError extends Error {
   constructor(public code: CreatorPublishingReviewErrorCode, message: string, public details?: unknown) { super(message) }

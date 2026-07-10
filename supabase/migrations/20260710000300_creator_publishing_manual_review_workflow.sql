@@ -33,7 +33,6 @@ create or replace function public.creator_publishing_apply_manual_review_decisio
   p_reviewer_notes text,
   p_expected_current_status text,
   p_expected_policy_version text,
-  p_reviewed_at timestamptz,
   p_rule_hits jsonb default '[]'::jsonb,
   p_review_metadata jsonb default '{}'::jsonb,
   p_idempotency_key text default null
@@ -52,6 +51,9 @@ declare
   v_result_status text;
   v_before jsonb;
   v_after jsonb;
+  v_reviewed_at timestamptz := clock_timestamp();
+  v_latest_automated public.creator_publishing_compliance_reviews%rowtype;
+  v_later_block public.creator_publishing_compliance_reviews%rowtype;
 begin
   if p_decision not in ('approve_escalation','reject','block','request_changes') then
     raise exception 'REVIEW_INVALID_DECISION';
@@ -71,9 +73,22 @@ begin
   if v_package.compliance_status <> 'manual_review' or p_expected_current_status <> 'manual_review' then raise exception 'REVIEW_INVALID_CURRENT_STATUS'; end if;
   if v_package.compliance_policy_version is null or v_package.compliance_policy_version = 'unassigned' then raise exception 'REVIEW_POLICY_VERSION_UNASSIGNED'; end if;
   if v_package.compliance_policy_version <> p_expected_policy_version then raise exception 'REVIEW_STALE_POLICY_VERSION'; end if;
-  if exists (select 1 from public.creator_publishing_compliance_reviews r where r.content_package_id = p_content_package_id and r.outcome = 'block' and r.created_at > coalesce((select max(created_at) from public.creator_publishing_compliance_reviews where content_package_id = p_content_package_id and outcome = 'manual_review' and review_source = 'automated'), '-infinity'::timestamptz)) then
-    raise exception 'REVIEW_BLOCKED_NOT_ESCALATABLE';
+
+  select * into v_latest_automated
+  from public.creator_publishing_compliance_reviews
+  where content_package_id = p_content_package_id and review_source = 'automated'
+  order by created_at desc, id desc
+  limit 1;
+  if not found or v_latest_automated.outcome <> 'manual_review' then
+    raise exception 'REVIEW_AUTOMATED_REVIEW_REQUIRED';
   end if;
+
+  select * into v_later_block
+  from public.creator_publishing_compliance_reviews
+  where content_package_id = p_content_package_id and outcome = 'block' and created_at > v_latest_automated.created_at
+  order by created_at desc, id desc
+  limit 1;
+  if found then raise exception 'REVIEW_BLOCKED_NOT_ESCALATABLE'; end if;
 
   if p_idempotency_key is not null and exists (select 1 from public.creator_publishing_audit_events where entity_type = 'creator_publishing_content_package' and entity_id = p_content_package_id and idempotency_key = p_idempotency_key) then
     raise exception 'REVIEW_DUPLICATE';
@@ -86,7 +101,7 @@ begin
   v_before := jsonb_build_object('compliance_status', v_package.compliance_status, 'compliance_policy_version', v_package.compliance_policy_version, 'forced_disclosure_text', v_package.forced_disclosure_text, 'creator_approval_status', v_package.creator_approval_status);
 
   insert into public.creator_publishing_compliance_reviews(content_package_id, reviewer_id, outcome, review_source, notes, escalated_approval_reason, rule_hits, review_metadata, created_at)
-  values (p_content_package_id, p_reviewer_id, v_outcome, 'human', concat_ws(E'\n\n', btrim(p_reason), nullif(btrim(coalesce(p_reviewer_notes, '')), '')), case when p_decision = 'approve_escalation' then btrim(p_reason) else null end, coalesce(p_rule_hits, '[]'::jsonb), coalesce(p_review_metadata, '{}'::jsonb) || jsonb_build_object('decision', p_decision, 'idempotency_key', p_idempotency_key), p_reviewed_at)
+  values (p_content_package_id, p_reviewer_id, v_outcome, 'human', concat_ws(E'\n\n', btrim(p_reason), nullif(btrim(coalesce(p_reviewer_notes, '')), '')), case when p_decision = 'approve_escalation' then btrim(p_reason) else null end, coalesce(p_rule_hits, '[]'::jsonb), coalesce(p_review_metadata, '{}'::jsonb) || jsonb_build_object('decision', p_decision, 'idempotency_key', p_idempotency_key), v_reviewed_at)
   returning id into v_review_id;
 
   if p_decision = 'request_changes' then
@@ -96,17 +111,19 @@ begin
   end if;
   if not found then raise exception 'REVIEW_CONFLICT'; end if;
 
-  v_after := v_before || jsonb_build_object('decision', p_decision, 'reviewer_id', p_reviewer_id, 'resulting_compliance_status', v_result_status, 'policy_version', v_package.compliance_policy_version, 'review_record_id', v_review_id, 'rule_hits', coalesce(p_rule_hits, '[]'::jsonb), 'idempotency_key', p_idempotency_key, 'timestamp', p_reviewed_at);
+  v_after := v_before || jsonb_build_object('decision', p_decision, 'reviewer_id', p_reviewer_id, 'resulting_compliance_status', v_result_status, 'policy_version', v_package.compliance_policy_version, 'review_record_id', v_review_id, 'rule_hits', coalesce(p_rule_hits, '[]'::jsonb), 'idempotency_key', p_idempotency_key, 'timestamp', v_reviewed_at);
   insert into public.creator_publishing_audit_events(entity_type, entity_id, actor_id, actor_role, action, before_state, after_state, idempotency_key, created_at)
-  values ('creator_publishing_content_package', p_content_package_id, p_reviewer_id, v_reviewer.role, v_action, v_before, v_after, p_idempotency_key, p_reviewed_at)
+  values ('creator_publishing_content_package', p_content_package_id, p_reviewer_id, v_reviewer.role, v_action, v_before, v_after, p_idempotency_key, v_reviewed_at)
   returning id into v_audit_id;
 
-  return jsonb_build_object('content_package_id', p_content_package_id, 'creator_id', v_package.creator_id, 'reviewer_id', p_reviewer_id, 'decision', p_decision, 'prior_compliance_status', 'manual_review', 'resulting_compliance_status', v_result_status, 'policy_version', v_package.compliance_policy_version, 'review_record_id', v_review_id, 'audit_event_ids', jsonb_build_array(v_audit_id), 'creator_approval_allowed', p_decision = 'approve_escalation', 'queue_creation_allowed', false, 'reviewed_at', p_reviewed_at);
+  return jsonb_build_object('content_package_id', p_content_package_id, 'creator_id', v_package.creator_id, 'reviewer_id', p_reviewer_id, 'decision', p_decision, 'prior_compliance_status', 'manual_review', 'resulting_compliance_status', v_result_status, 'policy_version', v_package.compliance_policy_version, 'review_record_id', v_review_id, 'audit_event_ids', jsonb_build_array(v_audit_id), 'creator_approval_allowed', p_decision = 'approve_escalation', 'queue_creation_allowed', false, 'reviewed_at', v_reviewed_at);
 end;
 $$;
 
-revoke all on function public.creator_publishing_apply_manual_review_decision(uuid, uuid, text, text, text, text, text, timestamptz, jsonb, jsonb, text) from anon, authenticated;
-grant execute on function public.creator_publishing_apply_manual_review_decision(uuid, uuid, text, text, text, text, text, timestamptz, jsonb, jsonb, text) to service_role;
+revoke all on function public.creator_publishing_apply_manual_review_decision(uuid, uuid, text, text, text, text, text, jsonb, jsonb, text) from PUBLIC;
+revoke all on function public.creator_publishing_apply_manual_review_decision(uuid, uuid, text, text, text, text, text, jsonb, jsonb, text) from anon;
+revoke all on function public.creator_publishing_apply_manual_review_decision(uuid, uuid, text, text, text, text, text, jsonb, jsonb, text) from authenticated;
+grant execute on function public.creator_publishing_apply_manual_review_decision(uuid, uuid, text, text, text, text, text, jsonb, jsonb, text) to service_role;
 
 comment on table public.creator_publishing_trusted_reviewers is 'Narrow Task 4 reviewer allowlist; no broad admin system. Used only by service-role trusted manual-review workflow.';
-comment on function public.creator_publishing_apply_manual_review_decision(uuid, uuid, text, text, text, text, text, timestamptz, jsonb, jsonb, text) is 'Atomic trusted human manual-review transition. Creates exactly one human review and one append-only audit event; never creates queue tasks or approves creator content.';
+comment on function public.creator_publishing_apply_manual_review_decision(uuid, uuid, text, text, text, text, text, jsonb, jsonb, text) is 'Atomic trusted human manual-review transition. Creates exactly one human review and one append-only audit event; never creates queue tasks or approves creator content.';
