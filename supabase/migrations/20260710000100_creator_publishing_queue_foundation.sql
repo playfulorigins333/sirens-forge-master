@@ -46,7 +46,8 @@ create table if not exists public.creator_platform_accounts (
   is_virtual_entity boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint creator_platform_accounts_username_not_blank check (length(btrim(platform_username)) > 0)
+  constraint creator_platform_accounts_username_not_blank check (length(btrim(platform_username)) > 0),
+  constraint creator_platform_accounts_id_creator_platform_unique unique (id, creator_id, platform)
 );
 
 create unique index if not exists creator_platform_accounts_creator_platform_username_uidx
@@ -55,7 +56,7 @@ create unique index if not exists creator_platform_accounts_creator_platform_use
 create table if not exists public.creator_publishing_content_packages (
   id uuid primary key default gen_random_uuid(),
   creator_id uuid not null references auth.users(id) on delete cascade,
-  platform_account_id uuid references public.creator_platform_accounts(id) on delete set null,
+  platform_account_id uuid not null,
   target_platform text not null check (target_platform in ('onlyfans','fansly','fanvue')),
   title text not null,
   caption_body text not null,
@@ -80,8 +81,36 @@ create table if not exists public.creator_publishing_content_packages (
   ),
   constraint creator_publishing_content_platform_meta_no_credentials check (
     not public.creator_publishing_queue_jsonb_has_forbidden_credential_key(platform_meta)
-  )
+  ),
+  constraint creator_publishing_content_platform_account_fk foreign key (platform_account_id, creator_id, target_platform)
+    references public.creator_platform_accounts(id, creator_id, platform)
+    on delete restrict
 );
+
+
+create or replace function public.creator_publishing_prevent_creator_controlled_field_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if current_user in ('authenticated', 'anon') and (
+    old.compliance_status is distinct from new.compliance_status or
+    old.compliance_policy_version is distinct from new.compliance_policy_version or
+    old.forced_disclosure_text is distinct from new.forced_disclosure_text or
+    old.creator_approval_status is distinct from new.creator_approval_status or
+    old.creator_approved_by is distinct from new.creator_approved_by or
+    old.creator_approved_at is distinct from new.creator_approved_at
+  ) then
+    raise exception 'content package compliance and approval controlled fields require service/admin workflow';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_creator_publishing_prevent_creator_controlled_field_update on public.creator_publishing_content_packages;
+create trigger trg_creator_publishing_prevent_creator_controlled_field_update
+before update on public.creator_publishing_content_packages
+for each row execute function public.creator_publishing_prevent_creator_controlled_field_update();
 
 create table if not exists public.creator_publishing_media_assets (
   id uuid primary key default gen_random_uuid(),
@@ -231,5 +260,9 @@ create policy "creator_publishing_reviews_select_own" on public.creator_publishi
 create policy "creator_publishing_co_performers_select_own" on public.creator_publishing_co_performer_records for select using (exists (select 1 from public.creator_publishing_content_packages p where p.id = content_package_id and p.creator_id = auth.uid()));
 create policy "creator_publishing_audit_events_select_actor" on public.creator_publishing_audit_events for select using (auth.uid() = actor_id);
 
-comment on table public.creator_publishing_co_performer_records is 'Supplemental Sirens Forge co-performer records; these do not replace platform-required release or verification flows.';
+comment on table public.creator_publishing_media_assets is 'Task 1 foundation: authenticated users may read their own package media metadata; writes are intentionally service-role-only until a controlled media workflow is introduced.';
+comment on table public.creator_publishing_queue_tasks is 'Task 1 foundation: authenticated users may read their own package queue tasks; inserts/updates are intentionally service-role-only to prevent forged operator claims or manual posting confirmation.';
+comment on table public.creator_publishing_compliance_reviews is 'Task 1 foundation: authenticated users may read their own package compliance reviews; writes are intentionally service-role-only to prevent creator-forged reviews.';
+comment on table public.creator_publishing_co_performer_records is 'Supplemental Sirens Forge co-performer records; these do not replace platform-required release or verification flows. Task 1 writes are intentionally service-role-only until a controlled release workflow is introduced.';
+comment on table public.creator_publishing_audit_events is 'Task 1 foundation: append-only audit events; authenticated users may read their own actor events, while inserts are intentionally service-role-only to prevent forged actor identity.';
 comment on column public.creator_publishing_queue_tasks.final_post_url is 'Human-entered string only. Do not fetch, preview, HEAD, scrape, or live-validate this URL.';

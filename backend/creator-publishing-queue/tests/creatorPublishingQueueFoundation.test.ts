@@ -15,6 +15,18 @@ assert.match(sql, /before update on public\.creator_publishing_audit_events/, 'a
 assert.match(sql, /before delete on public\.creator_publishing_audit_events/, 'audit events cannot be ordinarily deleted')
 assert.match(sql, /creator_publishing_escalated_approved_has_review[\s\S]*outcome = 'escalate'[\s\S]*escalated_approval_reason/, 'escalated_approved requires a related review reason')
 assert.match(sql, /creator_publishing_content_platform_meta_no_credentials[\s\S]*not public\.creator_publishing_queue_jsonb_has_forbidden_credential_key\(platform_meta\)/, 'platform_meta rejects credential-shaped keys')
+assert.match(sql, /platform_account_id uuid not null/, 'platform_account_id is required for content packages')
+assert.match(sql, /creator_platform_accounts_id_creator_platform_unique unique \(id, creator_id, platform\)/, 'platform account exposes composite uniqueness for package ownership matching')
+assert.match(sql, /creator_publishing_content_platform_account_fk[\s\S]*foreign key \(platform_account_id, creator_id, target_platform\)[\s\S]*references public\.creator_platform_accounts\(id, creator_id, platform\)/, 'content package platform account must match creator and target platform')
+assert.match(sql, /creator_publishing_prevent_creator_controlled_field_update[\s\S]*current_user in \('authenticated', 'anon'\)[\s\S]*old\.compliance_status is distinct from new\.compliance_status/, 'ordinary creators cannot change pending compliance to passed or escalated_approved')
+assert.match(sql, /old\.compliance_policy_version is distinct from new\.compliance_policy_version/, 'ordinary creators cannot change compliance_policy_version')
+assert.match(sql, /old\.forced_disclosure_text is distinct from new\.forced_disclosure_text/, 'ordinary creators cannot alter forced_disclosure_text')
+assert.match(sql, /old\.creator_approved_by is distinct from new\.creator_approved_by/, 'ordinary creators cannot forge creator_approved_by')
+assert.match(sql, /old\.creator_approved_at is distinct from new\.creator_approved_at/, 'ordinary creators cannot forge creator_approved_at')
+assert.match(sql, /old\.creator_approval_status is distinct from new\.creator_approval_status/, 'ordinary creators cannot directly mutate creator approval status')
+assert.match(sql, /queue_tasks is 'Task 1 foundation:[\s\S]*intentionally service-role-only/, 'queue tasks writes are documented as service-role-only')
+assert.match(sql, /compliance_reviews is 'Task 1 foundation:[\s\S]*intentionally service-role-only/, 'review writes are documented as service-role-only')
+assert.doesNotMatch(sql, /creator_publishing_queue_tasks for insert|creator_publishing_compliance_reviews for insert|creator_publishing_audit_events for insert/, 'queue/review/audit tables do not get broad authenticated insert policies')
 
 const fixture = 'backend/creator-publishing-queue/fixtures/forbidden-egress.fixture.ts'
 assert.deepEqual(findForbiddenNetworkCalls([fixture]), [fixture], 'forbidden-host egress guard catches fixture network call')
