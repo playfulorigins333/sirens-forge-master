@@ -8,7 +8,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "vercel-build": "next build"
+    "vercel-build": "next build",
+    "test:creator-publishing-queue": "tsx backend/creator-publishing-queue/tests/creatorPublishingQueueFoundation.test.ts && tsx scripts/creatorPublishingQueueSafetyGuard.ts"
   },
   "repository": {
     "type": "git",
