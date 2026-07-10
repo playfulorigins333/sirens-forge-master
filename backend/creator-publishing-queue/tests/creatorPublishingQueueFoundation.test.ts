@@ -5,7 +5,66 @@ import { findCredentialShapedQueueSchema, findForbiddenNetworkCalls } from '../.
 const migrationPath = 'supabase/migrations/20260710000100_creator_publishing_queue_foundation.sql'
 const sql = readFileSync(migrationPath, 'utf8')
 
+
+const credentialKeyFunctionMatch = sql.match(/create or replace function public\.creator_publishing_queue_jsonb_has_forbidden_credential_key\(value jsonb\)[\s\S]*?\n\$\$;/)
+assert.ok(credentialKeyFunctionMatch, 'credential-key helper function is defined')
+const credentialKeyFunctionSql = credentialKeyFunctionMatch[0]
+
+const forbiddenCredentialKeys = [
+  'password',
+  'access_token',
+  'refresh_token',
+  'auth_token',
+  'session',
+  'session_id',
+  'cookie',
+  'cookies',
+  'two_factor_secret',
+  'recovery_code',
+  'platform_secret',
+]
+
+function jsonbHasForbiddenCredentialKeyFixture(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => jsonbHasForbiddenCredentialKeyFixture(entry))
+  }
+
+  if (value !== null && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>).some(([key, childValue]) => {
+      return forbiddenCredentialKeys.includes(key.toLowerCase()) || jsonbHasForbiddenCredentialKeyFixture(childValue)
+    })
+  }
+
+  return false
+}
+
+assert.match(credentialKeyFunctionSql, /language plpgsql[\s\S]*immutable/, 'credential-key helper remains an immutable PostgreSQL function')
+assert.match(credentialKeyFunctionSql, /jsonb_each\(\$1\)/, 'credential-key helper traverses root and nested JSON objects')
+assert.match(credentialKeyFunctionSql, /jsonb_array_elements\(\$1\)/, 'credential-key helper traverses JSON arrays')
+assert.match(credentialKeyFunctionSql, /lower\(object_key\) in/, 'credential-key helper inspects object keys case-insensitively')
+assert.match(credentialKeyFunctionSql, /creator_publishing_queue_jsonb_has_forbidden_credential_key\(object_value\)/, 'credential-key helper recursively checks nested object values')
+assert.match(credentialKeyFunctionSql, /creator_publishing_queue_jsonb_has_forbidden_credential_key\(array_value\)/, 'credential-key helper recursively checks values inside arrays')
+for (const key of forbiddenCredentialKeys) {
+  assert.match(credentialKeyFunctionSql, new RegExp(`'${key}'`), `credential-key helper rejects ${key}`)
+}
+assert.doesNotMatch(credentialKeyFunctionSql, /with recursive walk/i, 'credential-key helper does not restore the invalid recursive CTE')
+assert.doesNotMatch(credentialKeyFunctionSql, /from walk[\s\S]*union all[\s\S]*from walk/i, 'credential-key helper does not contain two recursive UNION ALL branches')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture({ password: 'secret' }), true, 'direct forbidden key returns true')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture({ profile: { settings: { refresh_token: 'secret' } } }), true, 'deeply nested forbidden key returns true')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture([{ caption: 'safe' }, { cookie: 'secret' }]), true, 'forbidden key inside an array returns true')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture({ posts: [{ metadata: { session_id: 'secret' } }] }), true, 'forbidden key inside an object contained in an array returns true')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture({ Platform_Secret: 'secret' }), true, 'mixed-case forbidden key returns true')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture({ profile: { tags: ['safe', { notes: ['still safe'] }], meta: { platform: 'fanvue' } } }), false, 'clean deeply nested objects and arrays return false')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture('password'), false, 'JSON string scalar returns false')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture(42), false, 'JSON number scalar returns false')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture(true), false, 'JSON boolean scalar returns false')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture(null), false, 'JSON null returns false')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture({}), false, 'empty object returns false')
+assert.equal(jsonbHasForbiddenCredentialKeyFixture([]), false, 'empty array returns false')
+
 assert.match(sql, /creator_publishing_content_not_approved_when_blocked_or_pending[\s\S]*creator_approval_status <> 'approved' or compliance_status not in \('blocked','pending'\)/, 'blocked content package cannot be creator-approved')
+
+
 assert.match(sql, /creator_publishing_content_not_approved_when_blocked_or_pending[\s\S]*'pending'/, 'pending compliance package cannot be creator-approved')
 assert.match(sql, /creator_publishing_review_escalate_requires_reason[\s\S]*outcome <> 'escalate' or length\(btrim\(coalesce\(escalated_approval_reason, ''\)\)\) > 0/, 'escalated compliance review requires reason')
 assert.match(sql, /creator_publishing_queue_confirmed_requires_confirmation[\s\S]*status <> 'confirmed_posted_manual' or posted_confirmation is true/, 'confirmed manual task requires posted_confirmation')

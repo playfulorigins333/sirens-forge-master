@@ -11,28 +11,49 @@ $$ language plpgsql;
 
 create or replace function public.creator_publishing_queue_jsonb_has_forbidden_credential_key(value jsonb)
 returns boolean
-language sql
+language plpgsql
 immutable
 as $$
-  with recursive walk(key, val) as (
-    select null::text, value
-    union all
-    select child.key, child.value
-    from walk
-    cross join lateral jsonb_each(case when jsonb_typeof(walk.val) = 'object' then walk.val else '{}'::jsonb end) as child
-    union all
-    select null::text, elem.value
-    from walk
-    cross join lateral jsonb_array_elements(case when jsonb_typeof(walk.val) = 'array' then walk.val else '[]'::jsonb end) as elem(value)
-  )
-  select exists (
-    select 1
-    from walk
-    where lower(coalesce(key, '')) in (
-      'password','access_token','refresh_token','auth_token','session','session_id',
-      'cookie','cookies','two_factor_secret','recovery_code','platform_secret'
-    )
-  );
+declare
+  object_key text;
+  object_value jsonb;
+  array_value jsonb;
+begin
+  if jsonb_typeof($1) = 'object' then
+    for object_key, object_value in
+      select key, value
+      from jsonb_each($1)
+    loop
+      if lower(object_key) in (
+        'password','access_token','refresh_token','auth_token','session','session_id',
+        'cookie','cookies','two_factor_secret','recovery_code','platform_secret'
+      ) then
+        return true;
+      end if;
+
+      if public.creator_publishing_queue_jsonb_has_forbidden_credential_key(object_value) then
+        return true;
+      end if;
+    end loop;
+
+    return false;
+  end if;
+
+  if jsonb_typeof($1) = 'array' then
+    for array_value in
+      select value
+      from jsonb_array_elements($1) as element(value)
+    loop
+      if public.creator_publishing_queue_jsonb_has_forbidden_credential_key(array_value) then
+        return true;
+      end if;
+    end loop;
+
+    return false;
+  end if;
+
+  return false;
+end;
 $$;
 
 create table if not exists public.creator_platform_accounts (
