@@ -88,10 +88,14 @@ create table if not exists public.creator_publishing_content_packages (
 );
 
 
+-- Title changes are treated as compliance-invalidating because title can materially change content framing and disclosures.
 create or replace function public.creator_publishing_prevent_creator_controlled_field_update()
 returns trigger
 language plpgsql
 as $$
+declare
+  compliance_invalidating_content_changed boolean;
+  protected_fields_changed boolean;
 begin
   if current_user in ('authenticated', 'anon') and tg_op = 'INSERT' then
     new.compliance_status = 'pending';
@@ -103,16 +107,51 @@ begin
     return new;
   end if;
 
-  if current_user in ('authenticated', 'anon') and tg_op = 'UPDATE' and (
-    old.compliance_status is distinct from new.compliance_status or
-    old.compliance_policy_version is distinct from new.compliance_policy_version or
-    old.forced_disclosure_text is distinct from new.forced_disclosure_text or
-    old.creator_approval_status is distinct from new.creator_approval_status or
-    old.creator_approved_by is distinct from new.creator_approved_by or
-    old.creator_approved_at is distinct from new.creator_approved_at
-  ) then
-    raise exception 'content package compliance and approval controlled fields require service/admin workflow';
+  if current_user in ('authenticated', 'anon') and tg_op = 'UPDATE' then
+    compliance_invalidating_content_changed :=
+      old.platform_account_id is distinct from new.platform_account_id or
+      old.target_platform is distinct from new.target_platform or
+      old.title is distinct from new.title or
+      old.caption_body is distinct from new.caption_body or
+      old.ai_flag is distinct from new.ai_flag or
+      old.ai_detail is distinct from new.ai_detail or
+      old.second_person_present is distinct from new.second_person_present or
+      old.price_notes is distinct from new.price_notes or
+      old.visibility_notes is distinct from new.visibility_notes;
+
+    protected_fields_changed :=
+      old.compliance_status is distinct from new.compliance_status or
+      old.compliance_policy_version is distinct from new.compliance_policy_version or
+      old.forced_disclosure_text is distinct from new.forced_disclosure_text or
+      old.creator_approval_status is distinct from new.creator_approval_status or
+      old.creator_approved_by is distinct from new.creator_approved_by or
+      old.creator_approved_at is distinct from new.creator_approved_at;
+
+    if protected_fields_changed and not compliance_invalidating_content_changed then
+      raise exception 'content package compliance and approval controlled fields require service/admin workflow';
+    end if;
+
+    if protected_fields_changed and compliance_invalidating_content_changed and not (
+      new.compliance_status = 'pending' and
+      new.compliance_policy_version = 'unassigned' and
+      new.forced_disclosure_text is null and
+      new.creator_approval_status = 'pending' and
+      new.creator_approved_by is null and
+      new.creator_approved_at is null
+    ) then
+      raise exception 'content package compliance and approval controlled fields require service/admin workflow';
+    end if;
+
+    if compliance_invalidating_content_changed then
+      new.compliance_status = 'pending';
+      new.compliance_policy_version = 'unassigned';
+      new.forced_disclosure_text = null;
+      new.creator_approval_status = 'pending';
+      new.creator_approved_by = null;
+      new.creator_approved_at = null;
+    end if;
   end if;
+
   return new;
 end;
 $$;
