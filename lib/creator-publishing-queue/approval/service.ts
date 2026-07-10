@@ -10,7 +10,7 @@ export type CreatorPublishingApprovalDb = { from: (table: string) => Query; rpc?
 const approvalErrorCodes: readonly CreatorPublishingApprovalErrorCode[] = ["APPROVAL_UNAUTHORIZED", "APPROVAL_CREATOR_MISMATCH", "APPROVAL_PACKAGE_NOT_FOUND", "APPROVAL_INVALID_COMPLIANCE_STATUS", "APPROVAL_STALE_POLICY_VERSION", "APPROVAL_STALE_PACKAGE", "APPROVAL_ALREADY_DECIDED", "APPROVAL_DUPLICATE", "APPROVAL_FANVUE_NOT_SUPPORTED", "APPROVAL_FANSLY_QUEUE_DISABLED", "APPROVAL_DISCLOSURE_MISSING", "APPROVAL_MEDIA_MISSING", "APPROVAL_INVALID_DECISION", "APPROVAL_REJECTION_REASON_REQUIRED", "APPROVAL_FINAL_CAPTION_MISSING", "APPROVAL_BLOCKING_REVIEW_EXISTS", "APPROVAL_CURRENT_COMPLIANCE_EVIDENCE_REQUIRED"]
 const approvalErrorCodeSet = new Set<string>(approvalErrorCodes)
 function knownApprovalCode(value: unknown): CreatorPublishingApprovalErrorCode | null { return typeof value === "string" && approvalErrorCodeSet.has(value) ? value as CreatorPublishingApprovalErrorCode : null }
-export function normalizeCreatorPublishingApprovalError(error: unknown): CreatorPublishingApprovalError {
+export function normalizeCreatorPublishingApprovalError(error: unknown): CreatorPublishingApprovalError | Error {
   if (error instanceof CreatorPublishingApprovalError) return error
   const raw = error as { code?: unknown; message?: unknown; details?: unknown; hint?: unknown } | null | undefined
   const direct = knownApprovalCode(raw?.code)
@@ -18,8 +18,8 @@ export function normalizeCreatorPublishingApprovalError(error: unknown): Creator
   const haystack = [raw?.message, raw?.details, raw?.hint].filter((value): value is string => typeof value === "string")
   if (raw?.code === "P0001") for (const text of haystack) for (const code of approvalErrorCodes) if (text.includes(code)) return new CreatorPublishingApprovalError(code, code)
   const duplicateText = haystack.join(" ").toLowerCase()
-  if (["23505", "409"].includes(String(raw?.code ?? "")) && (duplicateText.includes("creator_publishing_queue_one_task_per_package_platform_uidx") || duplicateText.includes("creator_publishing_audit_creator_approval_idempotency_uidx") || duplicateText.includes("duplicate key"))) return new CreatorPublishingApprovalError("APPROVAL_DUPLICATE", "APPROVAL_DUPLICATE")
-  return new CreatorPublishingApprovalError("APPROVAL_INVALID_DECISION", "Approval decision failed.")
+  if (["23505", "409"].includes(String(raw?.code ?? "")) && (duplicateText.includes("creator_publishing_queue_one_task_per_package_platform_uidx") || duplicateText.includes("creator_publishing_audit_creator_approval_idempotency_uidx"))) return new CreatorPublishingApprovalError("APPROVAL_DUPLICATE", "APPROVAL_DUPLICATE")
+  return new Error("Approval decision failed.")
 }
 async function must<T = unknown>(result: unknown) { const r = await (result as PromiseLike<{ data: T | null; error: Error | null }>); if (r.error) throw normalizeCreatorPublishingApprovalError(r.error); return r.data }
 const okStatuses = new Set(["passed", "escalated_approved"])

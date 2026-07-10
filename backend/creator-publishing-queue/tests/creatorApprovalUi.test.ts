@@ -82,8 +82,10 @@ test("P0001 approval RPC errors normalize to allowlisted domain errors", () => {
 test("unknown database errors remain generic safe errors", () => {
   const normalized = normalizeCreatorPublishingApprovalError({ code: "XX000", message: "relation secret.table stack trace", details: "constraint x", hint: null })
   const safe = mapCreatorApprovalError(normalized)
-  assert.equal(safe.message, "The decision could not be saved. No publishing action was taken.")
+  assert.equal(safe.title, "Decision not saved")
+  assert.equal(safe.message, "The decision could not be saved. No publishing action was taken. Try again or reload the package.")
   assert.equal(safe.message.includes("secret"), false)
+  assert.equal(safe.controlsDisabled, undefined)
 })
 
 test("query errors are not silently rendered as empty UI state", () => {
@@ -98,6 +100,8 @@ test("controlsDisabled removes decision controls and reloads stale states", () =
   assert.match(source, /state\.controlsDisabled/)
   assert.match(source, /controlsBlocked/)
   assert.match(source, /Reload package/)
+  assert.match(source, /window\.location\.reload\(\)/)
+  assert.doesNotMatch(source, /onClick=\{\(\) => router\.refresh\(\)\}/)
 })
 
 test("success copy reflects exact queue and platform results without automatic posting claims", () => {
@@ -111,4 +115,23 @@ test("success copy reflects exact queue and platform results without automatic p
     assert.equal(/automatic publishing occurred|did not automatically publish|no automatic publishing occurred/.test(copy.message), true)
     assert.equal(/Successfully uploaded|Live/.test(copy.message), false)
   }
+})
+
+
+test("unrelated uniqueness violations remain generic while approval constraints map duplicate", () => {
+  const unrelated = normalizeCreatorPublishingApprovalError({ code: "23505", message: "duplicate key value violates unique constraint other_table_uidx", details: "Key exists", hint: null })
+  assert.equal(unrelated instanceof CreatorPublishingApprovalError, false)
+  assert.equal(mapCreatorApprovalError(unrelated).code, "APPROVAL_UNKNOWN")
+  for (const constraint of ["creator_publishing_queue_one_task_per_package_platform_uidx", "creator_publishing_audit_creator_approval_idempotency_uidx"]) {
+    const known = normalizeCreatorPublishingApprovalError({ code: "23505", message: `duplicate key value violates unique constraint ${constraint}`, details: null, hint: null })
+    assert.equal((known as CreatorPublishingApprovalError).code, "APPROVAL_DUPLICATE")
+  }
+})
+
+test("known stale, blocking, and already-decided errors keep expected control behavior", () => {
+  assert.equal(normalizeCreatorPublishingApprovalError({ code: "P0001", message: "APPROVAL_STALE_PACKAGE", details: null, hint: null }) instanceof CreatorPublishingApprovalError, true)
+  assert.equal(mapCreatorApprovalError(new CreatorPublishingApprovalError("APPROVAL_STALE_PACKAGE", "x")).reloadRequired, true)
+  assert.equal(mapCreatorApprovalError(new CreatorPublishingApprovalError("APPROVAL_BLOCKING_REVIEW_EXISTS", "x")).controlsDisabled, true)
+  assert.equal(mapCreatorApprovalError(new CreatorPublishingApprovalError("APPROVAL_ALREADY_DECIDED", "x")).controlsDisabled, true)
+  assert.equal(mapCreatorApprovalError(new CreatorPublishingApprovalError("APPROVAL_REJECTION_REASON_REQUIRED", "x")).controlsDisabled, undefined)
 })
