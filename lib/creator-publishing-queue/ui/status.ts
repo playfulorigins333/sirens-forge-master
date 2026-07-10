@@ -27,3 +27,9 @@ export function approvalStatusLabel(status: CreatorPublishingApprovalStatus) { r
 export function complianceStatusLabel(status: CreatorPublishingComplianceStatus) { return status.split("_").map((p) => p[0]?.toUpperCase() + p.slice(1)).join(" ") }
 export function queueStatusLabel(status: CreatorPublishingQueueTaskStatus | null | undefined) { const labels: Record<CreatorPublishingQueueTaskStatus,string> = { draft:"Draft", needs_compliance_review:"Needs compliance review", needs_creator_approval:"Needs creator approval", ready_for_handoff:"Ready for manual handoff", scheduled_internally:"Scheduled internally", due_now:"Due now", claimed:"Claimed for manual handoff", confirmed_posted_manual:"Manual posting confirmed", skipped:"Skipped", failed_manual_upload:"Manual upload failed", needs_fix:"Needs fix", blocked:"Blocked", archived:"Archived" }; return status ? labels[status] ?? status : "No queue task" }
 export function platformLabel(platform: string) { return platform === "onlyfans" ? "OnlyFans" : platform === "fansly" ? "Fansly" : platform === "fanvue" ? "Fanvue" : platform }
+
+export function creatorApprovalSuccessMessage(result: { decision: string; target_platform: string; queue_task_status?: CreatorPublishingQueueTaskStatus | null }) {
+  if (result.decision === "reject") return { title: "Rejected", message: "Rejected. No queue task was created and no publishing action occurred." }
+  if (result.target_platform === "fansly") return { title: "Approved", message: "Approved. Publishing queue creation is disabled for Fansly during MVP; no queue task was created and no automatic publishing occurred." }
+  return { title: "Approved", message: `Approved. ${queueStatusLabel(result.queue_task_status)}. Sirens Forge did not automatically publish this content; final posting remains a manual human action.` }
+}
