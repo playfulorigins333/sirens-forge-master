@@ -43,29 +43,54 @@ async function createSignedUrl(admin: any, bucket: string, row: MediaAssetRow, m
   return builder.createSignedUrl(storageKey, CREATOR_PUBLISHING_MEDIA_SIGNED_URL_EXPIRES_IN_SECONDS)
 }
 
+function isUnauthenticatedError(error: unknown) {
+  return error instanceof Error && error.message === "Unauthorized"
+}
+
 export async function createCreatorPublishingSignedMediaUrl(input: {
   mediaAssetId: string
   mode: CreatorPublishingMediaAccessMode
   authenticatedCreatorId?: string
 }, deps: AccessDeps): Promise<CreatorPublishingMediaAccessResult> {
-  const creatorId = input.authenticatedCreatorId ?? await deps.getAuthenticatedCreatorId()
+  let creatorId = input.authenticatedCreatorId
+  if (!creatorId) {
+    try {
+      creatorId = await deps.getAuthenticatedCreatorId()
+    } catch (error) {
+      if (isUnauthenticatedError(error)) return { ok: false, status: 401, code: "UNAUTHENTICATED" }
+      return { ok: false, status: 500, code: "SIGNING_FAILED" }
+    }
+  }
   if (!creatorId) return { ok: false, status: 401, code: "UNAUTHENTICATED" }
 
   const admin = deps.supabaseAdmin
-  const { data, error } = await (admin as any)
-    .from("creator_publishing_media_assets")
-    .select("id,storage_key,mime_type,creator_publishing_content_packages!inner(id,creator_id,target_platform)")
-    .eq("id", input.mediaAssetId)
-    .eq("creator_publishing_content_packages.creator_id", creatorId)
-    .neq("creator_publishing_content_packages.target_platform", "fanvue")
-    .maybeSingle()
+  let data: unknown
+  let error: unknown
+  try {
+    const result = await (admin as any)
+      .from("creator_publishing_media_assets")
+      .select("id,storage_key,mime_type,creator_publishing_content_packages!inner(id,creator_id,target_platform)")
+      .eq("id", input.mediaAssetId)
+      .eq("creator_publishing_content_packages.creator_id", creatorId)
+      .neq("creator_publishing_content_packages.target_platform", "fanvue")
+      .maybeSingle()
+    data = result.data
+    error = result.error
+  } catch {
+    return { ok: false, status: 500, code: "SIGNING_FAILED" }
+  }
 
   if (error) return { ok: false, status: 500, code: "SIGNING_FAILED" }
   const row = data as MediaAssetRow | null
   if (!row) return { ok: false, status: 404, code: "NOT_FOUND" }
   if (!row.storage_key?.trim()) return { ok: false, status: 404, code: "STORAGE_KEY_MISSING" }
 
-  const signed = await createSignedUrl(admin, deps.bucket ?? getCreatorPublishingMediaBucket(), row, input.mode)
+  let signed: any
+  try {
+    signed = await createSignedUrl(admin, deps.bucket ?? getCreatorPublishingMediaBucket(), row, input.mode)
+  } catch {
+    return { ok: false, status: 500, code: "SIGNING_FAILED" }
+  }
   if (signed.error || !signed.data?.signedUrl) return { ok: false, status: 500, code: "SIGNING_FAILED" }
 
   return { ok: true, value: { mediaAssetId: row.id, signedUrl: signed.data.signedUrl, expiresIn: CREATOR_PUBLISHING_MEDIA_SIGNED_URL_EXPIRES_IN_SECONDS, mode: input.mode } }

@@ -12,6 +12,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ medi
     if (!result.ok) { const failure = result as Extract<typeof result, { ok: false }>; return NextResponse.json({ error: failure.code }, { status: failure.status, headers: noStore }) }
     return NextResponse.json(result.value, { status: 200, headers: noStore })
   } catch {
-    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401, headers: noStore })
+    return NextResponse.json({ error: "SIGNING_FAILED" }, { status: 500, headers: noStore })
   }
 }

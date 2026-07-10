@@ -5,19 +5,19 @@ import { createCreatorPublishingSignedMediaUrl, CREATOR_PUBLISHING_MEDIA_DEFAULT
 
 async function test(name: string, fn: () => void | Promise<void>) { try { await fn(); console.log(`ok - ${name}`) } catch (error) { console.error(`not ok - ${name}`); throw error } }
 
-type MockOptions = { row: any; dbError?: any; signedUrl?: string; signError?: any }
+type MockOptions = { row: any; dbError?: any; signedUrl?: string; signError?: any; throwDb?: boolean; throwSign?: boolean }
 function mockAdmin(options: MockOptions) {
   const calls: any = { filters: [], signed: [], uploads: 0, lists: 0, removes: 0, moves: 0 }
   const query: any = {
     select(v: string) { calls.select = v; return this },
     eq(k: string, v: any) { calls.filters.push(["eq", k, v]); return this },
     neq(k: string, v: any) { calls.filters.push(["neq", k, v]); return this },
-    async maybeSingle() { return { data: options.row, error: options.dbError ?? null } },
+    async maybeSingle() { if (options.throwDb) throw new Error("database exploded"); return { data: options.row, error: options.dbError ?? null } },
   }
   const admin: any = {
     from(table: string) { calls.table = table; return query },
     storage: { from(bucket: string) { calls.bucket = bucket; return {
-      createSignedUrl(key: string, expires: number, opts?: any) { calls.signed.push({ key, expires, opts }); return { data: options.signedUrl ? { signedUrl: options.signedUrl } : null, error: options.signError ?? (options.signedUrl ? null : { message: "fail" }) } },
+      createSignedUrl(key: string, expires: number, opts?: any) { calls.signed.push({ key, expires, opts }); if (options.throwSign) throw new Error("signing exploded"); return { data: options.signedUrl ? { signedUrl: options.signedUrl } : null, error: options.signError ?? (options.signedUrl ? null : { message: "fail" }) } },
       upload() { calls.uploads++; throw new Error("upload forbidden") }, list() { calls.lists++; throw new Error("list forbidden") }, remove() { calls.removes++; throw new Error("remove forbidden") }, move() { calls.moves++; throw new Error("move forbidden") },
     } } },
   }
@@ -28,7 +28,7 @@ const ownedRow = { id: "asset-1", storage_key: "creator/pkg/photo.png", mime_typ
 
 await test("owned media asset receives a signed preview URL", async () => {
   const { admin, calls } = mockAdmin({ row: ownedRow, signedUrl: "https://signed.example/preview" })
-  const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin })
+  const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin, getAuthenticatedCreatorId: async () => "creator-1" })
   assert.equal(result.ok, true)
   assert.equal(result.ok && result.value.signedUrl, "https://signed.example/preview")
   assert.deepEqual(calls.signed[0], { key: "creator/pkg/photo.png", expires: 300, opts: undefined })
@@ -36,7 +36,7 @@ await test("owned media asset receives a signed preview URL", async () => {
 
 await test("owned media asset receives a signed download URL", async () => {
   const { admin, calls } = mockAdmin({ row: ownedRow, signedUrl: "https://signed.example/download" })
-  const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "download", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin })
+  const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "download", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin, getAuthenticatedCreatorId: async () => "creator-1" })
   assert.equal(result.ok, true)
   assert.equal(calls.signed[0].opts.download, "photo.png")
 })
@@ -51,7 +51,7 @@ await test("unauthenticated request is rejected", async () => {
 await test("foreign, missing, Fanvue, and blank-key media fail closed before signing", async () => {
   for (const row of [null, { ...ownedRow, storage_key: "" }]) {
     const { admin, calls } = mockAdmin({ row, signedUrl: "https://signed.example" })
-    const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin })
+    const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin, getAuthenticatedCreatorId: async () => "creator-1" })
     assert.equal(result.ok, false)
     assert.equal((result as any).status, 404)
     assert.equal(calls.signed.length, 0)
@@ -61,9 +61,29 @@ await test("foreign, missing, Fanvue, and blank-key media fail closed before sig
   assert.match(source, /eq\("creator_publishing_content_packages\.creator_id", creatorId\)/)
 })
 
+
+await test("authentication provider throws maps to unauthenticated without signing", async () => {
+  const { admin, calls } = mockAdmin({ row: ownedRow, signedUrl: "https://signed.example" })
+  const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview" }, { supabaseAdmin: admin, getAuthenticatedCreatorId: async () => { throw new Error("Unauthorized") } })
+  assert.deepEqual(result, { ok: false, status: 401, code: "UNAUTHENTICATED" })
+  assert.equal(calls.signed.length, 0)
+})
+
+await test("database and storage exceptions fail closed as signing failures", async () => {
+  const db = mockAdmin({ row: ownedRow, signedUrl: "https://signed.example", throwDb: true })
+  const dbResult = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: db.admin, getAuthenticatedCreatorId: async () => "creator-1" })
+  assert.deepEqual(dbResult, { ok: false, status: 500, code: "SIGNING_FAILED" })
+  assert.equal(db.calls.signed.length, 0)
+
+  const sign = mockAdmin({ row: ownedRow, signedUrl: "https://signed.example", throwSign: true })
+  const signResult = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: sign.admin, getAuthenticatedCreatorId: async () => "creator-1" })
+  assert.deepEqual(signResult, { ok: false, status: 500, code: "SIGNING_FAILED" })
+  assert.equal(sign.calls.signed.length, 1)
+})
+
 await test("browser input cannot choose bucket, storage key, or expiration", async () => {
   const { admin, calls } = mockAdmin({ row: ownedRow, signedUrl: "https://signed.example" })
-  await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1?bucket=evil&storage_key=evil&expires=99999", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin })
+  await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1?bucket=evil&storage_key=evil&expires=99999", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin, getAuthenticatedCreatorId: async () => "creator-1" })
   assert.equal(calls.bucket, CREATOR_PUBLISHING_MEDIA_DEFAULT_BUCKET)
   assert.equal(calls.signed[0].key, ownedRow.storage_key)
   assert.equal(calls.signed[0].expires, CREATOR_PUBLISHING_MEDIA_SIGNED_URL_EXPIRES_IN_SECONDS)
@@ -83,6 +103,9 @@ await test("mode parser rejects invalid modes", () => {
 await test("route responses use no-store and send no service-role credential", () => {
   const route = fs.readFileSync("app/api/creator-publishing-queue/media/[mediaAssetId]/signed-url/route.ts", "utf8")
   assert.match(route, /Cache-Control": "no-store"/)
+  assert.match(route, /status: 500/)
+  assert.match(route, /SIGNING_FAILED/)
+  assert.doesNotMatch(route, /status: 401, headers: noStore \}\)\s*\}/)
   assert.doesNotMatch(route, /SUPABASE_SERVICE_ROLE_KEY|service_role/)
 })
 
@@ -91,6 +114,7 @@ await test("approval loader uses centralized media service", () => {
   assert.match(source, /createCreatorPublishingSignedMediaUrl/)
   assert.doesNotMatch(source, /createSignedUrl\(storageKey/)
   assert.doesNotMatch(source, /function storageBucket/)
+  assert.match(source, /return result\.ok \? result\.value\.signedUrl : null/)
 })
 
 await test("no upload, delete, list, move, public bucket, platform calls, or Fanvue autopost changes are introduced", () => {
