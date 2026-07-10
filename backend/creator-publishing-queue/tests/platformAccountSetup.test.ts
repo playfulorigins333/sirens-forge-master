@@ -11,21 +11,25 @@ test("migration source removes direct browser writes and adds service-role-only 
   assert.deepEqual(fs.readdirSync("supabase/migrations").filter(f => f.includes("platform_account_setup")), ["20260710000700_creator_publishing_platform_account_setup.sql"])
   assert.match(migration, /drop policy if exists "creator_platform_accounts_insert_own"/)
   assert.match(migration, /drop policy if exists "creator_platform_accounts_update_own"/)
-  assert.match(fs.readFileSync("supabase/migrations/20260710000100_creator_publishing_queue_foundation.sql", "utf8"), /creator_platform_accounts_select_own/) 
+  assert.match(fs.readFileSync("supabase/migrations/20260710000100_creator_publishing_queue_foundation.sql", "utf8"), /creator_platform_accounts_select_own/)
   assert.match(migration, /security definer/i)
   assert.match(migration, /set search_path = public, pg_temp/i)
+  assert.match(migration, /request_fingerprint/)
+  assert.match(migration, /digest\(jsonb_build_object/)
+  assert.match(migration, /IDEMPOTENCY_CONFLICT/)
   assert.match(migration, /p_account_id is null[\s\S]*insert into public\.creator_platform_accounts/)
   assert.match(migration, /where id = p_account_id for update/)
-  assert.match(migration, /v_existing\.creator_id <> p_creator_id/) 
+  assert.match(migration, /v_existing\.creator_id <> p_creator_id/)
   assert.match(migration, /fanvue[\s\S]*FANVUE_NOT_AVAILABLE/)
   assert.match(migration, /not in \('onlyfans','fansly'\)/)
   assert.match(migration, /v_existing\.platform <> v_platform/)
-  assert.match(migration, /v_username text := btrim/) 
+  assert.match(migration, /v_username text := btrim/)
   assert.match(migration, /verification_status = v_status/)
   assert.match(migration, /verification_attested_at = v_attested_at/)
   assert.match(migration, /returning \* into v_result/g)
-  assert.match(migration, /insert into public\.creator_publishing_audit_events/) 
-  assert.match(migration, /on conflict[\s\S]*do nothing/) 
+  assert.match(migration, /insert into public\.creator_publishing_audit_events/)
+  assert.match(migration, /on conflict[\s\S]*do nothing/)
+  assert.match(migration, /exception when unique_violation[\s\S]*ACCOUNT_CONFLICT/)
   assert.match(migration, /revoke execute .* from public/i)
   assert.match(migration, /revoke execute .* from anon/i)
   assert.match(migration, /revoke execute .* from authenticated/i)
@@ -33,9 +37,9 @@ test("migration source removes direct browser writes and adds service-role-only 
 })
 
 test("validation accepts only OnlyFans and Fansly and normalizes usernames", () => {
-  assert.equal(normalizeAccountInput({ platform: "onlyfans", platformUsername: " creator ", idempotencyKey: "abc12345" }).platformUsername, "creator")
-  assert.equal(normalizeAccountInput({ platform: "fansly", platformUsername: "creator", idempotencyKey: "abc12345" }).platform, "fansly")
-  assert.throws(() => normalizeAccountInput({ platform: "fanvue", platformUsername: "creator", idempotencyKey: "abc12345" }), /Fanvue/)
+  assert.equal(normalizeAccountInput({ operation: "create", platform: "onlyfans", platformUsername: " creator ", idempotencyKey: "abc12345" }).platformUsername, "creator")
+  assert.equal(normalizeAccountInput({ operation: "create", platform: "fansly", platformUsername: "creator", idempotencyKey: "abc12345" }).platform, "fansly")
+  assert.throws(() => normalizeAccountInput({ operation: "create", platform: "fanvue", platformUsername: "creator", idempotencyKey: "abc12345" }), /Fanvue/)
   assert.throws(() => normalizeUsername("   "), /required/)
   assert.throws(() => normalizeUsername("a".repeat(81)), /too long/)
 })
@@ -46,26 +50,50 @@ test("profile URL validation is local-only and rejects unsafe references", () =>
   try {
     assert.equal(normalizeProfileUrl("", "onlyfans"), null)
     assert.equal(normalizeProfileUrl("https://onlyfans.com/name", "onlyfans"), "https://onlyfans.com/name")
+    assert.equal(normalizeProfileUrl("https://www.onlyfans.com/name", "onlyfans"), "https://www.onlyfans.com/name")
+    assert.equal(normalizeProfileUrl("https://fansly.com/name", "fansly"), "https://fansly.com/name")
     assert.equal(normalizeProfileUrl("https://www.fansly.com/name", "fansly"), "https://www.fansly.com/name")
-    for (const bad of ["http://onlyfans.com/name", "https://example.com/name", "https://user:pass@onlyfans.com/name", "javascript:alert(1)", "data:text/plain,hi", "https://localhost/name", "https://127.0.0.1/name", "not a url", "https://onlyfans.com/name#token=abc"]) assert.throws(() => normalizeProfileUrl(bad, "onlyfans"))
+    for (const bad of ["http://onlyfans.com/name", "https://example.com/name", "https://user:pass@onlyfans.com/name", "javascript:alert(1)", "data:text/plain,hi", "https://localhost/name", "https://127.0.0.1/name", "not a url", "https://onlyfans.com/name?token=secret", "https://onlyfans.com/name?access_token=secret", "https://onlyfans.com/name?session=secret", "https://onlyfans.com/name?cookie=secret", "https://onlyfans.com/name#token=secret", "https://onlyfans.com/name#access_token", "https://onlyfans.com/name?%74%6f%6b%65%6e=secret", "https://onlyfans.com/name#%74%6f%6b%65%6e", "https://onlyfans.com/name?ref=profile", "https://onlyfans.com/name#about"]) assert.throws(() => normalizeProfileUrl(bad, "onlyfans"))
   } finally { ;(globalThis as any).fetch = originalFetch }
 })
 
 test("service derives creator id, calls RPC, maps safe errors, and rejects browser credentials", async () => {
   const calls: any[] = []
   const deps = { getAuthenticatedUserId: async () => "creator-1", randomUUID: () => "idem_12345", getAdminClient: () => ({ rpc: async (name: string, args: any) => { calls.push({ name, args }); return { data: { id: "acc", platform: "onlyfans", platform_username: args.p_platform_username, profile_url: null, is_virtual_entity: false, verification_status: args.p_creator_attested ? "creator_attested" : "unattested", verification_attested_at: args.p_creator_attested ? "2026-07-10T00:00:00Z" : null }, error: null } }, from: () => ({}) }) }
-  assert.equal((await saveCreatorPlatformAccountWithDeps({ platform: "onlyfans", platformUsername: "me", creatorAttested: true, idempotencyKey: "idem_12345", creatorId: "browser" as any }, deps as any)).ok, false)
-  const created = await saveCreatorPlatformAccountWithDeps({ platform: "onlyfans", platformUsername: " me ", creatorAttested: true, idempotencyKey: "idem_12345" }, deps as any)
+  assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "create", platform: "onlyfans", platformUsername: "me", creatorAttested: true, idempotencyKey: "idem_12345", creatorId: "browser" as any }, deps as any)).ok, false)
+  const created = await saveCreatorPlatformAccountWithDeps({ operation: "create", platform: "onlyfans", platformUsername: " me ", creatorAttested: true, idempotencyKey: "idem_12345", accountId: "00000000-0000-0000-0000-000000000000" }, deps as any)
   assert.equal(created.ok, true)
   assert.equal(calls[0].args.p_creator_id, "creator-1")
   assert.equal(calls[0].args.p_platform_username, "me")
   assert.equal(JSON.stringify(created).includes("service_role"), false)
   assert.equal(JSON.stringify(calls).includes("password"), false)
-  assert.equal((await saveCreatorPlatformAccountWithDeps({ platform: "fanvue", platformUsername: "me", idempotencyKey: "idem_12345" }, deps as any)).ok, false)
-  assert.equal((await saveCreatorPlatformAccountWithDeps({ platform: "onlyfans", platformUsername: "me", password: "x" as any, idempotencyKey: "idem_12345" }, deps as any)).ok, false)
-  assert.equal((await saveCreatorPlatformAccountWithDeps({ platform: "onlyfans", platformUsername: "me", idempotencyKey: "idem_12345" }, { ...deps, getAuthenticatedUserId: async () => null } as any)).ok, false)
-  assert.equal((await saveCreatorPlatformAccountWithDeps({ accountId: "00000000-0000-0000-0000-000000000000", platform: "fansly", platformUsername: "me", idempotencyKey: "idem_12345" }, { ...deps, getAdminClient: () => ({ rpc: async () => ({ data: null, error: { message: "ACCOUNT_NOT_FOUND" } }), from: () => ({}) }) } as any)).code, "ACCOUNT_NOT_FOUND")
-  assert.equal((await saveCreatorPlatformAccountWithDeps({ platform: "onlyfans", platformUsername: "me", idempotencyKey: "idem_12345" }, { ...deps, getAdminClient: () => ({ rpc: async () => ({ data: null, error: { message: "ACCOUNT_REVOKED" } }), from: () => ({}) }) } as any)).code, "ACCOUNT_REVOKED")
+  assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "update", accountId: "00000000-0000-0000-0000-000000000000", platform: "fansly", platformUsername: "me", idempotencyKey: "idem_update" }, deps as any)).ok, true)
+  assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "create", platform: "fanvue", platformUsername: "me", idempotencyKey: "idem_12345" }, deps as any)).ok, false)
+  assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "create", platform: "onlyfans", platformUsername: "me", password: "x" as any, idempotencyKey: "idem_12345" }, deps as any)).ok, false)
+  assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "create", platform: "onlyfans", platformUsername: "me", idempotencyKey: "idem_12345" }, { ...deps, getAuthenticatedUserId: async () => null } as any)).ok, false)
+  assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "update", accountId: "00000000-0000-0000-0000-000000000000", platform: "fansly", platformUsername: "me", idempotencyKey: "idem_12345" }, { ...deps, getAdminClient: () => ({ rpc: async () => ({ data: null, error: { message: "ACCOUNT_NOT_FOUND" } }), from: () => ({}) }) } as any)).code, "ACCOUNT_NOT_FOUND")
+  assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "update", accountId: "00000000-0000-0000-0000-000000000000", platform: "onlyfans", platformUsername: "me", idempotencyKey: "idem_12345" }, { ...deps, getAdminClient: () => ({ rpc: async () => ({ data: null, error: { message: "ACCOUNT_REVOKED" } }), from: () => ({}) }) } as any)).code, "ACCOUNT_REVOKED")
+})
+
+
+test("invalid update account ids return INVALID_FORM without RPC calls", async () => {
+  let rpcCalls = 0
+  const deps = { getAuthenticatedUserId: async () => "creator-1", randomUUID: () => "idem_12345", getAdminClient: () => ({ rpc: async () => { rpcCalls++; return { data: null, error: null } }, from: () => ({}) }) }
+  for (const accountId of [undefined, "", "not-a-uuid"] as any[]) {
+    const result = await saveCreatorPlatformAccountWithDeps({ operation: "update", accountId, platform: "onlyfans", platformUsername: "me", idempotencyKey: "idem_12345" }, deps as any)
+    assert.equal(result.ok, false)
+    assert.equal((result as any).code, "INVALID_FORM")
+  }
+  assert.equal(rpcCalls, 0)
+})
+
+test("migration source asserts payload-aware idempotency outcomes", () => {
+  assert.match(migration, /same canonical request/i)
+  assert.match(migration, /request_fingerprint/)
+  assert.match(migration, /after_state->>'request_fingerprint' is distinct from v_fingerprint[\s\S]*IDEMPOTENCY_CONFLICT/)
+  assert.match(migration, /after_state->>'request_fingerprint' = v_fingerprint then return v_existing/)
+  assert.match(migration, /v_duplicate\.profile_url is not distinct from v_profile_url[\s\S]*return v_duplicate/)
+  assert.match(migration, /raise exception 'ACCOUNT_CONFLICT'/)
 })
 
 test("action and UI source assertions enforce safe fields and copy", () => {
@@ -78,7 +106,7 @@ test("action and UI source assertions enforce safe fields and copy", () => {
   assert.doesNotMatch(form + page, /type="password"|name="token"|name="cookie"|Connect account|Login connected|Test connection|Platform verified|Automatically verified/i)
   assert.match(form + page, /does not store your password, tokens, cookies, or login session/)
   assert.match(page, /Creator attested/); assert.match(page, /Attestation required/)
-  assert.match(actions, /revalidatePath\("\/creator\/publishing-queue\/accounts"\)/); assert.match(actions, /revalidatePath\("\/creator\/publishing-queue"\)/)
+  assert.match(actions, /updateAccountIdSchema = z\.string\(\)\.uuid\(\)/); assert.match(actions, /if \(!parsed\.success\) return invalidForm\(\)/); assert.match(actions, /operation: "create"/); assert.match(actions, /operation: "update"/); assert.match(actions, /revalidatePath\("\/creator\/publishing-queue\/accounts"\)/); assert.match(actions, /revalidatePath\("\/creator\/publishing-queue"\)/)
   assert.match(queue, /Manage platform accounts/)
   assert.doesNotMatch(form, /getSupabaseAdmin|service_role|\.from\("creator_platform_accounts"\)\.(insert|update)/)
 })
