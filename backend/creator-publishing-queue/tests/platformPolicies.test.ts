@@ -13,6 +13,13 @@ assert.equal(onlyFansPolicy.disclosure_policy.disclosure_position, 'start')
 assert.equal(onlyFansPolicy.disclosure_policy.default_disclosure, '#ai')
 assert.equal(onlyFansPolicy.disclosure_policy.disclosure_removable, false)
 assert.equal(onlyFansPolicy.disclosure_policy.copy_caption_must_include_disclosure, true)
+assert.equal(onlyFansPolicy.policy_effective_date, '2026-07-09')
+assert.deepEqual(onlyFansPolicy.source_references.map((source) => source.url), [
+  'https://onlyfans.com/terms',
+  'https://onlyfans.com/acceptable-use-policy',
+  'https://onlyfans.com/help/196/205/211',
+])
+assert.deepEqual(onlyFansPolicy.source_references.map((source) => source.retrieved_or_verified_date), ['2026-07-09', '2026-07-09', '2026-07-09'])
 assert.equal(onlyFansPolicy.capabilities.direct_posting, false)
 assert.equal(onlyFansPolicy.capabilities.platform_credentials, false)
 assert.equal(onlyFansPolicy.capabilities.platform_sessions, false)
@@ -28,6 +35,14 @@ assert.equal(fanslyPolicy.ai_policy.non_photorealistic_requires_virtual_entity_r
 assert.equal(fanslyPolicy.disclosure_policy.disclosure_cures_prohibited_ai, false)
 assert.equal(fanslyPolicy.capabilities.direct_posting, false)
 assert.equal(fanslyPolicy.capabilities.unofficial_api, false)
+assert.equal(fanslyPolicy.policy_effective_date, '2026-07-09')
+assert.deepEqual(fanslyPolicy.source_references.map((source) => source.url), [
+  'https://fansly.com/tos',
+  'https://help.fansly.com/en/articles/12315578-ai-generated-content-on-fansly',
+  'https://help.fansly.com/en/articles/10544523-how-to-verify-and-publish-content-featuring-others-on-fansly',
+  'https://help.fansly.com/en/articles/12328724-post-scheduling',
+])
+assert.deepEqual(fanslyPolicy.source_references.map((source) => source.retrieved_or_verified_date), ['2026-07-09', '2026-07-09', '2026-07-09', '2026-07-09'])
 
 assert.equal(fanvuePolicy.mode, 'direct_api')
 assert.equal(fanvuePolicy.enabled_for_queue, false)

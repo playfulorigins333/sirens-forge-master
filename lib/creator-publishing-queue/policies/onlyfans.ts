@@ -14,11 +14,11 @@ export const onlyFansPolicy = deepFreezePolicy({
   mode: "manual_handoff",
   enabled_for_queue: true,
   policy_version: "onlyfans-manual-handoff-2026-07-10-v1",
-  policy_effective_date: "2026-07-10",
+  policy_effective_date: "2026-07-09",
   source_references: [
-    { label: "OnlyFans Terms of Service", url: "https://onlyfans.com/terms" },
-    { label: "OnlyFans Acceptable Use Policy", url: "https://onlyfans.com/acceptable-use-policy" },
-    { label: "OnlyFans Terms of Service AI-generated-content disclosure clause", url: "https://onlyfans.com/terms" },
+    { label: "OnlyFans Terms of Service", url: "https://onlyfans.com/terms", retrieved_or_verified_date: "2026-07-09" },
+    { label: "OnlyFans Acceptable Use Policy", url: "https://onlyfans.com/acceptable-use-policy", retrieved_or_verified_date: "2026-07-09" },
+    { label: "OnlyFans AI-generated content help/policy reference", url: "https://onlyfans.com/help/196/205/211", retrieved_or_verified_date: "2026-07-09" },
   ],
   core_rule: "Sirens Forge prepares content and tasks only. A creator or authorized human operator manually publishes inside OnlyFans.",
   disclosure_policy: {
