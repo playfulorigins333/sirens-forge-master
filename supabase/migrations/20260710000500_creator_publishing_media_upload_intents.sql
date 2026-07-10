@@ -3,6 +3,7 @@ create table if not exists public.creator_publishing_media_upload_intents (
   reserved_media_asset_id uuid not null,
   creator_id uuid not null references auth.users(id),
   content_package_id uuid not null references public.creator_publishing_content_packages(id) on delete cascade,
+  bucket_name text not null,
   storage_key text not null,
   mime_type text not null,
   expected_size_bytes bigint not null check (expected_size_bytes > 0),
@@ -14,6 +15,7 @@ create table if not exists public.creator_publishing_media_upload_intents (
   failed_at timestamptz,
   failure_code text,
   created_at timestamptz not null default now(),
+  constraint creator_publishing_media_upload_intents_bucket_name_nonblank check (length(btrim(bucket_name)) > 0),
   constraint creator_publishing_media_upload_intents_storage_key_nonblank check (length(btrim(storage_key)) > 0),
   constraint creator_publishing_media_upload_intents_completed_at_required check (status <> 'completed' or completed_at is not null),
   constraint creator_publishing_media_upload_intents_failed_at_required check (status not in ('failed','expired') or failed_at is not null),
@@ -26,6 +28,7 @@ create index if not exists creator_publishing_media_upload_intents_creator_idx o
 alter table public.creator_publishing_media_upload_intents enable row level security;
 
 comment on table public.creator_publishing_media_upload_intents is 'Temporary service-role-only reservations for controlled private browser uploads. Signed upload credentials are never stored; browser clients cannot choose the Storage path; ai_pipeline remains reserved for trusted generation services.';
+comment on column public.creator_publishing_media_upload_intents.bucket_name is 'Server-resolved private Storage bucket captured when the upload credential is issued; completion must reuse this value instead of recalculating environment state.';
 comment on column public.creator_publishing_media_upload_intents.storage_key is 'Server-reserved private Storage object path. The browser must not supply or replace it.';
 comment on column public.creator_publishing_media_upload_intents.source is 'Browser upload sources are camera_upload or edited only; ai_pipeline is reserved for trusted generation services.';
 comment on column public.creator_publishing_media_upload_intents.expected_sha256 is 'Client-computed immutable manifest digest, not a server-attested checksum.';
@@ -52,7 +55,7 @@ begin
   if v_intent.status in ('failed','expired') then raise exception 'UPLOAD_INTENT_FAILED'; end if;
   if v_intent.expires_at <= now() then
     update public.creator_publishing_media_upload_intents set status = 'expired', failed_at = now(), failure_code = 'UPLOAD_INTENT_EXPIRED' where id = v_intent.id;
-    raise exception 'UPLOAD_INTENT_EXPIRED';
+    return jsonb_build_object('error', jsonb_build_object('code', 'UPLOAD_INTENT_EXPIRED'), 'upload_intent_id', v_intent.id);
   end if;
 
   select * into v_package from public.creator_publishing_content_packages where id = v_intent.content_package_id for update;
@@ -72,7 +75,14 @@ begin
   insert into public.creator_publishing_audit_events(entity_type, entity_id, actor_id, actor_role, action, before_state, after_state, idempotency_key, created_at)
   values ('creator_publishing_media_asset', v_asset.id, p_creator_id, 'creator', 'creator_publishing_media_asset_registered', '{}'::jsonb,
     jsonb_build_object('content_package_id', v_intent.content_package_id, 'storage_key', v_intent.storage_key, 'mime_type', v_intent.mime_type, 'sha256', v_intent.expected_sha256, 'source', v_intent.source), v_intent.id::text, now())
-  on conflict (entity_type, entity_id, action, idempotency_key) do nothing
+  on conflict (
+    entity_type,
+    entity_id,
+    action,
+    idempotency_key
+  )
+  where idempotency_key is not null
+  do nothing
   returning id into v_audit_id;
 
   return jsonb_build_object('media_asset', to_jsonb(v_asset), 'audit_event_ids', case when v_audit_id is null then '[]'::jsonb else jsonb_build_array(v_audit_id) end, 'idempotent', false);

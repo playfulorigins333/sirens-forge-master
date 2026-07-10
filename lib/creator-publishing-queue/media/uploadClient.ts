@@ -1,5 +1,5 @@
 import { supabaseBrowser } from "@/lib/supabase"
-import { CREATOR_PUBLISHING_MEDIA_EXTENSION_BY_MIME, CREATOR_PUBLISHING_MEDIA_MAX_UPLOAD_BYTES, type CreatorPublishingUploadSource, type RegisteredMediaAsset } from "./uploadCore"
+import { CREATOR_PUBLISHING_MEDIA_EXTENSION_BY_MIME, CREATOR_PUBLISHING_MEDIA_MAX_UPLOAD_BYTES, type CreatorPublishingUploadSource, type RegisteredMediaAsset } from "./uploadShared"
 
 async function sha256Hex(file: File) {
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer())
