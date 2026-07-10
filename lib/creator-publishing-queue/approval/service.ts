@@ -1,7 +1,7 @@
 import { getSupabaseAdmin } from "../../supabaseAdmin"
 import { getCreatorPublishingPlatformPolicy } from "../policies"
 import { assertCreatorPublishingApprovalAuthorized } from "./authorize"
-import { buildCreatorPublishingApprovalSnapshot, hashCreatorPublishingMediaManifest } from "./snapshot"
+import { buildCreatorPublishingApprovalSnapshot, buildCreatorPublishingMediaManifest, hashCreatorPublishingMediaManifest } from "./snapshot"
 import { CreatorPublishingApprovalError, type CreatorPublishingApprovalInput, type CreatorPublishingApprovalResult, type CreatorPublishingCreatorAuthorization, type CreatorPublishingMediaAssetForApproval, type CreatorPublishingPackageForApproval } from "./types"
 
 type DbResult<T = unknown> = Promise<{ data: T | null; error: Error | null }>
@@ -10,16 +10,16 @@ export type CreatorPublishingApprovalDb = { from: (table: string) => Query; rpc?
 async function must<T = unknown>(result: unknown) { const r = await (result as PromiseLike<{ data: T | null; error: Error | null }>); if (r.error) throw r.error; return r.data }
 const okStatuses = new Set(["passed", "escalated_approved"])
 function nonblank(value: string | null | undefined) { return typeof value === "string" && value.trim().length > 0 }
-export type CreatorPublishingApprovalReviewEvidence = Readonly<{ outcome: string; review_source?: string | null; escalated_approval_reason?: string | null; created_at?: string | null }>
+export type CreatorPublishingApprovalReviewEvidence = Readonly<{ id?: string | number | null; outcome: string; review_source?: string | null; escalated_approval_reason?: string | null; compliance_policy_version?: string | null; created_at?: string | null }>
 
 export function selectCurrentCreatorApprovalComplianceEvidence(pkg: CreatorPublishingPackageForApproval, reviews: readonly CreatorPublishingApprovalReviewEvidence[] = []) {
-  const sorted = [...reviews].filter((review) => review.created_at).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
-  const qualifies = (review: CreatorPublishingApprovalReviewEvidence) => pkg.compliance_status === "passed"
+  const sorted = [...reviews].filter((review) => review.created_at).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)) || String(b.id ?? "").localeCompare(String(a.id ?? "")))
+  const qualifies = (review: CreatorPublishingApprovalReviewEvidence) => review.compliance_policy_version === pkg.compliance_policy_version && (pkg.compliance_status === "passed"
     ? review.review_source === "automated" && review.outcome === "pass"
-    : review.review_source === "human" && review.outcome === "escalate" && nonblank(review.escalated_approval_reason)
+    : review.review_source === "human" && review.outcome === "escalate" && nonblank(review.escalated_approval_reason))
   const evidence = sorted.find(qualifies)
   if (!evidence) return { evidence: null, laterBlockingReview: null }
-  const laterBlockingReview = sorted.find((review) => String(review.created_at) > String(evidence.created_at) && ["block", "manual_review"].includes(review.outcome)) ?? null
+  const laterBlockingReview = sorted.find((review) => (String(review.created_at) > String(evidence.created_at) || (String(review.created_at) === String(evidence.created_at) && String(review.id ?? "") > String(evidence.id ?? ""))) && ["block", "manual_review"].includes(review.outcome)) ?? null
   return { evidence, laterBlockingReview }
 }
 
@@ -52,11 +52,12 @@ export async function performCreatorPublishingCreatorApproval(input: CreatorPubl
   const pkg = await must<CreatorPublishingPackageForApproval>(db.from("creator_publishing_content_packages").select("id,creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,second_person_present,compliance_status,compliance_policy_version,creator_approval_status,creator_approved_at,creator_approved_by,scheduled_for,created_at,updated_at").eq("id", input.content_package_id).single())
   assertCreatorPublishingApprovalAuthorized(input, deps.authorization, pkg)
   const media = await must<CreatorPublishingMediaAssetForApproval[]>(db.from("creator_publishing_media_assets").select("id,content_package_id,storage_key,mime_type,sha256,source,ai_generation_metadata,created_at").eq("content_package_id", input.content_package_id)) ?? []
-  const reviews = await must<CreatorPublishingApprovalReviewEvidence[]>(db.from("creator_publishing_compliance_reviews").select("outcome,review_source,escalated_approval_reason,created_at").eq("content_package_id", input.content_package_id).order?.("created_at", { ascending: false }) ?? Promise.resolve({ data: [], error: null })) ?? []
+  const reviews = await must<CreatorPublishingApprovalReviewEvidence[]>(db.from("creator_publishing_compliance_reviews").select("id,outcome,review_source,escalated_approval_reason,compliance_policy_version,created_at").eq("content_package_id", input.content_package_id).order?.("created_at", { ascending: false }) ?? Promise.resolve({ data: [], error: null })) ?? []
   const { evidence, laterBlockingReview } = selectCurrentCreatorApprovalComplianceEvidence(pkg, reviews)
   let taskQuery = db.from("creator_publishing_queue_tasks").select("id,status,target_platform").eq("content_package_id", input.content_package_id).eq("target_platform", pkg.target_platform)
   taskQuery = taskQuery.neq ? taskQuery.neq("status", "archived") : taskQuery
   const existingTask = await must<any>(taskQuery.maybeSingle?.() ?? Promise.resolve({ data: null, error: null }))
+  const mediaManifest = buildCreatorPublishingMediaManifest(media)
   const mediaManifestHash = hashCreatorPublishingMediaManifest(media)
   if (input.media_manifest_hash && input.media_manifest_hash !== mediaManifestHash) throw new CreatorPublishingApprovalError("APPROVAL_STALE_PACKAGE", "Approval media manifest hash is stale.")
   validateCreatorPublishingPackageForCreatorApproval(pkg, input, media, evidence, laterBlockingReview, existingTask)
@@ -65,7 +66,7 @@ export async function performCreatorPublishingCreatorApproval(input: CreatorPubl
   if (!db.rpc) throw new CreatorPublishingApprovalError("APPROVAL_UNAUTHORIZED", "Approval requires the trusted service RPC.")
   return await must<CreatorPublishingApprovalResult>(db.rpc("creator_publishing_apply_creator_approval_decision", {
     p_content_package_id: input.content_package_id, p_creator_id: input.creator_id, p_decision: input.decision, p_expected_compliance_status: input.expected_compliance_status,
-    p_expected_policy_version: input.expected_policy_version, p_expected_package_updated_at: input.expected_package_updated_at, p_snapshot_hash: hash, p_media_manifest_hash: mediaManifestHash,
+    p_expected_policy_version: input.expected_policy_version, p_expected_package_updated_at: input.expected_package_updated_at, p_snapshot_hash: hash, p_media_manifest: mediaManifest,
     p_client_snapshot_hash: input.approval_snapshot_hash ?? null, p_idempotency_key: input.idempotency_key, p_rejection_reason: input.rejection_reason ?? null, p_creator_notes: input.creator_notes ?? null,
   }))
 }

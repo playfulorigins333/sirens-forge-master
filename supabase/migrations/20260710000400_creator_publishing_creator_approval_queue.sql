@@ -22,6 +22,9 @@ create unique index if not exists creator_publishing_audit_creator_approval_idem
   on public.creator_publishing_audit_events(entity_type, entity_id, action, idempotency_key)
   where idempotency_key is not null and action in ('creator_publishing_creator_approved','creator_publishing_creator_rejected');
 
+alter table public.creator_publishing_compliance_reviews
+  add column if not exists compliance_policy_version text;
+
 create or replace function public.creator_publishing_apply_creator_approval_decision(
   p_content_package_id uuid,
   p_creator_id uuid,
@@ -30,7 +33,7 @@ create or replace function public.creator_publishing_apply_creator_approval_deci
   p_expected_policy_version text,
   p_expected_package_updated_at timestamptz,
   p_snapshot_hash text,
-  p_media_manifest_hash text,
+  p_media_manifest jsonb,
   p_client_snapshot_hash text default null,
   p_idempotency_key text default null,
   p_rejection_reason text default null,
@@ -54,7 +57,7 @@ declare
   v_media_count integer := 0;
   v_current_evidence public.creator_publishing_compliance_reviews%rowtype;
   v_later_blocking_review public.creator_publishing_compliance_reviews%rowtype;
-  v_current_media_manifest_hash text;
+  v_current_media_manifest jsonb;
 begin
   if p_decision not in ('approve','reject') then raise exception 'APPROVAL_INVALID_DECISION'; end if;
   if p_creator_id is null then raise exception 'APPROVAL_UNAUTHORIZED'; end if;
@@ -78,21 +81,21 @@ begin
   if v_package.creator_approval_status <> 'pending' then raise exception 'APPROVAL_ALREADY_DECIDED'; end if;
   if v_package.updated_at <> p_expected_package_updated_at then raise exception 'APPROVAL_STALE_PACKAGE'; end if;
 
-  select encode(digest(coalesce(jsonb_agg(jsonb_build_object('id', id, 'storage_key', storage_key, 'mime_type', mime_type, 'sha256', sha256, 'source', source, 'ai_generation_metadata', coalesce(ai_generation_metadata, '{}'::jsonb)) order by id)::text, '[]'), 'sha256'), 'hex')
-  into v_current_media_manifest_hash
+  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'storage_key', storage_key, 'mime_type', mime_type, 'sha256', sha256, 'source', source, 'ai_generation_metadata', coalesce(ai_generation_metadata, '{}'::jsonb)) order by id), '[]'::jsonb)
+  into v_current_media_manifest
   from (select id, storage_key, mime_type, sha256, source, ai_generation_metadata from public.creator_publishing_media_assets where content_package_id = p_content_package_id order by id for update) locked_media;
-  if v_current_media_manifest_hash <> p_media_manifest_hash then raise exception 'APPROVAL_STALE_PACKAGE'; end if;
+  if v_current_media_manifest is distinct from coalesce(p_media_manifest, '[]'::jsonb) then raise exception 'APPROVAL_STALE_PACKAGE'; end if;
 
   if v_package.compliance_status not in ('passed','escalated_approved') or p_expected_compliance_status <> v_package.compliance_status then raise exception 'APPROVAL_INVALID_COMPLIANCE_STATUS'; end if;
   if v_package.compliance_policy_version is null or v_package.compliance_policy_version = 'unassigned' or v_package.compliance_policy_version <> p_expected_policy_version then raise exception 'APPROVAL_STALE_POLICY_VERSION'; end if;
 
   if v_package.compliance_status = 'passed' then
     select * into v_current_evidence from public.creator_publishing_compliance_reviews
-    where content_package_id = p_content_package_id and review_source = 'automated' and outcome = 'pass'
+    where content_package_id = p_content_package_id and review_source = 'automated' and outcome = 'pass' and compliance_policy_version = v_package.compliance_policy_version
     order by created_at desc, id desc limit 1;
   else
     select * into v_current_evidence from public.creator_publishing_compliance_reviews
-    where content_package_id = p_content_package_id and review_source = 'human' and outcome = 'escalate' and length(btrim(coalesce(escalated_approval_reason, ''))) > 0
+    where content_package_id = p_content_package_id and review_source = 'human' and outcome = 'escalate' and length(btrim(coalesce(escalated_approval_reason, ''))) > 0 and compliance_policy_version = v_package.compliance_policy_version
     order by created_at desc, id desc limit 1;
   end if;
   if not found then raise exception 'APPROVAL_CURRENT_COMPLIANCE_EVIDENCE_REQUIRED'; end if;
@@ -100,7 +103,7 @@ begin
   select * into v_later_blocking_review from public.creator_publishing_compliance_reviews
   where content_package_id = p_content_package_id
     and outcome in ('block','manual_review')
-    and created_at > v_current_evidence.created_at
+    and (created_at > v_current_evidence.created_at or (created_at = v_current_evidence.created_at and id > v_current_evidence.id))
   order by created_at desc, id desc limit 1;
   if found then raise exception 'APPROVAL_BLOCKING_REVIEW_EXISTS'; end if;
 
@@ -140,10 +143,62 @@ begin
 end;
 $$;
 
-revoke all on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, text, text, text, text, text) from PUBLIC;
-revoke all on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, text, text, text, text, text) from anon;
-revoke all on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, text, text, text, text, text) from authenticated;
-grant execute on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, text, text, text, text, text) to service_role;
 
-comment on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, text, text, text, text, text) is 'Atomic creator approval/rejection workflow. Only creates OnlyFans manual-handoff queue tasks after valid creator approval; never posts to platforms and never routes Fanvue.';
+create or replace function public.creator_publishing_media_assets_invalidate_parent_package()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_content_package_id uuid;
+  v_package public.creator_publishing_content_packages%rowtype;
+  v_active_task_id uuid;
+begin
+  v_content_package_id := coalesce(new.content_package_id, old.content_package_id);
+  select * into v_package from public.creator_publishing_content_packages where id = v_content_package_id for update;
+  if not found then return coalesce(new, old); end if;
+
+  if v_package.creator_approval_status = 'approved' then
+    raise exception 'APPROVAL_STALE_PACKAGE';
+  end if;
+
+  select id into v_active_task_id
+  from public.creator_publishing_queue_tasks
+  where content_package_id = v_content_package_id and status <> 'archived'
+  limit 1;
+  if found then
+    raise exception 'APPROVAL_DUPLICATE';
+  end if;
+
+  update public.creator_publishing_content_packages
+  set compliance_status = 'pending',
+      compliance_policy_version = 'unassigned',
+      forced_disclosure_text = null,
+      creator_approval_status = 'pending',
+      creator_approved_by = null,
+      creator_approved_at = null,
+      updated_at = clock_timestamp()
+  where id = v_content_package_id;
+
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists trg_creator_publishing_media_assets_invalidate_parent on public.creator_publishing_media_assets;
+create trigger trg_creator_publishing_media_assets_invalidate_parent
+after insert or update or delete on public.creator_publishing_media_assets
+for each row execute function public.creator_publishing_media_assets_invalidate_parent_package();
+
+revoke all on function public.creator_publishing_media_assets_invalidate_parent_package() from PUBLIC;
+revoke all on function public.creator_publishing_media_assets_invalidate_parent_package() from anon;
+revoke all on function public.creator_publishing_media_assets_invalidate_parent_package() from authenticated;
+grant execute on function public.creator_publishing_media_assets_invalidate_parent_package() to service_role;
+
+revoke all on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, jsonb, text, text, text, text) from PUBLIC;
+revoke all on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, jsonb, text, text, text, text) from anon;
+revoke all on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, jsonb, text, text, text, text) from authenticated;
+grant execute on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, jsonb, text, text, text, text) to service_role;
+
+comment on function public.creator_publishing_apply_creator_approval_decision(uuid, uuid, text, text, text, timestamptz, text, jsonb, text, text, text, text) is 'Atomic creator approval/rejection workflow. Only creates OnlyFans manual-handoff queue tasks after valid creator approval; never posts to platforms and never routes Fanvue.';
 comment on index public.creator_publishing_queue_one_task_per_package_platform_uidx is 'Prevents duplicate active/final manual-handoff queue tasks for the same content package and platform.';

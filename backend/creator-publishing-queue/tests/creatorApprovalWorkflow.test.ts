@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildCreatorPublishingApprovalSnapshot, CreatorPublishingApprovalError, hashCreatorPublishingApprovalSnapshot, hashCreatorPublishingMediaManifest, performCreatorPublishingCreatorApproval, selectCurrentCreatorApprovalComplianceEvidence, validateCreatorPublishingPackageForCreatorApproval, type CreatorPublishingApprovalInput, type CreatorPublishingMediaAssetForApproval, type CreatorPublishingPackageForApproval } from '../../../lib/creator-publishing-queue/approval'
+import { buildCreatorPublishingApprovalSnapshot, buildCreatorPublishingMediaManifest, CreatorPublishingApprovalError, hashCreatorPublishingApprovalSnapshot, hashCreatorPublishingMediaManifest, performCreatorPublishingCreatorApproval, selectCurrentCreatorApprovalComplianceEvidence, validateCreatorPublishingPackageForCreatorApproval, type CreatorPublishingApprovalInput, type CreatorPublishingMediaAssetForApproval, type CreatorPublishingPackageForApproval } from '../../../lib/creator-publishing-queue/approval'
 import { findForbiddenNetworkCalls } from '../../../scripts/creatorPublishingQueueSafetyGuard'
 
 const creator = '00000000-0000-4000-8000-000000000001'
@@ -8,8 +8,8 @@ const other = '00000000-0000-4000-8000-000000000002'
 const updated = '2026-07-10T03:00:00.000Z'
 const pkg = (patch: Partial<CreatorPublishingPackageForApproval> = {}): CreatorPublishingPackageForApproval => ({ id: 'pkg-1', creator_id: creator, platform_account_id: 'acct-1', target_platform: 'onlyfans', title: 'Final set', caption_body: 'Final caption', forced_disclosure_text: '#ai', ai_flag: 'ai_generated', ai_detail: { model: 'internal' }, second_person_present: false, compliance_status: 'passed', compliance_policy_version: 'onlyfans-manual-handoff-2026-07-10-v1', creator_approval_status: 'pending', creator_approved_at: null, creator_approved_by: null, scheduled_for: null, created_at: '2026-07-10T02:00:00.000Z', updated_at: updated, ...patch })
 const asset = (patch: Partial<CreatorPublishingMediaAssetForApproval> = {}): CreatorPublishingMediaAssetForApproval => ({ id: 'asset-1', content_package_id: 'pkg-1', storage_key: 'creator/pkg-1/a.jpg', mime_type: 'image/jpeg', sha256: 'a'.repeat(64), source: 'ai_pipeline', ai_generation_metadata: { prompt_ref: 'safe' }, created_at: '2026-07-10T02:10:00.000Z', ...patch })
-const passReview = { outcome: 'pass', review_source: 'automated', created_at: '2026-07-10T02:30:00.000Z' }
-const escalationReview = { outcome: 'escalate', review_source: 'human', escalated_approval_reason: 'Trusted escalation approved.', created_at: '2026-07-10T02:30:00.000Z' }
+const passReview = { id: 'review-pass', outcome: 'pass', review_source: 'automated', compliance_policy_version: 'onlyfans-manual-handoff-2026-07-10-v1', created_at: '2026-07-10T02:30:00.000Z' }
+const escalationReview = { id: 'review-escalate', outcome: 'escalate', review_source: 'human', escalated_approval_reason: 'Trusted escalation approved.', compliance_policy_version: 'onlyfans-manual-handoff-2026-07-10-v1', created_at: '2026-07-10T02:30:00.000Z' }
 const ev = passReview
 const input = (patch: Partial<CreatorPublishingApprovalInput> = {}): CreatorPublishingApprovalInput => ({ content_package_id: 'pkg-1', creator_id: creator, decision: 'approve', expected_compliance_status: 'passed', expected_policy_version: 'onlyfans-manual-handoff-2026-07-10-v1', expected_package_updated_at: updated, idempotency_key: 'idem-1', ...patch })
 function assertCode(fn: () => unknown, code: string) { assert.throws(fn, (e) => e instanceof CreatorPublishingApprovalError && e.code === code) }
@@ -44,6 +44,10 @@ assert.equal(selectCurrentCreatorApprovalComplianceEvidence(pkg(), [passReview, 
 assert.equal(selectCurrentCreatorApprovalComplianceEvidence(pkg({ compliance_status: 'escalated_approved' }), [escalationReview, { outcome: 'block', review_source: 'human', created_at: '2026-07-10T02:45:00.000Z' }]).laterBlockingReview?.outcome, 'block')
 assert.equal(selectCurrentCreatorApprovalComplianceEvidence(pkg(), []).evidence, null)
 assert.equal(selectCurrentCreatorApprovalComplianceEvidence(pkg(), [passReview, { outcome: 'manual_review', review_source: 'automated', created_at: '2026-07-10T02:45:00.000Z' }]).laterBlockingReview?.outcome, 'manual_review')
+assert.equal(selectCurrentCreatorApprovalComplianceEvidence(pkg(), [{ ...passReview, compliance_policy_version: 'old-policy' }]).evidence, null)
+assert.equal(selectCurrentCreatorApprovalComplianceEvidence(pkg({ compliance_status: 'escalated_approved' }), [{ ...escalationReview, compliance_policy_version: 'old-policy' }]).evidence, null)
+assert.equal(selectCurrentCreatorApprovalComplianceEvidence(pkg(), [{ ...passReview, compliance_policy_version: null }]).evidence, null)
+assert.equal(selectCurrentCreatorApprovalComplianceEvidence(pkg(), [passReview, { id: 'zzzz-later-same-time', outcome: 'block', review_source: 'human', compliance_policy_version: 'onlyfans-manual-handoff-2026-07-10-v1', created_at: passReview.created_at }]).laterBlockingReview?.outcome, 'block')
 
 const snapA = buildCreatorPublishingApprovalSnapshot(pkg(), [asset()], ev)
 const snapB = buildCreatorPublishingApprovalSnapshot(pkg(), [asset()], ev)
@@ -92,7 +96,7 @@ await assert.rejects(() => performCreatorPublishingCreatorApproval(input({ media
 await assert.rejects(() => performCreatorPublishingCreatorApproval(input({ media_manifest_hash: expectedManifest }), { supabaseAdmin: mockDb(pkg(), [asset({ storage_key: 'creator/pkg-1/changed.jpg' })]).db as any, authorization: { user_id: creator } }), (e) => e instanceof CreatorPublishingApprovalError && e.code === 'APPROVAL_STALE_PACKAGE')
 await assert.rejects(() => performCreatorPublishingCreatorApproval(input({ media_manifest_hash: expectedManifest }), { supabaseAdmin: mockDb(pkg(), [asset({ sha256: 'b'.repeat(64) })]).db as any, authorization: { user_id: creator } }), (e) => e instanceof CreatorPublishingApprovalError && e.code === 'APPROVAL_STALE_PACKAGE')
 await performCreatorPublishingCreatorApproval(input({ media_manifest_hash: expectedManifest, idempotency_key: 'idem-manifest-ok' }), { supabaseAdmin: mockDb().db as any, authorization: { user_id: creator } })
-const fansly = await performCreatorPublishingCreatorApproval(input({ expected_policy_version: 'fansly-manual-handoff-2026-07-10-v1' }), { supabaseAdmin: mockDb(pkg({ target_platform: 'fansly', compliance_policy_version: 'fansly-manual-handoff-2026-07-10-v1', forced_disclosure_text: null })).db as any, authorization: { user_id: creator } })
+const fansly = await performCreatorPublishingCreatorApproval(input({ expected_policy_version: 'fansly-manual-handoff-2026-07-10-v1' }), { supabaseAdmin: mockDb(pkg({ target_platform: 'fansly', compliance_policy_version: 'fansly-manual-handoff-2026-07-10-v1', forced_disclosure_text: null }), [asset()], { reviews: [{ ...passReview, compliance_policy_version: 'fansly-manual-handoff-2026-07-10-v1' }] }).db as any, authorization: { user_id: creator } })
 assert.equal(fansly.queue_task_created, false)
 assert.equal(fansly.queue_creation_allowed, false)
 const rejected = await performCreatorPublishingCreatorApproval(input({ decision: 'reject', rejection_reason: 'No longer approved.' }), { supabaseAdmin: mockDb().db as any, authorization: { user_id: creator } })
@@ -105,7 +109,7 @@ const archivedDb = mockDb()
 await performCreatorPublishingCreatorApproval(input({ idempotency_key: 'idem-archived' }), { supabaseAdmin: archivedDb.db as any, authorization: { user_id: creator } })
 assert.equal(archivedDb.calls.some((c) => c[0] === 'neq' && c[3] === 'archived'), true)
 assert.equal(archivedDb.calls.some((c) => c[0] === 'eq' && c[2] === 'target_platform' && c[3] === 'onlyfans'), true)
-assert.equal(approvedDb.calls.find((c) => c[0] === 'rpc')?.[2].p_media_manifest_hash, hashCreatorPublishingMediaManifest([asset()]))
+assert.deepEqual(approvedDb.calls.find((c) => c[0] === 'rpc')?.[2].p_media_manifest, buildCreatorPublishingMediaManifest([asset()]))
 
 const migration = readFileSync('supabase/migrations/20260710000400_creator_publishing_creator_approval_queue.sql', 'utf8')
 assert.match(migration, /security definer/i)
@@ -122,8 +126,15 @@ assert.match(migration, /v_queue_allowed := v_package\.target_platform = 'onlyfa
 assert.match(migration, /APPROVAL_CURRENT_COMPLIANCE_EVIDENCE_REQUIRED/)
 assert.match(migration, /outcome in \('block','manual_review'\)/)
 assert.match(migration, /for update\) locked_media/)
-assert.match(migration, /p_media_manifest_hash/)
+assert.match(migration, /p_media_manifest jsonb/)
+assert.match(migration, /is distinct from coalesce\(p_media_manifest/)
+assert.doesNotMatch(migration, /p_media_manifest_hash|digest\(/)
 assert.match(migration, /target_platform = v_package\.target_platform and status <> 'archived'/)
+assert.match(migration, /after insert or update or delete on public\.creator_publishing_media_assets/)
+assert.match(migration, /where id = v_content_package_id for update/)
+assert.match(migration, /creator_approval_status = 'approved'/)
+assert.match(migration, /compliance_status = 'pending'[\s\S]*compliance_policy_version = 'unassigned'[\s\S]*forced_disclosure_text = null/)
+assert.match(migration, /content_package_id = v_content_package_id and status <> 'archived'/)
 assert.doesNotMatch(migration, /apiv3\.fansly\.com|fetch\(|puppeteer|playwright|fanvueApiClient|fanvueAdapter/)
 assert.deepEqual(findForbiddenNetworkCalls(['lib/creator-publishing-queue/approval/service.ts','lib/creator-publishing-queue/approval/snapshot.ts','lib/creator-publishing-queue/approval/authorize.ts']), [])
 console.log('Creator Publishing Queue creator approval workflow tests passed')
