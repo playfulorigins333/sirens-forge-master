@@ -6,7 +6,7 @@ export type AiFlag = "none" | "ai_enhanced" | "ai_generated"
 export type MediaProvenanceSource = "camera_upload" | "ai_pipeline" | "edited"
 
 export type ComplianceAiDetail = Readonly<Partial<Record<
-  | "lora_generated" | "photorealistic" | "lifelike" | "deepfake" | "face_swap" | "unauthorized_face_swap"
+  | "lora_generated" | "ai_twin" | "generated_creator_likeness" | "photorealistic" | "lifelike" | "deepfake" | "face_swap" | "unauthorized_face_swap"
   | "third_party_likeness" | "ai_background_edit" | "ai_outfit_edit" | "ai_lighting_edit" | "body_adjacent_edit"
   | "upscaled" | "non_photorealistic" | "creator_likeness_drift" | "heavy_alteration" | "synthetic_persona"
   | "fictional_persona" | "composite_persona" | "ai_contribution_more_than_cosmetic" | "borderline_lifelike_stylized"

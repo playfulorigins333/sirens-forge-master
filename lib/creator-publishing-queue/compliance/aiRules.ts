@@ -3,20 +3,25 @@ import type { ComplianceInput, ComplianceRuleHit } from "./types"
 function hit(rule_id: string, severity: "allow" | "review" | "block", category: string, message: string, field: string, source: string): ComplianceRuleHit {
   return { rule_id, severity, category, message, source, field, evidence: field, override_allowed: severity === "review" }
 }
-const verified = (s?: string) => s === "verified" || s === "creator_attested"
+const verified = (s?: string) => s === "verified"
 const hasAi = (i: ComplianceInput) => i.ai_flag !== "none" || i.media_provenance.includes("ai_pipeline") || Object.values(i.ai_detail ?? {}).some(Boolean)
+export function requiresAiTwinConsent(input: ComplianceInput) {
+  const d = input.ai_detail ?? {}
+  return Boolean(d.ai_twin || d.generated_creator_likeness || d.lora_generated || (input.ai_flag === "ai_generated" && (d.photorealistic || d.lifelike)))
+}
 
 export function evaluateAiAndProvenanceRules(input: ComplianceInput): readonly ComplianceRuleHit[] {
   const d = input.ai_detail ?? {}
   const hits: ComplianceRuleHit[] = []
   const policySource = `${input.target_platform}:${input.policy?.policy_version ?? input.policy_version ?? "selected"}`
-  if (!verified(input.creator_verification_status) || !verified(input.platform_account_verification_status ?? input.creator_verification_status)) hits.push(hit("verification-missing-creator", "block", "missing verification", "Creator/platform account verification is missing.", "creator_verification_status", policySource))
+  if (!verified(input.creator_verification_status)) hits.push(hit("verification-missing-creator", "block", "missing verification", "Creator verification must be exactly verified.", "creator_verification_status", policySource))
+  if (!verified(input.platform_account_verification_status)) hits.push(hit("verification-missing-platform-account", "block", "missing verification", "Platform account verification must be exactly verified.", "platform_account_verification_status", policySource))
   if (input.second_person_present) {
     const ok = input.co_performer_release_status === "confirmed" && input.co_performer_verification_status === "verified"
     hits.push(hit(ok ? "co-performer-review" : "co-performer-missing", ok ? "review" : "block", "second person", ok ? "Second-person content requires manual review even with claimed release." : "Second person is present without required release/verification.", "second_person_present", policySource))
   }
   if (input.target_platform === "onlyfans") {
-    if (hasAi(input) && input.ai_twin_consent_status !== "granted" && input.ai_twin_consent_status !== "not_applicable") hits.push(hit("onlyfans-ai-twin-consent-missing", "block", "missing AI twin consent", "AI content requires AI twin consent where applicable.", "ai_twin_consent_status", policySource))
+    if (requiresAiTwinConsent(input) && input.ai_twin_consent_status !== "granted") hits.push(hit("onlyfans-ai-twin-consent-missing", "block", "missing AI twin consent", "Generated creator likeness or AI twin content requires AI twin consent.", "ai_twin_consent_status", policySource))
     if (d.synthetic_persona || d.fictional_persona) hits.push(hit("onlyfans-fictional-persona", "block", "third-party deepfake", "Fictional explicit AI persona cannot match the verified creator.", "ai_detail.synthetic_persona", policySource))
     if (d.composite_persona) hits.push(hit("onlyfans-composite-persona", "block", "composite AI persona", "Composite AI persona is hard-blocked.", "ai_detail.composite_persona", policySource))
     if (d.deepfake || d.third_party_likeness) hits.push(hit("onlyfans-third-party-deepfake", "block", "third-party deepfake", "Third-party deepfake or likeness use is hard-blocked.", "ai_detail.deepfake", policySource))
@@ -24,6 +29,7 @@ export function evaluateAiAndProvenanceRules(input: ComplianceInput): readonly C
     else if (d.face_swap) hits.push(hit("onlyfans-face-swap-review", "review", "AI alteration", "Creator-only face swap requires manual review.", "ai_detail.face_swap", policySource))
     if (d.creator_likeness_drift || d.heavy_alteration) hits.push(hit("onlyfans-likeness-drift", "review", "likeness drift", "Creator likeness drift/heavy alteration requires manual review.", "ai_detail.creator_likeness_drift", policySource))
     if (d.ai_outfit_edit || d.body_adjacent_edit) hits.push(hit("onlyfans-body-adjacent-edit", "review", "AI outfit/body-adjacent edits", "AI outfit or body-adjacent edits require manual review.", "ai_detail.ai_outfit_edit", policySource))
+    if (d.ai_background_edit || d.ai_lighting_edit) hits.push(hit("onlyfans-cosmetic-ai-edit-review", "review", "cosmetic AI edit", "AI background or lighting edits require deterministic manual review without triggering AI twin consent.", "ai_detail.ai_background_edit", policySource))
     if (d.ambiguous_background_people) hits.push(hit("onlyfans-ambiguous-background-people", "review", "ambiguous background people", "Ambiguous background people require manual review.", "ai_detail.ambiguous_background_people", policySource))
   }
   if (input.target_platform === "fansly") {
