@@ -19,7 +19,9 @@ export function findForbiddenNetworkCalls(files: string[]) {
   for (const file of files) {
     const source = readFileSync(file, 'utf8').toLowerCase()
     if (!forbiddenHosts.some((host) => source.includes(host))) continue
-    if (!networkTerms.some((term) => source.includes(term))) continue
+    const hasForbiddenFetchCall = forbiddenHosts.some((host) => source.includes(`fetch('https://${host}`) || source.includes(`fetch(\"https://${host}`) || source.includes(`fetch(\`https://${host}`))
+    const hasForbiddenNetworkClient = networkTerms.filter((term) => term !== 'fetch').some((term) => source.includes(term) && forbiddenHosts.some((host) => source.includes(host)))
+    if (!hasForbiddenFetchCall && !hasForbiddenNetworkClient) continue
     findings.push(file)
   }
   return findings
