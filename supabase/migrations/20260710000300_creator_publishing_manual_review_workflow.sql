@@ -100,8 +100,8 @@ begin
 
   v_before := jsonb_build_object('compliance_status', v_package.compliance_status, 'compliance_policy_version', v_package.compliance_policy_version, 'forced_disclosure_text', v_package.forced_disclosure_text, 'creator_approval_status', v_package.creator_approval_status);
 
-  insert into public.creator_publishing_compliance_reviews(content_package_id, reviewer_id, outcome, review_source, notes, escalated_approval_reason, rule_hits, review_metadata, compliance_policy_version, created_at)
-  values (p_content_package_id, p_reviewer_id, v_outcome, 'human', concat_ws(E'\n\n', btrim(p_reason), nullif(btrim(coalesce(p_reviewer_notes, '')), '')), case when p_decision = 'approve_escalation' then btrim(p_reason) else null end, coalesce(p_rule_hits, '[]'::jsonb), coalesce(p_review_metadata, '{}'::jsonb) || jsonb_build_object('decision', p_decision, 'idempotency_key', p_idempotency_key, 'policy_version', v_package.compliance_policy_version), v_package.compliance_policy_version, v_reviewed_at)
+  insert into public.creator_publishing_compliance_reviews(content_package_id, reviewer_id, outcome, review_source, notes, escalated_approval_reason, rule_hits, review_metadata, created_at)
+  values (p_content_package_id, p_reviewer_id, v_outcome, 'human', concat_ws(E'\n\n', btrim(p_reason), nullif(btrim(coalesce(p_reviewer_notes, '')), '')), case when p_decision = 'approve_escalation' then btrim(p_reason) else null end, coalesce(p_rule_hits, '[]'::jsonb), coalesce(p_review_metadata, '{}'::jsonb) || jsonb_build_object('decision', p_decision, 'idempotency_key', p_idempotency_key), v_reviewed_at)
   returning id into v_review_id;
 
   if p_decision = 'request_changes' then
