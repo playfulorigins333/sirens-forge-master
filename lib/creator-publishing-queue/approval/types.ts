@@ -11,6 +11,7 @@ export type CreatorPublishingApprovalErrorCode =
   | "APPROVAL_STALE_POLICY_VERSION" | "APPROVAL_STALE_PACKAGE" | "APPROVAL_ALREADY_DECIDED" | "APPROVAL_DUPLICATE"
   | "APPROVAL_FANVUE_NOT_SUPPORTED" | "APPROVAL_FANSLY_QUEUE_DISABLED" | "APPROVAL_DISCLOSURE_MISSING" | "APPROVAL_MEDIA_MISSING"
   | "APPROVAL_INVALID_DECISION" | "APPROVAL_REJECTION_REASON_REQUIRED" | "APPROVAL_FINAL_CAPTION_MISSING" | "APPROVAL_BLOCKING_REVIEW_EXISTS"
+  | "APPROVAL_CURRENT_COMPLIANCE_EVIDENCE_REQUIRED"
 
 export class CreatorPublishingApprovalError extends Error {
   constructor(public code: CreatorPublishingApprovalErrorCode, message: string, public details?: unknown) { super(message) }
@@ -28,6 +29,7 @@ export type CreatorPublishingApprovalInput = Readonly<{
   rejection_reason?: string | null
   creator_notes?: string | null
   approval_snapshot_hash?: string | null
+  media_manifest_hash?: string | null
   actor_role?: string | null
 }>
 export type CreatorPublishingPackageForApproval = Readonly<{
