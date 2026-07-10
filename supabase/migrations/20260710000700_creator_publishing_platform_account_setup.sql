@@ -1,14 +1,15 @@
 -- Task 9: creator platform account setup through trusted server workflow only.
 
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 -- Preserve creator_platform_accounts_select_own from the foundation migration and remove browser writes.
 drop policy if exists "creator_platform_accounts_insert_own" on public.creator_platform_accounts;
 drop policy if exists "creator_platform_accounts_update_own" on public.creator_platform_accounts;
 
-create unique index if not exists creator_publishing_platform_account_audit_idempotency_uidx
-  on public.creator_publishing_audit_events(entity_type, entity_id, action, idempotency_key)
-  where entity_type = 'creator_platform_account' and idempotency_key is not null;
+drop index if exists public.creator_publishing_platform_account_audit_idempotency_uidx;
+create unique index if not exists creator_publishing_platform_account_audit_creator_key_uidx
+  on public.creator_publishing_audit_events(actor_id, idempotency_key)
+  where entity_type = 'creator_platform_account' and actor_id is not null and idempotency_key is not null;
 
 create or replace function public.creator_publishing_save_platform_account(
   p_creator_id uuid,
@@ -50,8 +51,11 @@ begin
   if v_profile_url is not null and length(v_profile_url) > 300 then raise exception 'INVALID_PROFILE_URL'; end if;
   if v_idempotency_key !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
 
+  -- Same creator/key requests are serialized before any account mutation or audit insert.
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_creator_id::text || ':' || v_idempotency_key, 0));
+
   -- same canonical request with the same idempotency key returns idempotent success; different payload raises IDEMPOTENCY_CONFLICT.
-  v_fingerprint := encode(digest(jsonb_build_object(
+  v_fingerprint := encode(extensions.digest(jsonb_build_object(
     'operation', v_operation,
     'account_id', p_account_id,
     'creator_id', p_creator_id,
@@ -62,22 +66,34 @@ begin
     'desired_verification_status', v_status
   )::text, 'sha256'), 'hex');
 
+  select * into v_existing_audit from public.creator_publishing_audit_events
+    where entity_type = 'creator_platform_account'
+      and actor_id = p_creator_id
+      and idempotency_key = v_idempotency_key
+    limit 1;
+
+  if found then
+    if v_existing_audit.after_state->>'request_fingerprint' is distinct from v_fingerprint then
+      raise exception 'IDEMPOTENCY_CONFLICT';
+    end if;
+    select * into v_result from public.creator_platform_accounts where id = v_existing_audit.entity_id for update;
+    if not found or v_result.creator_id <> p_creator_id then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
+    if v_result.id is distinct from coalesce(p_account_id, v_result.id)
+       or v_result.platform <> v_platform
+       or v_result.platform_username <> v_username
+       or v_result.profile_url is distinct from v_profile_url
+       or v_result.is_virtual_entity is distinct from coalesce(p_is_virtual_entity, false)
+       or v_result.verification_status <> v_status then
+      raise exception 'IDEMPOTENCY_CONFLICT';
+    end if;
+    return v_result;
+  end if;
+
   if p_account_id is null then
     select * into v_duplicate from public.creator_platform_accounts
       where creator_id = p_creator_id and platform = v_platform and lower(platform_username) = lower(v_username)
       limit 1;
-    if found then
-      if v_duplicate.profile_url is not distinct from v_profile_url
-         and v_duplicate.is_virtual_entity is not distinct from coalesce(p_is_virtual_entity, false)
-         and v_duplicate.verification_status = v_status then
-        select * into v_existing_audit from public.creator_publishing_audit_events
-          where entity_type = 'creator_platform_account' and entity_id = v_duplicate.id and idempotency_key = v_idempotency_key
-          limit 1;
-        if found and v_existing_audit.after_state->>'request_fingerprint' is distinct from v_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
-        return v_duplicate;
-      end if;
-      raise exception 'ACCOUNT_CONFLICT';
-    end if;
+    if found then raise exception 'ACCOUNT_CONFLICT'; end if;
     begin
       insert into public.creator_platform_accounts(creator_id, platform, platform_username, profile_url, verification_status, verification_attested_at, is_virtual_entity, created_at, updated_at)
       values (p_creator_id, v_platform, v_username, v_profile_url, v_status, v_attested_at, coalesce(p_is_virtual_entity, false), v_now, v_now)
@@ -86,11 +102,6 @@ begin
       select * into v_duplicate from public.creator_platform_accounts
         where creator_id = p_creator_id and platform = v_platform and lower(platform_username) = lower(v_username)
         limit 1;
-      if found and v_duplicate.profile_url is not distinct from v_profile_url
-         and v_duplicate.is_virtual_entity is not distinct from coalesce(p_is_virtual_entity, false)
-         and v_duplicate.verification_status = v_status then
-        return v_duplicate;
-      end if;
       raise exception 'ACCOUNT_CONFLICT';
     end;
     v_action := 'creator_platform_account_created';
@@ -100,13 +111,6 @@ begin
     if not found or v_existing.creator_id <> p_creator_id then raise exception 'ACCOUNT_NOT_FOUND'; end if;
     if v_existing.platform <> v_platform then raise exception 'ACCOUNT_CONFLICT'; end if;
     if v_existing.verification_status = 'revoked' then raise exception 'ACCOUNT_REVOKED'; end if;
-    select * into v_existing_audit from public.creator_publishing_audit_events
-      where entity_type = 'creator_platform_account' and entity_id = p_account_id and idempotency_key = v_idempotency_key
-      limit 1;
-    if found then
-      if v_existing_audit.after_state->>'request_fingerprint' = v_fingerprint then return v_existing; end if;
-      raise exception 'IDEMPOTENCY_CONFLICT';
-    end if;
     select * into v_duplicate from public.creator_platform_accounts
       where creator_id = p_creator_id and platform = v_platform and lower(platform_username) = lower(v_username) and id <> p_account_id
       limit 1;
@@ -121,8 +125,7 @@ begin
 
   v_after := jsonb_build_object('account_id', v_result.id, 'platform', v_result.platform, 'platform_username', v_result.platform_username, 'profile_url_present', v_result.profile_url is not null, 'is_virtual_entity', v_result.is_virtual_entity, 'prior_verification_status', coalesce(v_existing.verification_status, null), 'resulting_verification_status', v_result.verification_status, 'verification_attested_at', v_result.verification_attested_at, 'creator_id', v_result.creator_id, 'idempotency_key', v_idempotency_key, 'request_fingerprint', v_fingerprint);
   insert into public.creator_publishing_audit_events(entity_type, entity_id, actor_id, actor_role, action, before_state, after_state, idempotency_key, created_at)
-  values ('creator_platform_account', v_result.id, p_creator_id, 'creator', v_action, v_before, v_after, v_idempotency_key, v_now)
-  on conflict (entity_type, entity_id, action, idempotency_key) where entity_type = 'creator_platform_account' and idempotency_key is not null do nothing;
+  values ('creator_platform_account', v_result.id, p_creator_id, 'creator', v_action, v_before, v_after, v_idempotency_key, v_now);
   return v_result;
 end;
 $$;
