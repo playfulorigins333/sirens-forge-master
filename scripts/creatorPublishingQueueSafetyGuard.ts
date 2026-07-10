@@ -5,6 +5,28 @@ import { execFileSync } from 'node:child_process'
 
 const forbiddenHosts = ['onlyfans.com','www.onlyfans.com','fansly.com','www.fansly.com','apiv3.fansly.com','apifansly.com','fansly-api.com']
 const networkTerms = ['fetch','axios','request','got','undici','node-fetch','http.','https.','superagent','playwright','puppeteer','webdriver']
+const policySourceReferenceAllowlist = [
+  'lib/creator-publishing-queue/policies/onlyfans.ts',
+  'lib/creator-publishing-queue/policies/fansly.ts',
+] as const
+
+const networkClientCallPatterns = [
+  /(?:\b|\.)fetch\s*\(/,
+  /\baxios\s*(?:\.|\()/,
+  /\b(?:request|got|superagent)\s*(?:\.|\()/,
+  /\bundici\s*\.\s*(?:fetch|request|stream|pipeline|connect)\s*\(/,
+  /\bnodefetch\s*\(/,
+  /\b(?:http|https)\s*\.\s*(?:get|request)\s*\(/,
+  /\b(?:page|browser|driver)\s*\.\s*(?:goto|navigate|get)\s*\(/,
+]
+
+const networkClientImportPatterns = [
+  /\bfrom\s+['"](?:axios|got|undici|node-fetch|superagent|playwright|puppeteer|webdriverio|selenium-webdriver)['"]/,
+  /\bimport\s+['"](?:axios|got|undici|node-fetch|superagent|playwright|puppeteer|webdriverio|selenium-webdriver)['"]/,
+  /\brequire\s*\(\s*['"](?:axios|got|undici|node-fetch|superagent|playwright|puppeteer|webdriverio|selenium-webdriver)['"]\s*\)/,
+  /\bfrom\s+['"]node:(?:http|https)['"]/,
+  /\bfrom\s+['"](?:http|https)['"]/,
+]
 const credentialNames = ['password','access_token','refresh_token','auth_token','session','session_id','cookie','cookies','two_factor_secret','recovery_code','platform_secret']
 const scanGlobs = ['lib/creator-publishing-queue','backend/creator-publishing-queue','app/api/creator-publishing-queue']
 const migration = 'supabase/migrations/20260710000100_creator_publishing_queue_foundation.sql'
@@ -14,12 +36,28 @@ function filesUnder(paths: string[]) {
   try { return execFileSync('rg', args, { encoding: 'utf8' }).trim().split('\n').filter(Boolean) } catch { return [] }
 }
 
+function hasForbiddenHost(source: string) {
+  return forbiddenHosts.some((host) => source.includes(host))
+}
+
+function hasNetworkClientImportOrCall(source: string) {
+  return networkClientCallPatterns.some((pattern) => pattern.test(source)) || networkClientImportPatterns.some((pattern) => pattern.test(source))
+}
+
+function isPolicySourceReferenceFile(file: string) {
+  return policySourceReferenceAllowlist.some((allowedFile) => file.endsWith(allowedFile))
+}
+
 export function findForbiddenNetworkCalls(files: string[]) {
   const findings: string[] = []
   for (const file of files) {
     const source = readFileSync(file, 'utf8').toLowerCase()
-    if (!forbiddenHosts.some((host) => source.includes(host))) continue
-    if (!networkTerms.some((term) => source.includes(term))) continue
+    if (!hasForbiddenHost(source)) continue
+
+    const hasNetworkClient = hasNetworkClientImportOrCall(source)
+    if (isPolicySourceReferenceFile(file) && !hasNetworkClient) continue
+    if (!hasNetworkClient) continue
+
     findings.push(file)
   }
   return findings
