@@ -67,7 +67,7 @@ create table if not exists public.creator_publishing_content_packages (
   price_notes text,
   visibility_notes text,
   compliance_status text not null default 'pending' check (compliance_status in ('pending','passed','manual_review','blocked','escalated_approved')),
-  compliance_policy_version text not null,
+  compliance_policy_version text not null default 'unassigned',
   creator_approval_status text not null default 'pending' check (creator_approval_status in ('pending','approved','rejected')),
   creator_approved_at timestamptz,
   creator_approved_by uuid references auth.users(id) on delete set null,
@@ -93,7 +93,17 @@ returns trigger
 language plpgsql
 as $$
 begin
-  if current_user in ('authenticated', 'anon') and (
+  if current_user in ('authenticated', 'anon') and tg_op = 'INSERT' then
+    new.compliance_status = 'pending';
+    new.compliance_policy_version = 'unassigned';
+    new.forced_disclosure_text = null;
+    new.creator_approval_status = 'pending';
+    new.creator_approved_by = null;
+    new.creator_approved_at = null;
+    return new;
+  end if;
+
+  if current_user in ('authenticated', 'anon') and tg_op = 'UPDATE' and (
     old.compliance_status is distinct from new.compliance_status or
     old.compliance_policy_version is distinct from new.compliance_policy_version or
     old.forced_disclosure_text is distinct from new.forced_disclosure_text or
@@ -109,7 +119,7 @@ $$;
 
 drop trigger if exists trg_creator_publishing_prevent_creator_controlled_field_update on public.creator_publishing_content_packages;
 create trigger trg_creator_publishing_prevent_creator_controlled_field_update
-before update on public.creator_publishing_content_packages
+before insert or update on public.creator_publishing_content_packages
 for each row execute function public.creator_publishing_prevent_creator_controlled_field_update();
 
 create table if not exists public.creator_publishing_media_assets (
@@ -234,7 +244,7 @@ create index if not exists creator_publishing_audit_entity_idx on public.creator
 drop trigger if exists trg_creator_platform_accounts_updated_at on public.creator_platform_accounts;
 create trigger trg_creator_platform_accounts_updated_at before update on public.creator_platform_accounts for each row execute function public.set_updated_at();
 drop trigger if exists trg_creator_publishing_content_updated_at on public.creator_publishing_content_packages;
-create trigger trg_creator_publishing_content_updated_at before update on public.creator_publishing_content_packages for each row execute function public.set_updated_at();
+create trigger trg_creator_publishing_content_updated_at before insert or update on public.creator_publishing_content_packages for each row execute function public.set_updated_at();
 drop trigger if exists trg_creator_publishing_queue_updated_at on public.creator_publishing_queue_tasks;
 create trigger trg_creator_publishing_queue_updated_at before update on public.creator_publishing_queue_tasks for each row execute function public.set_updated_at();
 
