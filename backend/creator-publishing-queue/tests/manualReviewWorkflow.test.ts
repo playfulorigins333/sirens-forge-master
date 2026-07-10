@@ -115,7 +115,7 @@ assert.match(migration, /from authenticated;/, 'authenticated cannot execute RPC
 assert.doesNotMatch(migration, /insert into public\.creator_publishing_queue_tasks|ready_for_handoff|creator_approval_status = 'approved'/, 'RPC does not create queue tasks, approve content, or route Fanvue')
 assert.match(migration, /outcome = 'block'/, 'later blocking review blocks escalation')
 assert.match(migration, /review_source = 'automated'[\s\S]*v_latest_automated\.outcome <> 'manual_review'/, 'latest automated manual_review is required')
-assert.match(migration, /created_at > v_latest_automated\.created_at/, 'later blocking review prevents escalation')
+assert.match(migration, /created_at > v_latest_automated\.created_at|created_at = v_latest_automated\.created_at and id > v_latest_automated\.id/, 'later blocking review prevents escalation')
 assert.match(migration, /v_reviewed_at timestamptz := clock_timestamp\(\)/, 'RPC uses database-controlled timestamp')
 assert.doesNotMatch(migration, /create policy[\s\S]*creator_publishing_trusted_reviewers[\s\S]*for (insert|update|all)/i, 'trusted reviewer table has no broad authenticated write policy')
 

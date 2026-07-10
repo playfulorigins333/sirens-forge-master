@@ -27,13 +27,7 @@ alter table public.creator_publishing_compliance_reviews
 
 -- Forward-only Task 5 redefinition of the already-deployed Task 4 trusted review RPC.
 -- This preserves Task 4 behavior while ensuring future human evidence records carry the package policy version.
-update public.creator_publishing_compliance_reviews r
-set compliance_policy_version = p.compliance_policy_version
-from public.creator_publishing_content_packages p
-where r.content_package_id = p.id
-  and r.compliance_policy_version is null
-  and p.compliance_policy_version is not null
-  and p.compliance_policy_version <> 'unassigned';
+-- Historical reviews with unknown policy provenance intentionally remain null and fail closed for creator approval.
 
 create or replace function public.creator_publishing_apply_manual_review_decision(
   p_content_package_id uuid,
@@ -89,13 +83,13 @@ begin
   where content_package_id = p_content_package_id and review_source = 'automated'
   order by created_at desc, id desc
   limit 1;
-  if not found or v_latest_automated.outcome <> 'manual_review' then
+  if not found or v_latest_automated.outcome <> 'manual_review' or v_latest_automated.compliance_policy_version is null or v_latest_automated.compliance_policy_version = 'unassigned' or v_latest_automated.compliance_policy_version <> v_package.compliance_policy_version then
     raise exception 'REVIEW_AUTOMATED_REVIEW_REQUIRED';
   end if;
 
   select * into v_later_block
   from public.creator_publishing_compliance_reviews
-  where content_package_id = p_content_package_id and outcome = 'block' and created_at > v_latest_automated.created_at
+  where content_package_id = p_content_package_id and outcome = 'block' and (created_at > v_latest_automated.created_at or (created_at = v_latest_automated.created_at and id > v_latest_automated.id))
   order by created_at desc, id desc
   limit 1;
   if found then raise exception 'REVIEW_BLOCKED_NOT_ESCALATABLE'; end if;
@@ -194,7 +188,7 @@ begin
 
   select coalesce(jsonb_agg(jsonb_build_object('id', id, 'storage_key', storage_key, 'mime_type', mime_type, 'sha256', sha256, 'source', source, 'ai_generation_metadata', coalesce(ai_generation_metadata, '{}'::jsonb)) order by id), '[]'::jsonb)
   into v_current_media_manifest
-  from (select id, storage_key, mime_type, sha256, source, ai_generation_metadata from public.creator_publishing_media_assets where content_package_id = p_content_package_id order by id for update) locked_media;
+  from (select id, storage_key, mime_type, sha256, source, ai_generation_metadata from public.creator_publishing_media_assets where content_package_id = p_content_package_id order by id) current_media;
   if v_current_media_manifest is distinct from coalesce(p_media_manifest, '[]'::jsonb) then raise exception 'APPROVAL_STALE_PACKAGE'; end if;
 
   if v_package.compliance_status not in ('passed','escalated_approved') or p_expected_compliance_status <> v_package.compliance_status then raise exception 'APPROVAL_INVALID_COMPLIANCE_STATUS'; end if;
