@@ -50,7 +50,9 @@ assert.match(sql, /compliance_reviews is 'Task 1 foundation:[\s\S]*intentionally
 assert.doesNotMatch(sql, /creator_publishing_queue_tasks for insert|creator_publishing_compliance_reviews for insert|creator_publishing_audit_events for insert/, 'queue/review/audit tables do not get broad authenticated insert policies')
 
 const fixture = 'backend/creator-publishing-queue/fixtures/forbidden-egress.fixture.ts'
+const variantsFixture = 'backend/creator-publishing-queue/fixtures/forbidden-egress-variants.fixture.ts'
 assert.deepEqual(findForbiddenNetworkCalls([fixture]), [fixture], 'forbidden-host egress guard catches fixture network call')
+assert.deepEqual(findForbiddenNetworkCalls([variantsFixture]), [variantsFixture], 'forbidden-host egress guard catches adversarial network call variants')
 assert.deepEqual(findForbiddenNetworkCalls(['lib/autopost/fanvueApiClientCore.ts']), [], 'guard does not block approved Fanvue provider code when scoped')
 
 const badSql = `create table if not exists public.creator_publishing_bad (id uuid, access_token text);`

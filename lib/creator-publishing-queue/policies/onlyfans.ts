@@ -18,7 +18,7 @@ export const onlyFansPolicy = deepFreezePolicy({
   source_references: [
     { label: "OnlyFans Terms of Service", url: "https://onlyfans.com/terms" },
     { label: "OnlyFans Acceptable Use Policy", url: "https://onlyfans.com/acceptable-use-policy" },
-    { label: "OnlyFans AI-content help/policy reference", url: "https://onlyfans.com/help" },
+    { label: "OnlyFans Terms of Service AI-generated-content disclosure clause", url: "https://onlyfans.com/terms" },
   ],
   core_rule: "Sirens Forge prepares content and tasks only. A creator or authorized human operator manually publishes inside OnlyFans.",
   disclosure_policy: {
