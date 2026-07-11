@@ -1,0 +1,5 @@
+"use server"
+import { normalizeComplianceSubmissionFormInput } from "@/lib/creator-publishing-queue/compliance/submission/serviceCore"
+import { submitTrustedCreatorPublishingCompliance } from "@/lib/creator-publishing-queue/compliance/submission/service"
+export type ComplianceActionState = { ok?: boolean; code?: string; message?: string; outcome?: string }
+export async function runTrustedComplianceReview(_prev: ComplianceActionState, formData: FormData): Promise<ComplianceActionState> { const normalized=normalizeComplianceSubmissionFormInput(formData.entries()); if(normalized.ok === false) return { ok:false, code:normalized.code, message:"Compliance review request was invalid." }; const result=await submitTrustedCreatorPublishingCompliance(normalized.input); if(result.ok === false) return { ok:false, code:result.code, message:result.message }; const label=result.result.resulting_compliance_status === "passed" ? "passed" : result.result.resulting_compliance_status === "manual_review" ? "manual review required" : "blocked"; return { ok:true, outcome:result.result.resulting_compliance_status, message:`Compliance review ${label}.` } }
