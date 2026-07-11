@@ -102,10 +102,10 @@ create table if not exists public.creator_publishing_platform_jobs (
   constraint creator_publishing_jobs_plan_package_unique unique (publishing_plan_id, content_package_id),
   constraint creator_publishing_jobs_plan_account_unique unique (publishing_plan_id, platform_account_id)
 );
-comment on column public.creator_publishing_platform_jobs.job_state is 'Task 14 only creates draft. Other constrained values are reserved for future Tasks 15-17/Planner aggregation; no Task 14 mutation path transitions into them. Canonical terminal success states are published_direct, confirmed_posted_manual, exported. Canonical terminal failure states are direct_publish_failed, failed_manual_upload, skipped, blocked, platform_rejected.';
+comment on column public.creator_publishing_platform_jobs.job_state is 'Task 14 only creates draft. Other constrained values are reserved for future Tasks 15-17/Planner aggregation; no Task 14 mutation path transitions into them. Canonical terminal success states are published_direct, confirmed_posted_manual, exported. Canonical terminal failure states are direct_publish_failed, failed_manual_upload, skipped, blocked, platform_rejected, archived.';
 comment on column public.creator_publishing_platform_jobs.source_package_fingerprint is 'Server-derived Task 14 source fingerprint over content package ID, package updated_at, destination account, platform, deterministic generated-media manifest, media IDs, storage keys, MIME types, SHA-256 values, trusted generation IDs, and deterministic ordering.';
 
-create unique index if not exists creator_publishing_jobs_active_package_uidx on public.creator_publishing_platform_jobs(content_package_id) where job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected');
+create unique index if not exists creator_publishing_jobs_active_package_uidx on public.creator_publishing_platform_jobs(content_package_id) where job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived');
 create index if not exists creator_publishing_jobs_plan_idx on public.creator_publishing_platform_jobs(publishing_plan_id);
 create index if not exists creator_publishing_jobs_creator_idx on public.creator_publishing_platform_jobs(creator_id);
 
@@ -139,9 +139,20 @@ returns text language sql stable set search_path = public, pg_temp as $$
         'mime_type', m.mime_type,
         'sha256', lower(m.sha256),
         'source', m.source,
-        'generation_id', m.ai_generation_metadata ->> 'generation_id'
+        'generation_id', m.ai_generation_metadata ->> 'generation_id',
+        'generation_owner_id', g.user_id,
+        'generation_status', g.status,
+        'generation_r2_bucket', g.r2_bucket,
+        'generation_r2_key', g.r2_key,
+        'generation_placeholder', jsonb_typeof(g.metadata -> 'placeholder') = 'boolean' and g.metadata -> 'placeholder' = 'true'::jsonb,
+        'generation_is_placeholder', jsonb_typeof(g.metadata -> 'is_placeholder') = 'boolean' and g.metadata -> 'is_placeholder' = 'true'::jsonb,
+        'generation_test', jsonb_typeof(g.metadata -> 'test') = 'boolean' and g.metadata -> 'test' = 'true'::jsonb,
+        'generation_is_test', jsonb_typeof(g.metadata -> 'is_test') = 'boolean' and g.metadata -> 'is_test' = 'true'::jsonb,
+        'generation_unsafe', jsonb_typeof(g.metadata -> 'unsafe') = 'boolean' and g.metadata -> 'unsafe' = 'true'::jsonb,
+        'generation_safety', coalesce(g.metadata ->> 'safety', g.metadata ->> 'safety_classification')
       ) order by m.id)
       from public.creator_publishing_media_assets m
+      left join public.generations g on g.id::text = m.ai_generation_metadata ->> 'generation_id'
       where m.content_package_id = p.id
     ), '[]'::jsonb)
   ))::text, 'sha256'), 'hex')
@@ -161,7 +172,7 @@ returns text language sql stable set search_path = public, pg_temp as $$
   with jobs as (select job_state from public.creator_publishing_platform_jobs where publishing_plan_id = p_plan_id), counts as (
     select count(*) total,
       count(*) filter (where job_state in ('published_direct','confirmed_posted_manual','exported')) successes,
-      count(*) filter (where job_state in ('direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected')) failures,
+      count(*) filter (where job_state in ('direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived')) failures,
       count(*) filter (where job_state in ('scheduled_internally','scheduled_on_platform','retry_scheduled')) scheduled,
       count(*) filter (where job_state in ('publishing_direct','direct_publish_queued','awaiting_operator','due_now','claimed','awaiting_post_confirmation','ready_to_publish')) active
     from jobs)
@@ -203,12 +214,18 @@ begin
   if v_ids is null or array_length(v_ids,1)=0 then raise exception 'NO_CONTENT_PACKAGES_SELECTED'; end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_creator_id::text || ':autopost:' || v_key, 0));
 
-  if (select count(distinct registry_version) from public.creator_publishing_platform_capabilities) <> 1 then raise exception 'CAPABILITY_REGISTRY_INCONSISTENT'; end if;
-  select registry_version into v_registry_version from public.creator_publishing_platform_capabilities limit 1;
+  create temp table if not exists pg_temp.autopost_locked_capabilities as
+  select * from public.creator_publishing_platform_capabilities where false;
+  truncate table pg_temp.autopost_locked_capabilities;
+  -- Lock the canonical capability registry release in deterministic platform order so plan and job routing use one transaction-stable version.
+  insert into pg_temp.autopost_locked_capabilities
+  select * from public.creator_publishing_platform_capabilities order by platform for update;
+  if (select count(distinct registry_version) from pg_temp.autopost_locked_capabilities) <> 1 then raise exception 'CAPABILITY_REGISTRY_INCONSISTENT'; end if;
+  select registry_version into v_registry_version from pg_temp.autopost_locked_capabilities limit 1;
 
   create temp table if not exists pg_temp.autopost_selected_packages as
   select p.id content_package_id,p.creator_id,p.platform_account_id,p.target_platform,p.updated_at source_package_updated_at,public.creator_publishing_autopost_source_fingerprint(p.id) source_package_fingerprint,c.publishing_mode,c.registry_version,c.availability_status,c.display_name platform_label
-  from public.creator_publishing_content_packages p join public.creator_publishing_platform_capabilities c on c.platform=p.target_platform where false;
+  from public.creator_publishing_content_packages p join pg_temp.autopost_locked_capabilities c on c.platform=p.target_platform where false;
   truncate table pg_temp.autopost_selected_packages;
 
   -- Deterministically lock authoritative content packages in package-ID order. Trusted composer/media RPCs also lock the package row, so source versions and media associations cannot change unnoticed while this transaction builds the fingerprint and jobs.
@@ -219,7 +236,7 @@ begin
   select p.id,p.creator_id,p.platform_account_id,p.target_platform,p.updated_at,public.creator_publishing_autopost_source_fingerprint(p.id),c.publishing_mode,c.registry_version,c.availability_status,c.display_name
   from locked_packages p
   join public.creator_platform_accounts a on a.id=p.platform_account_id and a.creator_id=p.creator_id and a.platform=p.target_platform
-  join public.creator_publishing_platform_capabilities c on c.platform=p.target_platform
+  join pg_temp.autopost_locked_capabilities c on c.platform=p.target_platform
   order by p.id;
   get diagnostics v_count = row_count;
   if v_count <> array_length(v_ids,1) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
@@ -230,17 +247,27 @@ begin
 
   if exists(
     select 1
-    from public.creator_publishing_media_assets m
-    join pg_temp.autopost_selected_packages s on s.content_package_id=m.content_package_id
+    from pg_temp.autopost_selected_packages s
+    left join public.creator_publishing_media_assets m on m.content_package_id=s.content_package_id
     left join public.generations g on g.id::text = m.ai_generation_metadata ->> 'generation_id'
     left join public.profiles pr on pr.user_id=s.creator_id and pr.id=g.user_id
     group by s.content_package_id
     having count(m.id)=0
-      or bool_or(m.source <> 'ai_pipeline')
-      or bool_or(coalesce(m.ai_generation_metadata ->> 'generation_id','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
-      or bool_or(g.id is null)
-      or bool_or(not (g.user_id = s.creator_id or pr.id is not null))
-      or bool_or(length(btrim(m.storage_key)) = 0 or length(btrim(m.mime_type)) = 0 or m.sha256 !~* '^[a-f0-9]{64}$')
+      or coalesce(bool_or(m.source <> 'ai_pipeline'), false)
+      or coalesce(bool_or(coalesce(m.ai_generation_metadata ->> 'generation_id','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'), false)
+      or coalesce(bool_or(g.id is null), false)
+      or coalesce(bool_or(g.user_id is null), false)
+      or coalesce(bool_or(not (g.user_id = s.creator_id or pr.id is not null)), false)
+      or coalesce(bool_or(g.status is distinct from 'completed'), false)
+      or coalesce(bool_or(length(btrim(coalesce(g.r2_bucket,''))) = 0), false)
+      or coalesce(bool_or(length(btrim(coalesce(g.r2_key,''))) = 0), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'placeholder') = 'boolean' and g.metadata -> 'placeholder' = 'true'::jsonb), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'is_placeholder') = 'boolean' and g.metadata -> 'is_placeholder' = 'true'::jsonb), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'test') = 'boolean' and g.metadata -> 'test' = 'true'::jsonb), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'is_test') = 'boolean' and g.metadata -> 'is_test' = 'true'::jsonb), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'unsafe') = 'boolean' and g.metadata -> 'unsafe' = 'true'::jsonb), false)
+      or coalesce(bool_or(lower(coalesce(g.metadata ->> 'safety', g.metadata ->> 'safety_classification', '')) = 'unsafe'), false)
+      or coalesce(bool_or(length(btrim(m.storage_key)) = 0 or length(btrim(m.mime_type)) = 0 or m.sha256 !~* '^[a-f0-9]{64}$'), false)
   ) then raise exception 'GENERATED_MEDIA_PROVENANCE_REQUIRED'; end if;
 
   v_canonical := jsonb_build_object(
@@ -264,7 +291,7 @@ begin
   end if;
 
   -- Only genuinely new requests perform active-workflow conflict checks, so exact idempotent retries are not blocked by their own active draft jobs.
-  if exists(select 1 from public.creator_publishing_platform_jobs j join pg_temp.autopost_selected_packages s on s.content_package_id=j.content_package_id where j.job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected')) then raise exception 'ACTIVE_PUBLICATION_JOB_CONFLICT'; end if;
+  if exists(select 1 from public.creator_publishing_platform_jobs j join pg_temp.autopost_selected_packages s on s.content_package_id=j.content_package_id where j.job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived')) then raise exception 'ACTIVE_PUBLICATION_JOB_CONFLICT'; end if;
 
   insert into public.creator_publishing_plans(creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at) values(p_creator_id,'draft',v_key,v_fingerprint,v_registry_version,v_now,v_now) returning * into v_plan;
   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_plan',v_plan.id,p_creator_id,'creator','creator_publishing_plan_created',null,jsonb_build_object('plan_id',v_plan.id,'creator_id',p_creator_id,'status','draft','request_canonical',v_canonical,'request_fingerprint',v_fingerprint,'registry_version',v_registry_version),v_key,v_now) returning id into v_plan_audit_id;
@@ -287,10 +314,9 @@ grant execute on function public.creator_publishing_create_autopost_plan(uuid, u
 alter table public.creator_publishing_platform_capabilities enable row level security;
 alter table public.creator_publishing_plans enable row level security;
 alter table public.creator_publishing_platform_jobs enable row level security;
-drop policy if exists "creator_publishing_capabilities_safe_select" on public.creator_publishing_platform_capabilities;
-create policy "creator_publishing_capabilities_safe_select" on public.creator_publishing_platform_capabilities for select using (auth.role() = 'authenticated');
 create policy "creator_publishing_plans_select_own" on public.creator_publishing_plans for select using (auth.uid() = creator_id);
 create policy "creator_publishing_jobs_select_own" on public.creator_publishing_platform_jobs for select using (auth.uid() = creator_id);
 revoke all on table public.creator_publishing_platform_capabilities from public, anon, authenticated;
-revoke all on table public.creator_publishing_platform_capability_public from public, anon;
-grant select on public.creator_publishing_platform_capability_public to authenticated;
+revoke all on table public.creator_publishing_platform_capability_public from public, anon, authenticated;
+grant select on table public.creator_publishing_platform_capability_public to service_role;
+grant all on table public.creator_publishing_platform_capabilities to service_role;

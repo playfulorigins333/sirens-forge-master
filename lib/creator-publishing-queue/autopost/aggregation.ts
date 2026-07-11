@@ -1,9 +1,9 @@
 import type { JobState, PlanStatus } from "./types"
 export const AUTOPOST_TERMINAL_SUCCESS_STATES = ["published_direct", "confirmed_posted_manual", "exported"] as const satisfies readonly JobState[]
-export const AUTOPOST_TERMINAL_FAILURE_STATES = ["direct_publish_failed", "failed_manual_upload", "skipped", "blocked", "platform_rejected"] as const satisfies readonly JobState[]
+export const AUTOPOST_TERMINAL_FAILURE_STATES = ["direct_publish_failed", "failed_manual_upload", "skipped", "blocked", "platform_rejected", "archived"] as const satisfies readonly JobState[]
 export const AUTOPOST_SCHEDULED_STATES = ["scheduled_internally", "scheduled_on_platform", "retry_scheduled"] as const satisfies readonly JobState[]
 export const AUTOPOST_ACTIVE_STATES = ["ready_to_publish", "direct_publish_queued", "publishing_direct", "awaiting_operator", "due_now", "claimed", "awaiting_post_confirmation"] as const satisfies readonly JobState[]
-export const AUTOPOST_DRAFTISH_STATES = ["draft", "package_ready", "ready_for_export", "authentication_required", "needs_fix", "archived"] as const satisfies readonly JobState[]
+export const AUTOPOST_DRAFTISH_STATES = ["draft", "package_ready", "ready_for_export", "authentication_required", "needs_fix"] as const satisfies readonly JobState[]
 const success = new Set<JobState>(AUTOPOST_TERMINAL_SUCCESS_STATES)
 const failure = new Set<JobState>(AUTOPOST_TERMINAL_FAILURE_STATES)
 const scheduled = new Set<JobState>(AUTOPOST_SCHEDULED_STATES)

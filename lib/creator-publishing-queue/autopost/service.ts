@@ -1,3 +1,4 @@
+import "server-only"
 import { randomUUID } from "node:crypto"
 import { getSupabaseAdmin } from "../../supabaseAdmin"
 import { supabaseServer } from "../../supabaseServer"
