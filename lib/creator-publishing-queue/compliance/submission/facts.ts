@@ -48,7 +48,12 @@ export function parseTrustedFactsRpcResponse(data: unknown, expectedCreatorId: s
   if (!("human_review_lock" in f)) throw new Error("missing human review lock"); const lock = obj(f.human_review_lock)
   const facts = { schema_version: TRUSTED_FACTS_SCHEMA_VERSION, package: pkg, platform_account: account, creator_verification, ai_twin_consent, media_manifest, generation_manifest, co_performer_summary: { record_count: nonNegativeInt(co.record_count), all_platform_release_confirmed: bool(co, "all_platform_release_confirmed") }, active_queue_task: bool(f, "active_queue_task"), human_review_lock: { locked: bool(lock, "locked"), reason: str(lock, "reason", true), latest_review_id: lock.latest_review_id === null ? null : uuid(lock.latest_review_id), latest_review_outcome: str(lock, "latest_review_outcome", true), latest_review_created_at: ts(lock.latest_review_created_at, true), content_fingerprint: str(lock, "content_fingerprint", true) } } satisfies TrustedComplianceFacts
   if (facts.active_queue_task) throw new Error("locked")
-  if (facts.human_review_lock.locked && (!facts.human_review_lock.reason || !["block","manual_review","escalate"].includes(String(facts.human_review_lock.latest_review_outcome)))) throw new Error("invalid human review lock"); if (!facts.human_review_lock.locked && (facts.human_review_lock.reason !== null || facts.human_review_lock.latest_review_id !== null || facts.human_review_lock.latest_review_outcome !== null || facts.human_review_lock.latest_review_created_at !== null)) throw new Error("invalid human review lock"); if (facts.human_review_lock.locked) throw new Error("human review locked")
+  if (!facts.human_review_lock.content_fingerprint || !hashRe.test(facts.human_review_lock.content_fingerprint)) throw new Error("invalid human review lock")
+  if (facts.human_review_lock.locked) {
+    if (facts.human_review_lock.reason !== "COMPLIANCE_HUMAN_REVIEW_LOCKED" || facts.human_review_lock.latest_review_id === null || !["block","manual_review","escalate"].includes(String(facts.human_review_lock.latest_review_outcome)) || facts.human_review_lock.latest_review_created_at === null) throw new Error("invalid human review lock")
+    throw new Error("human review locked")
+  }
+  if (facts.human_review_lock.reason !== null || facts.human_review_lock.latest_review_id !== null || facts.human_review_lock.latest_review_outcome !== null || facts.human_review_lock.latest_review_created_at !== null) throw new Error("invalid human review lock")
   return { facts, facts_fingerprint: r.facts_fingerprint as string, media_manifest_hash: r.media_manifest_hash as string }
 }
 

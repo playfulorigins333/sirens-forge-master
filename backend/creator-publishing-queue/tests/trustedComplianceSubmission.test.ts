@@ -65,7 +65,7 @@ assert.match(migration,/COMPLIANCE_HUMAN_REVIEW_LOCKED/)
 assert.match(migration,/review_source='human'[\s\S]*outcome in \('block','manual_review','escalate'\)/)
 assert.match(migration,/g\.user_id is null/)
 assert.match(migration,/jsonb_typeof\(g\.metadata->'placeholder'\)='boolean'/)
-assert.match(migration,/jsonb_typeof\(h->'rule_id'\) <> 'string'/)
+assert.match(migration,/jsonb_typeof\(h->'rule_id'\) IS DISTINCT FROM 'string'/)
 assert.match(migration,/jsonb_array_elements\(p_reasons\)/)
 assert.match(migration,/p_effective_ai_twin_consent_status/)
 assert.match(migration,/effective_ai_twin_consent_status/)
@@ -84,3 +84,50 @@ assert.doesNotMatch(migration,/r\.created_at >= v_package\.updated_at/)
 assert.match(migration,/p_forced_disclosure_text is null/)
 assert.match(migration,/queue_enabled[\s\S]*boolean/)
 console.log("trusted compliance submission final blocker tests passed")
+
+const lockedFacts = facts({ facts:{ human_review_lock:{ locked:true, reason:"COMPLIANCE_HUMAN_REVIEW_LOCKED", latest_review_id:media, latest_review_outcome:"block", latest_review_created_at:"2026-01-01T00:00:00Z", content_fingerprint:hash } } })
+assert.throws(()=>parseTrustedFactsRpcResponse(lockedFacts, uuid), /human review locked/)
+for (const badLock of [
+  { locked:true, reason:"WRONG", latest_review_id:media, latest_review_outcome:"block", latest_review_created_at:"2026-01-01T00:00:00Z", content_fingerprint:hash },
+  { locked:true, reason:"COMPLIANCE_HUMAN_REVIEW_LOCKED", latest_review_id:null, latest_review_outcome:"block", latest_review_created_at:"2026-01-01T00:00:00Z", content_fingerprint:hash },
+  { locked:true, reason:"COMPLIANCE_HUMAN_REVIEW_LOCKED", latest_review_id:media, latest_review_outcome:"pass", latest_review_created_at:"2026-01-01T00:00:00Z", content_fingerprint:hash },
+  { locked:true, reason:"COMPLIANCE_HUMAN_REVIEW_LOCKED", latest_review_id:media, latest_review_outcome:"block", latest_review_created_at:null, content_fingerprint:hash },
+  { locked:false, reason:null, latest_review_id:null, latest_review_outcome:null, latest_review_created_at:null, content_fingerprint:"bad" },
+  { locked:false, reason:"COMPLIANCE_HUMAN_REVIEW_LOCKED", latest_review_id:null, latest_review_outcome:null, latest_review_created_at:null, content_fingerprint:hash },
+]) assert.throws(()=>parseTrustedFactsRpcResponse(facts({ facts:{ human_review_lock:badLock } }), uuid), /human review lock|human review locked/)
+
+d=deriveTrustedComplianceInput(parseTrustedFactsRpcResponse(facts({ generation:{lora_used:"x"} }),uuid).facts); assert.equal(d.input.ai_twin_consent_status,"granted")
+d=deriveTrustedComplianceInput(parseTrustedFactsRpcResponse(facts({ ai_twin_consent:{attestation_version:"old"}, generation:{lora_used:"x"} }),uuid).facts); assert.equal(d.input.ai_twin_consent_status,"missing")
+d=deriveTrustedComplianceInput(parseTrustedFactsRpcResponse(facts({ ai_twin_consent:{attestation_text_sha256:"b".repeat(64)}, generation:{lora_used:"x"} }),uuid).facts); assert.equal(d.input.ai_twin_consent_status,"missing")
+d=deriveTrustedComplianceInput(parseTrustedFactsRpcResponse(facts({ ai_twin_consent:{revoked_at:"2026-01-01T00:00:01Z"}, generation:{lora_used:"x"} }),uuid).facts); assert.equal(d.input.ai_twin_consent_status,"missing")
+d=deriveTrustedComplianceInput(parseTrustedFactsRpcResponse(facts({ ai_twin_consent:{status:"revoked"}, generation:{lora_used:"x"} }),uuid).facts); assert.equal(d.input.ai_twin_consent_status,"missing")
+d=deriveTrustedComplianceInput(parseTrustedFactsRpcResponse(facts(),uuid).facts); assert.equal(d.input.ai_twin_consent_status,"not_applicable")
+d=deriveTrustedComplianceInput(parseTrustedFactsRpcResponse(facts({package:{target_platform:"fansly"}, platform_account:{platform:"fansly"}, generation:{lora_used:"x"}}),uuid).facts); assert.equal(d.input.ai_twin_consent_status,"not_applicable")
+assert.match(migration,new RegExp(AI_TWIN_CONSENT_VERSION))
+assert.match(migration,new RegExp(getAiTwinConsentTextSha256()))
+assert.match(migration,/attestation_version'='creator-ai-twin-consent-v1'/)
+assert.match(migration,/attestation_text_sha256'='[0-9a-f]{64}'/)
+assert.match(migration,/revoked_at' is null/)
+
+assert.match(migration,/entity_type='creator_publishing_media_asset' and a\.action in \('generated_media_attached','creator_publishing_media_asset_registered'\)/)
+assert.match(migration,/after_state->>'content_package_id'/)
+assert.match(migration,/::uuid = v_package\.id/)
+assert.match(migration,/public\.creator_publishing_media_assets m where m\.id=a\.entity_id and m\.content_package_id=v_package\.id/)
+assert.doesNotMatch(migration,/a\.entity_type='creator_publishing_content_package' and a\.entity_id=v_package\.id and a\.created_at > r\.created_at and \(a\.action in \('generated_media_attached'/)
+assert.match(migration,/creator_publishing_package_updated' and exists[\s\S]*changed_fields/)
+assert.doesNotMatch(migration,/scheduled_for|schedule_timezone|platform_meta/)
+const loaderSource = readFileSync("lib/creator-publishing-queue/ui/loaders.ts","utf8")
+assert.match(loaderSource,/entity_type", "creator_publishing_media_asset"/)
+assert.match(loaderSource,/after_state->>content_package_id/)
+assert.match(loaderSource,/currentMediaIds\.has\(a\.entity_id\)/)
+assert.match(loaderSource,/validPackageUuid\(a\.after_state\?\.content_package_id\)/)
+
+for (const field of ["rule_id","severity","category","message","source","field","evidence","override_allowed"]) {
+  assert.match(migration,new RegExp(`not \\(h \\? '${field}'\\)`), `${field} must be explicitly required`)
+  assert.match(migration,new RegExp(`jsonb_typeof\\(h->'${field}'\\) IS DISTINCT FROM`), `${field} must fail closed on type`)
+}
+for (const field of ["evaluator","policy_mode","queue_enabled"]) assert.match(migration,new RegExp(`not \\(p_evaluator_metadata \\? '${field}'\\)`))
+assert.match(migration,/p_evaluator_metadata->>'evaluator' IS DISTINCT FROM 'creator_publishing_queue_compliance_v1'/)
+assert.match(migration,/p_evaluator_metadata->>'policy_mode' IS DISTINCT FROM 'manual_handoff'/)
+assert.match(migration,/jsonb_typeof\(p_evaluator_metadata->'queue_enabled'\) IS DISTINCT FROM 'boolean'/)
+console.log("trusted compliance submission final media/consent/sql fail-closed tests passed")
