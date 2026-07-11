@@ -174,18 +174,21 @@ returns text language sql stable set search_path = public, pg_temp as $$
       count(*) filter (where job_state in ('published_direct','confirmed_posted_manual','exported')) successes,
       count(*) filter (where job_state in ('direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived')) failures,
       count(*) filter (where job_state in ('scheduled_internally','scheduled_on_platform','retry_scheduled')) scheduled,
-      count(*) filter (where job_state in ('publishing_direct','direct_publish_queued','awaiting_operator','due_now','claimed','awaiting_post_confirmation','ready_to_publish')) active
+      count(*) filter (where job_state in ('publishing_direct','direct_publish_queued','awaiting_operator','due_now','claimed','awaiting_post_confirmation','ready_to_publish')) active,
+      count(*) filter (where job_state in ('draft','package_ready','ready_for_export','authentication_required','needs_fix')) draftish
     from jobs)
   select case
     when p.status = 'cancelled' then 'cancelled'
     when c.total = 0 then 'draft'
     when c.successes = c.total then 'completed'
-    when c.failures = c.total then 'completed_with_failures'
-    when c.successes > 0 and c.failures > 0 and c.successes + c.failures = c.total then 'completed_with_failures'
+    when c.successes + c.failures = c.total and c.failures > 0 then 'completed_with_failures'
     when c.successes > 0 then 'partially_published'
     when c.active > 0 then 'in_progress'
     when c.scheduled = c.total then 'scheduled'
-    else 'draft' end
+    when c.scheduled > 0 then 'in_progress'
+    when c.failures > 0 then 'in_progress'
+    when c.draftish = c.total then 'draft'
+    else 'in_progress' end
   from public.creator_publishing_plans p cross join counts c where p.id = p_plan_id;
 $$;
 
