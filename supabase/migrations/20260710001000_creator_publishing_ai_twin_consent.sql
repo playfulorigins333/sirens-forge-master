@@ -43,8 +43,10 @@ declare
   v_action text;
   v_outcome text;
   v_audit_id bigint;
-  v_request jsonb;
-  v_state text;
+  v_request_payload jsonb;
+  v_request_fingerprint text;
+  v_state_payload jsonb;
+  v_state_fingerprint text;
   v_stored_updated_at timestamptz;
 begin
   if p_creator_id is null then raise exception 'AI_TWIN_CONSENT_INVALID_FORM'; end if;
@@ -54,23 +56,28 @@ begin
   if coalesce(p_attestation_text_sha256,'') !~ '^[0-9a-f]{64}$' then raise exception 'AI_TWIN_CONSENT_INVALID_FORM'; end if;
   if coalesce(p_idempotency_key,'') !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'AI_TWIN_CONSENT_INVALID_FORM'; end if;
 
-  perform pg_advisory_xact_lock(hashtext('ai_twin_consent_key:' || p_creator_id::text || ':' || p_idempotency_key));
-  v_request := jsonb_build_object('creator_id',p_creator_id,'decision',p_decision,'attestation_version',p_attestation_version,'attestation_text_sha256',p_attestation_text_sha256,'expected_updated_at',p_expected_updated_at);
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('ai_twin_consent_key:' || p_creator_id::text || ':' || p_idempotency_key, 0));
+  v_request_payload := jsonb_build_object('creator_id',p_creator_id,'decision',p_decision,'attestation_version',p_attestation_version,'attestation_text_sha256',p_attestation_text_sha256,'expected_updated_at',p_expected_updated_at);
+  v_request_fingerprint := encode(extensions.digest(v_request_payload::text, 'sha256'), 'hex');
   select * into v_existing from public.creator_publishing_audit_events where actor_id=p_creator_id and idempotency_key=p_idempotency_key and action in ('creator_ai_twin_consent_granted','creator_ai_twin_consent_revoked','creator_ai_twin_consent_reattested') limit 1;
   if found then
-    if v_existing.after_state->'request_fingerprint' <> v_request then raise exception 'AI_TWIN_CONSENT_IDEMPOTENCY_CONFLICT'; end if;
-    perform pg_advisory_xact_lock(hashtext('ai_twin_consent_subject:' || p_creator_id::text));
+    if coalesce(v_existing.after_state->>'request_fingerprint','') !~ '^[0-9a-f]{64}$' then raise exception 'AI_TWIN_CONSENT_IDEMPOTENCY_CONFLICT'; end if;
+    if (v_existing.after_state->>'request_fingerprint') is distinct from v_request_fingerprint then raise exception 'AI_TWIN_CONSENT_IDEMPOTENCY_CONFLICT'; end if;
+    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('ai_twin_consent_subject:' || p_creator_id::text, 0));
     select * into v_row from public.creator_publishing_ai_twin_consents where creator_id=p_creator_id for update;
-    v_state := md5(jsonb_build_object('status',v_row.status,'attestation_version',v_row.attestation_version,'attestation_text_sha256',v_row.attestation_text_sha256,'granted_at',v_row.granted_at,'revoked_at',v_row.revoked_at)::text);
+    if not found then raise exception 'AI_TWIN_CONSENT_IDEMPOTENCY_CONFLICT'; end if;
+    if coalesce(v_existing.after_state->>'resulting_state_fingerprint','') !~ '^[0-9a-f]{64}$' then raise exception 'AI_TWIN_CONSENT_IDEMPOTENCY_CONFLICT'; end if;
+    v_state_payload := jsonb_build_object('creator_id',v_row.creator_id,'status',v_row.status,'attestation_version',v_row.attestation_version,'attestation_text_sha256',v_row.attestation_text_sha256,'granted_at',v_row.granted_at,'revoked_at',v_row.revoked_at);
+    v_state_fingerprint := encode(extensions.digest(v_state_payload::text, 'sha256'), 'hex');
     begin
       if nullif(v_existing.after_state->>'resulting_updated_at','') is null then raise exception 'bad'; end if;
       v_stored_updated_at := (v_existing.after_state->>'resulting_updated_at')::timestamptz;
     exception when others then raise exception 'AI_TWIN_CONSENT_IDEMPOTENCY_CONFLICT'; end;
-    if v_state <> v_existing.after_state->>'resulting_state_fingerprint' or v_row.updated_at <> v_stored_updated_at then raise exception 'AI_TWIN_CONSENT_IDEMPOTENCY_CONFLICT'; end if;
+    if v_state_fingerprint is distinct from v_existing.after_state->>'resulting_state_fingerprint' or v_row.updated_at is distinct from v_stored_updated_at then raise exception 'AI_TWIN_CONSENT_IDEMPOTENCY_CONFLICT'; end if;
     return jsonb_build_object('creator_id',p_creator_id,'prior_status',v_existing.after_state->>'prior_status','resulting_status',v_row.status,'attestation_version',v_row.attestation_version,'attestation_text_sha256',v_row.attestation_text_sha256,'granted_at',v_row.granted_at,'revoked_at',v_row.revoked_at,'updated_at',v_row.updated_at,'idempotent',true,'outcome','idempotent','audit_event_ids',jsonb_build_array(v_existing.id::text));
   end if;
 
-  perform pg_advisory_xact_lock(hashtext('ai_twin_consent_subject:' || p_creator_id::text));
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('ai_twin_consent_subject:' || p_creator_id::text, 0));
   select * into v_row from public.creator_publishing_ai_twin_consents where creator_id=p_creator_id for update;
   v_prior := case when found then v_row.status else null end;
   if p_decision='grant' and not exists (select 1 from public.creator_publishing_creator_verifications where creator_id=p_creator_id and status='verified') then raise exception 'AI_TWIN_CONSENT_CREATOR_NOT_VERIFIED'; end if;
@@ -92,8 +99,9 @@ begin
     end if;
   end if;
   select * into v_after from public.creator_publishing_ai_twin_consents where creator_id=p_creator_id;
-  v_state := md5(jsonb_build_object('status',v_after.status,'attestation_version',v_after.attestation_version,'attestation_text_sha256',v_after.attestation_text_sha256,'granted_at',v_after.granted_at,'revoked_at',v_after.revoked_at)::text);
-  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_ai_twin_consent',p_creator_id,p_creator_id,'creator',v_action,jsonb_build_object('prior_status',v_prior),jsonb_build_object('request_fingerprint',v_request,'resulting_state_fingerprint',v_state,'resulting_updated_at',v_after.updated_at,'prior_status',v_prior,'resulting_status',v_after.status,'attestation_version',v_after.attestation_version,'attestation_text_sha256',v_after.attestation_text_sha256,'granted_at',v_after.granted_at,'revoked_at',v_after.revoked_at),p_idempotency_key,v_now) returning id into v_audit_id;
+  v_state_payload := jsonb_build_object('creator_id',v_after.creator_id,'status',v_after.status,'attestation_version',v_after.attestation_version,'attestation_text_sha256',v_after.attestation_text_sha256,'granted_at',v_after.granted_at,'revoked_at',v_after.revoked_at);
+  v_state_fingerprint := encode(extensions.digest(v_state_payload::text, 'sha256'), 'hex');
+  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_ai_twin_consent',p_creator_id,p_creator_id,'creator',v_action,jsonb_build_object('prior_status',v_prior),jsonb_build_object('request_fingerprint',v_request_fingerprint,'resulting_state_fingerprint',v_state_fingerprint,'resulting_updated_at',v_after.updated_at,'prior_status',v_prior,'resulting_status',v_after.status,'attestation_version',v_after.attestation_version,'attestation_text_sha256',v_after.attestation_text_sha256,'granted_at',v_after.granted_at,'revoked_at',v_after.revoked_at),p_idempotency_key,v_now) returning id into v_audit_id;
   return jsonb_build_object('creator_id',p_creator_id,'prior_status',v_prior,'resulting_status',v_after.status,'attestation_version',v_after.attestation_version,'attestation_text_sha256',v_after.attestation_text_sha256,'granted_at',v_after.granted_at,'revoked_at',v_after.revoked_at,'updated_at',v_after.updated_at,'idempotent',false,'outcome',v_outcome,'audit_event_ids',jsonb_build_array(v_audit_id::text));
 end;
 $$;

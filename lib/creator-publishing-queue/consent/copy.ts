@@ -1,5 +1,2 @@
-import { createHash } from "node:crypto"
-
 export const AI_TWIN_CONSENT_VERSION = "creator-ai-twin-consent-v1"
 export const AI_TWIN_CONSENT_TEXT = "I confirm that I am the verified creator whose likeness is represented by this AI twin, and I consent to Sirens Forge preparing AI-generated content featuring my likeness for manual publishing workflows. This consent does not authorize Sirens Forge to post to external platforms, access platform accounts, or store platform credentials."
-export function getAiTwinConsentTextSha256() { return createHash("sha256").update(AI_TWIN_CONSENT_TEXT, "utf8").digest("hex") }
