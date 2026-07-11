@@ -1,0 +1,8 @@
+import { createHash } from "node:crypto"
+import { canonicalCreatorPublishingApprovalJson } from "../approval/snapshot"
+export type OrchestrationMediaFact = { id:string; storage_key:string; mime_type:string; sha256:string; source:string; ai_generation_metadata?:{generation_id?:unknown}|Record<string,unknown>|null }
+export type OrchestrationPackageFact = { id:string; updated_at:string; platform_account_id:string; target_platform:string; media: OrchestrationMediaFact[] }
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+export function buildAutopostSourceFacts(pkg: OrchestrationPackageFact){ return { content_package_id: pkg.id, package_updated_at: pkg.updated_at, platform_account_id: pkg.platform_account_id, target_platform: pkg.target_platform, media_manifest: [...pkg.media].sort((a,b)=>a.id.localeCompare(b.id)).map(m=>({ id:m.id, storage_key:m.storage_key, mime_type:m.mime_type, sha256:String(m.sha256).toLowerCase(), source:m.source, generation_id: typeof m.ai_generation_metadata?.generation_id === "string" ? m.ai_generation_metadata.generation_id.trim() : null })) } }
+export function hashAutopostSourceFacts(pkg: OrchestrationPackageFact){ return createHash("sha256").update(canonicalCreatorPublishingApprovalJson(buildAutopostSourceFacts(pkg))).digest("hex") }
+export function validateAutopostGeneratedMediaFacts(media: readonly OrchestrationMediaFact[]){ if(media.length===0) return false; return media.every(m=>m.source==="ai_pipeline" && typeof m.ai_generation_metadata?.generation_id==="string" && uuid.test(m.ai_generation_metadata.generation_id.trim()) && m.storage_key.trim().length>0 && m.mime_type.trim().length>0 && /^[a-f0-9]{64}$/i.test(m.sha256)) }

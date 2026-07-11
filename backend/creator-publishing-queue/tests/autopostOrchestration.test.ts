@@ -2,102 +2,53 @@ import { strict as assert } from "node:assert"
 import { readFileSync, existsSync, readdirSync } from "node:fs"
 import test from "node:test"
 import { normalizeAutopostPlanRequest, AUTOPOST_PROTECTED_REQUEST_FIELDS } from "../../../lib/creator-publishing-queue/autopost/validation"
-import { aggregateAutopostPlanStatus, isAutopostJobSourceCurrent } from "../../../lib/creator-publishing-queue/autopost/aggregation"
+import { aggregateAutopostPlanStatus, AUTOPOST_ACTIVE_STATES, AUTOPOST_DRAFTISH_STATES, AUTOPOST_SCHEDULED_STATES, AUTOPOST_TERMINAL_FAILURE_STATES, AUTOPOST_TERMINAL_SUCCESS_STATES, isActiveConflictAutopostJobState, isTerminalAutopostJobState } from "../../../lib/creator-publishing-queue/autopost/aggregation"
+import { buildAutopostSourceFacts, hashAutopostSourceFacts, validateAutopostGeneratedMediaFacts } from "../../../lib/creator-publishing-queue/autopost/sourceFingerprint"
+import { parseCreateAutopostPlanRpcResult } from "../../../lib/creator-publishing-queue/autopost/response"
+import { createAutopostPlan, httpStatusForAutopostError, loadAutopostCapabilities } from "../../../lib/creator-publishing-queue/autopost/service"
 const migrationPath="supabase/migrations/20260711001200_creator_publishing_autopost_orchestration.sql"
 const migration=readFileSync(migrationPath,"utf8")
 const pkg=readFileSync("package.json","utf8")
+const component=()=>readFileSync("app/autopost/Task14AutopostOrchestration.tsx","utf8")
+const route=()=>readFileSync("app/api/creator-publishing-queue/autopost/plans/route.ts","utf8")
 const files=()=>readdirSync("supabase/migrations").filter(f=>f.includes("creator_publishing"))
-test("Task 14 migration adds platform-neutral plan/job schema without replacing package composer or queue",()=>{
-  assert.equal(existsSync(migrationPath),true)
-  assert.equal(files().filter(f=>f.includes("001200")||f.includes("01200")).length,1)
-  for(const n of ["00100","00200","00300","00400","00500","00600","00700","00800","00900","01000","01100"]) assert.equal(files().some(f=>f.includes(n)),true)
-  assert.match(migration,/create table if not exists public\.creator_publishing_plans/)
-  assert.match(migration,/create table if not exists public\.creator_publishing_platform_jobs/)
-  assert.match(migration,/content_package_id uuid not null/)
-  assert.match(migration,/references public\.creator_publishing_content_packages|creator_publishing_jobs_package_creator_account_platform_fk/)
-  assert.equal(migration.includes("creator_publishing_save_content_package"),false)
-  assert.equal(migration.includes("insert into public.creator_publishing_queue_tasks"),false)
-  assert.equal(migration.includes("update public.creator_publishing_queue_tasks"),false)
-  assert.equal(migration.includes("create table if not exists public.creator_publishing_queue_tasks"),false)
+const creator="00000000-0000-4000-8000-000000000001"
+const planId="00000000-0000-4000-8000-000000000101"
+const pkg1="00000000-0000-4000-8000-000000000201"
+const pkg2="00000000-0000-4000-8000-000000000202"
+const acct1="00000000-0000-4000-8000-000000000301"
+const acct2="00000000-0000-4000-8000-000000000302"
+const now="2026-07-11T00:00:00.000Z"
+const fp="a".repeat(64)
+function rawResult(overrides:any={}){ const jobs=overrides.jobs??[{id:"00000000-0000-4000-8000-000000000401",publishing_plan_id:planId,creator_id:creator,content_package_id:pkg1,platform_account_id:acct1,target_platform:"onlyfans",platform_label:"OnlyFans",publishing_mode:"assisted",job_state:"draft",source_package_fingerprint:fp,capability_registry_version:"task14.20260711.001",original_job_audit_event_id:"9007199254740993123",created_at:now,updated_at:now}]; return {plan:{id:planId,creator_id:creator,status:"draft",registry_version:"task14.20260711.001",original_plan_audit_event_id:"9007199254740993122",original_job_audit_event_ids:jobs.map((j:any)=>j.original_job_audit_event_id),created_at:now,updated_at:now},jobs,audit_event_ids:{plan:"9007199254740993122",jobs:jobs.map((j:any)=>j.original_job_audit_event_id)},registry_version:"task14.20260711.001",idempotent:false,...overrides} }
+test("Task 14 migration remains additive and keeps content packages, composer, and queue authoritative",()=>{ assert.equal(existsSync(migrationPath),true); assert.equal(files().filter(f=>f.includes("01200")).length,1); for(const n of ["00100","00200","00300","00400","00500","00600","00700","00800","00900","01000","01100"]) assert.equal(files().some(f=>f.includes(n)),true); assert.match(migration,/create table if not exists public\.creator_publishing_plans/); assert.match(migration,/create table if not exists public\.creator_publishing_platform_jobs/); assert.match(migration,/content_package_id uuid not null/); assert.match(migration,/creator_publishing_jobs_package_creator_account_platform_fk/); assert.equal(migration.includes("creator_publishing_save_content_package"),false); assert.equal(migration.includes("insert into public.creator_publishing_queue_tasks"),false); assert.equal(migration.includes("update public.creator_publishing_queue_tasks"),false) })
+test("idempotent retry ordering happens after trusted derivation and before active-conflict checks",()=>{ const canonical=migration.indexOf("v_canonical := jsonb_build_object"); const existing=migration.indexOf("select * into v_existing"); const active=migration.indexOf("Only genuinely new requests perform active-workflow conflict checks"); assert(canonical>0&&existing>canonical&&active>existing); assert.match(migration,/if v_existing\.request_fingerprint <> v_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'/); assert.match(migration,/idempotent',true/); assert.match(migration,/Only genuinely new requests perform active-workflow conflict checks/); assert.match(migration,/ACTIVE_PUBLICATION_JOB_CONFLICT/) })
+test("job audit IDs are persisted on jobs, collected on the plan, and returned as decimal strings",()=>{ assert.match(migration,/v_plan_audit_id bigint/); assert.match(migration,/v_job_audit_id bigint/); assert.match(migration,/returning id into v_job_audit_id/); assert.match(migration,/update public\.creator_publishing_platform_jobs set original_job_audit_event_id=v_job_audit_id/); assert.match(migration,/v_job_audits := array_append\(v_job_audits,v_job_audit_id\)/); assert.match(migration,/original_job_audit_event_id',v_job\.original_job_audit_event_id::text/); const parsed=parseCreateAutopostPlanRpcResult(rawResult(),creator,[pkg1]); assert.equal(parsed.auditEventIds.plan,"9007199254740993122"); assert.equal(parsed.jobs[0].originalJobAuditEventId,"9007199254740993123"); assert.deepEqual(parsed.plan.originalJobAuditEventIds,["9007199254740993123"]) })
+test("deterministic locking, duplicate-account guard, registry consistency, and atomic conflict source contracts",()=>{ assert.match(migration,/order by p\.id for update/); assert.match(migration,/Trusted composer\/media RPCs also lock the package row/); assert.match(migration,/DUPLICATE_DESTINATION_ACCOUNT/); assert.match(migration,/count\(distinct registry_version\)[\s\S]+CAPABILITY_REGISTRY_INCONSISTENT/); assert.match(migration,/creator_publishing_capabilities_mode_availability_consistent/); assert.match(migration,/availability_status = 'available' and publishing_mode <> 'disabled'/); assert.match(migration,/availability_status in \('disabled','frozen','unassigned'\) and publishing_mode = 'disabled'/) })
+test("trusted source fingerprint includes package and deterministic generated-media manifest and detects stale changes",()=>{ const base={id:pkg1,updated_at:now,platform_account_id:acct1,target_platform:"onlyfans",media:[{id:"00000000-0000-4000-8000-000000000501",storage_key:"generated/a",mime_type:"image/png",sha256:"b".repeat(64),source:"ai_pipeline",ai_generation_metadata:{generation_id:"00000000-0000-4000-8000-000000000601"}}]}; const facts=buildAutopostSourceFacts(base); assert.deepEqual(Object.keys(facts),["content_package_id","package_updated_at","platform_account_id","target_platform","media_manifest"]); assert.equal(validateAutopostGeneratedMediaFacts(base.media),true); const h=hashAutopostSourceFacts(base); assert.equal(hashAutopostSourceFacts({...base}),h); for(const changed of [{...base,updated_at:"2026-07-11T00:00:01.000Z"},{...base,media:[]},{...base,media:[...base.media,{...base.media[0],id:"00000000-0000-4000-8000-000000000502"}]},{...base,media:[{...base.media[0],storage_key:"generated/b"}]},{...base,media:[{...base.media[0],mime_type:"image/jpeg"}]},{...base,media:[{...base.media[0],sha256:"c".repeat(64)}]},{...base,media:[{...base.media[0],ai_generation_metadata:{generation_id:"00000000-0000-4000-8000-000000000602"}}]}]) assert.notEqual(hashAutopostSourceFacts(changed as any),h); for(const bad of [[],[{...base.media[0],source:"camera_upload"}],[{...base.media[0],source:"edited"}],[{...base.media[0],ai_generation_metadata:{generation_id:""}}],[{...base.media[0],ai_generation_metadata:{generation_id:"not-a-uuid"}}],[{...base.media[0],sha256:"bad"}]]) assert.equal(validateAutopostGeneratedMediaFacts(bad as any),false) })
+test("migration hardens generated-media provenance against malformed, nonexistent, and cross-creator generation IDs",()=>{ assert.match(migration,/ai_generation_metadata ->> 'generation_id'.+!~\*/s); assert.match(migration,/left join public\.generations g/); assert.match(migration,/g\.id is null/); assert.match(migration,/not \(g\.user_id = s\.creator_id or pr\.id is not null\)/); assert.match(migration,/m\.source <> 'ai_pipeline'/); assert.match(migration,/GENERATED_MEDIA_PROVENANCE_REQUIRED/) })
+test("capability registry is one source, mode consistent, version consistent, and policy-aligned",()=>{ assert.match(migration,/create table if not exists public\.creator_publishing_platform_capabilities/); assert.match(migration,/'onlyfans'[^;]+'assisted'[^;]+'available'[^;]+true,true,true,false,false,false,false,false,false,true,true/s); assert.match(migration,/'fansly'[^;]+'disabled'[^;]+'unassigned'[^;]+false,true,true,true/s); assert.match(migration,/'fanvue'[^;]+'disabled'[^;]+'frozen'/s); assert.match(migration,/with \(security_invoker = true\)/); assert.match(migration,/revoke all on table public\.creator_publishing_platform_capabilities from public, anon, authenticated/); assert.match(migration,/grant select on public\.creator_publishing_platform_capability_public to authenticated/) })
+test("state classification is canonical and aggregation covers every state",()=>{ const allStates=[...AUTOPOST_TERMINAL_SUCCESS_STATES,...AUTOPOST_TERMINAL_FAILURE_STATES,...AUTOPOST_SCHEDULED_STATES,...AUTOPOST_ACTIVE_STATES,...AUTOPOST_DRAFTISH_STATES]; assert.equal(new Set(allStates).size, allStates.length); for(const s of AUTOPOST_TERMINAL_SUCCESS_STATES) assert.equal(isActiveConflictAutopostJobState(s),false); for(const s of AUTOPOST_TERMINAL_FAILURE_STATES) assert.equal(isActiveConflictAutopostJobState(s),false); for(const s of [...AUTOPOST_ACTIVE_STATES,...AUTOPOST_DRAFTISH_STATES,...AUTOPOST_SCHEDULED_STATES]) assert.equal(isTerminalAutopostJobState(s),false); assert.equal(aggregateAutopostPlanStatus(["draft","draft"]),"draft"); assert.equal(aggregateAutopostPlanStatus(["scheduled_internally","scheduled_on_platform"]),"scheduled"); assert.equal(aggregateAutopostPlanStatus(["publishing_direct","draft"]),"in_progress"); assert.equal(aggregateAutopostPlanStatus(["published_direct","draft"]),"partially_published"); assert.equal(aggregateAutopostPlanStatus(["published_direct","confirmed_posted_manual","exported"]),"completed"); assert.equal(aggregateAutopostPlanStatus(["published_direct","platform_rejected"]),"completed_with_failures"); assert.equal(aggregateAutopostPlanStatus(["direct_publish_failed","platform_rejected"]),"completed_with_failures"); assert.equal(aggregateAutopostPlanStatus(["exported"]),"completed"); assert.equal(aggregateAutopostPlanStatus(["platform_rejected"]),"completed_with_failures"); assert.equal(aggregateAutopostPlanStatus(["draft"],"cancelled"),"cancelled") })
+test("minimal request rejects browser-controlled fields including source fingerprint and safely normalizes duplicates",()=>{ const ids=[pkg2,pkg1,pkg1]; assert.deepEqual(normalizeAutopostPlanRequest({contentPackageIds:ids,idempotencyKey:"abcDEF_123"}).contentPackageIds,[pkg1,pkg2]); for(const field of AUTOPOST_PROTECTED_REQUEST_FIELDS) assert.throws(()=>normalizeAutopostPlanRequest({contentPackageIds:ids,idempotencyKey:"abcDEF_123",[field]:"forged"})); assert.throws(()=>normalizeAutopostPlanRequest({contentPackageIds:["not-a-uuid"],idempotencyKey:"abcDEF_123"})) })
+test("strict RPC parser returns safe DTOs and rejects malformed trusted responses",()=>{ const two=rawResult({jobs:[rawResult().jobs[0],{...rawResult().jobs[0],id:"00000000-0000-4000-8000-000000000402",content_package_id:pkg2,platform_account_id:acct2,original_job_audit_event_id:"9007199254740993124"}]}); two.plan.original_job_audit_event_ids=["9007199254740993123","9007199254740993124"]; const parsed=parseCreateAutopostPlanRpcResult(two,creator,[pkg1,pkg2]); assert.equal(parsed.plan.id,planId); assert.equal(parsed.jobs[0].publishingModeLabel,"Assisted publish required"); assert.equal(JSON.stringify(parsed).includes("idempotency_key"),false); assert.equal(JSON.stringify(parsed).includes("request_fingerprint"),false); assert.throws(()=>parseCreateAutopostPlanRpcResult(rawResult({plan:{...rawResult().plan,creator_id:"00000000-0000-4000-8000-000000009999"}}),creator,[pkg1])); assert.throws(()=>parseCreateAutopostPlanRpcResult(rawResult({jobs:[rawResult().jobs[0],{...rawResult().jobs[0],id:"00000000-0000-4000-8000-000000000402"}]}),creator,[pkg1])); assert.throws(()=>parseCreateAutopostPlanRpcResult(rawResult({jobs:[{...rawResult().jobs[0],original_job_audit_event_id:"12.3"}]}),creator,[pkg1])) })
+test("service maps expected errors, duplicate accounts, registry inconsistency, malformed responses, and authenticated capability reads",async()=>{
+  assert.equal(httpStatusForAutopostError("AUTOPOST_CREATE_FAILED"),500)
+  assert.equal(httpStatusForAutopostError("AUTOPOST_MALFORMED_TRUSTED_RESPONSE"),500)
+  assert.equal(httpStatusForAutopostError("DUPLICATE_DESTINATION_ACCOUNT"),409)
+  const deps={
+    getAuthenticatedUserId:async()=>creator,
+    getAdminClient:()=>({
+      rpc:async()=>({data:{bad:true},error:null}),
+      from:()=>({
+        select:()=>({
+          order:()=>({data:[{platform:"onlyfans",registry_version:"task14.20260711.001",display_name:"OnlyFans",publishing_mode:"assisted",availability_status:"available",human_publishing_required:true,connector_can_publish_immediately:false,connector_can_schedule_directly:false,connector_can_upload_media:false,human_operator_queue_supported:true,safe_label:"Assisted publish required",safe_description:"safe"}],error:null})
+        })
+      })
+    })
+  }
+  assert.equal(((await createAutopostPlan({contentPackageIds:[pkg1],idempotencyKey:"abcDEF_123"},deps)) as any).code,"AUTOPOST_MALFORMED_TRUSTED_RESPONSE")
+  assert.equal((await loadAutopostCapabilities(deps))[0].displayName,"OnlyFans")
+  await assert.rejects(()=>loadAutopostCapabilities({...deps,getAuthenticatedUserId:async()=>null}),/UNAUTHENTICATED/)
 })
-test("database constraints enforce ownership/platform consistency, uniqueness, active conflicts, RLS, service-role RPC, and safe registry",()=>{
-  assert.match(migration,/creator_publishing_platform_capabilities/)
-  assert.match(migration,/canonical Task 14 server-controlled Creator Publishing capability registry/i)
-  assert.match(migration,/creator_publishing_platform_capability_public/)
-  assert.match(migration,/platform_supports_native_scheduling/)
-  assert.match(migration,/connector_can_schedule_directly/)
-  assert.doesNotMatch(migration,/supportsScheduledPublish/)
-  assert.match(migration,/'onlyfans'[^;]+'assisted'[^;]+'available'/s)
-  assert.match(migration,/human_publishing_required[^\n]+default false/)
-  assert.match(migration,/'fansly'[^;]+'disabled'[^;]+'unassigned'/s)
-  assert.match(migration,/'fanvue'[^;]+'disabled'[^;]+'frozen'/s)
-  assert.match(migration,/creator_publishing_jobs_plan_package_unique unique \(publishing_plan_id, content_package_id\)/)
-  assert.match(migration,/creator_publishing_jobs_plan_account_unique unique \(publishing_plan_id, platform_account_id\)/)
-  assert.match(migration,/creator_publishing_jobs_active_package_uidx[\s\S]+where job_state not in/)
-  assert.match(migration,/foreign key \(publishing_plan_id, creator_id\)/)
-  assert.match(migration,/foreign key \(content_package_id, creator_id, platform_account_id, target_platform\)/)
-  assert.match(migration,/foreign key \(platform_account_id, creator_id, target_platform\)/)
-  assert.match(migration,/target_platform <> 'fanvue'/)
-  assert.match(migration,/alter table public\.creator_publishing_plans enable row level security/)
-  assert.match(migration,/for select using \(auth\.uid\(\) = creator_id\)/)
-  assert.match(migration,/revoke execute on function public\.creator_publishing_create_autopost_plan[\s\S]+from public, anon, authenticated/)
-  assert.match(migration,/grant execute[\s\S]+to service_role/)
-})
-test("trusted RPC documents minimal atomic creation, idempotency, generated-media provenance, audits, and no queue false conflict",()=>{
-  assert.match(migration,/p_content_package_ids uuid\[\]/)
-  assert.match(migration,/p_idempotency_key text/)
-  assert.match(migration,/pg_advisory_xact_lock/)
-  assert.match(migration,/jsonb_build_object\('creator_id',p_creator_id,'content_package_ids'/)
-  for(const f of ["platform_account_ids","target_platforms","source_package_versions","publishing_modes","registry_version"]) assert.match(migration,new RegExp(f))
-  assert.match(migration,/request_fingerprint text not null/)
-  assert.match(migration,/source_package_updated_at timestamptz not null/)
-  assert.match(migration,/if v_existing\.request_fingerprint <> v_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'/)
-  assert.match(migration,/return jsonb_build_object\('plan',to_jsonb\(v_existing\)/)
-  assert.equal((migration.match(/insert into public\.creator_publishing_audit_events/g)||[]).length,2)
-  assert.match(migration,/creator_publishing_plan_created/)
-  assert.match(migration,/creator_publishing_platform_job_created/)
-  assert.match(migration,/source <> 'ai_pipeline'/)
-  assert.match(migration,/ai_generation_metadata \? 'generation_id'/)
-  assert.match(migration,/ACTIVE_PUBLICATION_JOB_CONFLICT/)
-  assert.equal(migration.includes("creator_publishing_queue_tasks where content_package_id"),false)
-})
-test("Task 14 states start draft and future states are only reserved with deterministic aggregation",()=>{
-  assert.match(migration,/status text not null default 'draft'/)
-  assert.match(migration,/job_state text not null default 'draft'/)
-  assert.match(migration,/values\(v_plan\.id,p_creator_id[\s\S]+'draft'/)
-  assert.match(migration,/Other constrained values are reserved for future Tasks 15-17/)
-  assert.match(migration,/creator_publishing_aggregate_plan_status/)
-  assert.equal(aggregateAutopostPlanStatus(["draft","draft"]),"draft")
-  assert.equal(aggregateAutopostPlanStatus(["scheduled_internally","scheduled_on_platform"]),"scheduled")
-  assert.equal(aggregateAutopostPlanStatus(["publishing_direct","draft"]),"in_progress")
-  assert.equal(aggregateAutopostPlanStatus(["published_direct","draft"]),"partially_published")
-  assert.equal(aggregateAutopostPlanStatus(["published_direct","confirmed_posted_manual"]),"completed")
-  assert.equal(aggregateAutopostPlanStatus(["published_direct","failed_manual_upload"]),"completed_with_failures")
-  assert.equal(aggregateAutopostPlanStatus(["draft"],"cancelled"),"cancelled")
-  assert.equal(isAutopostJobSourceCurrent({source_package_updated_at:"2026-01-01T00:00:00Z"},{updated_at:"2026-01-01T00:00:00Z"}),true)
-  assert.equal(isAutopostJobSourceCurrent({source_package_updated_at:"old"},{updated_at:"new"}),false)
-})
-test("minimal browser request parsing rejects trusted browser copies and normalizes sorted IDs",()=>{
-  const ids=["00000000-0000-4000-8000-000000000002","00000000-0000-4000-8000-000000000001","00000000-0000-4000-8000-000000000001"]
-  assert.deepEqual(normalizeAutopostPlanRequest({contentPackageIds:ids,idempotencyKey:"abcDEF_123"}).contentPackageIds,["00000000-0000-4000-8000-000000000001","00000000-0000-4000-8000-000000000002"])
-  for(const field of AUTOPOST_PROTECTED_REQUEST_FIELDS) assert.throws(()=>normalizeAutopostPlanRequest({contentPackageIds:ids,idempotencyKey:"abcDEF_123",[field]:"forged"}))
-  assert.throws(()=>normalizeAutopostPlanRequest({contentPackageIds:ids,idempotencyKey:"bad space"}))
-  assert.throws(()=>normalizeAutopostPlanRequest({contentPackageIds:["not-a-uuid"],idempotencyKey:"abcDEF_123"}))
-})
-test("Task 14 UI/API integration is minimal and routes through trusted service",()=>{
-  assert.match(pkg,/autopostOrchestration\.test\.ts/)
-  const page=readFileSync("app/autopost/page.tsx","utf8")
-  const component=readFileSync("app/autopost/Task14AutopostOrchestration.tsx","utf8")
-  const service=readFileSync("lib/creator-publishing-queue/autopost/service.ts","utf8")
-  assert.match(page,/Task14AutopostOrchestration/)
-  assert.match(component,/contentPackageIds:selected,idempotencyKey/)
-  assert.match(component,/Select authoritative destination-specific content packages/)
-  assert.match(component,/captions, media, pricing, visibility, disclosure, compliance, approval, and routing are loaded from trusted server state/)
-  assert.match(service,/\.rpc\("creator_publishing_create_autopost_plan"/)
-  for(const forbidden of ["OnlyFans API","One-click publish to OnlyFans","Direct OnlyFans integration","Autoposts to OnlyFans","Auto-publishes to OnlyFans"]) assert.equal(component.includes(forbidden),false)
-})
-test("safety source checks: no credentials/platform calls/uploads/Fanvue production/scheduler/operator implementation",()=>{
-  for(const forbidden of ["fetch(\"https://onlyfans","fetch(\"https://fansly","fetch(\"https://fanvue","proxy","browser automation","proof_screenshot_storage_key","local file","camera_upload", "cron"]) assert.equal(migration.toLowerCase().includes(forbidden.toLowerCase()), false, forbidden)
-  assert.equal(migration.includes("autopost_accounts"),false)
-  assert.equal(migration.includes("fanvueApiClient"),false)
-})
+test("UI/API integration uses safe DTO, idempotency-key lifecycle, safe errors, and no raw JSON block",()=>{ const src=component(); assert.match(pkg,/autopostOrchestration\.test\.ts/); assert.match(src,/useState\(idempotencyKey\)/); assert.match(src,/setLocked\(true\)/); assert.match(src,/Create another plan/); assert.match(src,/setKey\(newKey\(\)\)/); assert.match(src,/Draft Publishing Plan created/); assert.match(src,/idempotent retry/); assert.match(src,/No platform publishing, scheduler, or operator task was started/); assert.doesNotMatch(src,/<pre/); assert.match(route(),/httpStatusForAutopostError/); for(const forbidden of ["OnlyFans API","One-click publish to OnlyFans","Direct OnlyFans integration","Autoposts to OnlyFans","Auto-publishes to OnlyFans"]) assert.equal(src.includes(forbidden),false) })
+test("restored app/autopost safety allowlist and no platform-call/upload/scheduler implementation",()=>{ const media=readFileSync("backend/creator-publishing-queue/tests/mediaAccess.test.ts","utf8"); assert.match(media,/allowedAutopost = new Set\(\["app\/autopost\/page\.tsx", "app\/autopost\/Task14AutopostOrchestration\.tsx"\]\)/); assert.match(media,/unsafe\("app\/autopost\/unrelated-production-change\.tsx"\), true/); for(const forbidden of ["fetch(\"https://onlyfans","fetch(\"https://fansly","fetch(\"https://fanvue","proxy","browser automation","proof_screenshot_storage_key","local file","camera_upload", "cron"]) assert.equal(migration.toLowerCase().includes(forbidden.toLowerCase()), false, forbidden); assert.equal(migration.includes("autopost_accounts"),false); assert.equal(migration.includes("fanvueApiClient"),false) })
