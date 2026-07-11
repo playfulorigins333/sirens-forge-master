@@ -5,7 +5,16 @@ alter table public.creator_platform_accounts
   add column if not exists verification_reviewed_by uuid references auth.users(id),
   add column if not exists verification_reviewed_at timestamptz,
   add column if not exists verification_evidence_reference text,
-  add column if not exists verification_reason text;
+  add column if not exists verification_reason text,
+  add column if not exists verification_legacy_revoked boolean not null default false;
+
+-- Preserve deployed pre-Task-11 revoked rows without fabricating a reviewer identity.
+update public.creator_platform_accounts
+  set verification_legacy_revoked = true
+  where verification_status = 'revoked'
+    and verification_reviewed_by is null
+    and verification_reviewed_at is null
+    and verification_reason is null;
 
 alter table public.creator_platform_accounts drop constraint if exists creator_platform_accounts_verification_status_check;
 alter table public.creator_platform_accounts add constraint creator_platform_accounts_verification_status_check
@@ -13,9 +22,10 @@ alter table public.creator_platform_accounts add constraint creator_platform_acc
 
 alter table public.creator_platform_accounts drop constraint if exists creator_platform_accounts_trusted_metadata_check;
 alter table public.creator_platform_accounts add constraint creator_platform_accounts_trusted_metadata_check check (
-  (verification_status = 'verified' and verification_reviewed_by is not null and verification_reviewed_at is not null and length(btrim(coalesce(verification_evidence_reference,''))) > 0 and length(btrim(coalesce(verification_reason,''))) > 0)
-  or (verification_status = 'revoked' and verification_reviewed_by is not null and verification_reviewed_at is not null and length(btrim(coalesce(verification_reason,''))) > 0)
-  or (verification_status in ('unattested','creator_attested') and verification_reviewed_by is null and verification_reviewed_at is null and verification_evidence_reference is null and verification_reason is null)
+  (verification_status = 'verified' and verification_legacy_revoked is false and verification_reviewed_by is not null and verification_reviewed_at is not null and length(btrim(coalesce(verification_evidence_reference,''))) > 0 and length(btrim(coalesce(verification_reason,''))) > 0)
+  or (verification_status = 'revoked' and verification_legacy_revoked is false and verification_reviewed_by is not null and verification_reviewed_at is not null and length(btrim(coalesce(verification_reason,''))) > 0)
+  or (verification_status = 'revoked' and verification_legacy_revoked is true and verification_reviewed_by is null and verification_reviewed_at is null and verification_evidence_reference is null and verification_reason is null)
+  or (verification_status in ('unattested','creator_attested') and verification_legacy_revoked is false and verification_reviewed_by is null and verification_reviewed_at is null and verification_evidence_reference is null and verification_reason is null)
 );
 
 create table if not exists public.creator_publishing_creator_verifications (
@@ -51,12 +61,15 @@ begin
     old.platform_username is distinct from new.platform_username or old.profile_url is distinct from new.profile_url or old.is_virtual_entity is distinct from new.is_virtual_entity or old.verification_attested_at is distinct from new.verification_attested_at
   ) then
     new.verification_status := case when new.verification_attested_at is not null then 'creator_attested' else 'unattested' end;
-    new.verification_reviewed_by := null; new.verification_reviewed_at := null; new.verification_evidence_reference := null; new.verification_reason := null;
+    new.verification_reviewed_by := null; new.verification_reviewed_at := null; new.verification_evidence_reference := null; new.verification_reason := null; new.verification_legacy_revoked := false;
     insert into public.creator_publishing_audit_events(entity_type, entity_id, actor_id, actor_role, action, before_state, after_state, created_at)
     values ('creator_platform_account', old.id, new.creator_id, 'creator', 'trusted_platform_account_verification_invalidated_by_creator_edit', jsonb_build_object('prior_status', old.verification_status), jsonb_build_object('resulting_status', new.verification_status, 'reason', 'creator account edit invalidated trusted verification'), v_now);
   end if;
   if new.verification_status in ('unattested','creator_attested') then
-    new.verification_reviewed_by := null; new.verification_reviewed_at := null; new.verification_evidence_reference := null; new.verification_reason := null;
+    new.verification_reviewed_by := null; new.verification_reviewed_at := null; new.verification_evidence_reference := null; new.verification_reason := null; new.verification_legacy_revoked := false;
+  end if;
+  if new.verification_status = 'verified' then
+    new.verification_legacy_revoked := false;
   end if;
   return new;
 end; $$;
@@ -79,7 +92,26 @@ create or replace function public.creator_publishing_apply_trusted_verification_
   p_idempotency_key text
 ) returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
-  v_reviewer public.creator_publishing_trusted_reviewers%rowtype; v_subject_type text := lower(btrim(coalesce(p_subject_type,''))); v_decision text := lower(btrim(coalesce(p_decision,''))); v_reason text := btrim(coalesce(p_reason,'')); v_evidence text := nullif(btrim(coalesce(p_evidence_reference,'')), ''); v_key text := btrim(coalesce(p_idempotency_key,'')); v_now timestamptz := now(); v_action text; v_prior text; v_resulting text; v_audit public.creator_publishing_audit_events%rowtype; v_fingerprint text; v_existing public.creator_publishing_audit_events%rowtype; v_creator public.creator_publishing_creator_verifications%rowtype; v_account public.creator_platform_accounts%rowtype; v_audit_id uuid; v_creator_id uuid;
+  v_reviewer public.creator_publishing_trusted_reviewers%rowtype;
+  v_subject_type text := lower(btrim(coalesce(p_subject_type,'')));
+  v_decision text := lower(btrim(coalesce(p_decision,'')));
+  v_reason text := btrim(coalesce(p_reason,''));
+  v_evidence text := nullif(btrim(coalesce(p_evidence_reference,'')), '');
+  v_key text := btrim(coalesce(p_idempotency_key,''));
+  v_now timestamptz := now();
+  v_action text;
+  v_prior text;
+  v_resulting text;
+  v_fingerprint text;
+  v_existing public.creator_publishing_audit_events%rowtype;
+  v_creator public.creator_publishing_creator_verifications%rowtype;
+  v_account public.creator_platform_accounts%rowtype;
+  v_audit_id bigint;
+  v_creator_id uuid;
+  v_resulting_state_fingerprint text;
+  v_current_state_fingerprint text;
+  v_resulting_updated_at timestamptz;
+  v_creator_exists boolean;
 begin
   if p_reviewer_id is null then raise exception 'VERIFICATION_UNAUTHORIZED'; end if;
   select * into v_reviewer from public.creator_publishing_trusted_reviewers where reviewer_id = p_reviewer_id;
@@ -91,21 +123,64 @@ begin
   if length(v_reason)=0 then raise exception 'VERIFICATION_REASON_REQUIRED'; end if;
   if v_decision='verify' and v_evidence is null then raise exception 'VERIFICATION_EVIDENCE_REQUIRED'; end if;
   if v_key !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
-  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_reviewer_id::text || ':' || v_key, 0)); -- serialize same-key requests
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_reviewer_id::text || ':' || v_key, 0)); -- serialize same-reviewer/same-key requests
   v_fingerprint := encode(extensions.digest(jsonb_build_object('reviewer_id',p_reviewer_id,'subject_type',v_subject_type,'subject_id',p_subject_id,'decision',v_decision,'reason',v_reason,'evidence_reference',v_evidence,'expected_updated_at',p_expected_updated_at)::text,'sha256'),'hex');
+
   select * into v_existing from public.creator_publishing_audit_events where actor_id=p_reviewer_id and idempotency_key=v_key and action in ('trusted_creator_verified','trusted_creator_verification_revoked','trusted_creator_marked_unverified','trusted_platform_account_verified','trusted_platform_account_verification_revoked','trusted_platform_account_marked_unverified') limit 1;
   if found then
     if v_existing.after_state->>'request_fingerprint' is distinct from v_fingerprint then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
-    if v_subject_type='creator' then select * into v_creator from public.creator_publishing_creator_verifications where creator_id=p_subject_id for update; if not found or v_creator.status is distinct from v_existing.after_state->>'resulting_status' then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
-    else select * into v_account from public.creator_platform_accounts where id=p_subject_id for update; if not found or v_account.verification_status is distinct from v_existing.after_state->>'resulting_status' then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if; end if;
-    return jsonb_build_object('subject_type',v_subject_type,'subject',jsonb_build_object('id',p_subject_id),'prior_status',v_existing.after_state->>'prior_status','resulting_status',v_existing.after_state->>'resulting_status','idempotent',true,'outcome','idempotent','audit_event_ids',jsonb_build_array(v_existing.id),'reviewed_at',v_existing.created_at);
+    perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('verification-subject:' || v_subject_type || ':' || p_subject_id::text, 0)); -- serialize same subject mutations and exact retries
+    if v_subject_type='creator' then
+      select * into v_creator from public.creator_publishing_creator_verifications where creator_id=p_subject_id for update;
+      if not found then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
+      v_current_state_fingerprint := encode(extensions.digest(jsonb_build_object('subject_type','creator','creator_id',v_creator.creator_id,'resulting_status',v_creator.status,'reviewed_by',v_creator.reviewed_by,'reviewed_at',v_creator.reviewed_at,'reason',v_creator.reason,'evidence_reference',v_creator.evidence_reference,'resulting_updated_at',v_creator.updated_at)::text,'sha256'),'hex');
+      if v_current_state_fingerprint is distinct from v_existing.after_state->>'resulting_state_fingerprint' or v_creator.updated_at::text is distinct from v_existing.after_state->>'resulting_updated_at' then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
+    else
+      select * into v_account from public.creator_platform_accounts where id=p_subject_id for update;
+      if not found then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
+      v_current_state_fingerprint := encode(extensions.digest(jsonb_build_object('subject_type','platform_account','account_id',v_account.id,'creator_id',v_account.creator_id,'platform',v_account.platform,'resulting_status',v_account.verification_status,'verification_reviewed_by',v_account.verification_reviewed_by,'verification_reviewed_at',v_account.verification_reviewed_at,'verification_reason',v_account.verification_reason,'verification_evidence_reference',v_account.verification_evidence_reference,'verification_attested_at',v_account.verification_attested_at,'verification_legacy_revoked',v_account.verification_legacy_revoked,'resulting_updated_at',v_account.updated_at)::text,'sha256'),'hex');
+      if v_current_state_fingerprint is distinct from v_existing.after_state->>'resulting_state_fingerprint' or v_account.updated_at::text is distinct from v_existing.after_state->>'resulting_updated_at' then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
+    end if;
+    return jsonb_build_object('subject_type',v_subject_type,'subject',jsonb_build_object('id',p_subject_id),'prior_status',v_existing.after_state->>'prior_status','resulting_status',v_existing.after_state->>'resulting_status','idempotent',true,'outcome','idempotent','audit_event_ids',jsonb_build_array(v_existing.id::text),'reviewed_at',v_existing.created_at);
   end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('verification-subject:' || v_subject_type || ':' || p_subject_id::text, 0)); -- serialize same subject mutations before first-use creator existence checks
+
   if v_subject_type='creator' then
     if p_reviewer_id = p_subject_id then raise exception 'VERIFICATION_SELF_REVIEW_FORBIDDEN'; end if;
+    select exists(select 1 from auth.users where id = p_subject_id) into v_creator_exists;
+    if v_creator_exists is not true then raise exception 'VERIFICATION_SUBJECT_NOT_FOUND'; end if;
     select * into v_creator from public.creator_publishing_creator_verifications where creator_id=p_subject_id for update;
-    if found then if p_expected_updated_at is null or v_creator.updated_at <> p_expected_updated_at then raise exception 'VERIFICATION_STALE'; end if; v_prior := v_creator.status; else if p_expected_updated_at is not null then raise exception 'VERIFICATION_STALE'; end if; v_prior := 'unverified'; end if;
+    if found then
+      if p_expected_updated_at is null or v_creator.updated_at <> p_expected_updated_at then raise exception 'VERIFICATION_STALE'; end if;
+      v_prior := v_creator.status;
+    else
+      if p_expected_updated_at is not null then raise exception 'VERIFICATION_STALE'; end if;
+      v_prior := 'unverified';
+    end if;
     v_resulting := case v_decision when 'verify' then 'verified' when 'revoke' then 'revoked' else 'unverified' end;
-    insert into public.creator_publishing_creator_verifications(creator_id,status,evidence_reference,reason,reviewed_by,reviewed_at,created_at,updated_at) values(p_subject_id,v_resulting,case when v_resulting='unverified' then null else coalesce(v_evidence, case when v_decision='revoke' then v_creator.evidence_reference else null end) end,v_reason,p_reviewer_id,v_now,v_now,v_now) on conflict (creator_id) do update set status=excluded.status,evidence_reference=excluded.evidence_reference,reason=excluded.reason,reviewed_by=excluded.reviewed_by,reviewed_at=excluded.reviewed_at,updated_at=v_now returning * into v_creator;
+    if v_creator.creator_id is null then
+      begin
+        insert into public.creator_publishing_creator_verifications(creator_id,status,evidence_reference,reason,reviewed_by,reviewed_at,created_at,updated_at)
+        values(p_subject_id,v_resulting,case when v_resulting='unverified' then null else v_evidence end,v_reason,p_reviewer_id,v_now,v_now,v_now)
+        returning * into v_creator;
+      exception when unique_violation then
+        raise exception 'VERIFICATION_STALE';
+      end;
+    else
+      update public.creator_publishing_creator_verifications
+        set status=v_resulting,
+            evidence_reference=case when v_resulting='unverified' then null else coalesce(v_evidence, case when v_decision='revoke' then v_creator.evidence_reference else null end) end,
+            reason=v_reason,
+            reviewed_by=p_reviewer_id,
+            reviewed_at=v_now,
+            updated_at=v_now
+        where creator_id=p_subject_id
+        returning * into v_creator;
+    end if;
+    v_resulting_updated_at := v_creator.updated_at;
+    v_resulting_state_fingerprint := encode(extensions.digest(jsonb_build_object('subject_type','creator','creator_id',v_creator.creator_id,'resulting_status',v_creator.status,'reviewed_by',v_creator.reviewed_by,'reviewed_at',v_creator.reviewed_at,'reason',v_creator.reason,'evidence_reference',v_creator.evidence_reference,'resulting_updated_at',v_creator.updated_at)::text,'sha256'),'hex');
     v_action := case v_decision when 'verify' then 'trusted_creator_verified' when 'revoke' then 'trusted_creator_verification_revoked' else 'trusted_creator_marked_unverified' end; v_creator_id := p_subject_id;
   else
     select * into v_account from public.creator_platform_accounts where id=p_subject_id for update;
@@ -117,11 +192,13 @@ begin
     v_prior := v_account.verification_status;
     if v_decision='verify' and (v_account.verification_status <> 'creator_attested' or v_account.verification_attested_at is null) then raise exception 'VERIFICATION_ATTESTATION_REQUIRED'; end if;
     v_resulting := case v_decision when 'verify' then 'verified' when 'revoke' then 'revoked' else case when v_account.verification_attested_at is not null then 'creator_attested' else 'unattested' end end;
-    update public.creator_platform_accounts set verification_status=v_resulting, verification_reviewed_by=case when v_resulting in ('verified','revoked') then p_reviewer_id else null end, verification_reviewed_at=case when v_resulting in ('verified','revoked') then v_now else null end, verification_evidence_reference=case when v_resulting='verified' then v_evidence else null end, verification_reason=case when v_resulting in ('verified','revoked') then v_reason else null end, updated_at=v_now where id=p_subject_id returning * into v_account;
+    update public.creator_platform_accounts set verification_status=v_resulting, verification_legacy_revoked=false, verification_reviewed_by=case when v_resulting in ('verified','revoked') then p_reviewer_id else null end, verification_reviewed_at=case when v_resulting in ('verified','revoked') then v_now else null end, verification_evidence_reference=case when v_resulting='verified' then v_evidence else null end, verification_reason=case when v_resulting in ('verified','revoked') then v_reason else null end, updated_at=v_now where id=p_subject_id returning * into v_account;
+    v_resulting_updated_at := v_account.updated_at;
+    v_resulting_state_fingerprint := encode(extensions.digest(jsonb_build_object('subject_type','platform_account','account_id',v_account.id,'creator_id',v_account.creator_id,'platform',v_account.platform,'resulting_status',v_account.verification_status,'verification_reviewed_by',v_account.verification_reviewed_by,'verification_reviewed_at',v_account.verification_reviewed_at,'verification_reason',v_account.verification_reason,'verification_evidence_reference',v_account.verification_evidence_reference,'verification_attested_at',v_account.verification_attested_at,'verification_legacy_revoked',v_account.verification_legacy_revoked,'resulting_updated_at',v_account.updated_at)::text,'sha256'),'hex');
     v_action := case v_decision when 'verify' then 'trusted_platform_account_verified' when 'revoke' then 'trusted_platform_account_verification_revoked' else 'trusted_platform_account_marked_unverified' end; v_creator_id := v_account.creator_id;
   end if;
-  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values (case when v_subject_type='creator' then 'creator_publishing_creator_verification' else 'creator_platform_account' end,p_subject_id,p_reviewer_id,v_reviewer.role,v_action,jsonb_build_object('prior_status',v_prior),jsonb_build_object('subject_type',v_subject_type,'subject_id',p_subject_id,'creator_id',v_creator_id,'platform',case when v_subject_type='platform_account' then v_account.platform else null end,'platform_username',case when v_subject_type='platform_account' then v_account.platform_username else null end,'prior_status',v_prior,'resulting_status',v_resulting,'evidence_reference_present',v_evidence is not null,'reason',v_reason,'reviewer_id',p_reviewer_id,'reviewer_role',v_reviewer.role,'request_fingerprint',v_fingerprint,'idempotency_key',v_key,'trusted_timestamp',v_now),v_key,v_now) returning id into v_audit_id;
-  return jsonb_build_object('subject_type',v_subject_type,'subject',jsonb_build_object('id',p_subject_id,'creator_id',v_creator_id),'prior_status',v_prior,'resulting_status',v_resulting,'idempotent',false,'outcome',case v_decision when 'verify' then 'verified' when 'revoke' then 'revoked' else 'marked_unverified' end,'audit_event_ids',jsonb_build_array(v_audit_id),'reviewed_at',v_now);
+  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values (case when v_subject_type='creator' then 'creator_publishing_creator_verification' else 'creator_platform_account' end,p_subject_id,p_reviewer_id,v_reviewer.role,v_action,jsonb_build_object('prior_status',v_prior),jsonb_build_object('subject_type',v_subject_type,'subject_id',p_subject_id,'creator_id',v_creator_id,'platform',case when v_subject_type='platform_account' then v_account.platform else null end,'platform_username',case when v_subject_type='platform_account' then v_account.platform_username else null end,'prior_status',v_prior,'resulting_status',v_resulting,'evidence_reference_present',v_evidence is not null,'reason',v_reason,'reviewer_id',p_reviewer_id,'reviewer_role',v_reviewer.role,'request_fingerprint',v_fingerprint,'resulting_state_fingerprint',v_resulting_state_fingerprint,'resulting_updated_at',v_resulting_updated_at,'idempotency_key',v_key,'trusted_timestamp',v_now),v_key,v_now) returning id into v_audit_id;
+  return jsonb_build_object('subject_type',v_subject_type,'subject',jsonb_build_object('id',p_subject_id,'creator_id',v_creator_id),'prior_status',v_prior,'resulting_status',v_resulting,'idempotent',false,'outcome',case v_decision when 'verify' then 'verified' when 'revoke' then 'revoked' else 'marked_unverified' end,'audit_event_ids',jsonb_build_array(v_audit_id::text),'reviewed_at',v_now);
 end; $$;
 
 revoke execute on function public.creator_publishing_apply_trusted_verification_decision(uuid,text,uuid,text,text,text,timestamptz,text) from public;

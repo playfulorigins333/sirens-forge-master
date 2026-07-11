@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import fs from "node:fs"
 import test from "node:test"
-import { applyTrustedVerificationDecisionWithDeps } from "../../../lib/creator-publishing-queue/verification/serviceCore"
+import { applyTrustedVerificationDecisionWithDeps, parseVerificationRpcResult } from "../../../lib/creator-publishing-queue/verification/serviceCore"
 import { normalizeDecision, normalizeEvidenceReference, normalizeReason, normalizeSubjectType, normalizeTimestamp, normalizeUuid, normalizeVerificationInput } from "../../../lib/creator-publishing-queue/verification/validation"
 const migrationPath = "supabase/migrations/20260710000900_creator_publishing_trusted_verification.sql"
 const migration = fs.readFileSync(migrationPath, "utf8")
@@ -14,7 +14,14 @@ test("migration source implements trusted verification boundaries", () => {
   assert.match(migration, /alter table public\.creator_publishing_creator_verifications enable row level security/)
   assert.match(migration, /create policy "creator_publishing_creator_verifications_select_own"[\s\S]*auth\.uid\(\) = creator_id/)
   assert.doesNotMatch(migration, /create policy [^\n]* on public\.creator_publishing_creator_verifications for (insert|update|delete|all)/i)
+  assert.match(migration, /v_audit_id bigint/)
+  assert.match(migration, /jsonb_build_array\(v_audit_id::text\)/)
+  assert.match(migration, /jsonb_build_array\(v_existing.id::text\)/)
   assert.match(migration, /verification_reviewed_by uuid references auth\.users\(id\)/)
+  assert.match(migration, /verification_legacy_revoked boolean not null default false/)
+  assert.match(migration, /set verification_legacy_revoked = true[\s\S]*where verification_status = 'revoked'/)
+  assert.match(migration, /verification_status = 'revoked' and verification_legacy_revoked is true/)
+  assert.match(migration, /verification_status in \('unattested','creator_attested'\) and verification_legacy_revoked is false/)
   assert.match(migration, /creator_platform_accounts_trusted_metadata_check/)
   assert.match(migration, /creator_publishing_platform_account_clear_trusted_metadata/)
   assert.match(migration, /creator_publishing_trusted_reviewers/)
@@ -29,7 +36,14 @@ test("migration source implements trusted verification boundaries", () => {
   assert.match(migration, /creator_publishing_verification_audit_reviewer_key_uidx[\s\S]*on public\.creator_publishing_audit_events\(actor_id, idempotency_key\)/)
   assert.doesNotMatch(migration.slice(migration.indexOf("creator_publishing_verification_audit_reviewer_key_uidx"), migration.indexOf("create or replace function public.creator_publishing_apply_trusted_verification_decision")), /entity_id/)
   assert.match(migration, /pg_advisory_xact_lock/)
+  assert.match(migration, /verification-subject/)
+  assert.match(migration, /select exists\(select 1 from auth.users where id = p_subject_id\)/)
+  assert.match(migration, /VERIFICATION_SUBJECT_NOT_FOUND/)
+  assert.match(migration, /exception when unique_violation[\s\S]*VERIFICATION_STALE/)
+  assert.doesNotMatch(migration, /on conflict \(creator_id\) do update/i)
   assert.match(migration, /request_fingerprint/)
+  assert.match(migration, /resulting_state_fingerprint/)
+  assert.match(migration, /resulting_updated_at/)
   assert.match(migration, /resulting_status[\s\S]*VERIFICATION_IDEMPOTENCY_CONFLICT/)
   assert.match(migration, /insert into public\.creator_publishing_audit_events/g)
   assert.doesNotMatch(migration, /on conflict[\s\S]*do nothing/i)
@@ -54,10 +68,24 @@ test("validation normalizes safe verification inputs", () => {
   for (const forbidden of ["reviewerId","actorRole","targetStatus","password","token","cookie","session","apiKey"]) assert.throws(()=>normalizeVerificationInput({subjectType:"creator",subjectId:"00000000-0000-4000-8000-000000000000",decision:"revoke",reason:"ok",idempotencyKey:"abcdefgh",[forbidden]:"x"} as any))
 })
 
+test("parser accepts decimal-string audit IDs and rejects unsafe audit IDs", () => {
+  const base = { subject_type: "creator", subject: { id: "creator" }, prior_status: "unverified", resulting_status: "verified", idempotent: false, outcome: "verified", audit_event_ids: ["123"], reviewed_at: "2026-07-10T00:00:00Z" }
+  const parsed = parseVerificationRpcResult(base)
+  assert.ok(parsed)
+  assert.deepEqual(parsed.audit_event_ids, ["123"])
+  const ids: string[] = parsed.audit_event_ids
+  assert.deepEqual(ids, ["123"])
+  assert.equal(parseVerificationRpcResult({ ...base, audit_event_ids: [123] }), null)
+  assert.equal(parseVerificationRpcResult({ ...base, audit_event_ids: [{ id: "123" }] }), null)
+  assert.equal(parseVerificationRpcResult({ ...base, audit_event_ids: [""] }), null)
+  assert.equal(parseVerificationRpcResult({ ...base, audit_event_ids: ["12x"] }), null)
+})
+
+
 test("service derives reviewer server-side and maps safe RPC results", async () => {
-  const calls:any[]=[]; const baseDeps:any={ getAuthenticatedUserId: async()=>"00000000-0000-4000-8000-000000000001", randomUUID:()=>"serverkey1", getAdminClient:()=>({ rpc: async(name:string,args:any)=>{ calls.push({name,args}); return {data:{subject_type:args.p_subject_type,subject:{id:args.p_subject_id},prior_status:"unverified",resulting_status:args.p_decision==="verify"?"verified":args.p_decision==="revoke"?"revoked":"unverified",idempotent:false,outcome:args.p_decision==="verify"?"verified":args.p_decision==="revoke"?"revoked":"marked_unverified",audit_event_ids:["00000000-0000-4000-8000-000000000099"],reviewed_at:"2026-07-10T00:00:00Z"},error:null}}, from:()=>({})}) }
-  assert.equal((await applyTrustedVerificationDecisionWithDeps({subjectType:"creator",subjectId:"00000000-0000-4000-8000-000000000002",decision:"verify",reason:" ok ",evidenceReference:"case",expectedUpdatedAt:null}, baseDeps)).ok, true)
-  assert.equal(calls[0].args.p_reviewer_id, "00000000-0000-4000-8000-000000000001"); assert.equal(JSON.stringify(calls).includes("service_role"), false)
+  const calls:any[]=[]; const baseDeps:any={ getAuthenticatedUserId: async()=>"00000000-0000-4000-8000-000000000001", getAdminClient:()=>({ rpc: async(name:string,args:any)=>{ calls.push({name,args}); return {data:{subject_type:args.p_subject_type,subject:{id:args.p_subject_id},prior_status:"unverified",resulting_status:args.p_decision==="verify"?"verified":args.p_decision==="revoke"?"revoked":"unverified",idempotent:false,outcome:args.p_decision==="verify"?"verified":args.p_decision==="revoke"?"revoked":"marked_unverified",audit_event_ids:["99"],reviewed_at:"2026-07-10T00:00:00Z"},error:null}}, from:()=>({})}) }
+  assert.equal((await applyTrustedVerificationDecisionWithDeps({subjectType:"creator",subjectId:"00000000-0000-4000-8000-000000000002",decision:"verify",reason:" ok ",evidenceReference:"case",expectedUpdatedAt:null,idempotencyKey:"abcdefgh"}, baseDeps)).ok, true)
+  assert.equal(((await applyTrustedVerificationDecisionWithDeps({subjectType:"creator",subjectId:"00000000-0000-4000-8000-000000000002",decision:"verify",reason:" ok ",evidenceReference:"case",expectedUpdatedAt:null,idempotencyKey:"abcdefgh"}, baseDeps)) as any).result.audit_event_ids[0], "99"); assert.equal(calls[0].args.p_reviewer_id, "00000000-0000-4000-8000-000000000001"); assert.equal(JSON.stringify(calls).includes("service_role"), false)
   for (const decision of ["revoke","mark_unverified"] as const) assert.equal((await applyTrustedVerificationDecisionWithDeps({subjectType:"creator",subjectId:"00000000-0000-4000-8000-000000000002",decision,reason:"ok",expectedUpdatedAt:"2026-07-10T00:00:00Z",idempotencyKey:"abcdefgh"}, baseDeps)).ok, true)
   for (const decision of ["verify","revoke","mark_unverified"] as const) assert.equal((await applyTrustedVerificationDecisionWithDeps({subjectType:"platform_account",subjectId:"00000000-0000-4000-8000-000000000003",decision,reason:"ok",evidenceReference:decision==="verify"?"case":null,expectedUpdatedAt:"2026-07-10T00:00:00Z",idempotencyKey:"abcdefgh"}, baseDeps)).ok, true)
   const errorCodes=["VERIFICATION_UNAUTHORIZED","VERIFICATION_REVIEWER_INACTIVE","VERIFICATION_UNAUTHORIZED","VERIFICATION_ATTESTATION_REQUIRED","VERIFICATION_FANVUE_NOT_SUPPORTED","VERIFICATION_SELF_REVIEW_FORBIDDEN","VERIFICATION_SUBJECT_NOT_FOUND","VERIFICATION_STALE","VERIFICATION_IDEMPOTENCY_CONFLICT"]
@@ -70,10 +98,10 @@ test("UI and loaders expose verification workflow without forbidden controls", (
   const page=fs.readFileSync("app/creator/publishing-queue/review/verifications/page.tsx","utf8"); const form=fs.readFileSync("app/creator/publishing-queue/review/verifications/VerificationDecisionForm.tsx","utf8"); const actions=fs.readFileSync("app/creator/publishing-queue/review/verifications/actions.ts","utf8"); const loaders=fs.readFileSync("lib/creator-publishing-queue/verification/loaders.ts","utf8"); const accounts=fs.readFileSync("app/creator/publishing-queue/accounts/page.tsx","utf8"); const detail=fs.readFileSync("app/creator/publishing-queue/[contentPackageId]/page.tsx","utf8"); const uiLoaders=fs.readFileSync("lib/creator-publishing-queue/ui/loaders.ts","utf8")
   assert.match(loaders, /supabase\.auth\.getUser/); assert.match(loaders, /creator_publishing_trusted_reviewers/); assert.doesNotMatch(loaders+page, /auto.?enroll|owner bypass/i)
   assert.match(page, /Creator identity/); assert.match(loaders, /in\("platform", \["onlyfans","fansly"\]\)/); assert.match(page+loaders, /Fanvue is excluded|neq\("target_platform", "fanvue"\)/)
-  assert.match(form, /value="verify"/); assert.match(form, /value="revoke"/); assert.match(form, /value="mark_unverified"/); assert.match(form, /name="reason"[\s\S]*required/); assert.match(form, /Evidence reference \(required for verify\)/); assert.match(actions, /randomUUID\(\)/); assert.match(form, /Self-review is disabled/)
+  assert.match(form, /value="verify"/); assert.match(form, /value="revoke"/); assert.match(form, /value="mark_unverified"/); assert.match(form, /name="reason"[\s\S]*required/); assert.match(form, /Evidence reference \(required for verify\)/); assert.match(page, /import \{ randomUUID \} from "node:crypto"/); assert.match(page, /idempotencyKey=\{randomUUID\(\)\}/); assert.match(form, /idempotencyKey: string/); assert.match(form, /name="idempotencyKey"/); assert.match(actions, /formData.get\("idempotencyKey"\)/); assert.doesNotMatch(actions, /randomUUID\(\)/); assert.doesNotMatch(form, /randomUUID|crypto\./); assert.match(form, /Self-review is disabled/)
   assert.match(accounts, /Unattested/); assert.match(accounts, /Creator attested/); assert.match(accounts, /Trusted verification recorded/); assert.match(accounts, /Revoked/); assert.match(accounts, /Editing this account reference will require verification review again/)
   assert.match(detail, /Creator verification status/); assert.match(detail, /Selected platform-account verification status/); assert.doesNotMatch(detail+page+form, /Submit for compliance|type="file"|capture=|name="password"|name="token"|name="cookie"|name="api.?key"|Connect account|Login|Test connection/i)
-  assert.match(uiLoaders, /\["creator_attested","verified"\]/); assert.doesNotMatch(fs.readFileSync("app/creator/publishing-queue/accounts/PlatformAccountForm.tsx","utf8"), /value="verified"|name="verificationStatus"|targetStatus/)
+  assert.match(uiLoaders, /\["creator_attested","verified"\]/); assert.doesNotMatch(fs.readFileSync("app/creator/publishing-queue/accounts/PlatformAccountForm.tsx","utf8"), /value="verified"|name="verificationStatus"|targetStatus|verification_legacy_revoked/)
 })
 
 console.log("Trusted verification source, validation, service, and UI checks passed")
