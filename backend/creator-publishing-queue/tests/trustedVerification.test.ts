@@ -3,8 +3,47 @@ import fs from "node:fs"
 import test from "node:test"
 import { applyTrustedVerificationDecisionWithDeps, parseVerificationRpcResult } from "../../../lib/creator-publishing-queue/verification/serviceCore"
 import { normalizeDecision, normalizeEvidenceReference, normalizeReason, normalizeSubjectType, normalizeTimestamp, normalizeUuid, normalizeVerificationInput } from "../../../lib/creator-publishing-queue/verification/validation"
+import { buildTrustedVerificationCreatorIds, TRUSTED_VERIFICATION_CREATOR_LIMIT } from "../../../lib/creator-publishing-queue/verification/subjectDiscovery"
 const migrationPath = "supabase/migrations/20260710000900_creator_publishing_trusted_verification.sql"
 const migration = fs.readFileSync(migrationPath, "utf8")
+
+function creatorUuid(n: number) { return `00000000-0000-4000-8000-${n.toString().padStart(12, "0")}` }
+
+test("subject discovery helper unions, validates, deduplicates, sorts, limits, and preserves inputs", () => {
+  const packageOnly = creatorUuid(3), accountOnly = creatorUuid(2), both = creatorUuid(1), repeatedPackage = creatorUuid(5), repeatedAccount = creatorUuid(4)
+  const packageRows = [{ creator_id: packageOnly }, { creator_id: both }, { creator_id: both }, { creator_id: repeatedPackage }, { creator_id: repeatedPackage }, { creator_id: null }, { creator_id: undefined }, { creator_id: "" }, { creator_id: "not-a-uuid" }]
+  const accountRows = [{ creator_id: accountOnly }, { creator_id: both }, { creator_id: repeatedAccount }, { creator_id: repeatedAccount }, { creator_id: "   " }, { creator_id: "00000000-0000-0000-0000-000000000000" }]
+  const packageSnapshot = JSON.stringify(packageRows), accountSnapshot = JSON.stringify(accountRows)
+  const result = buildTrustedVerificationCreatorIds(packageRows, accountRows)
+  assert.deepEqual(result, [both, accountOnly, packageOnly, repeatedAccount, repeatedPackage])
+  assert.equal(result.filter(id => id === both).length, 1)
+  assert.equal(result.filter(id => id === repeatedPackage).length, 1)
+  assert.equal(result.filter(id => id === repeatedAccount).length, 1)
+  assert.equal(JSON.stringify(packageRows), packageSnapshot)
+  assert.equal(JSON.stringify(accountRows), accountSnapshot)
+  assert.deepEqual(buildTrustedVerificationCreatorIds(packageRows, accountRows, 2), [both, accountOnly])
+  assert.throws(() => buildTrustedVerificationCreatorIds(packageRows, accountRows, 0))
+  assert.throws(() => buildTrustedVerificationCreatorIds(packageRows, accountRows, TRUSTED_VERIFICATION_CREATOR_LIMIT + 1))
+  assert.throws(() => buildTrustedVerificationCreatorIds(packageRows, accountRows, 1.5))
+})
+
+test("subject discovery helper prevents high-volume creator crowd-out", () => {
+  const creatorA = creatorUuid(1), creatorB = creatorUuid(2), creatorC = creatorUuid(3)
+  const packageRows = Array.from({ length: 150 }, () => ({ creator_id: creatorA }))
+  packageRows.push({ creator_id: creatorB })
+  const result = buildTrustedVerificationCreatorIds(packageRows, [{ creator_id: creatorC }])
+  assert.deepEqual(result, [creatorA, creatorB, creatorC])
+  assert.equal(result.filter(id => id === creatorA).length, 1)
+})
+
+test("subject discovery helper applies final limit after union and sorting", () => {
+  const packageRows = Array.from({ length: 40 }, (_, i) => ({ creator_id: creatorUuid(80 - i) }))
+  const accountRows = Array.from({ length: 30 }, (_, i) => ({ creator_id: creatorUuid(1 + i) }))
+  const allSorted = Array.from(new Set([...packageRows, ...accountRows].map(r => r.creator_id))).sort((a, b) => a.localeCompare(b))
+  const result = buildTrustedVerificationCreatorIds(packageRows, accountRows)
+  assert.equal(result.length, TRUSTED_VERIFICATION_CREATOR_LIMIT)
+  assert.deepEqual(result, allSorted.slice(0, TRUSTED_VERIFICATION_CREATOR_LIMIT))
+})
 
 test("migration source implements trusted verification boundaries", () => {
   assert.deepEqual(fs.readdirSync("supabase/migrations").filter(f => f.includes("trusted_verification")), ["20260710000900_creator_publishing_trusted_verification.sql"])
@@ -102,8 +141,8 @@ test("service derives reviewer server-side and maps safe RPC results", async () 
 
 test("UI and loaders expose verification workflow without forbidden controls", () => {
   const page=fs.readFileSync("app/creator/publishing-queue/review/verifications/page.tsx","utf8"); const form=fs.readFileSync("app/creator/publishing-queue/review/verifications/VerificationDecisionForm.tsx","utf8"); const actions=fs.readFileSync("app/creator/publishing-queue/review/verifications/actions.ts","utf8"); const loaders=fs.readFileSync("lib/creator-publishing-queue/verification/loaders.ts","utf8"); const accounts=fs.readFileSync("app/creator/publishing-queue/accounts/page.tsx","utf8"); const detail=fs.readFileSync("app/creator/publishing-queue/[contentPackageId]/page.tsx","utf8"); const uiLoaders=fs.readFileSync("lib/creator-publishing-queue/ui/loaders.ts","utf8")
-  assert.match(loaders, /supabase\.auth\.getUser/); assert.match(loaders, /creator_publishing_trusted_reviewers/); assert.match(loaders, /buildTrustedVerificationCreatorIds/); assert.match(loaders, /\.sort\(\(a,b\)=>a\.localeCompare\(b\)\)/); assert.match(loaders, /\.\.\.packageRows\.map/); assert.match(loaders, /\.\.\.accountRows\.map/); assert.doesNotMatch(loaders+page, /auto.?enroll|owner bypass/i)
-  assert.match(page, /Creator identity/); assert.match(loaders, /in\("platform", \["onlyfans","fansly"\]\)/); assert.match(loaders, /neq\("target_platform", "fanvue"\)/); assert.match(page+loaders, /Fanvue is excluded|neq\("target_platform", "fanvue"\)/)
+  assert.match(loaders, /supabase\.auth\.getUser/); assert.match(loaders, /creator_publishing_trusted_reviewers/); assert.match(loaders, /TRUSTED_VERIFICATION_DISCOVERY_PAGE_SIZE/); assert.match(loaders, /TRUSTED_VERIFICATION_DISCOVERY_MAX_PAGES/); assert.match(loaders, /TRUSTED_VERIFICATION_CREATOR_LIMIT/); assert.match(loaders, /TRUSTED_VERIFICATION_ACCOUNT_SUBJECT_LIMIT/); assert.match(loaders, /loadSupportedPackageCreatorRows/); assert.match(loaders, /loadSupportedAccountCreatorRows/); assert.match(loaders, /\.range\(/); assert.match(loaders, /buildTrustedVerificationCreatorIds/); assert.match(loaders, /accountSubjectDisplayQuery/); assert.match(loaders, /limit\(TRUSTED_VERIFICATION_ACCOUNT_SUBJECT_LIMIT\)/); assert.match(loaders, /Verification subject discovery exceeded its safe pagination boundary/); assert.doesNotMatch(loaders+page, /auto.?enroll|owner bypass/i)
+  assert.match(page, /Creator identity/); assert.match(loaders, /\.in\("target_platform", \["onlyfans", "fansly"\]\)/); assert.match(loaders, /\.in\("platform", \["onlyfans", "fansly"\]\)/); assert.match(loaders, /order\("creator_id", \{ ascending: true \}\)\.order\("id", \{ ascending: true \}\)/); assert.doesNotMatch(loaders, /neq\("target_platform", "fanvue"\)/); assert.doesNotMatch(loaders, /auth\.users/); assert.doesNotMatch(loaders, /\.limit\(100\)/); assert.doesNotMatch(loaders, /updated_at", \{ ascending: false \}/); assert.doesNotMatch(loaders, /accountsRes\.data[\s\S]*buildTrustedVerificationCreatorIds/); assert.match(page+loaders, /Fanvue is excluded|\.in\("target_platform", \["onlyfans", "fansly"\]\)/)
   assert.match(form, /value="verify"/); assert.match(form, /value="revoke"/); assert.match(form, /value="mark_unverified"/); assert.match(form, /name="reason"[\s\S]*required/); assert.match(form, /Evidence reference \(required for verify\)/); assert.match(page, /import \{ randomUUID \} from "node:crypto"/); assert.match(page, /idempotencyKey=\{randomUUID\(\)\}/); assert.match(form, /idempotencyKey: string/); assert.match(form, /name="idempotencyKey"/); assert.match(actions, /formData.get\("idempotencyKey"\)/); assert.doesNotMatch(actions, /randomUUID\(\)/); assert.doesNotMatch(form, /randomUUID|crypto\./); assert.match(form, /Self-review is disabled/)
   assert.match(accounts, /Unattested/); assert.match(accounts, /Creator attested/); assert.match(accounts, /Trusted verification recorded/); assert.match(accounts, /Revoked/); assert.match(fs.readFileSync("app/creator/publishing-queue/accounts/PlatformAccountForm.tsx","utf8"), /defaultChecked=\{Boolean\(account\?\.verificationAttestedAt\)\}/); assert.doesNotMatch(fs.readFileSync("app/creator/publishing-queue/accounts/PlatformAccountForm.tsx","utf8"), /defaultChecked=\{account\?\.verificationStatus === "creator_attested"\}/); assert.match(accounts, /Editing this account reference will require verification review again/)
   assert.match(detail, /Creator verification status/); assert.match(detail, /Selected platform-account verification status/); assert.doesNotMatch(detail+page+form, /Submit for compliance|type="file"|capture=|name="password"|name="token"|name="cookie"|name="api.?key"|Connect account|Login|Test connection/i)
