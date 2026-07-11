@@ -1,5 +1,5 @@
 export type CreatorPlatform = "onlyfans" | "fansly"
-export type VerificationStatus = "unattested" | "creator_attested" | "revoked"
+export type VerificationStatus = "unattested" | "creator_attested" | "verified" | "revoked"
 export type AccountErrorCode = "UNAUTHENTICATED" | "INVALID_FORM" | "UNSUPPORTED_PLATFORM" | "FANVUE_NOT_AVAILABLE" | "INVALID_USERNAME" | "INVALID_PROFILE_URL" | "ACCOUNT_NOT_FOUND" | "ACCOUNT_REVOKED" | "ACCOUNT_CONFLICT" | "IDEMPOTENCY_CONFLICT" | "SAVE_FAILED"
 export type CreatePlatformAccountInput = { operation: "create"; platform: string; platformUsername: string; profileUrl?: string | null; isVirtualEntity?: boolean; creatorAttested?: boolean; idempotencyKey?: string | null; accountId?: unknown; creatorId?: unknown; password?: unknown; token?: unknown; cookie?: unknown; apiKey?: unknown; session?: unknown }
 export type UpdatePlatformAccountInput = { operation: "update"; accountId: string; platform: string; platformUsername: string; profileUrl?: string | null; isVirtualEntity?: boolean; creatorAttested?: boolean; idempotencyKey?: string | null; creatorId?: unknown; password?: unknown; token?: unknown; cookie?: unknown; apiKey?: unknown; session?: unknown }

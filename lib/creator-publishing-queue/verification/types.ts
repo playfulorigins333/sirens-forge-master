@@ -1,0 +1,11 @@
+export type VerificationSubjectType = "creator" | "platform_account"
+export type VerificationDecision = "verify" | "revoke" | "mark_unverified"
+export type CreatorVerificationStatus = "unverified" | "verified" | "revoked"
+export type PlatformVerificationStatus = "unattested" | "creator_attested" | "verified" | "revoked"
+export type VerificationErrorCode = "UNAUTHENTICATED" | "VERIFICATION_UNAUTHORIZED" | "VERIFICATION_REVIEWER_INACTIVE" | "VERIFICATION_SELF_REVIEW_FORBIDDEN" | "VERIFICATION_INVALID_SUBJECT" | "VERIFICATION_INVALID_DECISION" | "VERIFICATION_REASON_REQUIRED" | "VERIFICATION_EVIDENCE_REQUIRED" | "VERIFICATION_SUBJECT_NOT_FOUND" | "VERIFICATION_ATTESTATION_REQUIRED" | "VERIFICATION_FANVUE_NOT_SUPPORTED" | "VERIFICATION_STALE" | "VERIFICATION_IDEMPOTENCY_CONFLICT" | "VERIFICATION_SAVE_FAILED"
+export type VerificationInput = { subjectType: string; subjectId: string; decision: string; reason: string; evidenceReference?: string | null; expectedUpdatedAt?: string | null; idempotencyKey?: string | null; reviewerId?: unknown; actorRole?: unknown; targetStatus?: unknown; password?: unknown; token?: unknown; cookie?: unknown; session?: unknown; apiKey?: unknown }
+export type NormalizedVerificationInput = { subjectType: VerificationSubjectType; subjectId: string; decision: VerificationDecision; reason: string; evidenceReference: string | null; expectedUpdatedAt: string | null; idempotencyKey: string }
+export type VerificationRpcResult = { subject_type: VerificationSubjectType; subject: Record<string, unknown>; prior_status: string; resulting_status: string; idempotent: boolean; outcome: "verified" | "revoked" | "marked_unverified" | "idempotent"; audit_event_ids: string[]; reviewed_at: string }
+export type VerificationServiceResult = { ok: true; result: VerificationRpcResult } | { ok: false; code: VerificationErrorCode; message: string }
+export type TrustedReviewer = { reviewer_id: string; role: "admin" | "reviewer" | "service_reviewer" | "operator"; active: boolean; revoked_at: string | null }
+export type VerificationDeps = { getAuthenticatedUserId: () => Promise<string | null>; getAdminClient: () => { rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: any }>; from: (table: string) => any } }

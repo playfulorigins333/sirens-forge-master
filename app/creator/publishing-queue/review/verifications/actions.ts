@@ -1,0 +1,5 @@
+"use server"
+import { revalidatePath } from "next/cache"
+import { applyTrustedVerificationDecision } from "@/lib/creator-publishing-queue/verification/service"
+export type VerificationActionState = { ok: boolean; message: string }
+export async function applyVerificationDecisionAction(_prev: VerificationActionState, formData: FormData): Promise<VerificationActionState> { const result = await applyTrustedVerificationDecision({ subjectType: String(formData.get("subjectType") ?? ""), subjectId: String(formData.get("subjectId") ?? ""), decision: String(formData.get("decision") ?? ""), reason: String(formData.get("reason") ?? ""), evidenceReference: String(formData.get("evidenceReference") ?? ""), expectedUpdatedAt: String(formData.get("expectedUpdatedAt") ?? "") || null, idempotencyKey: String(formData.get("idempotencyKey") ?? "") }); if (!result.ok) return { ok: false, message: (result as { ok: false; code: string }).code }; revalidatePath("/creator/publishing-queue/review/verifications"); return { ok: true, message: `Verification decision recorded: ${result.result.outcome}` } }
