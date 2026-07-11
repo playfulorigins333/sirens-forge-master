@@ -142,14 +142,14 @@ returns text language sql stable set search_path = public, pg_temp as $$
         'generation_id', m.ai_generation_metadata ->> 'generation_id',
         'generation_owner_id', g.user_id,
         'generation_status', g.status,
-        'generation_r2_bucket', g.r2_bucket,
-        'generation_r2_key', g.r2_key,
-        'generation_placeholder', jsonb_typeof(g.metadata -> 'placeholder') = 'boolean' and g.metadata -> 'placeholder' = 'true'::jsonb,
-        'generation_is_placeholder', jsonb_typeof(g.metadata -> 'is_placeholder') = 'boolean' and g.metadata -> 'is_placeholder' = 'true'::jsonb,
-        'generation_test', jsonb_typeof(g.metadata -> 'test') = 'boolean' and g.metadata -> 'test' = 'true'::jsonb,
-        'generation_is_test', jsonb_typeof(g.metadata -> 'is_test') = 'boolean' and g.metadata -> 'is_test' = 'true'::jsonb,
-        'generation_unsafe', jsonb_typeof(g.metadata -> 'unsafe') = 'boolean' and g.metadata -> 'unsafe' = 'true'::jsonb,
-        'generation_safety', coalesce(g.metadata ->> 'safety', g.metadata ->> 'safety_classification')
+        'generation_r2_bucket', nullif(btrim(g.r2_bucket),''),
+        'generation_r2_key', nullif(btrim(g.r2_key),''),
+        'generation_placeholder', coalesce(jsonb_typeof(g.metadata -> 'placeholder') = 'boolean' and g.metadata -> 'placeholder' = 'true'::jsonb, false),
+        'generation_is_placeholder', coalesce(jsonb_typeof(g.metadata -> 'is_placeholder') = 'boolean' and g.metadata -> 'is_placeholder' = 'true'::jsonb, false),
+        'generation_test', coalesce(jsonb_typeof(g.metadata -> 'test') = 'boolean' and g.metadata -> 'test' = 'true'::jsonb, false),
+        'generation_is_test', coalesce(jsonb_typeof(g.metadata -> 'is_test') = 'boolean' and g.metadata -> 'is_test' = 'true'::jsonb, false),
+        'generation_unsafe', coalesce(jsonb_typeof(g.metadata -> 'unsafe') = 'boolean' and g.metadata -> 'unsafe' = 'true'::jsonb, false),
+        'generation_safety', nullif(lower(btrim(coalesce(g.metadata ->> 'safety', g.metadata ->> 'safety_classification'))),'')
       ) order by m.id)
       from public.creator_publishing_media_assets m
       left join public.generations g on g.id::text = m.ai_generation_metadata ->> 'generation_id'
@@ -214,26 +214,32 @@ begin
   if v_ids is null or array_length(v_ids,1)=0 then raise exception 'NO_CONTENT_PACKAGES_SELECTED'; end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_creator_id::text || ':autopost:' || v_key, 0));
 
-  create temp table if not exists pg_temp.autopost_locked_capabilities as
-  select * from public.creator_publishing_platform_capabilities where false;
-  truncate table pg_temp.autopost_locked_capabilities;
+  create temp table pg_temp.autopost_locked_capabilities (like public.creator_publishing_platform_capabilities including defaults) on commit drop;
   -- Lock the canonical capability registry release in deterministic platform order so plan and job routing use one transaction-stable version.
   insert into pg_temp.autopost_locked_capabilities
   select * from public.creator_publishing_platform_capabilities order by platform for update;
   if (select count(distinct registry_version) from pg_temp.autopost_locked_capabilities) <> 1 then raise exception 'CAPABILITY_REGISTRY_INCONSISTENT'; end if;
   select registry_version into v_registry_version from pg_temp.autopost_locked_capabilities limit 1;
 
-  create temp table if not exists pg_temp.autopost_selected_packages as
-  select p.id content_package_id,p.creator_id,p.platform_account_id,p.target_platform,p.updated_at source_package_updated_at,public.creator_publishing_autopost_source_fingerprint(p.id) source_package_fingerprint,c.publishing_mode,c.registry_version,c.availability_status,c.display_name platform_label
-  from public.creator_publishing_content_packages p join pg_temp.autopost_locked_capabilities c on c.platform=p.target_platform where false;
-  truncate table pg_temp.autopost_selected_packages;
+  create temp table pg_temp.autopost_selected_packages (
+    content_package_id uuid not null,
+    creator_id uuid not null,
+    platform_account_id uuid not null,
+    target_platform text not null,
+    source_package_updated_at timestamptz not null,
+    source_package_fingerprint text,
+    publishing_mode text not null,
+    registry_version text not null,
+    availability_status text not null,
+    platform_label text not null
+  ) on commit drop;
 
-  -- Deterministically lock authoritative content packages in package-ID order. Trusted composer/media RPCs also lock the package row, so source versions and media associations cannot change unnoticed while this transaction builds the fingerprint and jobs.
-  insert into pg_temp.autopost_selected_packages
+  -- Deterministically lock authoritative content packages in package-ID order. Trusted composer/media RPCs also lock the package row, so new media association writes are blocked while this transaction captures source facts.
+  insert into pg_temp.autopost_selected_packages(content_package_id,creator_id,platform_account_id,target_platform,source_package_updated_at,source_package_fingerprint,publishing_mode,registry_version,availability_status,platform_label)
   with locked_packages as (
     select p.* from public.creator_publishing_content_packages p where p.id = any(v_ids) order by p.id for update
   )
-  select p.id,p.creator_id,p.platform_account_id,p.target_platform,p.updated_at,public.creator_publishing_autopost_source_fingerprint(p.id),c.publishing_mode,c.registry_version,c.availability_status,c.display_name
+  select p.id,p.creator_id,p.platform_account_id,p.target_platform,p.updated_at,null,c.publishing_mode,c.registry_version,c.availability_status,c.display_name
   from locked_packages p
   join public.creator_platform_accounts a on a.id=p.platform_account_id and a.creator_id=p.creator_id and a.platform=p.target_platform
   join pg_temp.autopost_locked_capabilities c on c.platform=p.target_platform
@@ -241,34 +247,25 @@ begin
   get diagnostics v_count = row_count;
   if v_count <> array_length(v_ids,1) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
   if exists(select 1 from pg_temp.autopost_selected_packages where creator_id <> p_creator_id) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
-  if exists(select 1 from pg_temp.autopost_selected_packages where target_platform='fanvue') then raise exception 'FANVUE_NOT_AVAILABLE'; end if;
-  if exists(select 1 from pg_temp.autopost_selected_packages where publishing_mode='disabled' or availability_status <> 'available') then raise exception 'PLATFORM_UNAVAILABLE'; end if;
-  if exists(select 1 from pg_temp.autopost_selected_packages group by platform_account_id having count(*) > 1) then raise exception 'DUPLICATE_DESTINATION_ACCOUNT'; end if;
 
-  if exists(
-    select 1
-    from pg_temp.autopost_selected_packages s
-    left join public.creator_publishing_media_assets m on m.content_package_id=s.content_package_id
-    left join public.generations g on g.id::text = m.ai_generation_metadata ->> 'generation_id'
-    left join public.profiles pr on pr.user_id=s.creator_id and pr.id=g.user_id
-    group by s.content_package_id
-    having count(m.id)=0
-      or coalesce(bool_or(m.source <> 'ai_pipeline'), false)
-      or coalesce(bool_or(coalesce(m.ai_generation_metadata ->> 'generation_id','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'), false)
-      or coalesce(bool_or(g.id is null), false)
-      or coalesce(bool_or(g.user_id is null), false)
-      or coalesce(bool_or(not (g.user_id = s.creator_id or pr.id is not null)), false)
-      or coalesce(bool_or(g.status is distinct from 'completed'), false)
-      or coalesce(bool_or(length(btrim(coalesce(g.r2_bucket,''))) = 0), false)
-      or coalesce(bool_or(length(btrim(coalesce(g.r2_key,''))) = 0), false)
-      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'placeholder') = 'boolean' and g.metadata -> 'placeholder' = 'true'::jsonb), false)
-      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'is_placeholder') = 'boolean' and g.metadata -> 'is_placeholder' = 'true'::jsonb), false)
-      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'test') = 'boolean' and g.metadata -> 'test' = 'true'::jsonb), false)
-      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'is_test') = 'boolean' and g.metadata -> 'is_test' = 'true'::jsonb), false)
-      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'unsafe') = 'boolean' and g.metadata -> 'unsafe' = 'true'::jsonb), false)
-      or coalesce(bool_or(lower(coalesce(g.metadata ->> 'safety', g.metadata ->> 'safety_classification', '')) = 'unsafe'), false)
-      or coalesce(bool_or(length(btrim(m.storage_key)) = 0 or length(btrim(m.mime_type)) = 0 or m.sha256 !~* '^[a-f0-9]{64}$'), false)
-  ) then raise exception 'GENERATED_MEDIA_PROVENANCE_REQUIRED'; end if;
+  create temp table pg_temp.autopost_locked_media on commit drop as
+  select m.*, (m.ai_generation_metadata ->> 'generation_id') generation_id_text
+  from public.creator_publishing_media_assets m
+  join pg_temp.autopost_selected_packages s on s.content_package_id=m.content_package_id
+  order by m.id for update;
+
+  create temp table pg_temp.autopost_locked_generations on commit drop as
+  select g.*
+  from public.generations g
+  join (
+    select distinct generation_id_text::uuid generation_id
+    from pg_temp.autopost_locked_media
+    where coalesce(generation_id_text,'') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+  ) ids on ids.generation_id=g.id
+  order by g.id for update;
+
+  -- Compute source fingerprints only after package, media, and linked generation rows are locked.
+  update pg_temp.autopost_selected_packages s set source_package_fingerprint=public.creator_publishing_autopost_source_fingerprint(s.content_package_id);
 
   v_canonical := jsonb_build_object(
     'creator_id',p_creator_id,
@@ -278,6 +275,7 @@ begin
     'source_package_versions',(select jsonb_agg(source_package_updated_at order by content_package_id) from pg_temp.autopost_selected_packages),
     'source_package_fingerprints',(select jsonb_agg(source_package_fingerprint order by content_package_id) from pg_temp.autopost_selected_packages),
     'publishing_modes',(select jsonb_agg(publishing_mode order by content_package_id) from pg_temp.autopost_selected_packages),
+    'availability_statuses',(select jsonb_agg(availability_status order by content_package_id) from pg_temp.autopost_selected_packages),
     'registry_versions',(select jsonb_agg(registry_version order by content_package_id) from pg_temp.autopost_selected_packages),
     'registry_version',v_registry_version
   );
@@ -290,7 +288,38 @@ begin
     return jsonb_build_object('plan',to_jsonb(v_existing) || jsonb_build_object('original_plan_audit_event_id',v_existing.original_plan_audit_event_id::text,'original_job_audit_event_ids',(select jsonb_agg(x::text order by ord) from unnest(v_existing.original_job_audit_event_ids) with ordinality as t(x,ord))), 'jobs',v_jobs, 'audit_event_ids',jsonb_build_object('plan',v_existing.original_plan_audit_event_id::text,'jobs',(select jsonb_agg(x::text order by ord) from unnest(v_existing.original_job_audit_event_ids) with ordinality as t(x,ord))), 'registry_version',v_existing.registry_version,'idempotent',true);
   end if;
 
-  -- Only genuinely new requests perform active-workflow conflict checks, so exact idempotent retries are not blocked by their own active draft jobs.
+  -- Only genuinely new requests perform business-validation and active-workflow conflict checks, so changed retries return IDEMPOTENCY_CONFLICT first.
+  if exists(select 1 from pg_temp.autopost_selected_packages where target_platform='fanvue') then raise exception 'FANVUE_NOT_AVAILABLE'; end if;
+  if exists(select 1 from pg_temp.autopost_selected_packages where publishing_mode='disabled' or availability_status <> 'available') then raise exception 'PLATFORM_UNAVAILABLE'; end if;
+  if exists(select 1 from pg_temp.autopost_selected_packages group by platform_account_id having count(*) > 1) then raise exception 'DUPLICATE_DESTINATION_ACCOUNT'; end if;
+
+  if exists(
+    select 1
+    from pg_temp.autopost_selected_packages s
+    left join pg_temp.autopost_locked_media m on m.content_package_id=s.content_package_id
+    left join pg_temp.autopost_locked_generations g on g.id::text = m.generation_id_text
+    left join public.profiles pr on pr.user_id=s.creator_id and pr.id=g.user_id
+    group by s.content_package_id
+    having count(m.id)=0
+      or coalesce(bool_or(m.source <> 'ai_pipeline'), false)
+      or coalesce(bool_or(coalesce(m.generation_id_text,'') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'), false)
+      or coalesce(bool_or(g.id is null), false)
+      or coalesce(bool_or(g.user_id is null), false)
+      or coalesce(bool_or(not (g.user_id = s.creator_id or pr.id is not null)), false)
+      or coalesce(bool_or(g.status is distinct from 'completed'), false)
+      or coalesce(bool_or(length(btrim(coalesce(g.r2_bucket,''))) = 0), false)
+      or coalesce(bool_or(length(btrim(coalesce(g.r2_key,''))) = 0), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'placeholder') = 'boolean' and g.metadata -> 'placeholder' = 'true'::jsonb), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'is_placeholder') = 'boolean' and g.metadata -> 'is_placeholder' = 'true'::jsonb), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'test') = 'boolean' and g.metadata -> 'test' = 'true'::jsonb), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'is_test') = 'boolean' and g.metadata -> 'is_test' = 'true'::jsonb), false)
+      or coalesce(bool_or(jsonb_typeof(g.metadata -> 'unsafe') = 'boolean' and g.metadata -> 'unsafe' = 'true'::jsonb), false)
+      or coalesce(bool_or(lower(btrim(coalesce(g.metadata ->> 'safety', g.metadata ->> 'safety_classification', ''))) = 'unsafe'), false)
+      or coalesce(bool_or(length(btrim(m.storage_key)) = 0 or length(btrim(m.mime_type)) = 0 or m.sha256 !~* '^[a-f0-9]{64}$'), false)
+  ) then raise exception 'GENERATED_MEDIA_PROVENANCE_REQUIRED'; end if;
+
+  if exists(select 1 from pg_temp.autopost_selected_packages s where public.creator_publishing_autopost_source_fingerprint(s.content_package_id) <> s.source_package_fingerprint) then raise exception 'GENERATED_MEDIA_PROVENANCE_REQUIRED'; end if;
+
   if exists(select 1 from public.creator_publishing_platform_jobs j join pg_temp.autopost_selected_packages s on s.content_package_id=j.content_package_id where j.job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived')) then raise exception 'ACTIVE_PUBLICATION_JOB_CONFLICT'; end if;
 
   insert into public.creator_publishing_plans(creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at) values(p_creator_id,'draft',v_key,v_fingerprint,v_registry_version,v_now,v_now) returning * into v_plan;
