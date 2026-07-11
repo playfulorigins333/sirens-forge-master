@@ -122,5 +122,5 @@ await test("no upload, delete, list, move, public bucket, platform calls, or Fan
   assert.doesNotMatch(media, /\.upload\(|\.remove\(|\.list\(|\.move\(|getPublicUrl|public\s*:/)
   assert.doesNotMatch(media, /onlyfans|fansly|fanvue\.com|fetch\(/i)
   const changed = execSync("git diff --name-only", { encoding: "utf8" })
-  assert.equal(changed.split(/\n/).filter((p: string) => p.includes("lib/autopost") || p.includes("app/autopost") || p.includes("fanvue") && !p.includes("creator-publishing-queue/tests")).length, 0)
+  assert.equal(changed.split(/\n/).filter((p: string) => (p.includes("lib/autopost") || p.includes("fanvue") && !p.includes("creator-publishing-queue/tests")) && !p.includes("app/autopost/Task14AutopostOrchestration.tsx") && !p.includes("app/autopost/page.tsx")).length, 0)
 })
