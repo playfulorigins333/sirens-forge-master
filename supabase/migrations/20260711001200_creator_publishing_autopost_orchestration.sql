@@ -123,7 +123,7 @@ select platform, registry_version, display_name, publishing_mode, availability_s
        connector_can_upload_media, connector_can_publish_immediately, connector_can_schedule_directly, connector_can_fetch_publication_status,
        connector_can_fetch_analytics, human_operator_queue_supported, human_publishing_required, safe_label, safe_description
 from public.creator_publishing_platform_capabilities;
-comment on view public.creator_publishing_platform_capability_public is 'Safe creator-readable projection of the canonical Task 14 capability registry. It exposes no credentials, tokens, cookies, sessions, or mutable controls.';
+comment on view public.creator_publishing_platform_capability_public is 'Safe server-readable projection of the canonical Task 14 capability registry. It is returned to authenticated active subscribers through the trusted Autopost API route and exposes no credentials, tokens, cookies, sessions, or mutable controls.';
 
 create or replace function public.creator_publishing_autopost_source_fingerprint(p_content_package_id uuid)
 returns text language sql stable set search_path = public, pg_temp as $$
@@ -214,14 +214,14 @@ begin
   if v_ids is null or array_length(v_ids,1)=0 then raise exception 'NO_CONTENT_PACKAGES_SELECTED'; end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_creator_id::text || ':autopost:' || v_key, 0));
 
-  create temp table pg_temp.autopost_locked_capabilities (like public.creator_publishing_platform_capabilities including defaults) on commit drop;
+  create temp table autopost_locked_capabilities (like public.creator_publishing_platform_capabilities including defaults) on commit drop;
   -- Lock the canonical capability registry release in deterministic platform order so plan and job routing use one transaction-stable version.
   insert into pg_temp.autopost_locked_capabilities
   select * from public.creator_publishing_platform_capabilities order by platform for update;
   if (select count(distinct registry_version) from pg_temp.autopost_locked_capabilities) <> 1 then raise exception 'CAPABILITY_REGISTRY_INCONSISTENT'; end if;
   select registry_version into v_registry_version from pg_temp.autopost_locked_capabilities limit 1;
 
-  create temp table pg_temp.autopost_selected_packages (
+  create temp table autopost_selected_packages (
     content_package_id uuid not null,
     creator_id uuid not null,
     platform_account_id uuid not null,
@@ -248,13 +248,13 @@ begin
   if v_count <> array_length(v_ids,1) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
   if exists(select 1 from pg_temp.autopost_selected_packages where creator_id <> p_creator_id) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
 
-  create temp table pg_temp.autopost_locked_media on commit drop as
+  create temp table autopost_locked_media on commit drop as
   select m.*, (m.ai_generation_metadata ->> 'generation_id') generation_id_text
   from public.creator_publishing_media_assets m
   join pg_temp.autopost_selected_packages s on s.content_package_id=m.content_package_id
   order by m.id for update;
 
-  create temp table pg_temp.autopost_locked_generations on commit drop as
+  create temp table autopost_locked_generations on commit drop as
   select g.*
   from public.generations g
   join (
