@@ -25,7 +25,7 @@ create or replace function public.creator_publishing_save_content_package(
   p_expected_updated_at timestamptz,
   p_idempotency_key text
 )
-returns public.creator_publishing_content_packages
+returns jsonb
 language plpgsql
 security definer
 set search_path = public, pg_temp
@@ -43,6 +43,9 @@ declare
   v_result public.creator_publishing_content_packages%rowtype;
   v_existing_audit public.creator_publishing_audit_events%rowtype;
   v_fingerprint text;
+  v_retry_probe_fingerprint text;
+  v_request_canonical jsonb;
+  v_retry_probe_canonical jsonb;
   v_changed text[] := array[]::text[];
   v_before jsonb;
   v_after jsonb;
@@ -58,6 +61,33 @@ begin
 
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_creator_id::text || ':' || v_idempotency_key, 0)); -- serialize same-key requests
 
+  -- Existing creator/key records are checked before account-specific validation so key reuse cannot be obscured by account errors.
+  v_retry_probe_canonical := jsonb_build_object('operation',v_operation,'content_package_id',p_content_package_id,'creator_id',p_creator_id,'platform_account_id',p_platform_account_id,'title',v_title,'caption_length',length(v_caption),'caption_sha256',encode(extensions.digest(v_caption,'sha256'),'hex'),'second_person_present',coalesce(p_second_person_present,false),'price_notes',v_price_notes,'visibility_notes',v_visibility_notes,'ai_flag','ai_generated','ai_detail','{}'::jsonb);
+  v_retry_probe_fingerprint := encode(extensions.digest(v_retry_probe_canonical::text,'sha256'),'hex');
+
+  select * into v_existing_audit from public.creator_publishing_audit_events where entity_type='creator_publishing_content_package' and actor_id=p_creator_id and idempotency_key=v_idempotency_key and action in ('creator_publishing_package_created','creator_publishing_package_updated','creator_publishing_package_noop') limit 1;
+  if found then
+    if (v_existing_audit.after_state->'request_canonical' - 'target_platform') is distinct from v_retry_probe_canonical
+       or v_existing_audit.after_state->>'retry_probe_fingerprint' is distinct from v_retry_probe_fingerprint then
+      raise exception 'IDEMPOTENCY_CONFLICT';
+    end if;
+    select * into v_result from public.creator_publishing_content_packages where id = v_existing_audit.entity_id for update;
+    if not found or v_result.creator_id <> p_creator_id then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
+    if v_result.platform_account_id <> p_platform_account_id
+       or v_result.target_platform is distinct from v_existing_audit.after_state->'request_canonical'->>'target_platform'
+       or v_result.title <> v_title
+       or length(coalesce(v_result.caption_body,'')) <> ((v_existing_audit.after_state->'request_canonical'->>'caption_length')::int)
+       or encode(extensions.digest(coalesce(v_result.caption_body,''),'sha256'),'hex') is distinct from v_existing_audit.after_state->'request_canonical'->>'caption_sha256'
+       or v_result.second_person_present is distinct from coalesce(p_second_person_present,false)
+       or v_result.price_notes is distinct from v_price_notes
+       or v_result.visibility_notes is distinct from v_visibility_notes
+       or v_result.ai_flag <> 'ai_generated'
+       or v_result.ai_detail <> '{}'::jsonb then
+      raise exception 'IDEMPOTENCY_CONFLICT';
+    end if;
+    return jsonb_build_object('package', to_jsonb(v_result), 'idempotent', true, 'outcome', 'idempotent');
+  end if;
+
   select * into v_account from public.creator_platform_accounts where id = p_platform_account_id for update;
   if not found or v_account.creator_id <> p_creator_id then raise exception 'PLATFORM_ACCOUNT_NOT_FOUND'; end if;
   if v_account.platform = 'fanvue' then raise exception 'FANVUE_NOT_AVAILABLE'; end if;
@@ -65,16 +95,8 @@ begin
   if v_account.verification_status = 'revoked' then raise exception 'PLATFORM_ACCOUNT_REVOKED'; end if;
   if v_account.verification_status <> 'creator_attested' then raise exception 'PLATFORM_ACCOUNT_ATTESTATION_REQUIRED'; end if;
 
-  v_fingerprint := encode(extensions.digest(jsonb_build_object('operation',v_operation,'content_package_id',p_content_package_id,'creator_id',p_creator_id,'platform_account_id',p_platform_account_id,'target_platform',v_account.platform,'title',v_title,'caption_body',v_caption,'second_person_present',coalesce(p_second_person_present,false),'price_notes',v_price_notes,'visibility_notes',v_visibility_notes,'ai_flag','ai_generated','ai_detail','{}'::jsonb)::text,'sha256'),'hex');
-
-  select * into v_existing_audit from public.creator_publishing_audit_events where entity_type='creator_publishing_content_package' and actor_id=p_creator_id and idempotency_key=v_idempotency_key and action in ('creator_publishing_package_created','creator_publishing_package_updated','creator_publishing_package_noop') limit 1;
-  if found then
-    if v_existing_audit.after_state->>'request_fingerprint' is distinct from v_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
-    select * into v_result from public.creator_publishing_content_packages where id = v_existing_audit.entity_id for update;
-    if not found or v_result.creator_id <> p_creator_id then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
-    if v_result.platform_account_id <> p_platform_account_id or v_result.target_platform <> v_account.platform or v_result.title <> v_title or coalesce(v_result.caption_body,'') <> v_caption or v_result.second_person_present is distinct from coalesce(p_second_person_present,false) or v_result.price_notes is distinct from v_price_notes or v_result.visibility_notes is distinct from v_visibility_notes or v_result.ai_flag <> 'ai_generated' or v_result.ai_detail <> '{}'::jsonb then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
-    return v_result;
-  end if;
+  v_request_canonical := v_retry_probe_canonical || jsonb_build_object('target_platform',v_account.platform);
+  v_fingerprint := encode(extensions.digest(v_request_canonical::text,'sha256'),'hex');
 
   if v_operation='create' then
     insert into public.creator_publishing_content_packages(creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,second_person_present,price_notes,visibility_notes,compliance_status,compliance_policy_version,creator_approval_status,creator_approved_by,creator_approved_at,platform_meta,scheduled_for,schedule_timezone,created_at,updated_at)
@@ -106,9 +128,9 @@ begin
       v_result := v_package; v_action := 'creator_publishing_package_noop';
     end if;
   end if;
-  v_after := jsonb_build_object('package_id',v_result.id,'creator_id',v_result.creator_id,'platform_account_id',v_result.platform_account_id,'target_platform',v_result.target_platform,'title',v_result.title,'caption_length',length(coalesce(v_result.caption_body,'')),'caption_sha256',encode(extensions.digest(coalesce(v_result.caption_body,''),'sha256'),'hex'),'second_person_present',v_result.second_person_present,'price_notes_present',v_result.price_notes is not null,'visibility_notes_present',v_result.visibility_notes is not null,'trusted_ai_flag',v_result.ai_flag,'prior_compliance_status',coalesce(v_package.compliance_status,null),'resulting_compliance_status',v_result.compliance_status,'prior_approval_status',coalesce(v_package.creator_approval_status,null),'resulting_approval_status',v_result.creator_approval_status,'changed_fields',to_jsonb(v_changed),'request_fingerprint',v_fingerprint,'idempotency_key',v_idempotency_key,'timestamp',v_now);
+  v_after := jsonb_build_object('package_id',v_result.id,'creator_id',v_result.creator_id,'platform_account_id',v_result.platform_account_id,'target_platform',v_result.target_platform,'title',v_result.title,'caption_length',length(coalesce(v_result.caption_body,'')),'caption_sha256',encode(extensions.digest(coalesce(v_result.caption_body,''),'sha256'),'hex'),'second_person_present',v_result.second_person_present,'price_notes_present',v_result.price_notes is not null,'visibility_notes_present',v_result.visibility_notes is not null,'trusted_ai_flag',v_result.ai_flag,'prior_compliance_status',coalesce(v_package.compliance_status,null),'resulting_compliance_status',v_result.compliance_status,'prior_approval_status',coalesce(v_package.creator_approval_status,null),'resulting_approval_status',v_result.creator_approval_status,'changed_fields',to_jsonb(v_changed),'request_canonical',v_request_canonical,'retry_probe_fingerprint',v_retry_probe_fingerprint,'request_fingerprint',v_fingerprint,'idempotency_key',v_idempotency_key,'timestamp',v_now);
   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_content_package',v_result.id,p_creator_id,'creator',v_action,v_before,v_after,v_idempotency_key,v_now);
-  return v_result;
+  return jsonb_build_object('package', to_jsonb(v_result), 'idempotent', false, 'outcome', case v_action when 'creator_publishing_package_created' then 'created' when 'creator_publishing_package_updated' then 'updated' else 'noop' end);
 end;
 $$;
 
@@ -117,4 +139,4 @@ revoke execute on function public.creator_publishing_save_content_package(uuid, 
 revoke execute on function public.creator_publishing_save_content_package(uuid, text, uuid, uuid, text, text, boolean, text, text, timestamptz, text) from authenticated;
 grant execute on function public.creator_publishing_save_content_package(uuid, text, uuid, uuid, text, text, boolean, text, text, timestamptz, text) to service_role;
 
-comment on function public.creator_publishing_save_content_package(uuid, text, uuid, uuid, text, text, boolean, text, text, timestamptz, text) is 'Trusted service-role-only Task 10 composer RPC. Does not insert media rows, compliance-review rows, or queue tasks.';
+comment on function public.creator_publishing_save_content_package(uuid, text, uuid, uuid, text, text, boolean, text, text, timestamptz, text) is 'Trusted service-role-only Task 10 composer RPC returning JSONB package/idempotent/outcome. Does not insert media rows, compliance-review rows, or queue tasks.';
