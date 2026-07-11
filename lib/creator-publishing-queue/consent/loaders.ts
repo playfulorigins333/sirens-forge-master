@@ -1,0 +1,6 @@
+import "server-only"
+import { redirect } from "next/navigation"
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
+import { supabaseServer } from "@/lib/supabaseServer"
+import type { AiTwinConsentView } from "./types"
+export async function loadAiTwinConsentView(): Promise<AiTwinConsentView> { const supabase = await supabaseServer(); const { data } = await supabase.auth.getUser(); const creatorId = data.user?.id; if (!creatorId) redirect("/login"); const admin = getSupabaseAdmin(); const [consent, verification] = await Promise.all([admin.from("creator_publishing_ai_twin_consents").select("status,attestation_version,granted_at,revoked_at,updated_at").eq("creator_id", creatorId).maybeSingle(), admin.from("creator_publishing_creator_verifications").select("status").eq("creator_id", creatorId).maybeSingle()]); if (consent.error) throw new Error("AI-twin consent could not be loaded."); if (verification.error) throw new Error("Creator verification could not be loaded."); const c:any = consent.data; return { consentStatus: c?.status ?? "not_recorded", verificationStatus: (verification.data as any)?.status ?? "unverified", attestationVersion: c?.attestation_version ?? null, grantedAt: c?.granted_at ?? null, revokedAt: c?.revoked_at ?? null, updatedAt: c?.updated_at ?? null } }
