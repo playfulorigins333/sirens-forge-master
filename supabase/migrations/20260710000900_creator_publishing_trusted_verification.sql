@@ -111,6 +111,7 @@ declare
   v_resulting_state_fingerprint text;
   v_current_state_fingerprint text;
   v_resulting_updated_at timestamptz;
+  v_stored_resulting_updated_at timestamptz;
   v_creator_exists boolean;
 begin
   if p_reviewer_id is null then raise exception 'VERIFICATION_UNAUTHORIZED'; end if;
@@ -130,17 +131,23 @@ begin
   select * into v_existing from public.creator_publishing_audit_events where actor_id=p_reviewer_id and idempotency_key=v_key and action in ('trusted_creator_verified','trusted_creator_verification_revoked','trusted_creator_marked_unverified','trusted_platform_account_verified','trusted_platform_account_verification_revoked','trusted_platform_account_marked_unverified') limit 1;
   if found then
     if v_existing.after_state->>'request_fingerprint' is distinct from v_fingerprint then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
+    begin
+      if nullif(btrim(coalesce(v_existing.after_state->>'resulting_updated_at','')), '') is null then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
+      v_stored_resulting_updated_at := (v_existing.after_state->>'resulting_updated_at')::timestamptz;
+    exception when others then
+      raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT';
+    end;
     perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('verification-subject:' || v_subject_type || ':' || p_subject_id::text, 0)); -- serialize same subject mutations and exact retries
     if v_subject_type='creator' then
       select * into v_creator from public.creator_publishing_creator_verifications where creator_id=p_subject_id for update;
       if not found then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
       v_current_state_fingerprint := encode(extensions.digest(jsonb_build_object('subject_type','creator','creator_id',v_creator.creator_id,'resulting_status',v_creator.status,'reviewed_by',v_creator.reviewed_by,'reviewed_at',v_creator.reviewed_at,'reason',v_creator.reason,'evidence_reference',v_creator.evidence_reference,'resulting_updated_at',v_creator.updated_at)::text,'sha256'),'hex');
-      if v_current_state_fingerprint is distinct from v_existing.after_state->>'resulting_state_fingerprint' or v_creator.updated_at::text is distinct from v_existing.after_state->>'resulting_updated_at' then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
+      if v_current_state_fingerprint is distinct from v_existing.after_state->>'resulting_state_fingerprint' or v_creator.updated_at is distinct from v_stored_resulting_updated_at then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
     else
       select * into v_account from public.creator_platform_accounts where id=p_subject_id for update;
       if not found then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
       v_current_state_fingerprint := encode(extensions.digest(jsonb_build_object('subject_type','platform_account','account_id',v_account.id,'creator_id',v_account.creator_id,'platform',v_account.platform,'resulting_status',v_account.verification_status,'verification_reviewed_by',v_account.verification_reviewed_by,'verification_reviewed_at',v_account.verification_reviewed_at,'verification_reason',v_account.verification_reason,'verification_evidence_reference',v_account.verification_evidence_reference,'verification_attested_at',v_account.verification_attested_at,'verification_legacy_revoked',v_account.verification_legacy_revoked,'resulting_updated_at',v_account.updated_at)::text,'sha256'),'hex');
-      if v_current_state_fingerprint is distinct from v_existing.after_state->>'resulting_state_fingerprint' or v_account.updated_at::text is distinct from v_existing.after_state->>'resulting_updated_at' then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
+      if v_current_state_fingerprint is distinct from v_existing.after_state->>'resulting_state_fingerprint' or v_account.updated_at is distinct from v_stored_resulting_updated_at then raise exception 'VERIFICATION_IDEMPOTENCY_CONFLICT'; end if;
     end if;
     return jsonb_build_object('subject_type',v_subject_type,'subject',jsonb_build_object('id',p_subject_id),'prior_status',v_existing.after_state->>'prior_status','resulting_status',v_existing.after_state->>'resulting_status','idempotent',true,'outcome','idempotent','audit_event_ids',jsonb_build_array(v_existing.id::text),'reviewed_at',v_existing.created_at);
   end if;
@@ -190,7 +197,7 @@ begin
     if v_account.platform not in ('onlyfans','fansly') then raise exception 'VERIFICATION_INVALID_SUBJECT'; end if;
     if p_expected_updated_at is null or v_account.updated_at <> p_expected_updated_at then raise exception 'VERIFICATION_STALE'; end if;
     v_prior := v_account.verification_status;
-    if v_decision='verify' and (v_account.verification_status <> 'creator_attested' or v_account.verification_attested_at is null) then raise exception 'VERIFICATION_ATTESTATION_REQUIRED'; end if;
+    if v_decision='verify' and (v_account.verification_status not in ('creator_attested','verified') or v_account.verification_attested_at is null) then raise exception 'VERIFICATION_ATTESTATION_REQUIRED'; end if;
     v_resulting := case v_decision when 'verify' then 'verified' when 'revoke' then 'revoked' else case when v_account.verification_attested_at is not null then 'creator_attested' else 'unattested' end end;
     update public.creator_platform_accounts set verification_status=v_resulting, verification_legacy_revoked=false, verification_reviewed_by=case when v_resulting in ('verified','revoked') then p_reviewer_id else null end, verification_reviewed_at=case when v_resulting in ('verified','revoked') then v_now else null end, verification_evidence_reference=case when v_resulting='verified' then v_evidence else null end, verification_reason=case when v_resulting in ('verified','revoked') then v_reason else null end, updated_at=v_now where id=p_subject_id returning * into v_account;
     v_resulting_updated_at := v_account.updated_at;
