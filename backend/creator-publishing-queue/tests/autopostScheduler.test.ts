@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs"
 import test from "node:test"
 import { isValidIanaTimeZone, localWallTimeToZonedRfc3339, validateScheduleInstant } from "../../../lib/creator-publishing-queue/autopost/schedulerTime"
 import { classifyLegacyQueueCompatibility, classifySchedulerProcessorResult, compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, parseSchedulerTrustedIso, schedulerHttpStatusForErrorCode, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
-import { applyScheduleUiResults, preserveUncertainScheduleUiState, selectInitialScheduleTargets, selectRescheduleTargets } from "../../../lib/creator-publishing-queue/autopost/schedulerUiState"
+import { applyCancellationUiResults, applyScheduleUiResults, preserveUncertainScheduleUiState, selectInitialScheduleTargets, selectRescheduleTargets } from "../../../lib/creator-publishing-queue/autopost/schedulerUiState"
 import { AI_TWIN_CONSENT_VERSION } from "../../../lib/creator-publishing-queue/consent/copy"
 import { getAiTwinConsentTextSha256 } from "../../../lib/creator-publishing-queue/consent/hash"
 
@@ -499,4 +499,79 @@ test("closure: cancelled plans fail closed for new schedule or reschedule reques
  assert.ok(existing>0&&replay>existing&&cancelled>replay&&locks>cancelled)
  assert.match(migration,/code','PLAN_CANCELLED'/)
  assert.match(service,/"PLAN_CANCELLED"/)
+})
+
+test("runtime correction: cancelled plans are top-level PLAN_CANCELLED conflicts, not successful per-job results",()=>{
+ const replay=migration.indexOf("return v_existing.result || jsonb_build_object('idempotent',true)")
+ const cancelled=migration.indexOf("v_plan.status='cancelled' then raise exception 'PLAN_CANCELLED'",replay)
+ const locks=migration.indexOf("create temp table scheduler_locked_jobs",cancelled)
+ assert.ok(replay>0&&cancelled>replay&&locks>cancelled)
+ assert.doesNotMatch(migration,/code','PLAN_CANCELLED','scheduleRevision',0/)
+ assert.equal(schedulerHttpStatusForErrorCode("PLAN_CANCELLED"),409)
+ assert.match(service,/PLAN_CANCELLED:"This publishing plan has been cancelled/)
+})
+
+test("runtime correction: Assisted claim ordering claims only earliest active event per job",()=>{
+ assert.match(migration,/not exists \([\s\S]+prior\.platform_job_id=e\.platform_job_id[\s\S]+prior\.event_status in \('pending','processing'\)[\s\S]+prior\.due_at,case when prior\.event_type='operator_due' then 0 else 1 end,prior\.id/)
+ assert.match(migration,/order by e\.due_at,case when e\.event_type='operator_due' then 0 else 1 end,e\.id/)
+ assert.match(migration,/for update of e skip locked/)
+ assert.match(migration,/row_number\(\) over \(order by c\.due_at,c\.event_order,c\.id\) as ord/)
+ assert.match(migration,/select claimed\.id,claimed\.lock_token from claimed order by claimed\.ord/)
+})
+
+test("runtime correction: Assisted obsolete operator events are superseded, not blocked",()=>{
+ const obsolete=migration.indexOf("OBSOLETE_OPERATOR_DUE")
+ const unsupported=migration.indexOf("UNSUPPORTED_DUE_TRANSITION",obsolete)
+ assert.ok(obsolete>0&&unsupported>obsolete)
+ assert.match(migration,/e\.event_type='operator_due' and j\.publishing_mode='assisted' and j\.job_state='due_now'[\s\S]+event_status='superseded'/)
+ assert.match(migration,/e\.event_type='publish_due' and j\.publishing_mode='assisted' and v_state='due_now'[\s\S]+event_type='operator_due'[\s\S]+event_status in \('pending','processing'\)/)
+ assert.doesNotMatch(migration,/OBSOLETE_OPERATOR_DUE[\s\S]{0,200}creator_publishing_due_state_transition_blocked/)
+})
+
+test("runtime correction: UI target selectors exactly match SQL predecessor contract",()=>{
+ const states=["scheduled_internally","awaiting_operator","due_now","ready_to_publish","package_ready","ready_for_export","needs_fix"]
+ const state=Object.fromEntries(states.map((jobState,i)=>[`job-${i}`,{jobId:`job-${i}`,currentJobState:jobState,currentScheduleRevision:1,hasEverScheduled:true}]))
+ assert.deepEqual(selectRescheduleTargets(state).sort(),states.map((_,i)=>`job-${i}`))
+ for(const bad of ["direct_publish_queued","publishing_direct","retry_scheduled","authentication_required","claimed","scheduled_on_platform","awaiting_post_confirmation","published_direct","blocked","archived","future_state"]){
+   assert.deepEqual(selectRescheduleTargets({bad:{jobId:"bad",currentJobState:bad,currentScheduleRevision:1,hasEverScheduled:true}}),[])
+ }
+ assert.deepEqual(selectInitialScheduleTargets([{id:"draft",jobState:"draft"},{id:"unknown",jobState:"future_state"}],{}),["draft"])
+ assert.deepEqual(selectInitialScheduleTargets([{id:"scheduled",jobState:"draft"}],{scheduled:{jobId:"scheduled",currentJobState:"draft",currentScheduleRevision:1,hasEverScheduled:true}}),[])
+ assert.match(migration,/j\.job_state not in \('scheduled_internally','awaiting_operator','due_now','ready_to_publish','package_ready','ready_for_export','needs_fix'\)/)
+})
+
+test("runtime correction: UI revisions are monotonic after failed schedule and cancellation results",()=>{
+ let state=applyScheduleUiResults({},[{jobId:"job-a",ok:true,jobState:"scheduled_internally",scheduleRevision:1}],"schedule")
+ state=applyScheduleUiResults(state,[{jobId:"job-a",ok:false,code:"STALE_SCHEDULE_REVISION",scheduleRevision:0}],"reschedule")
+ assert.equal(state["job-a"].currentScheduleRevision,1)
+ assert.deepEqual(selectInitialScheduleTargets([{id:"job-a",jobState:"draft"}],state),[])
+ assert.deepEqual(selectRescheduleTargets(state),["job-a"])
+ state=applyScheduleUiResults(state,[{jobId:"job-a",ok:false,code:"STALE_SCHEDULE_REVISION",scheduleRevision:3}],"reschedule")
+ assert.equal(state["job-a"].currentScheduleRevision,3)
+ state=applyCancellationUiResults(state,[{jobId:"job-a",outcome:"already_terminal",jobState:"scheduled_internally",scheduleRevision:0}])
+ assert.equal(state["job-a"].currentScheduleRevision,3)
+})
+
+test("runtime correction: strict parser source enforces successful revision progression",()=>{
+ assert.match(service,/context\.actionType==="schedule"&&rev!==1/)
+ assert.match(service,/context\.actionType==="reschedule"[\s\S]+rev!==Number\(expectedRevision\)\+1/)
+ assert.match(service,/parseScheduleResult\(data,\{planId:cleanId\(input\.publishingPlanId\),targetJobIds,actionType:action,expectedScheduleRevisions:expected\}\)/)
+})
+
+test("runtime correction: revision-map validation errors carry safe HTTP 400 codes",()=>{
+ assert.throws(()=>normalizeExpectedRevisionMap({extra:1},["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],true),(e:any)=>e.code==="UNEXPECTED_REVISION_JOB")
+ assert.throws(()=>normalizeExpectedRevisionMap({"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa":"1"},["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],true),(e:any)=>e.code==="INVALID_EXPECTED_REVISION")
+ assert.throws(()=>normalizeExpectedRevisionMap({},["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],true),(e:any)=>e.code==="EXPECTED_REVISIONS_REQUIRED")
+ assert.equal(schedulerHttpStatusForErrorCode("UNEXPECTED_REVISION_JOB"),400)
+ assert.equal(schedulerHttpStatusForErrorCode("INVALID_EXPECTED_REVISION"),400)
+ assert.equal(schedulerHttpStatusForErrorCode("EXPECTED_REVISIONS_REQUIRED"),400)
+ assert.match(service,/UNEXPECTED_REVISION_JOB/)
+})
+
+test("runtime correction: cancellation DTO validates counts, terminal states, and event audit fields",()=>{
+ assert.match(service,/results\.filter\(r=>r\.outcome==="archived"\)\.length!==cancelledJobs/)
+ assert.match(service,/outcome==="already_terminal"&&!terminalCancellationStates\.has/)
+ assert.match(service,/r\.closedSchedulerEventIds!=null\) parseStringArrayStrict\(r\.closedSchedulerEventIds\)/)
+ assert.match(service,/r\.eventAuditEventId!=null/)
+ assert.match(service,/context\.jobId&&rows\.length!==1/)
 })

@@ -268,10 +268,7 @@ begin
  v_request_fingerprint:=encode(extensions.digest(v_request_canonical::text,'sha256'),'hex');
  select * into v_existing from public.creator_publishing_schedule_idempotency where creator_id=p_creator_id and idempotency_key=v_key for update;
  if found then if v_existing.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return v_existing.result || jsonb_build_object('idempotent',true); end if;
- if v_plan.status='cancelled' then
-   for j in select unnest(v_target_ids) as id loop v_results:=v_results||jsonb_build_array(jsonb_build_object('jobId',j.id,'ok',false,'code','PLAN_CANCELLED','scheduleRevision',0)); end loop;
-   return jsonb_build_object('ok',true,'planId',p_publishing_plan_id,'results',v_results,'auditEventIds','[]'::jsonb,'idempotent',false);
- end if;
+ if v_plan.status='cancelled' then raise exception 'PLAN_CANCELLED'; end if;
  -- Task 15 global lock order: plan, platform jobs, scheduler events, supporting facts.
  create temp table scheduler_locked_jobs on commit drop as select j.* from public.creator_publishing_platform_jobs j where j.publishing_plan_id=p_publishing_plan_id and j.creator_id=p_creator_id and j.id=any(v_target_ids) order by j.id for update;
  if (select count(*) from pg_temp.scheduler_locked_jobs) <> array_length(v_target_ids,1) then raise exception 'JOB_NOT_FOUND'; end if;
@@ -348,14 +345,29 @@ end; $$;
 create or replace function public.creator_publishing_claim_due_scheduler_events(p_limit integer default 25,p_lock_minutes integer default 15)
 returns table(id uuid, lock_token uuid) language plpgsql security definer set search_path=public,pg_temp as $$
 begin
- return query with due as (
-   select e.id from public.creator_publishing_scheduler_events e
-   where e.event_status='pending' and e.due_at<=now()
-      or (e.event_status='processing' and e.locked_at < now() - make_interval(mins=>least(greatest(coalesce(p_lock_minutes,15),1),60)))
-   order by e.due_at,e.id for update of e skip locked limit least(greatest(coalesce(p_limit,25),1),50)
+ return query with candidate as (
+   select e.id,e.platform_job_id,e.due_at,case when e.event_type='operator_due' then 0 else 1 end as event_order
+   from public.creator_publishing_scheduler_events e
+   where ((e.event_status='pending' and e.due_at<=now())
+      or (e.event_status='processing' and e.locked_at < now() - make_interval(mins=>least(greatest(coalesce(p_lock_minutes,15),1),60))))
+     and not exists (
+       select 1 from public.creator_publishing_scheduler_events prior
+       where prior.platform_job_id=e.platform_job_id
+         and prior.event_status in ('pending','processing')
+         and (prior.due_at,case when prior.event_type='operator_due' then 0 else 1 end,prior.id) < (e.due_at,case when e.event_type='operator_due' then 0 else 1 end,e.id)
+     )
+   order by e.due_at,case when e.event_type='operator_due' then 0 else 1 end,e.id
+   for update of e skip locked
+ ), due as (
+   select c.*, row_number() over (order by c.due_at,c.event_order,c.id) as ord
+   from candidate c
+   limit least(greatest(coalesce(p_limit,25),1),50)
  ), claimed as (
-   update public.creator_publishing_scheduler_events e set event_status='processing',lock_token=gen_random_uuid(),locked_at=now(),processing_attempts=processing_attempts+1 from due where e.id=due.id returning e.id,e.lock_token
- ) select claimed.id,claimed.lock_token from claimed order by claimed.id;
+   update public.creator_publishing_scheduler_events e
+   set event_status='processing',lock_token=gen_random_uuid(),locked_at=now(),processing_attempts=processing_attempts+1
+   from due where e.id=due.id
+   returning e.id,e.lock_token,due.ord
+ ) select claimed.id,claimed.lock_token from claimed order by claimed.ord;
 end; $$;
 
 create or replace function public.creator_publishing_process_scheduler_event(p_event_id uuid,p_lock_token uuid,p_expected_ai_twin_consent_version text,p_expected_ai_twin_consent_text_sha256 text)
@@ -388,11 +400,13 @@ begin
  v_gate:=public.creator_publishing_scheduler_gate(j.id,p_expected_ai_twin_consent_version,p_expected_ai_twin_consent_text_sha256);
  if (v_gate->>'ok')::boolean is not true then update public.creator_publishing_platform_jobs set job_state=case when coalesce((v_gate->>'hard')::boolean,false) then 'blocked' else 'needs_fix' end, updated_at=v_now where id=j.id and not (job_state = any(terminal_states)); get diagnostics v_job_rows = row_count; update public.creator_publishing_scheduler_events set event_status='blocked',processed_at=v_now,lock_token=null,locked_at=null,last_error_code=v_gate->>'code' where id=e.id and event_status='processing' and lock_token is not distinct from p_lock_token; get diagnostics v_event_rows = row_count; if v_job_rows<>1 or v_event_rows<>1 then raise exception 'PROTECTED_UPDATE_MISSED'; end if; update public.creator_publishing_scheduler_events set event_status='superseded',superseded_at=v_now,lock_token=null,locked_at=null where platform_job_id=j.id and schedule_revision=e.schedule_revision and event_status in ('pending','processing') and id<>e.id; insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_platform_job',j.id,'system','creator_publishing_due_state_transition_blocked',jsonb_build_object('job_state',j.job_state),jsonb_build_object('event_id',e.id,'code',v_gate->>'code'),v_now) returning id into v_audit; perform public.creator_publishing_recalculate_plan_status(j.publishing_plan_id); return jsonb_build_object('ok',false,'blocked',true,'code',v_gate->>'code','auditEventId',v_audit::text); end if;
  select * into c from pg_temp.process_locked_capabilities where platform=j.target_platform;
+ if e.event_type='operator_due' and j.publishing_mode='assisted' and j.job_state='due_now' then update public.creator_publishing_scheduler_events set event_status='superseded',superseded_at=v_now,lock_token=null,locked_at=null,last_error_code='OBSOLETE_OPERATOR_DUE' where id=e.id and event_status='processing' and lock_token is not distinct from p_lock_token; return jsonb_build_object('ok',true,'skipped',true,'code','OBSOLETE_OPERATOR_DUE'); end if;
  v_state:=case when e.event_type='operator_due' and j.publishing_mode='assisted' and j.job_state='scheduled_internally' then 'awaiting_operator' when e.event_type='publish_due' and j.publishing_mode='assisted' and j.job_state in ('scheduled_internally','awaiting_operator') then 'due_now' when e.event_type='publish_due' and j.publishing_mode='direct' and j.job_state='ready_to_publish' and c.publishing_mode='direct' and c.availability_status='available' and c.connector_can_publish_immediately then 'direct_publish_queued' when e.event_type='publish_due' and j.publishing_mode='planner' and j.job_state='package_ready' then 'ready_for_export' else null end;
  if v_state is null then update public.creator_publishing_platform_jobs set job_state=case when j.publishing_mode='direct' then 'blocked' else j.job_state end, updated_at=v_now where id=j.id and not (job_state = any(terminal_states)); get diagnostics v_job_rows = row_count; update public.creator_publishing_scheduler_events set event_status='blocked',processed_at=v_now,lock_token=null,locked_at=null,last_error_code='UNSUPPORTED_DUE_TRANSITION' where id=e.id and event_status='processing' and lock_token is not distinct from p_lock_token; get diagnostics v_event_rows = row_count; if v_job_rows<>1 or v_event_rows<>1 then raise exception 'PROTECTED_UPDATE_MISSED'; end if; insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_platform_job',j.id,'system','creator_publishing_due_state_transition_blocked',jsonb_build_object('job_state',j.job_state),jsonb_build_object('event_id',e.id,'code','UNSUPPORTED_DUE_TRANSITION'),v_now) returning id into v_audit; perform public.creator_publishing_recalculate_plan_status(j.publishing_plan_id); return jsonb_build_object('ok',false,'blocked',true,'code','UNSUPPORTED_DUE_TRANSITION','auditEventId',v_audit::text); end if;
  update public.creator_publishing_platform_jobs set job_state=v_state,updated_at=v_now where id=j.id and job_state=j.job_state and not (job_state = any(terminal_states)); get diagnostics v_job_rows = row_count;
  update public.creator_publishing_scheduler_events set event_status='processed',processed_at=v_now,lock_token=null,locked_at=null where id=e.id and event_status='processing' and lock_token is not distinct from p_lock_token; get diagnostics v_event_rows = row_count;
  if v_job_rows<>1 or v_event_rows<>1 then raise exception 'PROTECTED_UPDATE_MISSED'; end if;
+ if e.event_type='publish_due' and j.publishing_mode='assisted' and v_state='due_now' then update public.creator_publishing_scheduler_events set event_status='superseded',superseded_at=v_now,lock_token=null,locked_at=null,last_error_code='OBSOLETE_OPERATOR_DUE' where platform_job_id=j.id and schedule_revision=e.schedule_revision and event_type='operator_due' and event_status in ('pending','processing') and id<>e.id; end if;
  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_platform_job',j.id,'system','creator_publishing_due_state_transition_completed',jsonb_build_object('job_state',j.job_state),jsonb_build_object('job_state',v_state,'event_id',e.id),v_now) returning id into v_audit;
  perform public.creator_publishing_recalculate_plan_status(j.publishing_plan_id); return jsonb_build_object('ok',true,'processed',true,'jobState',v_state,'auditEventId',v_audit::text);
 end; $$;
