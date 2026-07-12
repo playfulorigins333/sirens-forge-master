@@ -41,12 +41,77 @@ values (
 insert into public.creator_publishing_ai_twin_consents(creator_id,status,attestation_version,attestation_text_sha256,granted_at,created_at,updated_at)
 values ('00000000-0000-4000-8000-000000000001','granted','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',now(),now(),now());
 
-insert into public.creator_platform_accounts(id,creator_id,platform,platform_username,verification_status,verification_attested_at,verification_reviewed_by,verification_reviewed_at,verification_evidence_reference,created_at,updated_at)
+insert into public.creator_platform_accounts(
+  id,
+  creator_id,
+  platform,
+  platform_username,
+  verification_status,
+  verification_attested_at,
+  verification_reviewed_by,
+  verification_reviewed_at,
+  verification_evidence_reference,
+  verification_reason,
+  created_at,
+  updated_at
+)
 values
-('20000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','onlyfans','only_fixture','verified',now(),'00000000-0000-4000-8000-000000000001',now(),'fixture',now(),now()),
-('20000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','onlyfans','only_fixture2','verified',now(),'00000000-0000-4000-8000-000000000001',now(),'fixture',now(),now()),
-('20000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','fansly','fansly_direct','verified',now(),'00000000-0000-4000-8000-000000000001',now(),'fixture',now(),now()),
-('20000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000001','fansly','fansly_planner','verified',now(),'00000000-0000-4000-8000-000000000001',now(),'fixture',now(),now());
+(
+  '20000000-0000-4000-8000-000000000001',
+  '00000000-0000-4000-8000-000000000001',
+  'onlyfans',
+  'only_fixture',
+  'verified',
+  now(),
+  '00000000-0000-4000-8000-000000000001',
+  now(),
+  'fixture',
+  'Task 15 scheduler fixture',
+  now(),
+  now()
+),
+(
+  '20000000-0000-4000-8000-000000000002',
+  '00000000-0000-4000-8000-000000000001',
+  'onlyfans',
+  'only_fixture2',
+  'verified',
+  now(),
+  '00000000-0000-4000-8000-000000000001',
+  now(),
+  'fixture',
+  'Task 15 scheduler fixture',
+  now(),
+  now()
+),
+(
+  '20000000-0000-4000-8000-000000000003',
+  '00000000-0000-4000-8000-000000000001',
+  'fansly',
+  'fansly_direct',
+  'verified',
+  now(),
+  '00000000-0000-4000-8000-000000000001',
+  now(),
+  'fixture',
+  'Task 15 scheduler fixture',
+  now(),
+  now()
+),
+(
+  '20000000-0000-4000-8000-000000000004',
+  '00000000-0000-4000-8000-000000000001',
+  'fansly',
+  'fansly_planner',
+  'verified',
+  now(),
+  '00000000-0000-4000-8000-000000000001',
+  now(),
+  'fixture',
+  'Task 15 scheduler fixture',
+  now(),
+  now()
+);
 
 insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,compliance_status,compliance_policy_version,creator_approval_status,creator_approved_at,creator_approved_by,created_at,updated_at)
 values
