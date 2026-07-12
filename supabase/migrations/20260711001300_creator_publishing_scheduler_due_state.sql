@@ -2,7 +2,7 @@
 -- Forward-only additive migration. No platform calls, no Fanvue enablement, no legacy queue mutation.
 create extension if not exists pgcrypto with schema extensions;
 
-create or replace function public.creator_publishing_queue_jsonb_has_forbidden_credential_key(p_value jsonb)
+create or replace function public.creator_publishing_queue_jsonb_has_forbidden_credential_key(value jsonb)
 returns boolean
 language plpgsql
 immutable
@@ -12,10 +12,10 @@ declare
   object_entry record;
   array_entry record;
 begin
-  if jsonb_typeof(p_value) = 'object' then
+  if jsonb_typeof($1) = 'object' then
     for object_entry in
       select object_source.key as object_key, object_source.value as object_value
-      from jsonb_each(p_value) as object_source(key, value)
+      from jsonb_each($1) as object_source(key, value)
     loop
       if lower(object_entry.object_key) in (
         'password','access_token','refresh_token','auth_token','session','session_id',
@@ -30,10 +30,10 @@ begin
     return false;
   end if;
 
-  if jsonb_typeof(p_value) = 'array' then
+  if jsonb_typeof($1) = 'array' then
     for array_entry in
       select array_source.value as array_value
-      from jsonb_array_elements(p_value) as array_source(value)
+      from jsonb_array_elements($1) as array_source(value)
     loop
       if public.creator_publishing_queue_jsonb_has_forbidden_credential_key(array_entry.array_value) then
         return true;

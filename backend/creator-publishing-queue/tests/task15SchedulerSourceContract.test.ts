@@ -10,10 +10,10 @@ test('Task 15 migration preserves helper key policy exactly and repairs ambiguit
   const keys = ['password','access_token','refresh_token','auth_token','session','session_id','cookie','cookies','two_factor_secret','recovery_code','platform_secret']
   for (const key of keys) assert.match(src, new RegExp(`'${key}'`))
   for (const added of ['api_key','apikey','authorization','credential','credentials','secret']) assert.doesNotMatch(src, new RegExp(`'${added}'`))
-  assert.match(src, /create or replace function public\.creator_publishing_queue_jsonb_has_forbidden_credential_key\(p_value jsonb\)/)
+  assert.match(src, /create or replace function public\.creator_publishing_queue_jsonb_has_forbidden_credential_key\(value jsonb\)/)
   assert.match(src, /#variable_conflict error/)
-  assert.match(src, /jsonb_each\(p_value\) as object_source\(key, value\)/)
-  assert.match(src, /jsonb_array_elements\(p_value\) as array_source\(value\)/)
+  assert.match(src, /jsonb_each\(\$1\) as object_source\(key, value\)/)
+  assert.match(src, /jsonb_array_elements\(\$1\) as array_source\(value\)/)
 })
 
 test('Task 15 database contracts include final overrides and no application layer', () => {
