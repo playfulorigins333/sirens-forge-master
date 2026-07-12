@@ -185,6 +185,20 @@ do $$ begin
   end;
 end $$;
 
+do $$ begin
+  begin
+    perform public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',now()+interval '5 hours','UTC','invalid-revision-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid],jsonb_build_object('not-a-uuid',1),'reschedule');
+    raise exception 'expected invalid expected revision key';
+  exception when others then
+    if sqlerrm not like '%SCHEDULER_EXPECTED_REVISIONS_INVALID%' then raise; end if;
+  end;
+end $$;
+select public.task15_assert(schedule_revision=1 and job_state='scheduled_internally', 'invalid expected revision key leaves assisted job unchanged') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=1)=2, 'invalid expected revision key leaves revision one events unchanged');
+select public.task15_assert(not exists(select 1 from public.creator_publishing_scheduler_idempotency where idempotency_key='invalid-revision-key-0001'), 'invalid expected revision key stores no idempotency row');
+select public.task15_assert(not exists(select 1 from public.creator_publishing_audit_events where action='creator_publishing_schedule_rescheduled' and idempotency_key='invalid-revision-key-0001'), 'invalid expected revision key writes no reschedule audit');
+select public.task15_assert(not exists(select 1 from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=2), 'invalid expected revision key creates no revision two events');
+
 select now() + interval '5 hours' as reschedule_intended_publish_at \gset
 select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',:'reschedule_intended_publish_at'::timestamptz,'UTC','reschedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid],jsonb_build_object('80000000-0000-4000-8000-000000000001',1),'reschedule') as reschedule_result \gset
 select public.task15_assert((:'reschedule_result')::jsonb->>'idempotent' = 'false', 'first reschedule is not idempotent replay');

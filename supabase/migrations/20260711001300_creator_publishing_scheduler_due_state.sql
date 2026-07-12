@@ -217,6 +217,7 @@ begin
 
   if v_action='reschedule' then
     if jsonb_typeof(coalesce(p_expected_schedule_revisions,'{}'::jsonb)) <> 'object' then raise exception 'SCHEDULER_EXPECTED_REVISIONS_INVALID'; end if;
+    if exists(select 1 from jsonb_object_keys(p_expected_schedule_revisions) as expected_key where expected_key !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') then raise exception 'SCHEDULER_EXPECTED_REVISIONS_INVALID'; end if;
     if exists(select 1 from jsonb_object_keys(p_expected_schedule_revisions) as expected_key where expected_key::uuid <> all(v_target_job_ids)) then raise exception 'SCHEDULER_EXPECTED_REVISIONS_EXTRA'; end if;
     if exists(select 1 from unnest(v_target_job_ids) as target_job_id where not (p_expected_schedule_revisions ? target_job_id::text)) then raise exception 'SCHEDULER_EXPECTED_REVISIONS_MISSING'; end if;
   end if;
