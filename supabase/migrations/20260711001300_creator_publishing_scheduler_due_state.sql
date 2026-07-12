@@ -122,7 +122,8 @@ create table if not exists public.creator_publishing_scheduler_idempotency (
   result jsonb not null,
   created_at timestamptz not null default now(),
   constraint creator_publishing_scheduler_idempotency_pk primary key (creator_id, publishing_plan_id, action_type, idempotency_key),
-  constraint creator_publishing_scheduler_idempotency_creator_action_key_unique unique (creator_id, action_type, idempotency_key)
+  constraint creator_publishing_scheduler_idempotency_creator_action_key_unique unique (creator_id, action_type, idempotency_key),
+  constraint creator_publishing_scheduler_idempotency_plan_creator_fk foreign key (publishing_plan_id, creator_id) references public.creator_publishing_plans(id, creator_id) on delete cascade
 );
 
 alter table public.creator_publishing_scheduler_events enable row level security;

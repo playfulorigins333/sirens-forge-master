@@ -148,6 +148,54 @@ values
 ('70000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','draft','plan-key-0002','2222222222222222222222222222222222222222222222222222222222222222','task14.20260711.001',now(),now()),
 ('70000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','draft','plan-key-0003','3333333333333333333333333333333333333333333333333333333333333333','task14.20260711.001',now(),now());
 
+select public.task15_assert(
+  exists (
+    select 1
+    from pg_catalog.pg_constraint
+    where conrelid = 'public.creator_publishing_scheduler_idempotency'::regclass
+      and conname = 'creator_publishing_scheduler_idempotency_plan_creator_fk'
+      and contype = 'f'
+  ),
+  'scheduler idempotency plan creator foreign key exists'
+);
+do $$
+begin
+  begin
+    insert into public.creator_publishing_scheduler_idempotency(
+      creator_id,
+      publishing_plan_id,
+      action_type,
+      idempotency_key,
+      request_fingerprint,
+      result,
+      created_at
+    )
+    values (
+      '00000000-0000-4000-8000-000000000002',
+      '70000000-0000-4000-8000-000000000001',
+      'schedule',
+      'idempotency-owner-mismatch-key-0001',
+      'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      '{}'::jsonb,
+      now()
+    );
+
+    raise exception 'expected scheduler idempotency plan creator foreign key violation';
+  exception
+    when foreign_key_violation then
+      null;
+  end;
+end
+$$;
+select public.task15_assert(
+  not exists (
+    select 1
+    from public.creator_publishing_scheduler_idempotency
+    where idempotency_key = 'idempotency-owner-mismatch-key-0001'
+  ),
+  'mismatched scheduler idempotency row is not stored'
+);
+
 insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at)
 values
 ('80000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','assisted','draft',(select updated_at from public.creator_publishing_content_packages where id='30000000-0000-4000-8000-000000000001'),public.creator_publishing_autopost_source_fingerprint('30000000-0000-4000-8000-000000000001'),'task14.20260711.001','1111111111111111111111111111111111111111111111111111111111111111',now(),now()),
