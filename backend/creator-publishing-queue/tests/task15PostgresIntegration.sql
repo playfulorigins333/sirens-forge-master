@@ -18,8 +18,26 @@ insert into auth.users(id,email) values
 on conflict do nothing;
 insert into public.profiles(id,user_id) values ('10000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001') on conflict do nothing;
 
-insert into public.creator_publishing_creator_verifications(creator_id,status,verified_at,verified_by,verification_reference,created_at,updated_at)
-values ('00000000-0000-4000-8000-000000000001','verified',now(),'00000000-0000-4000-8000-000000000001','fixture',now(),now());
+insert into public.creator_publishing_creator_verifications(
+  creator_id,
+  status,
+  evidence_reference,
+  reason,
+  reviewed_by,
+  reviewed_at,
+  created_at,
+  updated_at
+)
+values (
+  '00000000-0000-4000-8000-000000000001',
+  'verified',
+  'fixture',
+  'Task 15 scheduler fixture',
+  '00000000-0000-4000-8000-000000000001',
+  now(),
+  now(),
+  now()
+);
 insert into public.creator_publishing_ai_twin_consents(creator_id,status,attestation_version,attestation_text_sha256,granted_at,created_at,updated_at)
 values ('00000000-0000-4000-8000-000000000001','granted','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',now(),now(),now());
 
