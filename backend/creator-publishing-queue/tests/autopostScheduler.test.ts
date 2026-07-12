@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync, readdirSync } from "node:fs"
 import test from "node:test"
 import { isValidIanaTimeZone, localWallTimeToZonedRfc3339, validateScheduleInstant } from "../../../lib/creator-publishing-queue/autopost/schedulerTime"
+import { compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, stableScheduleRequestFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
 
 const migrationPath="supabase/migrations/20260711001300_creator_publishing_scheduler_due_state.sql"
 const migration=readFileSync(migrationPath,"utf8")
@@ -80,7 +81,7 @@ test("worker uses cron secret, bounded batch, lock tokens, SKIP LOCKED, expired 
  assert.match(service,/process\.env\.CRON_SECRET\|\|process\.env\.VERCEL_CRON_SECRET/)
  assert.match(service,/if\(!secret\)return false/)
  assert.match(service,/authorization/)
- assert.match(migration,/for update of j,e skip locked/)
+ assert.match(migration,/for update of e skip locked/)
  assert.match(migration,/limit least\(greatest\(coalesce\(p_limit,25\),1\),50\)/)
  assert.match(migration,/lock_token=gen_random_uuid\(\)/)
  assert.match(migration,/locked_at < now\(\) - make_interval/)
@@ -145,8 +146,9 @@ test("review fixes: composite FK has unique key and raw scheduler internals stay
 test("review fixes: every Task 15 security definer has explicit service-role-only privilege contract",()=>{
  const funcs=[
   ["creator_publishing_recalculate_plan_status","creator_publishing_recalculate_plan_status\\(uuid\\)"],
+  ["creator_publishing_scheduler_fact_snapshot","creator_publishing_scheduler_fact_snapshot\\(uuid\\)"],
   ["creator_publishing_scheduler_gate","creator_publishing_scheduler_gate\\(uuid\\)"],
-  ["creator_publishing_schedule_plan","creator_publishing_schedule_plan\\(uuid,uuid,timestamptz,text,text,integer\\)"],
+  ["creator_publishing_schedule_plan","creator_publishing_schedule_plan\\(uuid,uuid,timestamptz,text,text,uuid\\[\\],jsonb,text\\)"],
   ["creator_publishing_cancel_schedule","creator_publishing_cancel_schedule\\(uuid,uuid,uuid,text\\)"],
   ["creator_publishing_claim_due_scheduler_events","creator_publishing_claim_due_scheduler_events\\(integer,integer\\)"],
   ["creator_publishing_process_scheduler_event","creator_publishing_process_scheduler_event\\(uuid,uuid\\)"],
@@ -161,28 +163,33 @@ test("review fixes: every Task 15 security definer has explicit service-role-onl
 test("review fixes: canonical gate covers required trusted facts with narrow safe codes",()=>{
  assert.match(migration,/creator_publishing_scheduler_gate/)
  for(const code of ["PLAN_OWNERSHIP_INVALID","PACKAGE_OWNERSHIP_INVALID","DESTINATION_ACCOUNT_INVALID","CAPABILITY_SNAPSHOT_STALE","FANVUE_NOT_AVAILABLE","COMPLIANCE_NOT_PASSED","COMPLIANCE_BLOCKED","CREATOR_APPROVAL_REQUIRED","CREATOR_VERIFICATION_REQUIRED","DESTINATION_ACCOUNT_VERIFICATION_REQUIRED","AI_TWIN_CONSENT_REQUIRED","CO_PERFORMER_RELEASE_REQUIRED","BLOCKING_MANUAL_REVIEW","GENERATED_MEDIA_PROVENANCE_REQUIRED","STALE_SOURCE_FINGERPRINT","ACTIVE_QUEUE_TASK_CONFLICT","ACTIVE_PUBLICATION_JOB_CONFLICT"]) assert.match(migration,new RegExp(code))
- assert.match(migration,/creator_publishing_build_compliance_facts/)
- assert.match(migration,/g\.user_id <> j\.creator_id/)
+ assert.doesNotMatch(migration,/creator_publishing_build_compliance_facts/)
+ assert.match(migration,/g\.user_id <> j\.creator_id and g\.user_id is distinct from v_profile_id/)
  assert.match(migration,/g\.status is distinct from 'completed'/)
  assert.match(migration,/r2_bucket/) ; assert.match(migration,/r2_key/)
  assert.match(migration,/placeholder/) ; assert.match(migration,/is_test/) ; assert.match(migration,/unsafe/)
 })
 
-test("review fixes: idempotency fingerprint is computed from locked job and gate snapshots",()=>{
+test("review fixes: idempotency uses a stable request fingerprint before mutations and locks snapshot facts before new writes",()=>{
  assert.match(migration,/pg_advisory_xact_lock/)
  assert.match(migration,/select \* into v_plan[\s\S]+for update/)
+ assert.match(migration,/v_request_canonical:=jsonb_build_object[\s\S]+expected_schedule_revisions[\s\S]+assisted_lead_policy/)
+ assert.match(migration,/select \* into v_existing[\s\S]+return v_existing\.result/)
  assert.match(migration,/create temp table scheduler_locked_jobs[\s\S]+order by j\.id for update/)
+ assert.match(migration,/create temp table scheduler_locked_capabilities/)
+ assert.match(migration,/create temp table scheduler_locked_media/)
+ assert.match(migration,/create temp table scheduler_locked_generations/)
  assert.match(migration,/create temp table scheduler_gate_snapshot/)
- assert.match(migration,/v_canonical:=jsonb_build_object[\s\S]+scheduler_locked_jobs[\s\S]+scheduler_gate_snapshot/)
- const canonical=migration.indexOf("v_canonical:=jsonb_build_object")
+ const request=migration.indexOf("v_request_canonical:=jsonb_build_object")
  const idem=migration.indexOf("select * into v_existing")
+ const locks=migration.indexOf("create temp table scheduler_locked_jobs")
  const mutate=migration.indexOf("update public.creator_publishing_platform_jobs set intended_publish_at")
- assert.ok(canonical>0 && idem>canonical && mutate>idem)
+ assert.ok(request>0 && idem>request && locks>idem && mutate>locks)
 })
 
 test("review fixes: processing locks job before event and clears lock fields for final statuses",()=>{
- assert.match(migration,/select id, platform_job_id, schedule_revision into e0/)
- assert.match(migration,/select \* into j from public\.creator_publishing_platform_jobs where id=e0\.platform_job_id for update;\n select \* into e from public\.creator_publishing_scheduler_events/)
+ assert.match(migration,/select id, platform_job_id, publishing_plan_id, creator_id, schedule_revision into e0/)
+ assert.match(migration,/select \* into p from public\.creator_publishing_plans[\s\S]+for update;\n select \* into j from public\.creator_publishing_platform_jobs[\s\S]+for update;\n select \* into e from public\.creator_publishing_scheduler_events/)
  for(const status of ["processed","blocked","superseded","cancelled"]) assert.match(migration,new RegExp(`${status}[\\s\\S]+lock_token=null,locked_at=null`))
  assert.match(migration,/j\.schedule_revision<>e\.schedule_revision/)
  assert.match(migration,/event_status='processing'/)
@@ -190,9 +197,11 @@ test("review fixes: processing locks job before event and clears lock fields for
 
 test("review fixes: terminal truth and predecessor states are preserved",()=>{
  for(const state of ["published_direct","confirmed_posted_manual","exported","direct_publish_failed","failed_manual_upload","skipped","blocked","platform_rejected","archived"]) assert.match(migration,new RegExp(state))
- assert.match(migration,/if j\.cancelled_at is not null or j\.job_state = any\(terminal_states\) then continue/)
+ assert.match(migration,/if j\.cancelled_at is not null then/)
+ assert.match(migration,/if j\.job_state = any\(terminal_states\) then/)
  assert.match(migration,/JOB_NOT_FOUND/)
- assert.match(migration,/status='cancelled'[\s\S]+idempotent/)
+ assert.match(migration,/already_cancelled/)
+ assert.match(migration,/already_terminal/)
  assert.match(migration,/j\.job_state='scheduled_internally' then 'awaiting_operator'/)
  assert.match(migration,/j\.job_state in \('scheduled_internally','awaiting_operator'\) then 'due_now'/)
  assert.match(migration,/j\.job_state='ready_to_publish'[\s\S]+connector_can_publish_immediately[\s\S]+direct_publish_queued/)
@@ -231,4 +240,40 @@ test("review fixes: scheduler service has server-only boundary and safe DTO pars
  assert.match(service,/MALFORMED_TRUSTED_RESPONSE/)
  assert.doesNotMatch(service,/return data\}/)
  assert.doesNotMatch(service,/last_error_code|source_package_fingerprint/)
+})
+
+
+test("behavioral gate tests cover approved packages, escalations, media, consent, co-performer, ownership, and conflicts",()=>{
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},package:{complianceStatus:"passed",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated",secondPersonPresent:false},latestHumanReview:null,creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{status:"granted",revokedAt:null,attestationVersion:"v1"},coPerformers:[],media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true,activeQueueConflict:false,activePublicationJobConflict:false}
+ assert.deepEqual(evaluateSchedulerGateFacts(base as any),{ok:true,code:"OK",hard:false})
+ assert.deepEqual(evaluateSchedulerGateFacts({...base,package:{...base.package,complianceStatus:"escalated_approved"},latestHumanReview:{outcome:"escalate",reason:"approved by reviewer"}} as any),{ok:true,code:"OK",hard:false})
+ assert.equal(evaluateSchedulerGateFacts({...base,latestHumanReview:{outcome:"manual_review"}} as any).code,"BLOCKING_MANUAL_REVIEW")
+ assert.equal(evaluateSchedulerGateFacts({...base,media:[]} as any).code,"MEDIA_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],sha256:"bad"}]} as any).code,"GENERATED_MEDIA_PROVENANCE_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,package:{...base.package,secondPersonPresent:true},coPerformers:[]} as any).code,"CO_PERFORMER_RELEASE_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],generation:{...base.media[0].generation!,userId:base.profileId!}}]} as any).code,"OK")
+ assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],generation:{...base.media[0].generation!,userId:"44444444-4444-4444-8444-444444444444"}}]} as any).code,"GENERATED_MEDIA_PROVENANCE_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,activeQueueConflict:true} as any).code,"ACTIVE_QUEUE_TASK_CONFLICT")
+ assert.equal(evaluateSchedulerGateFacts({...base,capability:{...base.capability,registryVersionMatches:false}} as any).code,"CAPABILITY_SNAPSHOT_STALE")
+})
+
+test("behavioral idempotency and per-job revision helpers reject stale or missing concurrency data",()=>{
+ const req={creatorId:"11111111-1111-4111-8111-111111111111",planId:"22222222-2222-4222-8222-222222222222",targetJobIds:["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],intendedPublishAt:"2026-07-12T12:00:00Z",scheduleTimezone:"UTC",actionType:"schedule" as const,expectedScheduleRevisions:{},assistedLeadPolicyVersion:"task15_60_minutes_v1"}
+ const fp=stableScheduleRequestFingerprint(req)
+ const record={requestFingerprint:fp,result:{planId:req.planId,results:[{jobId:req.targetJobIds[0],scheduleRevision:1}]}}
+ assert.deepEqual(compareIdempotencyRecord(record,fp),{kind:"replay",result:record.result})
+ assert.deepEqual(compareIdempotencyRecord(record,stableScheduleRequestFingerprint({...req,intendedPublishAt:"2026-07-12T13:00:00Z"})),{kind:"conflict",code:"IDEMPOTENCY_CONFLICT"})
+ assert.deepEqual(normalizeExpectedRevisionMap({"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa":2,"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb":7},req.targetJobIds,true),{"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa":2,"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb":7})
+ assert.throws(()=>normalizeExpectedRevisionMap({"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa":2},req.targetJobIds,true),/EXPECTED_REVISIONS_REQUIRED/)
+ assert.throws(()=>normalizeExpectedRevisionMap({"cccccccc-cccc-4ccc-8ccc-cccccccccccc":2},req.targetJobIds,true),/UNEXPECTED_REVISION_JOB/)
+})
+
+test("behavioral UTC and explicit offset parser reject malformed choices and retain DST behavior",()=>{
+ assert.equal(isValidIanaTimeZone("UTC"),true)
+ assert.deepEqual(localWallTimeToZonedRfc3339("2026-07-12T00:00","UTC"),{ok:true,rfc3339:"2026-07-12T00:00:00Z",offset:"+00:00",ambiguous:false})
+ for(const bad of ["Zjunk","junk-05:00","+05:99","+14:30"]) assert.deepEqual(localWallTimeToZonedRfc3339("2026-07-12T00:00","UTC",bad),{ok:false,code:"INVALID_OFFSET"})
+ assert.equal(localWallTimeToZonedRfc3339("2026-07-12T00:00","Pacific/Kiritimati","+14:00").ok,true)
+ assert.deepEqual(localWallTimeToZonedRfc3339("2026-03-08T02:30","America/New_York"),{ok:false,code:"NONEXISTENT_LOCAL_TIME"})
+ const amb=localWallTimeToZonedRfc3339("2026-11-01T01:30","America/New_York")
+ assert.equal(amb.ok,false)
 })
