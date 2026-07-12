@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync, readdirSync } from "node:fs"
 import test from "node:test"
 import { isValidIanaTimeZone, localWallTimeToZonedRfc3339, validateScheduleInstant } from "../../../lib/creator-publishing-queue/autopost/schedulerTime"
-import { classifyLegacyQueueCompatibility, classifySchedulerProcessorResult, compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, parseSchedulerTrustedIso, schedulerHttpStatusForErrorCode, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
+import { classifyLegacyQueueCompatibility, classifySchedulerProcessorResult, compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, normalizeSchedulerErrorCode, parseSchedulerTrustedIso, schedulerHttpStatusForErrorCode, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
 import { applyCancellationUiResults, applyScheduleUiResults, preserveUncertainScheduleUiState, selectInitialScheduleTargets, selectRescheduleTargets } from "../../../lib/creator-publishing-queue/autopost/schedulerUiState"
 import { AI_TWIN_CONSENT_VERSION } from "../../../lib/creator-publishing-queue/consent/copy"
 import { getAiTwinConsentTextSha256 } from "../../../lib/creator-publishing-queue/consent/hash"
@@ -515,8 +515,8 @@ test("runtime correction: Assisted claim ordering claims only earliest active ev
  assert.match(migration,/not exists \([\s\S]+prior\.platform_job_id=e\.platform_job_id[\s\S]+prior\.event_status in \('pending','processing'\)[\s\S]+prior\.due_at,case when prior\.event_type='operator_due' then 0 else 1 end,prior\.id/)
  assert.match(migration,/order by e\.due_at,case when e\.event_type='operator_due' then 0 else 1 end,e\.id/)
  assert.match(migration,/for update of e skip locked/)
- assert.match(migration,/row_number\(\) over \(order by c\.due_at,c\.event_order,c\.id\) as ord/)
- assert.match(migration,/select claimed\.id,claimed\.lock_token from claimed order by claimed\.ord/)
+ assert.match(migration,/limit least\(greatest\(coalesce\(p_limit,25\),1\),50\)[\s\S]+for update of e skip locked/)
+ assert.match(migration,/select claimed\.id,claimed\.lock_token from claimed order by claimed\.due_at,claimed\.event_order,claimed\.id/)
 })
 
 test("runtime correction: Assisted obsolete operator events are superseded, not blocked",()=>{
@@ -574,4 +574,54 @@ test("runtime correction: cancellation DTO validates counts, terminal states, an
  assert.match(service,/r\.closedSchedulerEventIds!=null\) parseStringArrayStrict\(r\.closedSchedulerEventIds\)/)
  assert.match(service,/r\.eventAuditEventId!=null/)
  assert.match(service,/context\.jobId&&rows\.length!==1/)
+})
+
+
+test("database-runtime closure: normalizes PostgreSQL, schema, local, and malformed errors safely",()=>{
+ for(const [error,code,status] of [
+   [{code:"P0001",message:"PLAN_CANCELLED"},"PLAN_CANCELLED",409],
+   [{code:"P0001",message:"IDEMPOTENCY_CONFLICT"},"IDEMPOTENCY_CONFLICT",409],
+   [{code:"PGRST202",message:"Could not find the function public.creator_publishing_schedule_plan"},"AUTOPOST_SCHEMA_UNAVAILABLE",503],
+   [{code:"42883",message:"function public.creator_publishing_schedule_plan does not exist"},"AUTOPOST_SCHEMA_UNAVAILABLE",503],
+   [{code:"42P01",message:"relation creator_publishing_scheduler_events does not exist"},"AUTOPOST_SCHEMA_UNAVAILABLE",503],
+   [{code:"P0001",message:"some internal exception"},"SCHEDULE_FAILED",500],
+   [{code:"INVALID_EXPECTED_REVISION",message:"INVALID_EXPECTED_REVISION"},"INVALID_EXPECTED_REVISION",400],
+   [{code:"MALFORMED_TRUSTED_RESPONSE",message:"RangeError: invalid time value"},"MALFORMED_TRUSTED_RESPONSE",500]
+ ] as const){
+   assert.equal(normalizeSchedulerErrorCode(error),code)
+   assert.equal(schedulerHttpStatusForErrorCode(code),status)
+ }
+ assert.match(service,/normalizeSchedulerErrorCode\(e\)/)
+ assert.doesNotMatch(service,/e\.code\|\|dbCode/)
+})
+
+test("database-runtime closure: bounded claim SQL limits in the locking select and audits claims",()=>{
+ const fn=migration.slice(migration.indexOf("create or replace function public.creator_publishing_claim_due_scheduler_events"),migration.indexOf("create or replace function public.creator_publishing_process_scheduler_event"))
+ const limit=fn.indexOf("limit least(greatest(coalesce(p_limit,25),1),50)")
+ const lock=fn.indexOf("for update of e skip locked")
+ assert.ok(limit>0&&lock>limit)
+ assert.doesNotMatch(fn,/row_number\(\)/)
+ assert.match(fn,/not exists \([\s\S]+prior\.platform_job_id=e\.platform_job_id[\s\S]+prior\.event_status in \('pending','processing'\)/)
+ assert.match(fn,/order by e\.due_at,case when e\.event_type='operator_due' then 0 else 1 end,e\.id[\s\S]+limit least[\s\S]+for update of e skip locked/)
+ assert.match(fn,/creator_publishing_scheduler_event_claimed/)
+ assert.doesNotMatch(fn,/lock_token[^\n]+jsonb_build_object/)
+})
+
+test("database-runtime closure: processor validates token before every mutation and audits cleanup",()=>{
+ const fn=migration.slice(migration.indexOf("create or replace function public.creator_publishing_process_scheduler_event"),migration.indexOf("revoke all on function public.creator_publishing_recalculate_plan_status"))
+ const planLock=fn.indexOf("select * into p")
+ const jobLock=fn.indexOf("select * into j")
+ const eventLock=fn.indexOf("select * into e")
+ const tokenCheck=fn.indexOf("e.lock_token is distinct from p_lock_token")
+ const cancelledPlan=fn.indexOf("PLAN_CANCELLED")
+ assert.ok(planLock>0&&jobLock>planLock&&eventLock>jobLock&&tokenCheck>eventLock&&cancelledPlan>tokenCheck)
+ for(const code of ["PLAN_CANCELLED","JOB_NOT_FOUND","REVISION_SUPERSEDED","CANCELLED","TERMINAL_JOB","OBSOLETE_OPERATOR_DUE"]){
+   const idx=fn.indexOf(code)
+   assert.ok(idx>0,code)
+   assert.ok(fn.slice(Math.max(0,idx-700),idx+900).includes("lock_token is not distinct from p_lock_token"),code)
+   assert.ok(fn.slice(idx,idx+1000).includes("get diagnostics v_event_rows = row_count")||fn.slice(Math.max(0,idx-700),idx+900).includes("get diagnostics v_event_rows = row_count"),code)
+ }
+ assert.match(fn,/creator_publishing_scheduler_event_cancelled/)
+ assert.match(fn,/creator_publishing_scheduler_event_superseded/)
+ assert.match(fn,/superseded_event_ids/)
 })

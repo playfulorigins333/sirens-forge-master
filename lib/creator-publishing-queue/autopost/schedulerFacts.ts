@@ -12,6 +12,12 @@ export type SchedulerGateFacts={creatorId:string;profileId?:string;jobState:stri
 export type GateResult={ok:boolean;code:string;hard:boolean}
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const sha=/^[a-f0-9]{64}$/i
+
+export const AUTOPOST_SCHEMA_UNAVAILABLE_CODE = "AUTOPOST_SCHEMA_UNAVAILABLE"
+const localSchedulerApplicationCodes=new Set(["UNAUTHENTICATED","INVALID_REQUEST_FIELD","INVALID_IDENTIFIER","INVALID_TARGET_JOB","DUPLICATE_TARGET_JOB","INVALID_IDEMPOTENCY_KEY","INVALID_SCHEDULE_ACTION","EXPECTED_REVISIONS_REQUIRED","UNEXPECTED_REVISION_JOB","INVALID_EXPECTED_REVISION","MALFORMED_TRUSTED_RESPONSE","INVALID_IANA_TIMEZONE","INVALID_RFC3339_INSTANT","OFFSET_TIMEZONE_INCOMPATIBLE","TARGET_JOBS_REQUIRED","CANCELLATION_REASON_REQUIRED"])
+const trustedSchedulerRpcApplicationCodes=new Set(["PLAN_CANCELLED","IDEMPOTENCY_CONFLICT","PLAN_NOT_FOUND","JOB_NOT_FOUND","CANCELLATION_REASON_REQUIRED","PROTECTED_UPDATE_MISSED","ASSISTED_LEAD_TIME_REQUIRED","STALE_SCHEDULE_REVISION","TARGET_JOBS_REQUIRED","INVALID_EXPECTED_REVISION","EXPECTED_REVISIONS_REQUIRED","UNEXPECTED_REVISION_JOB"])
+function schedulerSchemaUnavailable(error:any){ const code=String(error?.code??""); const message=String(error?.message??""); return code === "42P01" || code === "42883" || code === "PGRST202" || /does not exist|schema cache|Could not find the function|relation .* does not exist/i.test(message) }
+export function normalizeSchedulerErrorCode(e:any){ const code=String(e?.code??""); const message=String(e?.message??""); if(localSchedulerApplicationCodes.has(code)) return code; if(schedulerSchemaUnavailable(e)) return AUTOPOST_SCHEMA_UNAVAILABLE_CODE; for(const c of trustedSchedulerRpcApplicationCodes){ if((code==="P0001"||code==="XX000"||!code) && new RegExp(`(^|[^A-Z0-9_])${c}([^A-Z0-9_]|$)`).test(message)) return c } return "SCHEDULE_FAILED" }
 const terminalQueueStates=new Set(["confirmed_posted_manual","skipped","failed_manual_upload","blocked","archived"])
 function unsafe(metadata:Record<string,unknown>|undefined){return metadata?.placeholder===true||metadata?.is_placeholder===true||metadata?.test===true||metadata?.is_test===true||metadata?.unsafe===true||String(metadata?.safety??metadata?.safety_classification??"").toLowerCase()==="unsafe"}
 function later(a:SchedulerComplianceReviewFact,b:SchedulerComplianceReviewFact){return a.createdAt>b.createdAt||(a.createdAt===b.createdAt&&a.id>b.id)}
