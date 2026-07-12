@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert"
-import { readFileSync, readdirSync } from "node:fs"
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import test from "node:test"
 import { isValidIanaTimeZone, localWallTimeToZonedRfc3339, validateScheduleInstant } from "../../../lib/creator-publishing-queue/autopost/schedulerTime"
 import { classifyLegacyQueueCompatibility, classifySchedulerProcessorResult, compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, normalizeSchedulerErrorCode, parseSchedulerTrustedIso, schedulerHttpStatusForErrorCode, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
@@ -14,6 +14,9 @@ const vercel=readFileSync("vercel.json","utf8")
 const service=readFileSync("lib/creator-publishing-queue/autopost/scheduler.ts","utf8")
 const ui=readFileSync("app/autopost/Task14AutopostOrchestration.tsx","utf8")
 const route=readFileSync("app/api/creator-publishing-queue/scheduler/run/route.ts","utf8")
+const postgresWorkflow=readFileSync(".github/workflows/task15-scheduler-postgres.yml","utf8")
+const postgresRunner=readFileSync("backend/creator-publishing-queue/tests/runTask15PostgresIntegration.mjs","utf8")
+const postgresSql=readFileSync("backend/creator-publishing-queue/tests/task15PostgresIntegration.sql","utf8")
 
 test("Task 15 creates exactly one forward 01300 migration and leaves prior migrations intact",()=>{
  const files=readdirSync("supabase/migrations")
@@ -624,4 +627,66 @@ test("database-runtime closure: processor validates token before every mutation 
  assert.match(fn,/creator_publishing_scheduler_event_cancelled/)
  assert.match(fn,/creator_publishing_scheduler_event_superseded/)
  assert.match(fn,/superseded_event_ids/)
+})
+
+
+test("database-runtime closure: mocked scheduler service boundaries normalize safe database errors",async()=>{
+ mkdirSync("node_modules/server-only",{recursive:true})
+ writeFileSync("node_modules/server-only/package.json",JSON.stringify({name:"server-only",version:"0.0.0",type:"module",main:"index.js"}))
+ writeFileSync("node_modules/server-only/index.js","")
+ const {schedulePublishingPlan,cancelPublishingSchedule,httpStatusForSchedulerError}=await import("../../../lib/creator-publishing-queue/autopost/scheduler")
+ const creator="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+ const plan="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+ const job="cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+ const base={publishingPlanId:plan,intendedPublishAt:"2026-07-12T00:00:00Z",scheduleTimezone:"UTC",idempotencyKey:"runtime-key-004",targetJobIds:[job],actionType:"schedule"}
+ const deps=(error:any)=>({getAuthenticatedUserId:async()=>creator,getAdminClient:()=>({rpc:async()=>({data:null,error})})})
+ for(const [error,code,status] of [
+   [{code:"P0001",message:"PLAN_CANCELLED"},"PLAN_CANCELLED",409],
+   [{code:"P0001",message:"IDEMPOTENCY_CONFLICT"},"IDEMPOTENCY_CONFLICT",409],
+   [{code:"PGRST202",message:"Could not find the function public.creator_publishing_schedule_plan"},"AUTOPOST_SCHEMA_UNAVAILABLE",503],
+   [{code:"42883",message:"function public.creator_publishing_schedule_plan does not exist"},"AUTOPOST_SCHEMA_UNAVAILABLE",503],
+   [{code:"42P01",message:"relation creator_publishing_scheduler_events does not exist"},"AUTOPOST_SCHEMA_UNAVAILABLE",503],
+   [{code:"P0001",message:"internal exception"},"SCHEDULE_FAILED",500]
+ ] as const){
+   const result=await schedulePublishingPlan(base,deps(error))
+   assert.equal(result.ok,false)
+   assert.equal(result.code,code)
+   assert.equal(httpStatusForSchedulerError(result.code),status)
+ }
+ const cancel=await cancelPublishingSchedule({publishingPlanId:plan,reason:"test cancellation"},deps({code:"P0001",message:"PLAN_CANCELLED"}))
+ assert.equal(cancel.ok,false)
+ assert.equal(cancel.code,"PLAN_CANCELLED")
+ assert.equal(httpStatusForSchedulerError(cancel.code),409)
+ const invalidOffset=await schedulePublishingPlan({...base,intendedPublishAt:"2026-07-12T00:00:00+15:00",idempotencyKey:"runtime-key-005"},{getAuthenticatedUserId:async()=>creator,getAdminClient:()=>({rpc:async()=>({data:null,error:null})})})
+ assert.equal(invalidOffset.ok,false)
+ assert.equal(invalidOffset.code,"INVALID_RFC3339_OFFSET")
+ assert.equal(httpStatusForSchedulerError(invalidOffset.code),400)
+ const malformed=await schedulePublishingPlan({...base,idempotencyKey:"runtime-key-006"},{getAuthenticatedUserId:async()=>creator,getAdminClient:()=>({rpc:async()=>({data:{ok:true,planId:plan,results:[{jobId:job,ok:true,jobState:"scheduled_internally",scheduleRevision:2,schedulerEventIds:["dddddddd-dddd-4ddd-8ddd-dddddddddddd"],auditEventId:"1"}],auditEventIds:["1"]},error:null})})})
+ assert.equal(malformed.ok,false)
+ assert.equal(malformed.code,"MALFORMED_TRUSTED_RESPONSE")
+ assert.equal(httpStatusForSchedulerError(malformed.code),500)
+})
+
+test("database-runtime closure: invalid RFC3339 offsets are safe creator-input errors",()=>{
+ for(const instant of ["2026-07-12T00:00:00+14:30","2026-07-12T00:00:00+15:00","2026-07-12T00:00:00+05:99","2026-07-12T00:00:00Zjunk"]){
+   assert.throws(()=>validateScheduleInstant(instant,"UTC"),(e:any)=>e.code==="INVALID_RFC3339_OFFSET"||e.code==="INVALID_RFC3339_INSTANT"||e.code==="OFFSET_TIMEZONE_INCOMPATIBLE")
+ }
+ assert.equal(validateScheduleInstant("2026-07-12T14:00:00+14:00","Pacific/Kiritimati").iso,"2026-07-12T00:00:00.000Z")
+ assert.equal(schedulerHttpStatusForErrorCode("INVALID_RFC3339_OFFSET"),400)
+ assert.match(service,/INVALID_RFC3339_OFFSET:"The publication instant contains an invalid UTC offset\."/)
+})
+
+
+test("database-runtime closure: PostgreSQL integration workflow installs migration chain and exercises real SQL scenarios",()=>{
+ assert.match(postgresWorkflow,/postgres:15/)
+ assert.match(postgresWorkflow,/node backend\/creator-publishing-queue\/tests\/runTask15PostgresIntegration\.mjs/)
+ assert.match(postgresRunner,/ON_ERROR_STOP=1/)
+ for(const migration of ["20260710000100","20260710000400","20260710001100","20260711001200","20260711001300"]){
+   assert.match(postgresRunner,new RegExp(migration))
+ }
+ for(const scenario of ["initial schedule ok","exact schedule retry idempotent","changed request conflicts","reschedule increments once","new schedule on cancelled plan rejected","operator_due claimed first","expired recovery audit starts from processing","obsolete operator skipped before gate","direct path stops at direct_publish_queued","planner path stops at ready_for_export"]){
+   assert.match(postgresSql,new RegExp(scenario.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")))
+ }
+ assert.match(postgresSql,/has_table_privilege\('anon','public\.creator_publishing_scheduler_events','SELECT'\)/)
+ assert.match(postgresSql,/has_function_privilege\('service_role','public\.creator_publishing_claim_due_scheduler_events\(integer,integer\)'/)
 })

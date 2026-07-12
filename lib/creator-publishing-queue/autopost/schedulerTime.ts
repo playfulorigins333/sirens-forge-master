@@ -15,13 +15,13 @@ export function validateScheduleInstant(instant:unknown, timeZone:unknown){
   const [,y,mo,da,h,mi,s,,off]=m
   if(!isValidIanaTimeZone(timeZone)) throw Object.assign(new Error("INVALID_IANA_TIMEZONE"),{code:"INVALID_IANA_TIMEZONE"})
   if(+h>23||!validCalendar(y,mo,da,h,mi,s)) throw Object.assign(new Error("INVALID_RFC3339_INSTANT"),{code:"INVALID_RFC3339_INSTANT"})
-  const date=new Date(instant)
-  if(!Number.isFinite(date.getTime())) throw Object.assign(new Error("INVALID_RFC3339_INSTANT"),{code:"INVALID_RFC3339_INSTANT"})
-  const p=partsInZone(date,timeZone)
-  if(p.year!==y||p.month!==mo||p.day!==da||p.hour!==h||p.minute!==mi||p.second!==s) throw Object.assign(new Error("OFFSET_TIMEZONE_INCOMPATIBLE"),{code:"OFFSET_TIMEZONE_INCOMPATIBLE"})
   if(off!=="Z"){
     const mins=parseExplicitOffset(off)
     if(mins===null) throw Object.assign(new Error("INVALID_RFC3339_OFFSET"),{code:"INVALID_RFC3339_OFFSET"})
   }
+  const date=new Date(instant)
+  if(!Number.isFinite(date.getTime())) throw Object.assign(new Error("INVALID_RFC3339_INSTANT"),{code:"INVALID_RFC3339_INSTANT"})
+  const p=partsInZone(date,timeZone)
+  if(p.year!==y||p.month!==mo||p.day!==da||p.hour!==h||p.minute!==mi||p.second!==s) throw Object.assign(new Error("OFFSET_TIMEZONE_INCOMPATIBLE"),{code:"OFFSET_TIMEZONE_INCOMPATIBLE"})
   return {iso:date.toISOString(),timeZone}
 }

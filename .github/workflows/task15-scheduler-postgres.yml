@@ -1,0 +1,56 @@
+name: Task 15 Scheduler PostgreSQL Integration
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260710000100_creator_publishing_queue_foundation.sql'
+      - 'supabase/migrations/20260710000200_creator_publishing_compliance_manual_review_outcome.sql'
+      - 'supabase/migrations/20260710000300_creator_publishing_manual_review_workflow.sql'
+      - 'supabase/migrations/20260710000400_creator_publishing_creator_approval_queue.sql'
+      - 'supabase/migrations/20260710000500_creator_publishing_media_upload_intents.sql'
+      - 'supabase/migrations/20260710000600_creator_publishing_generated_media_association.sql'
+      - 'supabase/migrations/20260710000700_creator_publishing_platform_account_setup.sql'
+      - 'supabase/migrations/20260710000800_creator_publishing_package_composer.sql'
+      - 'supabase/migrations/20260710000900_creator_publishing_trusted_verification.sql'
+      - 'supabase/migrations/20260710001000_creator_publishing_ai_twin_consent.sql'
+      - 'supabase/migrations/20260710001100_creator_publishing_trusted_compliance_submission.sql'
+      - 'supabase/migrations/20260711001200_creator_publishing_autopost_orchestration.sql'
+      - 'supabase/migrations/20260711001300_creator_publishing_scheduler_due_state.sql'
+      - 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql'
+      - 'backend/creator-publishing-queue/tests/runTask15PostgresIntegration.mjs'
+      - '.github/workflows/task15-scheduler-postgres.yml'
+  workflow_dispatch:
+
+jobs:
+  postgres-integration:
+    name: PostgreSQL 15 disposable scheduler integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: task15_scheduler
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d task15_scheduler"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/task15_scheduler
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Wait for PostgreSQL
+        run: until pg_isready -h localhost -p 5432 -U postgres -d task15_scheduler; do sleep 1; done
+        env:
+          PGPASSWORD: postgres
+      - name: Apply Creator Publishing migrations and run Task 15 SQL scenarios
+        run: node backend/creator-publishing-queue/tests/runTask15PostgresIntegration.mjs
