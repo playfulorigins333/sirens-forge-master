@@ -2,7 +2,10 @@ import { strict as assert } from "node:assert"
 import { readFileSync, readdirSync } from "node:fs"
 import test from "node:test"
 import { isValidIanaTimeZone, localWallTimeToZonedRfc3339, validateScheduleInstant } from "../../../lib/creator-publishing-queue/autopost/schedulerTime"
-import { classifyLegacyQueueCompatibility, classifySchedulerProcessorResult, compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
+import { classifyLegacyQueueCompatibility, classifySchedulerProcessorResult, compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, parseSchedulerTrustedIso, schedulerHttpStatusForErrorCode, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
+import { applyScheduleUiResults, preserveUncertainScheduleUiState, selectInitialScheduleTargets, selectRescheduleTargets } from "../../../lib/creator-publishing-queue/autopost/schedulerUiState"
+import { AI_TWIN_CONSENT_VERSION } from "../../../lib/creator-publishing-queue/consent/copy"
+import { getAiTwinConsentTextSha256 } from "../../../lib/creator-publishing-queue/consent/hash"
 
 const migrationPath="supabase/migrations/20260711001300_creator_publishing_scheduler_due_state.sql"
 const migration=readFileSync(migrationPath,"utf8")
@@ -146,12 +149,12 @@ test("review fixes: composite FK has unique key and raw scheduler internals stay
 test("review fixes: every Task 15 security definer has explicit service-role-only privilege contract",()=>{
  const funcs=[
   ["creator_publishing_recalculate_plan_status","creator_publishing_recalculate_plan_status\\(uuid\\)"],
-  ["creator_publishing_scheduler_fact_snapshot","creator_publishing_scheduler_fact_snapshot\\(uuid\\)"],
-  ["creator_publishing_scheduler_gate","creator_publishing_scheduler_gate\\(uuid\\)"],
-  ["creator_publishing_schedule_plan","creator_publishing_schedule_plan\\(uuid,uuid,timestamptz,text,text,uuid\\[\\],jsonb,text\\)"],
+  ["creator_publishing_scheduler_fact_snapshot","creator_publishing_scheduler_fact_snapshot\\(uuid,text,text\\)"],
+  ["creator_publishing_scheduler_gate","creator_publishing_scheduler_gate\\(uuid,text,text\\)"],
+  ["creator_publishing_schedule_plan","creator_publishing_schedule_plan\\(uuid,uuid,timestamptz,text,text,text,text,uuid\\[\\],jsonb,text\\)"],
   ["creator_publishing_cancel_schedule","creator_publishing_cancel_schedule\\(uuid,uuid,uuid,text\\)"],
   ["creator_publishing_claim_due_scheduler_events","creator_publishing_claim_due_scheduler_events\\(integer,integer\\)"],
-  ["creator_publishing_process_scheduler_event","creator_publishing_process_scheduler_event\\(uuid,uuid\\)"],
+  ["creator_publishing_process_scheduler_event","creator_publishing_process_scheduler_event\\(uuid,uuid,text,text\\)"],
  ]
  for(const [name,sig] of funcs){
   assert.match(migration,new RegExp(`create or replace function public\\.${name}[\\s\\S]+security definer[\\s\\S]+set search_path=public,pg_temp`,"i"))
@@ -231,7 +234,7 @@ test("review fixes: UI uses stable action key, explicit timezone conversion, and
  assert.match(ui,/actionKey/) ; assert.match(ui,/actionCanonical/)
  assert.match(ui,/Retry will reuse the same action key/)
  assert.match(ui,/hasScheduled&&<button/)
- assert.match(ui,/scheduleRevision:r\.scheduleRevision/)
+ assert.match(ui,/applyScheduleUiResults\(s,body\.results\?\?\[\],reschedule\?"reschedule":"schedule"\)/)
  assert.doesNotMatch(ui,/Math\.max\(1|map\(\(\)=>1\)/)
 })
 
@@ -247,7 +250,7 @@ test("review fixes: scheduler service has server-only boundary and safe DTO pars
 
 
 test("behavioral gate tests cover approved packages, escalations, media, consent, co-performer, ownership, and conflicts",()=>{
- const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},contentPackageId:"66666666-6666-4666-8666-666666666666",platformAccountId:"77777777-7777-4777-8777-777777777777",package:{complianceStatus:"passed",compliancePolicyVersion:"v1",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated",secondPersonPresent:false},complianceReviews:[{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",reviewSource:"automated",outcome:"pass",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:00:00Z"}],creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{status:"granted",revokedAt:null,attestationVersion:"v1"},coPerformers:[],media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true,activeQueueConflict:false,activePublicationJobConflict:false}
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},contentPackageId:"66666666-6666-4666-8666-666666666666",platformAccountId:"77777777-7777-4777-8777-777777777777",package:{complianceStatus:"passed",compliancePolicyVersion:"v1",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated",secondPersonPresent:false},complianceReviews:[{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",reviewSource:"automated",outcome:"pass",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:00:00Z"}],creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{creatorId:"11111111-1111-4111-8111-111111111111",status:"granted",revokedAt:null,attestationVersion:AI_TWIN_CONSENT_VERSION,attestationTextSha256:getAiTwinConsentTextSha256()},coPerformers:[],media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true,activeQueueConflict:false,activePublicationJobConflict:false}
  assert.deepEqual(evaluateSchedulerGateFacts(base as any),{ok:true,code:"OK",hard:false})
  assert.deepEqual(evaluateSchedulerGateFacts({...base,package:{...base.package,complianceStatus:"escalated_approved"},complianceReviews:[{id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",reviewSource:"human",outcome:"escalate",reason:"approved by reviewer",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:00:00Z"}]} as any),{ok:true,code:"OK",hard:false})
  assert.equal(evaluateSchedulerGateFacts({...base,complianceReviews:[...(base as any).complianceReviews,{id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",reviewSource:"human",outcome:"manual_review",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:01:00Z"}]} as any).code,"COMPLIANCE_LATER_BLOCKING_REVIEW")
@@ -334,7 +337,7 @@ test("remaining blockers: due-time facts are locked after plan-job-event and bef
 })
 
 test("remaining blockers: generation ownership rejects null and unrelated owners",()=>{
- const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},contentPackageId:"66666666-6666-4666-8666-666666666666",platformAccountId:"77777777-7777-4777-8777-777777777777",package:{complianceStatus:"passed",compliancePolicyVersion:"v1",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated"},complianceReviews:[{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",reviewSource:"automated",outcome:"pass",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:00:00Z"}],creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{status:"granted",revokedAt:null,attestationVersion:"v1"},media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true}
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},contentPackageId:"66666666-6666-4666-8666-666666666666",platformAccountId:"77777777-7777-4777-8777-777777777777",package:{complianceStatus:"passed",compliancePolicyVersion:"v1",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated"},complianceReviews:[{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",reviewSource:"automated",outcome:"pass",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:00:00Z"}],creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{creatorId:"11111111-1111-4111-8111-111111111111",status:"granted",revokedAt:null,attestationVersion:AI_TWIN_CONSENT_VERSION,attestationTextSha256:getAiTwinConsentTextSha256()},media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true}
  assert.equal(evaluateSchedulerGateFacts(base as any).code,"OK")
  assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],generation:{...base.media[0].generation,userId:base.profileId}}]} as any).code,"OK")
  for(const owner of [null,"44444444-4444-4444-8444-444444444444","55555555-5555-4555-8555-555555555555"]) assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],generation:{...base.media[0].generation,userId:owner}}]} as any).code,"GENERATED_MEDIA_PROVENANCE_REQUIRED")
@@ -426,4 +429,74 @@ test("final review: worker classification never treats failed or malformed proce
  assert.match(service,/classifySchedulerProcessorResult\(r\.data\)/)
  assert.match(service,/summary\[classification\]\+\+/)
  assert.doesNotMatch(service,/else summary\.processed\+\+/)
+})
+
+
+test("closure: authoritative AI-twin consent policy version and hash are server-owned and enforced",()=>{
+ const hash=getAiTwinConsentTextSha256()
+ assert.equal(hash.length,64)
+ assert.match(hash,/^[a-f0-9]{64}$/)
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",contentPackageId:"66666666-6666-4666-8666-666666666666",platformAccountId:"77777777-7777-4777-8777-777777777777",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},package:{complianceStatus:"passed",compliancePolicyVersion:"v2",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated"},complianceReviews:[{id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",reviewSource:"automated",outcome:"pass",compliancePolicyVersion:"v2",createdAt:"2026-07-12T00:02:00Z"}],creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{creatorId:"11111111-1111-4111-8111-111111111111",status:"granted",revokedAt:null,attestationVersion:AI_TWIN_CONSENT_VERSION,attestationTextSha256:hash},media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true}
+ assert.equal(evaluateSchedulerGateFacts(base as any).code,"OK")
+ assert.equal(evaluateSchedulerGateFacts({...base,aiTwinConsent:{...base.aiTwinConsent,attestationVersion:"old"}} as any).code,"AI_TWIN_CONSENT_POLICY_STALE")
+ assert.equal(evaluateSchedulerGateFacts({...base,aiTwinConsent:{...base.aiTwinConsent,attestationTextSha256:"b".repeat(64)}} as any).code,"AI_TWIN_CONSENT_HASH_INVALID")
+ assert.equal(evaluateSchedulerGateFacts({...base,aiTwinConsent:{...base.aiTwinConsent,attestationTextSha256:"not-a-hash"}} as any).code,"AI_TWIN_CONSENT_HASH_INVALID")
+ assert.equal(evaluateSchedulerGateFacts({...base,aiTwinConsent:{...base.aiTwinConsent,revokedAt:"2026-07-12T00:00:00Z"}} as any).code,"AI_TWIN_CONSENT_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,aiTwinConsent:null} as any).code,"AI_TWIN_CONSENT_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,aiTwinConsent:{...base.aiTwinConsent,creatorId:"99999999-9999-4999-8999-999999999999"}} as any).code,"AI_TWIN_CONSENT_REQUIRED")
+ assert.match(service,/p_expected_ai_twin_consent_version:AI_TWIN_CONSENT_VERSION/)
+ assert.match(service,/p_expected_ai_twin_consent_text_sha256:getAiTwinConsentTextSha256\(\)/)
+ assert.match(migration,/attestation_version is distinct from p_expected_ai_twin_consent_version/)
+ assert.match(migration,/attestation_text_sha256.*p_expected_ai_twin_consent_text_sha256/)
+ assert.doesNotMatch(service.match(/const allowedScheduleKeys[^\n]+/)?.[0]??"",/expected_ai_twin|attestation/i)
+})
+
+test("closure: cancellation closes active events even for terminal and already-cancelled jobs and audits closures",()=>{
+ assert.match(migration,/create temp table cancel_locked_events[\s\S]+order by e\.id for update/)
+ assert.match(migration,/update public\.creator_publishing_scheduler_events set event_status='cancelled',cancelled_at=v_now,lock_token=null,locked_at=null,last_error_code='CANCELLED_BY_CREATOR'/)
+ assert.match(migration,/creator_publishing_scheduler_events_cancelled/)
+ const eventUpdate=migration.indexOf("last_error_code='CANCELLED_BY_CREATOR'")
+ const alreadyCancelled=migration.indexOf("outcome','already_cancelled'",eventUpdate)
+ const alreadyTerminal=migration.indexOf("outcome','already_terminal'",eventUpdate)
+ const archive=migration.indexOf("job_state='archived'",eventUpdate)
+ assert.ok(eventUpdate>0&&alreadyCancelled>eventUpdate&&alreadyTerminal>eventUpdate&&archive>eventUpdate)
+ assert.match(migration,/closedSchedulerEvents/)
+ assert.match(migration,/idempotent',\(not v_plan_changed and v_count=0 and v_events_changed=0 and not v_audit_created\)/)
+})
+
+test("closure: pure UI schedule state keeps failed reschedules as reschedule targets",()=>{
+ const jobs=[{id:"job-a",jobState:"draft"},{id:"job-b",jobState:"draft"}]
+ let state={}
+ assert.deepEqual(selectInitialScheduleTargets(jobs,state),["job-a","job-b"])
+ state=applyScheduleUiResults(state,[{jobId:"job-a",ok:true,jobState:"scheduled_internally",scheduleRevision:1}],"schedule")
+ assert.deepEqual(selectInitialScheduleTargets(jobs,state),["job-b"])
+ assert.deepEqual(selectRescheduleTargets(state),["job-a"])
+ state=applyScheduleUiResults(state,[{jobId:"job-a",ok:false,code:"STALE_SCHEDULE_REVISION",scheduleRevision:2}],"reschedule")
+ assert.deepEqual(selectInitialScheduleTargets(jobs,state),["job-b"])
+ assert.deepEqual(selectRescheduleTargets(state),["job-a"])
+ assert.equal(state["job-a"].currentJobState,"scheduled_internally")
+ assert.equal(state["job-a"].currentScheduleRevision,2)
+ assert.equal(state["job-a"].lastActionCode,"STALE_SCHEDULE_REVISION")
+ assert.equal(preserveUncertainScheduleUiState(state),state)
+})
+
+test("closure: malformed trusted responses are internal failures and invalid timestamps are sanitized",()=>{
+ assert.equal(schedulerHttpStatusForErrorCode("UNAUTHENTICATED"),401)
+ assert.equal(schedulerHttpStatusForErrorCode("INVALID_REQUEST_FIELD"),400)
+ assert.equal(schedulerHttpStatusForErrorCode("IDEMPOTENCY_CONFLICT"),409)
+ assert.equal(schedulerHttpStatusForErrorCode("PLAN_CANCELLED"),409)
+ assert.equal(schedulerHttpStatusForErrorCode("AUTOPOST_SCHEMA_UNAVAILABLE"),503)
+ assert.equal(schedulerHttpStatusForErrorCode("MALFORMED_TRUSTED_RESPONSE"),500)
+ assert.throws(()=>parseSchedulerTrustedIso("not-a-date"),(e:any)=>e.code==="MALFORMED_TRUSTED_RESPONSE"&&!String(e.message).includes("RangeError"))
+ assert.equal(parseSchedulerTrustedIso("2026-07-12T00:00:00Z"),"2026-07-12T00:00:00.000Z")
+})
+
+test("closure: cancelled plans fail closed for new schedule or reschedule requests while exact replay remains before validation",()=>{
+ const existing=migration.indexOf("select * into v_existing from public.creator_publishing_schedule_idempotency")
+ const replay=migration.indexOf("return v_existing.result || jsonb_build_object('idempotent',true)",existing)
+ const cancelled=migration.indexOf("v_plan.status='cancelled'",replay)
+ const locks=migration.indexOf("create temp table scheduler_locked_jobs",cancelled)
+ assert.ok(existing>0&&replay>existing&&cancelled>replay&&locks>cancelled)
+ assert.match(migration,/code','PLAN_CANCELLED'/)
+ assert.match(service,/"PLAN_CANCELLED"/)
 })

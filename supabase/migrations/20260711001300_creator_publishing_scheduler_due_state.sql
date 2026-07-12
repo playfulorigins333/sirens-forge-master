@@ -111,7 +111,7 @@ begin
   return jsonb_build_object('ok',false,'code','ACTIVE_QUEUE_TASK_CONFLICT','hard',true,'compatible_legacy_queue_task',null);
 end; $$;
 
-create or replace function public.creator_publishing_scheduler_fact_snapshot(p_job_id uuid)
+create or replace function public.creator_publishing_scheduler_fact_snapshot(p_job_id uuid,p_expected_ai_twin_consent_version text,p_expected_ai_twin_consent_text_sha256 text)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare
   j public.creator_publishing_platform_jobs%rowtype;
@@ -122,6 +122,7 @@ declare
   v_evidence jsonb;
   v_queue_gate jsonb;
   v_media jsonb;
+  v_consent jsonb;
 begin
   select * into j from public.creator_publishing_platform_jobs where id=p_job_id;
   if not found then return jsonb_build_object('ok',false,'code','JOB_NOT_FOUND'); end if;
@@ -137,6 +138,7 @@ begin
     where r.content_package_id=j.content_package_id and r.compliance_policy_version=pkg.compliance_policy_version and ((pkg.compliance_status='passed' and r.review_source='automated' and r.outcome='pass') or (pkg.compliance_status='escalated_approved' and r.review_source='human' and r.outcome='escalate' and length(btrim(coalesce(r.escalated_approval_reason,r.notes,'')))>0))
     order by r.created_at desc, r.id desc limit 1;
   v_queue_gate := public.creator_publishing_scheduler_queue_gate(j.creator_id,j.content_package_id,j.target_platform,j.platform_account_id);
+  select jsonb_build_object('creator_id',c.creator_id,'status',c.status,'revoked_at',c.revoked_at,'attestation_version',c.attestation_version,'attestation_text_sha256',c.attestation_text_sha256,'expected_attestation_version',p_expected_ai_twin_consent_version,'expected_attestation_text_sha256',p_expected_ai_twin_consent_text_sha256) into v_consent from public.creator_publishing_ai_twin_consents c where c.creator_id=j.creator_id;
   select coalesce(jsonb_agg(jsonb_build_object('media_id',m.id,'source',m.source,'generation_id',m.ai_generation_metadata ->> 'generation_id','storage_key',m.storage_key,'mime_type',m.mime_type,'sha256',m.sha256) order by m.id),'[]'::jsonb)
     into v_media from public.creator_publishing_media_assets m where m.content_package_id=j.content_package_id;
   return jsonb_build_object(
@@ -146,13 +148,13 @@ begin
     'package_compliance_status',coalesce(pkg.compliance_status,''),'creator_approval_status',coalesce(pkg.creator_approval_status,''),
     'creator_approved_at',pkg.creator_approved_at,'creator_approved_by',pkg.creator_approved_by,
     'ai_flag',coalesce(pkg.ai_flag,''),'second_person_present',coalesce(pkg.second_person_present,false),
-    'account_verification_status',coalesce(acct.verification_status,''),'latest_compliance_review',coalesce(v_review,'{}'::jsonb),'current_compliance_evidence',coalesce(v_evidence,'{}'::jsonb),'queue_gate',v_queue_gate,
+    'account_verification_status',coalesce(acct.verification_status,''),'ai_twin_consent',coalesce(v_consent,'{}'::jsonb),'latest_compliance_review',coalesce(v_review,'{}'::jsonb),'current_compliance_evidence',coalesce(v_evidence,'{}'::jsonb),'queue_gate',v_queue_gate,
     'media',v_media,'source_package_fingerprint',j.source_package_fingerprint,
     'source_is_current',public.creator_publishing_job_source_is_current(j.id)
   );
 end; $$;
 
-create or replace function public.creator_publishing_scheduler_gate(p_job_id uuid)
+create or replace function public.creator_publishing_scheduler_gate(p_job_id uuid,p_expected_ai_twin_consent_version text,p_expected_ai_twin_consent_text_sha256 text)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare
   j public.creator_publishing_platform_jobs%rowtype;
@@ -162,6 +164,7 @@ declare
   cap public.creator_publishing_platform_capabilities%rowtype;
   current_review public.creator_publishing_compliance_reviews%rowtype;
   later_review public.creator_publishing_compliance_reviews%rowtype;
+  consent public.creator_publishing_ai_twin_consents%rowtype;
   v_queue_gate jsonb;
   v_media_count integer;
   v_media_bad boolean;
@@ -209,7 +212,12 @@ begin
   if coalesce(acct.verification_status,'')='revoked' then return jsonb_build_object('ok',false,'code','DESTINATION_ACCOUNT_VERIFICATION_REVOKED','hard',true); end if;
   if coalesce(cap.platform_requires_creator_verification,false) and acct.verification_status <> 'verified' then return jsonb_build_object('ok',false,'code','DESTINATION_ACCOUNT_VERIFICATION_REQUIRED','hard',false); end if;
   if not coalesce(cap.platform_requires_creator_verification,false) and acct.verification_status not in ('verified','creator_attested') then return jsonb_build_object('ok',false,'code','DESTINATION_ACCOUNT_VERIFICATION_REQUIRED','hard',false); end if;
-  if pkg.ai_flag in ('ai_enhanced','ai_generated') and not exists(select 1 from public.creator_publishing_ai_twin_consents c where c.creator_id=j.creator_id and c.status='granted' and c.revoked_at is null and length(btrim(coalesce(c.attestation_version,'')))>0) then return jsonb_build_object('ok',false,'code','AI_TWIN_CONSENT_REQUIRED','hard',false); end if;
+  if pkg.ai_flag in ('ai_enhanced','ai_generated') then
+    select * into consent from public.creator_publishing_ai_twin_consents c where c.creator_id=j.creator_id;
+    if consent.creator_id is null or consent.status <> 'granted' or consent.revoked_at is not null then return jsonb_build_object('ok',false,'code','AI_TWIN_CONSENT_REQUIRED','hard',false); end if;
+    if length(btrim(coalesce(p_expected_ai_twin_consent_version,'')))=0 or consent.attestation_version is distinct from p_expected_ai_twin_consent_version then return jsonb_build_object('ok',false,'code','AI_TWIN_CONSENT_POLICY_STALE','hard',false); end if;
+    if coalesce(p_expected_ai_twin_consent_text_sha256,'') !~ '^[a-f0-9]{64}$' or coalesce(consent.attestation_text_sha256,'') !~ '^[a-f0-9]{64}$' or lower(consent.attestation_text_sha256) is distinct from lower(p_expected_ai_twin_consent_text_sha256) then return jsonb_build_object('ok',false,'code','AI_TWIN_CONSENT_HASH_INVALID','hard',false); end if;
+  end if;
   if pkg.second_person_present and not exists(select 1 from public.creator_publishing_co_performer_records r where r.content_package_id=pkg.id) then return jsonb_build_object('ok',false,'code','CO_PERFORMER_RELEASE_REQUIRED','hard',false); end if;
   if pkg.second_person_present and exists(select 1 from public.creator_publishing_co_performer_records r where r.content_package_id=pkg.id and (coalesce(r.platform_release_confirmed,false) is not true or length(btrim(coalesce(r.release_document_reference,'')))=0)) then return jsonb_build_object('ok',false,'code','CO_PERFORMER_RELEASE_REQUIRED','hard',false); end if;
 
@@ -236,16 +244,16 @@ begin
   v_queue_gate := public.creator_publishing_scheduler_queue_gate(j.creator_id,j.content_package_id,j.target_platform,j.platform_account_id);
   if (v_queue_gate->>'ok')::boolean is not true then return jsonb_build_object('ok',false,'code','ACTIVE_QUEUE_TASK_CONFLICT','hard',true); end if;
   if exists(select 1 from public.creator_publishing_platform_jobs other where other.content_package_id=j.content_package_id and other.id<>j.id and other.job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived')) then return jsonb_build_object('ok',false,'code','ACTIVE_PUBLICATION_JOB_CONFLICT','hard',true); end if;
-  v_snapshot := public.creator_publishing_scheduler_fact_snapshot(j.id);
+  v_snapshot := public.creator_publishing_scheduler_fact_snapshot(j.id,p_expected_ai_twin_consent_version,p_expected_ai_twin_consent_text_sha256);
   return jsonb_build_object('ok',true,'code','OK','hard',false,'mode',j.publishing_mode,'capability_registry_version',cap.registry_version,'source_package_fingerprint',j.source_package_fingerprint,'compatible_legacy_queue_task',v_queue_gate->'compatible_legacy_queue_task','facts_fingerprint',encode(extensions.digest(v_snapshot::text,'sha256'),'hex'));
 end; $$;
 
-create or replace function public.creator_publishing_schedule_plan(p_creator_id uuid,p_publishing_plan_id uuid,p_intended_publish_at timestamptz,p_schedule_timezone text,p_idempotency_key text,p_target_job_ids uuid[] default null,p_expected_schedule_revisions jsonb default '{}'::jsonb,p_action_type text default 'schedule')
+create or replace function public.creator_publishing_schedule_plan(p_creator_id uuid,p_publishing_plan_id uuid,p_intended_publish_at timestamptz,p_schedule_timezone text,p_idempotency_key text,p_expected_ai_twin_consent_version text,p_expected_ai_twin_consent_text_sha256 text,p_target_job_ids uuid[] default null,p_expected_schedule_revisions jsonb default '{}'::jsonb,p_action_type text default 'schedule')
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare
   v_now timestamptz:=now(); v_key text:=btrim(coalesce(p_idempotency_key,'')); v_plan public.creator_publishing_plans%rowtype; v_request_fingerprint text; v_snapshot_fingerprint text; v_existing record; v_results jsonb:='[]'::jsonb; v_audits jsonb:='[]'::jsonb; j record; v_rev int; v_state text; v_operator_due timestamptz; v_event_ids jsonb; v_audit bigint; v_request_canonical jsonb; v_snapshot_canonical jsonb; v_gate jsonb; v_expected int; v_target_ids uuid[];
 begin
- if p_creator_id is null then raise exception 'UNAUTHENTICATED'; end if; if v_key !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'IDEMPOTENCY_CONFLICT'; end if; if p_intended_publish_at is null or length(btrim(coalesce(p_schedule_timezone,'')))=0 then raise exception 'INVALID_SCHEDULE_REQUEST'; end if; if p_action_type not in ('schedule','reschedule') then raise exception 'INVALID_SCHEDULE_ACTION'; end if;
+ if p_creator_id is null then raise exception 'UNAUTHENTICATED'; end if; if length(btrim(coalesce(p_expected_ai_twin_consent_version,'')))=0 or coalesce(p_expected_ai_twin_consent_text_sha256,'') !~ '^[a-f0-9]{64}$' then raise exception 'AI_TWIN_CONSENT_POLICY_INVALID'; end if; if v_key !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'IDEMPOTENCY_CONFLICT'; end if; if p_intended_publish_at is null or length(btrim(coalesce(p_schedule_timezone,'')))=0 then raise exception 'INVALID_SCHEDULE_REQUEST'; end if; if p_action_type not in ('schedule','reschedule') then raise exception 'INVALID_SCHEDULE_ACTION'; end if;
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_creator_id::text||':schedule:'||v_key,0));
  select * into v_plan from public.creator_publishing_plans where id=p_publishing_plan_id and creator_id=p_creator_id for update; if not found then raise exception 'PLAN_NOT_FOUND'; end if;
  if p_target_job_ids is null then
@@ -260,6 +268,10 @@ begin
  v_request_fingerprint:=encode(extensions.digest(v_request_canonical::text,'sha256'),'hex');
  select * into v_existing from public.creator_publishing_schedule_idempotency where creator_id=p_creator_id and idempotency_key=v_key for update;
  if found then if v_existing.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return v_existing.result || jsonb_build_object('idempotent',true); end if;
+ if v_plan.status='cancelled' then
+   for j in select unnest(v_target_ids) as id loop v_results:=v_results||jsonb_build_array(jsonb_build_object('jobId',j.id,'ok',false,'code','PLAN_CANCELLED','scheduleRevision',0)); end loop;
+   return jsonb_build_object('ok',true,'planId',p_publishing_plan_id,'results',v_results,'auditEventIds','[]'::jsonb,'idempotent',false);
+ end if;
  -- Task 15 global lock order: plan, platform jobs, scheduler events, supporting facts.
  create temp table scheduler_locked_jobs on commit drop as select j.* from public.creator_publishing_platform_jobs j where j.publishing_plan_id=p_publishing_plan_id and j.creator_id=p_creator_id and j.id=any(v_target_ids) order by j.id for update;
  if (select count(*) from pg_temp.scheduler_locked_jobs) <> array_length(v_target_ids,1) then raise exception 'JOB_NOT_FOUND'; end if;
@@ -276,7 +288,7 @@ begin
  create temp table scheduler_locked_queue_conflicts on commit drop as select q.* from public.creator_publishing_queue_tasks q join pg_temp.scheduler_locked_packages p on p.id=q.content_package_id where q.status not in ('confirmed_posted_manual','skipped','failed_manual_upload','blocked','archived') order by q.id for update;
  create temp table scheduler_locked_publication_conflicts on commit drop as select o.* from public.creator_publishing_platform_jobs o join pg_temp.scheduler_locked_jobs j on o.content_package_id=j.content_package_id and o.id<>j.id where o.job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') order by o.id for update;
  create temp table scheduler_gate_snapshot(job_id uuid primary key, gate jsonb not null) on commit drop;
- for j in select * from pg_temp.scheduler_locked_jobs order by id loop insert into pg_temp.scheduler_gate_snapshot values(j.id, public.creator_publishing_scheduler_gate(j.id)); end loop;
+ for j in select * from pg_temp.scheduler_locked_jobs order by id loop insert into pg_temp.scheduler_gate_snapshot values(j.id, public.creator_publishing_scheduler_gate(j.id,p_expected_ai_twin_consent_version,p_expected_ai_twin_consent_text_sha256)); end loop;
  v_snapshot_canonical:=jsonb_build_object('locked_jobs',(select jsonb_agg(to_jsonb(j) order by j.id) from pg_temp.scheduler_locked_jobs j),'gates',(select jsonb_agg(jsonb_build_object('job_id',g.job_id,'gate',g.gate) order by g.job_id) from pg_temp.scheduler_gate_snapshot g),'capabilities',(select jsonb_agg(to_jsonb(c) order by c.platform) from pg_temp.scheduler_locked_capabilities c),'packages',(select jsonb_agg(to_jsonb(p) order by p.id) from pg_temp.scheduler_locked_packages p),'accounts',(select jsonb_agg(to_jsonb(a) order by a.id) from pg_temp.scheduler_locked_accounts a),'creator_verifications',(select jsonb_agg(to_jsonb(v) order by v.creator_id) from pg_temp.scheduler_locked_creator_verifications v),'ai_consents',(select jsonb_agg(to_jsonb(c) order by c.creator_id) from pg_temp.scheduler_locked_ai_consents c),'reviews',(select jsonb_agg(to_jsonb(r) order by r.content_package_id,r.created_at,r.id) from pg_temp.scheduler_locked_reviews r),'co_performers',(select jsonb_agg(to_jsonb(r) order by r.content_package_id,r.id) from pg_temp.scheduler_locked_coperformers r),'media',(select jsonb_agg(to_jsonb(m) order by m.content_package_id,m.id) from pg_temp.scheduler_locked_media m),'generations',(select jsonb_agg(to_jsonb(g) order by g.id) from pg_temp.scheduler_locked_generations g),'active_queue_conflicts',(select jsonb_agg(to_jsonb(q) order by q.id) from pg_temp.scheduler_locked_queue_conflicts q),'active_publication_conflicts',(select jsonb_agg(to_jsonb(o) order by o.id) from pg_temp.scheduler_locked_publication_conflicts o));
  v_snapshot_fingerprint:=encode(extensions.digest(v_snapshot_canonical::text,'sha256'),'hex');
  for j in select j.*,g.gate from pg_temp.scheduler_locked_jobs j join pg_temp.scheduler_gate_snapshot g on g.job_id=j.id order by j.id loop
@@ -299,24 +311,38 @@ end; $$;
 
 create or replace function public.creator_publishing_cancel_schedule(p_creator_id uuid,p_publishing_plan_id uuid,p_platform_job_id uuid,p_reason text)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
-declare v_now timestamptz:=now(); v_plan public.creator_publishing_plans%rowtype; j record; v_count int:=0; v_results jsonb:='[]'::jsonb; v_audit bigint; terminal_states constant text[]:=array['published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived'];
+declare
+  v_now timestamptz:=now(); v_plan public.creator_publishing_plans%rowtype; j record; v_count int:=0; v_events_changed int:=0; v_results jsonb:='[]'::jsonb; v_audit bigint; v_event_audit bigint; v_event_ids jsonb; v_event_rows int; v_plan_changed boolean:=false; v_audit_created boolean:=false; terminal_states constant text[]:=array['published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived'];
 begin
  if length(btrim(coalesce(p_reason,''))) not between 1 and 500 then raise exception 'CANCELLATION_REASON_REQUIRED'; end if;
  select * into v_plan from public.creator_publishing_plans where id=p_publishing_plan_id and creator_id=p_creator_id for update; if not found then raise exception 'PLAN_NOT_FOUND'; end if;
  create temp table cancel_locked_jobs on commit drop as select * from public.creator_publishing_platform_jobs where publishing_plan_id=p_publishing_plan_id and creator_id=p_creator_id and (p_platform_job_id is null or id=p_platform_job_id) order by id for update;
  if p_platform_job_id is not null and not exists(select 1 from pg_temp.cancel_locked_jobs) then return jsonb_build_object('ok',false,'code','JOB_NOT_FOUND','planId',p_publishing_plan_id,'jobId',p_platform_job_id,'results','[]'::jsonb); end if;
  create temp table cancel_locked_events on commit drop as select e.* from public.creator_publishing_scheduler_events e join pg_temp.cancel_locked_jobs j on j.id=e.platform_job_id where e.event_status in ('pending','processing') order by e.id for update;
- if p_platform_job_id is null and v_plan.status <> 'cancelled' then update public.creator_publishing_plans set status='cancelled',cancelled_at=v_now,cancelled_by=p_creator_id,cancellation_reason=btrim(p_reason),updated_at=v_now where id=p_publishing_plan_id; insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,after_state,created_at) values('creator_publishing_plan',p_publishing_plan_id,p_creator_id,'creator','creator_publishing_plan_cancelled',jsonb_build_object('reason','redacted'),v_now); end if;
+ if p_platform_job_id is null and v_plan.status <> 'cancelled' then
+   update public.creator_publishing_plans set status='cancelled',cancelled_at=v_now,cancelled_by=p_creator_id,cancellation_reason=btrim(p_reason),updated_at=v_now where id=p_publishing_plan_id;
+   v_plan_changed:=true;
+   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,after_state,created_at) values('creator_publishing_plan',p_publishing_plan_id,p_creator_id,'creator','creator_publishing_plan_cancelled',jsonb_build_object('reason','redacted'),v_now);
+   v_audit_created:=true;
+ end if;
  for j in select * from pg_temp.cancel_locked_jobs order by id loop
-   if j.cancelled_at is not null then v_results:=v_results||jsonb_build_array(jsonb_build_object('jobId',j.id,'outcome','already_cancelled','jobState',j.job_state,'scheduleRevision',coalesce(j.schedule_revision,0))); continue; end if;
-   if j.job_state = any(terminal_states) then v_results:=v_results||jsonb_build_array(jsonb_build_object('jobId',j.id,'outcome','already_terminal','jobState',j.job_state,'scheduleRevision',coalesce(j.schedule_revision,0))); continue; end if;
+   select coalesce(jsonb_agg(e.id order by e.id),'[]'::jsonb) into v_event_ids from pg_temp.cancel_locked_events e where e.platform_job_id=j.id;
+   if jsonb_array_length(v_event_ids)>0 then
+     update public.creator_publishing_scheduler_events set event_status='cancelled',cancelled_at=v_now,lock_token=null,locked_at=null,last_error_code='CANCELLED_BY_CREATOR' where platform_job_id=j.id and event_status in ('pending','processing');
+     get diagnostics v_event_rows = row_count; v_events_changed:=v_events_changed+v_event_rows;
+     insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_platform_job',j.id,p_creator_id,'creator','creator_publishing_scheduler_events_cancelled',jsonb_build_object('scheduler_event_ids',v_event_ids),jsonb_build_object('scheduler_event_ids',v_event_ids,'reason','redacted'),v_now) returning id into v_event_audit;
+     v_audit_created:=true;
+   else
+     v_event_audit:=null;
+   end if;
+   if j.cancelled_at is not null then v_results:=v_results||jsonb_build_array(jsonb_build_object('jobId',j.id,'outcome','already_cancelled','jobState',j.job_state,'scheduleRevision',coalesce(j.schedule_revision,0),'closedSchedulerEventIds',v_event_ids,'eventAuditEventId',case when v_event_audit is null then null else v_event_audit::text end)); continue; end if;
+   if j.job_state = any(terminal_states) then v_results:=v_results||jsonb_build_array(jsonb_build_object('jobId',j.id,'outcome','already_terminal','jobState',j.job_state,'scheduleRevision',coalesce(j.schedule_revision,0),'closedSchedulerEventIds',v_event_ids,'eventAuditEventId',case when v_event_audit is null then null else v_event_audit::text end)); continue; end if;
    update public.creator_publishing_platform_jobs set job_state='archived',cancelled_at=v_now,cancelled_by=p_creator_id,cancellation_reason=btrim(p_reason),updated_at=v_now where id=j.id;
-   update public.creator_publishing_scheduler_events set event_status='cancelled',cancelled_at=v_now,lock_token=null,locked_at=null where platform_job_id=j.id and event_status in ('pending','processing');
-   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_platform_job',j.id,p_creator_id,'creator','creator_publishing_job_cancelled',jsonb_build_object('job_state',j.job_state),jsonb_build_object('job_state','archived'),v_now) returning id into v_audit;
-   v_count:=v_count+1; v_results:=v_results||jsonb_build_array(jsonb_build_object('jobId',j.id,'outcome','archived','jobState','archived','scheduleRevision',coalesce(j.schedule_revision,0),'auditEventId',v_audit::text));
+   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_platform_job',j.id,p_creator_id,'creator','creator_publishing_job_cancelled',jsonb_build_object('job_state',j.job_state),jsonb_build_object('job_state','archived','scheduler_event_ids',v_event_ids),v_now) returning id into v_audit;
+   v_audit_created:=true; v_count:=v_count+1; v_results:=v_results||jsonb_build_array(jsonb_build_object('jobId',j.id,'outcome','archived','jobState','archived','scheduleRevision',coalesce(j.schedule_revision,0),'auditEventId',v_audit::text,'closedSchedulerEventIds',v_event_ids,'eventAuditEventId',case when v_event_audit is null then null else v_event_audit::text end));
  end loop;
  if p_platform_job_id is not null and v_plan.status <> 'cancelled' then perform public.creator_publishing_recalculate_plan_status(p_publishing_plan_id); end if;
- return jsonb_build_object('ok',true,'planId',p_publishing_plan_id,'jobId',p_platform_job_id,'cancelledJobs',v_count,'results',v_results,'idempotent',v_count=0);
+ return jsonb_build_object('ok',true,'planId',p_publishing_plan_id,'jobId',p_platform_job_id,'cancelledJobs',v_count,'closedSchedulerEvents',v_events_changed,'results',v_results,'idempotent',(not v_plan_changed and v_count=0 and v_events_changed=0 and not v_audit_created));
 end; $$;
 
 create or replace function public.creator_publishing_claim_due_scheduler_events(p_limit integer default 25,p_lock_minutes integer default 15)
@@ -332,7 +358,7 @@ begin
  ) select claimed.id,claimed.lock_token from claimed order by claimed.id;
 end; $$;
 
-create or replace function public.creator_publishing_process_scheduler_event(p_event_id uuid,p_lock_token uuid)
+create or replace function public.creator_publishing_process_scheduler_event(p_event_id uuid,p_lock_token uuid,p_expected_ai_twin_consent_version text,p_expected_ai_twin_consent_text_sha256 text)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare e0 record; e public.creator_publishing_scheduler_events%rowtype; j public.creator_publishing_platform_jobs%rowtype; p public.creator_publishing_plans%rowtype; c public.creator_publishing_platform_capabilities%rowtype; v_now timestamptz:=now(); v_gate jsonb; v_state text; v_audit bigint; v_job_rows int; v_event_rows int; terminal_states constant text[]:=array['published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived'];
 begin
@@ -359,7 +385,7 @@ begin
  create temp table process_locked_generations on commit drop as select g.* from public.generations g join pg_temp.process_locked_media m on g.id::text=m.ai_generation_metadata ->> 'generation_id' order by g.id for update;
  create temp table process_locked_queue_conflicts on commit drop as select q.* from public.creator_publishing_queue_tasks q where q.content_package_id=j.content_package_id and q.status not in ('confirmed_posted_manual','skipped','failed_manual_upload','blocked','archived') order by q.id for update;
  create temp table process_locked_publication_conflicts on commit drop as select o.* from public.creator_publishing_platform_jobs o where o.content_package_id=j.content_package_id and o.id<>j.id and o.job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') order by o.id for update;
- v_gate:=public.creator_publishing_scheduler_gate(j.id);
+ v_gate:=public.creator_publishing_scheduler_gate(j.id,p_expected_ai_twin_consent_version,p_expected_ai_twin_consent_text_sha256);
  if (v_gate->>'ok')::boolean is not true then update public.creator_publishing_platform_jobs set job_state=case when coalesce((v_gate->>'hard')::boolean,false) then 'blocked' else 'needs_fix' end, updated_at=v_now where id=j.id and not (job_state = any(terminal_states)); get diagnostics v_job_rows = row_count; update public.creator_publishing_scheduler_events set event_status='blocked',processed_at=v_now,lock_token=null,locked_at=null,last_error_code=v_gate->>'code' where id=e.id and event_status='processing' and lock_token is not distinct from p_lock_token; get diagnostics v_event_rows = row_count; if v_job_rows<>1 or v_event_rows<>1 then raise exception 'PROTECTED_UPDATE_MISSED'; end if; update public.creator_publishing_scheduler_events set event_status='superseded',superseded_at=v_now,lock_token=null,locked_at=null where platform_job_id=j.id and schedule_revision=e.schedule_revision and event_status in ('pending','processing') and id<>e.id; insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_platform_job',j.id,'system','creator_publishing_due_state_transition_blocked',jsonb_build_object('job_state',j.job_state),jsonb_build_object('event_id',e.id,'code',v_gate->>'code'),v_now) returning id into v_audit; perform public.creator_publishing_recalculate_plan_status(j.publishing_plan_id); return jsonb_build_object('ok',false,'blocked',true,'code',v_gate->>'code','auditEventId',v_audit::text); end if;
  select * into c from pg_temp.process_locked_capabilities where platform=j.target_platform;
  v_state:=case when e.event_type='operator_due' and j.publishing_mode='assisted' and j.job_state='scheduled_internally' then 'awaiting_operator' when e.event_type='publish_due' and j.publishing_mode='assisted' and j.job_state in ('scheduled_internally','awaiting_operator') then 'due_now' when e.event_type='publish_due' and j.publishing_mode='direct' and j.job_state='ready_to_publish' and c.publishing_mode='direct' and c.availability_status='available' and c.connector_can_publish_immediately then 'direct_publish_queued' when e.event_type='publish_due' and j.publishing_mode='planner' and j.job_state='package_ready' then 'ready_for_export' else null end;
@@ -373,17 +399,17 @@ end; $$;
 
 revoke all on function public.creator_publishing_recalculate_plan_status(uuid) from public, anon, authenticated;
 revoke all on function public.creator_publishing_scheduler_queue_gate(uuid,uuid,text,uuid) from public, anon, authenticated;
-revoke all on function public.creator_publishing_scheduler_fact_snapshot(uuid) from public, anon, authenticated;
-revoke all on function public.creator_publishing_scheduler_gate(uuid) from public, anon, authenticated;
-revoke all on function public.creator_publishing_schedule_plan(uuid,uuid,timestamptz,text,text,uuid[],jsonb,text) from public, anon, authenticated;
+revoke all on function public.creator_publishing_scheduler_fact_snapshot(uuid,text,text) from public, anon, authenticated;
+revoke all on function public.creator_publishing_scheduler_gate(uuid,text,text) from public, anon, authenticated;
+revoke all on function public.creator_publishing_schedule_plan(uuid,uuid,timestamptz,text,text,text,text,uuid[],jsonb,text) from public, anon, authenticated;
 revoke all on function public.creator_publishing_cancel_schedule(uuid,uuid,uuid,text) from public, anon, authenticated;
 revoke all on function public.creator_publishing_claim_due_scheduler_events(integer,integer) from public, anon, authenticated;
-revoke all on function public.creator_publishing_process_scheduler_event(uuid,uuid) from public, anon, authenticated;
+revoke all on function public.creator_publishing_process_scheduler_event(uuid,uuid,text,text) from public, anon, authenticated;
 grant execute on function public.creator_publishing_recalculate_plan_status(uuid) to service_role;
 grant execute on function public.creator_publishing_scheduler_queue_gate(uuid,uuid,text,uuid) to service_role;
-grant execute on function public.creator_publishing_scheduler_fact_snapshot(uuid) to service_role;
-grant execute on function public.creator_publishing_scheduler_gate(uuid) to service_role;
-grant execute on function public.creator_publishing_schedule_plan(uuid,uuid,timestamptz,text,text,uuid[],jsonb,text) to service_role;
+grant execute on function public.creator_publishing_scheduler_fact_snapshot(uuid,text,text) to service_role;
+grant execute on function public.creator_publishing_scheduler_gate(uuid,text,text) to service_role;
+grant execute on function public.creator_publishing_schedule_plan(uuid,uuid,timestamptz,text,text,text,text,uuid[],jsonb,text) to service_role;
 grant execute on function public.creator_publishing_cancel_schedule(uuid,uuid,uuid,text) to service_role;
 grant execute on function public.creator_publishing_claim_due_scheduler_events(integer,integer) to service_role;
-grant execute on function public.creator_publishing_process_scheduler_event(uuid,uuid) to service_role;
+grant execute on function public.creator_publishing_process_scheduler_event(uuid,uuid,text,text) to service_role;
