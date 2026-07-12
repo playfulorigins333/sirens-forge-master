@@ -4,6 +4,10 @@
     {
       "path": "/api/autopost/run",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/creator-publishing-queue/scheduler/run",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

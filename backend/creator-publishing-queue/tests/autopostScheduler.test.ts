@@ -1,0 +1,136 @@
+import { strict as assert } from "node:assert"
+import { readFileSync, readdirSync } from "node:fs"
+import test from "node:test"
+import { ASSISTED_OPERATOR_LEAD_MINUTES, isAuthorizedSchedulerRun, isValidIanaTimeZone, validateScheduleInstant } from "../../../lib/creator-publishing-queue/autopost/scheduler"
+
+const migrationPath="supabase/migrations/20260711001300_creator_publishing_scheduler_due_state.sql"
+const migration=readFileSync(migrationPath,"utf8")
+const pkg=readFileSync("package.json","utf8")
+const vercel=readFileSync("vercel.json","utf8")
+const service=readFileSync("lib/creator-publishing-queue/autopost/scheduler.ts","utf8")
+const ui=readFileSync("app/autopost/Task14AutopostOrchestration.tsx","utf8")
+const route=readFileSync("app/api/creator-publishing-queue/scheduler/run/route.ts","utf8")
+
+test("Task 15 creates exactly one forward 01300 migration and leaves prior migrations intact",()=>{
+ const files=readdirSync("supabase/migrations")
+ assert.deepEqual(files.filter(f=>f.includes("20260711001300")),["20260711001300_creator_publishing_scheduler_due_state.sql"])
+ for(const n of ["00100","00200","00300","00400","00500","00600","00700","00800","00900","01000","01100","01200"]) assert.equal(files.some(f=>f.includes(n)),true)
+ assert.match(pkg,/autopostScheduler\.test\.ts/)
+})
+
+test("migration adds trusted schedule columns, scheduler events, ownership FKs, RLS, and service-role-only mutation",()=>{
+ for(const col of ["intended_publish_at timestamptz","schedule_timezone text","operator_due_at timestamptz","schedule_revision integer","scheduled_at timestamptz","scheduled_by uuid","rescheduled_at timestamptz","cancelled_at timestamptz","cancelled_by uuid","cancellation_reason text"]) assert.match(migration,new RegExp(col.replace(/[()]/g,"\\$&")))
+ assert.match(migration,/create table if not exists public\.creator_publishing_scheduler_events/)
+ assert.match(migration,/event_type text not null check \(event_type in \('operator_due','publish_due'\)\)/)
+ assert.match(migration,/event_status text not null default 'pending' check \(event_status in \('pending','processing','processed','blocked','superseded','cancelled'\)\)/)
+ assert.match(migration,/foreign key \(publishing_plan_id, creator_id\)/)
+ assert.match(migration,/foreign key \(platform_job_id, publishing_plan_id, creator_id\)/)
+ assert.match(migration,/enable row level security/)
+ assert.match(migration,/revoke all on table public\.creator_publishing_scheduler_events from public, anon, authenticated/)
+ assert.match(migration,/grant all on table public\.creator_publishing_scheduler_events to service_role/)
+ assert.match(migration,/unique \(platform_job_id, event_type, schedule_revision\)/)
+ assert.match(migration,/where event_status in \('pending','processing'\)/)
+ assert.doesNotMatch(migration,/insert into public\.creator_publishing_queue_tasks|update public\.creator_publishing_queue_tasks/)
+})
+
+test("database consistency rejects missing timezone, invalid assisted due, stale active events, and browser-owned protected fields",()=>{
+ assert.match(migration,/schedule_timezone_required/)
+ assert.match(migration,/assisted_operator_due_required/)
+ assert.match(migration,/operator_due_at <= intended_publish_at/)
+ assert.match(migration,/schedule_revision > 0/)
+ assert.match(migration,/cancelled_metadata_consistent/)
+ assert.match(migration,/event_status='superseded',superseded_at=v_now,lock_token=null,locked_at=null/)
+ assert.match(service,/p_creator_id:creatorId/)
+ assert.doesNotMatch(service,/creatorId\s*:\s*input|publishingMode|capability_registry_version|source_package_fingerprint/)
+})
+
+test("trusted scheduling command implements per-destination isolation, gates, modes, idempotency, and 60-minute assisted lead time",()=>{
+ assert.equal(ASSISTED_OPERATOR_LEAD_MINUTES,60)
+ assert.match(migration,/p_intended_publish_at - interval '60 minutes'/)
+ assert.match(migration,/ASSISTED_LEAD_TIME_REQUIRED/)
+ assert.match(migration,/for j in select[\s\S]+order by j\.id for update loop/)
+ assert.match(migration,/creator_publishing_schedule_idempotency/)
+ assert.match(migration,/IDEMPOTENCY_CONFLICT/)
+ assert.match(migration,/creator_publishing_job_source_is_current/)
+ assert.match(migration,/j\.target_platform='fanvue'/)
+ assert.match(migration,/j\.availability_status <> 'available' or j\.publishing_mode='disabled'/)
+ assert.match(migration,/when 'assisted' then 'scheduled_internally'/)
+ assert.match(migration,/when 'direct' then 'ready_to_publish'/)
+ assert.match(migration,/when 'planner' then 'package_ready'/)
+ assert.doesNotMatch(service,/fetch\(|postXTextOnlyAutopost|fanvue|credentials|cookies|proxy|2FA|upload/i)
+})
+
+test("rescheduling and cancellation preserve history and use expected revisions",()=>{
+ assert.match(migration,/p_expected_schedule_revision/)
+ assert.match(migration,/STALE_SCHEDULE_REVISION/)
+ assert.match(migration,/v_rev:=coalesce\(j\.schedule_revision,0\)\+1/)
+ assert.match(migration,/event_status='superseded'/)
+ assert.match(migration,/creator_publishing_job_rescheduled/)
+ assert.match(migration,/creator_publishing_cancel_schedule/)
+ assert.match(migration,/CANCELLATION_REASON_REQUIRED/)
+ assert.match(migration,/job_state='archived'/)
+ assert.match(migration,/event_status='cancelled'/)
+ assert.match(migration,/creator_publishing_plan_cancelled/)
+ assert.doesNotMatch(migration,/delete from public\.creator_publishing_scheduler_events|delete from public\.creator_publishing_platform_jobs|delete from public\.creator_publishing_plans/)
+})
+
+test("worker uses cron secret, bounded batch, lock tokens, SKIP LOCKED, expired lock recovery, safe summary, and mode-specific due states",()=>{
+ assert.match(route,/runtime="nodejs"/)
+ assert.match(route,/dynamic="force-dynamic"/)
+ assert.equal(isAuthorizedSchedulerRun(new Request("http://x")),false)
+ process.env.CRON_SECRET="s3cret"
+ assert.equal(isAuthorizedSchedulerRun(new Request("http://x",{headers:{authorization:"Bearer wrong"}})),false)
+ assert.equal(isAuthorizedSchedulerRun(new Request("http://x",{headers:{authorization:"Bearer s3cret"}})),true)
+ delete process.env.CRON_SECRET
+ assert.match(migration,/for update skip locked/)
+ assert.match(migration,/limit least\(greatest\(coalesce\(p_limit,25\),1\),50\)/)
+ assert.match(migration,/lock_token=gen_random_uuid\(\)/)
+ assert.match(migration,/locked_at < now\(\) - make_interval/)
+ assert.match(migration,/processing_attempts=processing_attempts\+1/)
+ assert.match(migration,/when e\.event_type='operator_due' and j\.publishing_mode='assisted' then 'awaiting_operator'/)
+ assert.match(migration,/when e\.event_type='publish_due' and j\.publishing_mode='assisted' then 'due_now'/)
+ assert.match(migration,/when e\.event_type='publish_due' and j\.publishing_mode='direct' and c\.connector_can_publish_immediately then 'direct_publish_queued'/)
+ assert.match(migration,/when e\.event_type='publish_due' and j\.publishing_mode='planner' then 'ready_for_export'/)
+ assert.doesNotMatch(migration,/set job_state='confirmed_posted_manual'|set job_state='published_direct'|platform_post_id/)
+ assert.match(service,/summary=\{scanned:0,claimed:0,processed:0,blocked:0,skipped:0,failed:0\}/)
+})
+
+test("due-time gate rechecks block stale or invalidated jobs and aggregate parent through canonical helper",()=>{
+ assert.match(migration,/creator_publishing_job_source_is_current\(j\.id\)/)
+ assert.match(migration,/CURRENT_GATES_BLOCKED/)
+ assert.match(migration,/job_state=case when c\.availability_status='available' then 'needs_fix' else 'blocked' end/)
+ assert.match(migration,/event_status='blocked'/)
+ assert.match(migration,/event_status='superseded'[\s\S]+schedule_revision=e\.schedule_revision/)
+ assert.match(migration,/creator_publishing_recalculate_plan_status/)
+ assert.match(migration,/creator_publishing_aggregate_plan_status/)
+ assert.match(migration,/creator_publishing_due_state_transition_completed/)
+})
+
+test("strict IANA timezone and RFC3339 validation covers DST and calendar edge cases",()=>{
+ assert.equal(isValidIanaTimeZone("America/New_York"),true)
+ assert.equal(isValidIanaTimeZone("Asia/Kolkata"),true)
+ assert.equal(isValidIanaTimeZone("Etc/GMT+5"),false)
+ for(const bad of ["","UTC+05:00","+05:00","Mars/Olympus"," America/New_York"]) assert.equal(isValidIanaTimeZone(bad),false)
+ assert.throws(()=>validateScheduleInstant("2026-03-08T02:30:00-05:00","America/New_York"),/OFFSET_TIMEZONE_INCOMPATIBLE/)
+ assert.doesNotThrow(()=>validateScheduleInstant("2026-11-01T01:30:00-04:00","America/New_York"))
+ assert.doesNotThrow(()=>validateScheduleInstant("2026-11-01T01:30:00-05:00","America/New_York"))
+ assert.throws(()=>validateScheduleInstant("2026-11-01T01:30:00-06:00","America/New_York"),/OFFSET_TIMEZONE_INCOMPATIBLE/)
+ assert.throws(()=>validateScheduleInstant("2026-02-29T12:00:00Z","UTC"))
+ assert.doesNotThrow(()=>validateScheduleInstant("2028-02-29T12:00:00Z","UTC"))
+ assert.doesNotThrow(()=>validateScheduleInstant("2026-07-12T17:30:00+05:30","Asia/Kolkata"))
+ assert.doesNotThrow(()=>validateScheduleInstant("2026-07-12T09:00:00-07:00","America/Los_Angeles"))
+ assert.doesNotThrow(()=>validateScheduleInstant("2026-07-12T13:00:00+04:00","Asia/Dubai"))
+ for(const bad of ["2026-13-01T00:00:00Z","2026-04-31T00:00:00Z","2026-01-01T24:00:00Z","2026-01-01T00:00:00+25:00","not a date"]) assert.throws(()=>validateScheduleInstant(bad,"UTC"))
+})
+
+test("minimal creator API/UI and cron preserve platform-neutral safety boundaries",()=>{
+ assert.match(ui,/Intl\.DateTimeFormat\(\)\.resolvedOptions\(\)\.timeZone/)
+ assert.match(ui,/Schedule Publishing Plan/)
+ assert.match(ui,/Reschedule/)
+ assert.match(ui,/Cancel plan/)
+ assert.match(ui,/Cancel destination/)
+ assert.match(vercel,/"path": "\/api\/autopost\/run"[\s\S]*"schedule": "\*\/5 \* \* \* \*"/)
+ assert.match(vercel,/"path": "\/api\/creator-publishing-queue\/scheduler\/run"[\s\S]*"schedule": "\*\/5 \* \* \* \*"/)
+ assert.doesNotMatch(ui,/proof upload|credentials|cookie|2FA|browser automation|proxy/i)
+ for(const f of ["app/api/autopost/run/route.ts","lib/autopost/fanvueOAuth.ts"]) assert.ok(readFileSync(f,"utf8").length>0)
+})
