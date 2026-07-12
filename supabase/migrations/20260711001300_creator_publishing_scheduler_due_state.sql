@@ -2,6 +2,54 @@
 -- Forward-only additive migration. Do not apply automatically; do not edit migrations 00100-01200.
 create extension if not exists pgcrypto with schema extensions;
 
+-- Forward-only repair for deployed Task 1 helper ambiguity under standard PL/pgSQL variable-conflict handling.
+create or replace function public.creator_publishing_queue_jsonb_has_forbidden_credential_key(value jsonb)
+returns boolean
+language plpgsql
+immutable
+as $$
+declare
+  object_key text;
+  object_value jsonb;
+  array_value jsonb;
+begin
+  if jsonb_typeof($1) = 'object' then
+    for object_key, object_value in
+      select entry.key, entry.value
+      from jsonb_each($1) as entry(key, value)
+    loop
+      if lower(object_key) in (
+        'password','access_token','refresh_token','auth_token','session','session_id',
+        'cookie','cookies','two_factor_secret','recovery_code','platform_secret'
+      ) then
+        return true;
+      end if;
+
+      if public.creator_publishing_queue_jsonb_has_forbidden_credential_key(object_value) then
+        return true;
+      end if;
+    end loop;
+
+    return false;
+  end if;
+
+  if jsonb_typeof($1) = 'array' then
+    for array_value in
+      select element.value
+      from jsonb_array_elements($1) as element(value)
+    loop
+      if public.creator_publishing_queue_jsonb_has_forbidden_credential_key(array_value) then
+        return true;
+      end if;
+    end loop;
+
+    return false;
+  end if;
+
+  return false;
+end;
+$$;
+
 alter table public.creator_publishing_platform_jobs
   add column if not exists intended_publish_at timestamptz,
   add column if not exists schedule_timezone text,

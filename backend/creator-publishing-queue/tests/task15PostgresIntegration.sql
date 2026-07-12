@@ -24,6 +24,12 @@ select public.task15_assert(has_function_privilege('service_role','public.creato
 select public.task15_assert((select prosecdef from pg_proc where oid='public.creator_publishing_process_scheduler_event(uuid,uuid,text,text)'::regprocedure), 'process RPC is security definer');
 select public.task15_assert((select replace(array_to_string(proconfig,','),' ','') from pg_proc where oid='public.creator_publishing_process_scheduler_event(uuid,uuid,text,text)'::regprocedure) like '%search_path=public,pg_temp%', 'process RPC search_path pinned');
 
+-- Forward-only Task 15 repair for deployed credential-key helper ambiguity.
+select public.task15_assert(not public.creator_publishing_queue_jsonb_has_forbidden_credential_key('{"safe":{"nested":[{"caption":"ok"}]}}'::jsonb), 'credential helper safe nested json false');
+select public.task15_assert(public.creator_publishing_queue_jsonb_has_forbidden_credential_key('{"access_token":"redacted"}'::jsonb), 'credential helper top-level forbidden key true');
+select public.task15_assert(public.creator_publishing_queue_jsonb_has_forbidden_credential_key('{"safe":{"cookie":"redacted"}}'::jsonb), 'credential helper nested object forbidden key true');
+select public.task15_assert(public.creator_publishing_queue_jsonb_has_forbidden_credential_key(jsonb_build_array(jsonb_build_object('platform_secret','redacted'))), 'credential helper nested array forbidden key true');
+
 -- Seed one valid assisted OnlyFans package/job with structured generated-media facts.
 do $$
 declare
