@@ -54,3 +54,29 @@ jobs:
           PGPASSWORD: postgres
       - name: Apply Creator Publishing migrations and run Task 15 SQL scenarios
         run: node backend/creator-publishing-queue/tests/runTask15PostgresIntegration.mjs
+      - name: Summarize PostgreSQL diagnostic failure
+        if: failure()
+        run: |
+          {
+            echo "## PostgreSQL integration failed"
+            echo
+            echo "Diagnostic artifact: task15-postgres-diagnostics"
+            echo "Commit SHA: ${GITHUB_SHA}"
+            echo "Inspect task15-postgres-diagnostics.log for the complete psql stdout/stderr."
+            echo
+            echo '```text'
+            if [ -f task15-postgres-diagnostics.log ]; then
+              tail -n 100 task15-postgres-diagnostics.log
+            else
+              echo "task15-postgres-diagnostics.log was not created."
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Task 15 PostgreSQL diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task15-postgres-diagnostics
+          path: task15-postgres-diagnostics.log
+          if-no-files-found: error
+          retention-days: 7

@@ -1,17 +1,67 @@
 import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('DATABASE_URL is required for Task 15 PostgreSQL integration')
+const diagnosticsPath = join(root, 'task15-postgres-diagnostics.log')
+writeFileSync(diagnosticsPath, `Task 15 PostgreSQL diagnostics\nRepository root: ${root}\n`)
 
-function psql(args, input) {
-  const result = spawnSync('psql', ['--set', 'ON_ERROR_STOP=1', databaseUrl, ...args], { input, stdio: input ? ['pipe', 'inherit', 'inherit'] : 'inherit', encoding: 'utf8' })
-  if (result.status !== 0) process.exit(result.status ?? 1)
+function appendDiagnostics(text) {
+  appendFileSync(diagnosticsPath, text)
 }
 
-psql([], `
+function tailDiagnostics(lines = 250) {
+  if (!existsSync(diagnosticsPath)) return ''
+  return readFileSync(diagnosticsPath, 'utf8').split(/\r?\n/).slice(-lines).join('\n')
+}
+
+function runPsql({ commandType, file, args = [], input }) {
+  const heading = [
+    '\n==================================================',
+    `COMMAND TYPE: ${commandType}`,
+    file ? `FILE: ${file}` : null,
+    'COMMAND: psql --set ON_ERROR_STOP=1 [REDACTED_DATABASE_URL] ' + args.join(' '),
+    '==================================================\n',
+  ].filter(Boolean).join('\n')
+  appendDiagnostics(heading)
+  process.stdout.write(heading)
+
+  const result = spawnSync('psql', ['--set', 'ON_ERROR_STOP=1', databaseUrl, ...args], {
+    input,
+    encoding: 'utf8',
+    maxBuffer: 50 * 1024 * 1024,
+  })
+
+  const stdout = result.stdout ?? ''
+  const stderr = result.stderr ?? ''
+  if (stdout) process.stdout.write(stdout)
+  if (stderr) process.stderr.write(stderr)
+  appendDiagnostics(`EXIT STATUS: ${result.status ?? ''}\n`)
+  appendDiagnostics(`SIGNAL: ${result.signal ?? ''}\n`)
+  appendDiagnostics('----- STDOUT BEGIN -----\n')
+  appendDiagnostics(stdout)
+  if (stdout && !stdout.endsWith('\n')) appendDiagnostics('\n')
+  appendDiagnostics('----- STDOUT END -----\n')
+  appendDiagnostics('----- STDERR BEGIN -----\n')
+  appendDiagnostics(stderr)
+  if (stderr && !stderr.endsWith('\n')) appendDiagnostics('\n')
+  appendDiagnostics('----- STDERR END -----\n')
+
+  if (result.status !== 0 || result.signal) {
+    appendDiagnostics(`FAILED COMMAND TYPE: ${commandType}\n`)
+    appendDiagnostics(`FAILED FILE: ${file ?? ''}\n`)
+    appendDiagnostics(`EXIT STATUS: ${result.status ?? ''}\n`)
+    appendDiagnostics(`SIGNAL: ${result.signal ?? ''}\n`)
+    process.stderr.write('\nLast 250 lines of task15-postgres-diagnostics.log:\n')
+    process.stderr.write(tailDiagnostics(250) + '\n')
+    process.exit(result.status ?? 1)
+  }
+}
+
+runPsql({ commandType: 'BOOTSTRAP', input: `
 create schema if not exists auth;
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
@@ -59,7 +109,7 @@ create table if not exists public.generations (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-`)
+` })
 
 const migrations = [
   '20260710000100_creator_publishing_queue_foundation.sql',
@@ -77,8 +127,14 @@ const migrations = [
   '20260711001300_creator_publishing_scheduler_due_state.sql',
 ]
 for (const migration of migrations) {
-  console.log(`Applying ${migration}`)
-  psql(['--file', join(root, 'supabase/migrations', migration)])
+  runPsql({
+    commandType: 'MIGRATION',
+    file: migration,
+    args: ['--file', join(root, 'supabase/migrations', migration)],
+  })
 }
-console.log('Running Task 15 PostgreSQL integration assertions')
-psql(['--file', join(root, 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql')])
+runPsql({
+  commandType: 'INTEGRATION ASSERTIONS',
+  file: 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql',
+  args: ['--file', join(root, 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql')],
+})
