@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync, readdirSync } from "node:fs"
 import test from "node:test"
 import { isValidIanaTimeZone, localWallTimeToZonedRfc3339, validateScheduleInstant } from "../../../lib/creator-publishing-queue/autopost/schedulerTime"
-import { compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, stableScheduleRequestFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
+import { compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
 
 const migrationPath="supabase/migrations/20260711001300_creator_publishing_scheduler_due_state.sql"
 const migration=readFileSync(migrationPath,"utf8")
@@ -189,7 +189,10 @@ test("review fixes: idempotency uses a stable request fingerprint before mutatio
 
 test("review fixes: processing locks job before event and clears lock fields for final statuses",()=>{
  assert.match(migration,/select id, platform_job_id, publishing_plan_id, creator_id, schedule_revision into e0/)
- assert.match(migration,/select \* into p from public\.creator_publishing_plans[\s\S]+for update;\n select \* into j from public\.creator_publishing_platform_jobs[\s\S]+for update;\n select \* into e from public\.creator_publishing_scheduler_events/)
+ const planLock=migration.indexOf("select * into p from public.creator_publishing_plans")
+ const jobLock=migration.indexOf("select * into j from public.creator_publishing_platform_jobs",planLock)
+ const eventLock=migration.indexOf("select * into e from public.creator_publishing_scheduler_events",jobLock)
+ assert.ok(planLock>0&&jobLock>planLock&&eventLock>jobLock)
  for(const status of ["processed","blocked","superseded","cancelled"]) assert.match(migration,new RegExp(`${status}[\\s\\S]+lock_token=null,locked_at=null`))
  assert.match(migration,/j\.schedule_revision<>e\.schedule_revision/)
  assert.match(migration,/event_status='processing'/)
@@ -276,4 +279,94 @@ test("behavioral UTC and explicit offset parser reject malformed choices and ret
  assert.deepEqual(localWallTimeToZonedRfc3339("2026-03-08T02:30","America/New_York"),{ok:false,code:"NONEXISTENT_LOCAL_TIME"})
  const amb=localWallTimeToZonedRfc3339("2026-11-01T01:30","America/New_York")
  assert.equal(amb.ok,false)
+})
+
+
+test("remaining blockers: lock queries use existing creator_id keys and no nonexistent id columns",()=>{
+ assert.match(migration,/scheduler_locked_creator_verifications[\s\S]+order by v\.creator_id for update/)
+ assert.match(migration,/scheduler_locked_ai_consents[\s\S]+order by c\.creator_id for update/)
+ assert.doesNotMatch(migration,/creator_publishing_creator_verifications v[\s\S]{0,120}order by v\.id/)
+ assert.doesNotMatch(migration,/creator_publishing_ai_twin_consents c[\s\S]{0,120}order by c\.id/)
+ assert.match(readFileSync("supabase/migrations/20260710000900_creator_publishing_trusted_verification.sql","utf8"),/creator_id uuid primary key/)
+ assert.match(readFileSync("supabase/migrations/20260710001000_creator_publishing_ai_twin_consent.sql","utf8"),/creator_id uuid primary key/)
+})
+
+test("remaining blockers: plan cancellation metadata satisfies Task 14 constraint and individual cancellation recalculates",()=>{
+ const task14=readFileSync("supabase/migrations/20260711001200_creator_publishing_autopost_orchestration.sql","utf8")
+ assert.match(task14,/creator_publishing_plans_cancelled_metadata check \(status <> 'cancelled' or cancelled_at is not null\)/)
+ assert.match(migration,/update public\.creator_publishing_plans set status='cancelled',cancelled_at=v_now,cancelled_by=p_creator_id,cancellation_reason=btrim\(p_reason\),updated_at=v_now/)
+ assert.match(migration,/if p_platform_job_id is not null and v_plan\.status <> 'cancelled' then perform public\.creator_publishing_recalculate_plan_status/)
+ assert.match(migration,/already_terminal/)
+ assert.match(migration,/already_cancelled/)
+ assert.match(migration,/event_status='cancelled'[\s\S]+event_status in \('pending','processing'\)/)
+})
+
+test("remaining blockers: initial schedule cannot bypass reschedule concurrency",()=>{
+ assert.match(migration,/p_action_type='schedule'[\s\S]+ALREADY_SCHEDULED/)
+ assert.match(migration,/coalesce\(j\.schedule_revision,0\)<>0/)
+ assert.match(migration,/j\.job_state <> 'draft'/)
+ assert.match(migration,/exists\(select 1 from pg_temp\.scheduler_locked_events/)
+ assert.match(migration,/p_action_type='reschedule'[\s\S]+EXPECTED_REVISION_REQUIRED[\s\S]+INVALID_RESCHEDULE_STATE/)
+ assert.match(ui,/initialTargetIds/)
+ assert.match(ui,/rescheduleTargetIds/)
+ assert.match(ui,/No unscheduled destinations remain available for initial scheduling/)
+})
+
+test("remaining blockers: cross-plan idempotency reuses creator-key lookup and conflicts before mutation",()=>{
+ assert.match(migration,/primary key \(creator_id, idempotency_key\)/)
+ assert.match(migration,/where creator_id=p_creator_id and idempotency_key=v_key for update/)
+ assert.doesNotMatch(migration,/idempotency_key=v_key and publishing_plan_id=p_publishing_plan_id for update/)
+ const req={creatorId:"11111111-1111-4111-8111-111111111111",planId:"22222222-2222-4222-8222-222222222222",targetJobIds:["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],intendedPublishAt:"2026-07-12T12:00:00Z",scheduleTimezone:"UTC",actionType:"schedule" as const}
+ const fp=stableScheduleRequestFingerprint(req)
+ assert.equal(compareIdempotencyRecord({requestFingerprint:fp,result:{ok:true}},stableScheduleRequestFingerprint({...req,planId:"33333333-3333-4333-8333-333333333333"})).kind,"conflict")
+})
+
+test("remaining blockers: due-time facts are locked after plan-job-event and before transition",()=>{
+ const plan=migration.indexOf("select * into p from public.creator_publishing_plans")
+ const job=migration.indexOf("select * into j from public.creator_publishing_platform_jobs", plan)
+ const event=migration.indexOf("select * into e from public.creator_publishing_scheduler_events", job)
+ const facts=migration.indexOf("create temp table process_locked_capabilities", event)
+ const gate=migration.indexOf("v_gate:=public.creator_publishing_scheduler_gate", facts)
+ const transition=migration.indexOf("v_state:=case", gate)
+ assert.ok(plan>0&&job>plan&&event>job&&facts>event&&gate>facts&&transition>gate)
+ for(const name of ["process_locked_capabilities","process_locked_packages","process_locked_accounts","process_locked_creator_verifications","process_locked_ai_consents","process_locked_reviews","process_locked_coperformers","process_locked_media","process_locked_generations","process_locked_queue_conflicts","process_locked_publication_conflicts"]) assert.match(migration,new RegExp(name))
+ assert.doesNotMatch(migration,/creator_publishing_scheduler_facts:/)
+})
+
+test("remaining blockers: generation ownership rejects null and unrelated owners",()=>{
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},package:{complianceStatus:"passed",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated"},creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{status:"granted",revokedAt:null,attestationVersion:"v1"},media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true}
+ assert.equal(evaluateSchedulerGateFacts(base as any).code,"OK")
+ assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],generation:{...base.media[0].generation,userId:base.profileId}}]} as any).code,"OK")
+ for(const owner of [null,"44444444-4444-4444-8444-444444444444","55555555-5555-4555-8555-555555555555"]) assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],generation:{...base.media[0].generation,userId:owner}}]} as any).code,"GENERATED_MEDIA_PROVENANCE_REQUIRED")
+ assert.match(migration,/g\.user_id is null/)
+})
+
+test("remaining blockers: snapshot fingerprint covers trusted facts and separates request fingerprint",()=>{
+ for(const name of ["locked_jobs","capabilities","packages","accounts","creator_verifications","ai_consents","reviews","co_performers","media","generations","active_queue_conflicts","active_publication_conflicts","gates"]) assert.match(migration,new RegExp(name))
+ const request={creatorId:"11111111-1111-4111-8111-111111111111",planId:"22222222-2222-4222-8222-222222222222",targetJobIds:["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],intendedPublishAt:"2026-07-12T12:00:00Z",scheduleTimezone:"UTC",actionType:"schedule" as const}
+ const requestFp=stableScheduleRequestFingerprint(request)
+ assert.equal(requestFp,stableScheduleRequestFingerprint(request))
+ const snap={jobs:[{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",revision:0}],ai_consents:[{attestation_version:"v1",attestation_text_sha256:"a".repeat(64),revoked_at:null}],gates:[{code:"OK"}]}
+ assert.notEqual(stableTrustedSnapshotFingerprint(snap),stableTrustedSnapshotFingerprint({...snap,ai_consents:[{attestation_version:"v2",attestation_text_sha256:"b".repeat(64),revoked_at:null}]}))
+})
+
+test("remaining blockers: cancellation not-found and strict cancellation DTO behavior are safe",()=>{
+ assert.match(migration,/jsonb_build_object\('ok',false,'code','JOB_NOT_FOUND'/)
+ assert.match(service,/if\(data\?\.ok===false\)/)
+ assert.match(service,/cancelledJobs=Number\(raw\.cancelledJobs/)
+ assert.match(service,/context\.jobId&&rows\.length!==1/)
+ assert.match(service,/outcome==="archived"&&\(r\.jobState!=="archived"/)
+ assert.match(service,/outcome==="already_terminal"\|\|outcome==="already_cancelled"/)
+})
+
+test("remaining blockers: processor verifies protected row counts before audit and processed response",()=>{
+ assert.match(migration,/get diagnostics v_job_rows = row_count/)
+ assert.match(migration,/get diagnostics v_event_rows = row_count/)
+ assert.match(migration,/PROTECTED_UPDATE_MISSED/)
+ const successUpdate=migration.indexOf("update public.creator_publishing_platform_jobs set job_state=v_state")
+ const eventUpdate=migration.indexOf("update public.creator_publishing_scheduler_events set event_status='processed'", successUpdate)
+ const rowCheck=migration.indexOf("if v_job_rows<>1 or v_event_rows<>1", eventUpdate)
+ const audit=migration.indexOf("creator_publishing_due_state_transition_completed", rowCheck)
+ assert.ok(successUpdate>0&&eventUpdate>successUpdate&&rowCheck>eventUpdate&&audit>rowCheck)
+ assert.match(migration,/p\.status='cancelled'/)
 })
