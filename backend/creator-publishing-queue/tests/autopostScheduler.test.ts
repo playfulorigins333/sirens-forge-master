@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert"
 import { readFileSync, readdirSync } from "node:fs"
 import test from "node:test"
 import { isValidIanaTimeZone, localWallTimeToZonedRfc3339, validateScheduleInstant } from "../../../lib/creator-publishing-queue/autopost/schedulerTime"
-import { compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
+import { classifyLegacyQueueCompatibility, classifySchedulerProcessorResult, compareIdempotencyRecord, evaluateSchedulerGateFacts, normalizeExpectedRevisionMap, stableScheduleRequestFingerprint, stableTrustedSnapshotFingerprint } from "../../../lib/creator-publishing-queue/autopost/schedulerFacts"
 
 const migrationPath="supabase/migrations/20260711001300_creator_publishing_scheduler_due_state.sql"
 const migration=readFileSync(migrationPath,"utf8")
@@ -62,7 +62,7 @@ test("trusted scheduling command implements per-destination isolation, gates, mo
 })
 
 test("rescheduling and cancellation preserve history and use expected revisions",()=>{
- assert.match(migration,/p_expected_schedule_revision/)
+ assert.match(migration,/p_expected_schedule_revisions/)
  assert.match(migration,/STALE_SCHEDULE_REVISION/)
  assert.match(migration,/v_rev:=coalesce\(j\.schedule_revision,0\)\+1/)
  assert.match(migration,/event_status='superseded'/)
@@ -162,7 +162,7 @@ test("review fixes: every Task 15 security definer has explicit service-role-onl
 
 test("review fixes: canonical gate covers required trusted facts with narrow safe codes",()=>{
  assert.match(migration,/creator_publishing_scheduler_gate/)
- for(const code of ["PLAN_OWNERSHIP_INVALID","PACKAGE_OWNERSHIP_INVALID","DESTINATION_ACCOUNT_INVALID","CAPABILITY_SNAPSHOT_STALE","FANVUE_NOT_AVAILABLE","COMPLIANCE_NOT_PASSED","COMPLIANCE_BLOCKED","CREATOR_APPROVAL_REQUIRED","CREATOR_VERIFICATION_REQUIRED","DESTINATION_ACCOUNT_VERIFICATION_REQUIRED","AI_TWIN_CONSENT_REQUIRED","CO_PERFORMER_RELEASE_REQUIRED","BLOCKING_MANUAL_REVIEW","GENERATED_MEDIA_PROVENANCE_REQUIRED","STALE_SOURCE_FINGERPRINT","ACTIVE_QUEUE_TASK_CONFLICT","ACTIVE_PUBLICATION_JOB_CONFLICT"]) assert.match(migration,new RegExp(code))
+ for(const code of ["PLAN_OWNERSHIP_INVALID","PACKAGE_OWNERSHIP_INVALID","DESTINATION_ACCOUNT_INVALID","CAPABILITY_SNAPSHOT_STALE","FANVUE_NOT_AVAILABLE","COMPLIANCE_NOT_PASSED","COMPLIANCE_BLOCKED","COMPLIANCE_CURRENT_EVIDENCE_REQUIRED","COMPLIANCE_LATER_BLOCKING_REVIEW","CREATOR_APPROVAL_REQUIRED","CREATOR_VERIFICATION_REQUIRED","DESTINATION_ACCOUNT_VERIFICATION_REQUIRED","AI_TWIN_CONSENT_REQUIRED","CO_PERFORMER_RELEASE_REQUIRED","GENERATED_MEDIA_PROVENANCE_REQUIRED","STALE_SOURCE_FINGERPRINT","ACTIVE_QUEUE_TASK_CONFLICT","ACTIVE_PUBLICATION_JOB_CONFLICT"]) assert.match(migration,new RegExp(code))
  assert.doesNotMatch(migration,/creator_publishing_build_compliance_facts/)
  assert.match(migration,/g\.user_id <> j\.creator_id and g\.user_id is distinct from v_profile_id/)
  assert.match(migration,/g\.status is distinct from 'completed'/)
@@ -247,10 +247,10 @@ test("review fixes: scheduler service has server-only boundary and safe DTO pars
 
 
 test("behavioral gate tests cover approved packages, escalations, media, consent, co-performer, ownership, and conflicts",()=>{
- const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},package:{complianceStatus:"passed",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated",secondPersonPresent:false},latestHumanReview:null,creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{status:"granted",revokedAt:null,attestationVersion:"v1"},coPerformers:[],media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true,activeQueueConflict:false,activePublicationJobConflict:false}
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},contentPackageId:"66666666-6666-4666-8666-666666666666",platformAccountId:"77777777-7777-4777-8777-777777777777",package:{complianceStatus:"passed",compliancePolicyVersion:"v1",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated",secondPersonPresent:false},complianceReviews:[{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",reviewSource:"automated",outcome:"pass",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:00:00Z"}],creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{status:"granted",revokedAt:null,attestationVersion:"v1"},coPerformers:[],media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true,activeQueueConflict:false,activePublicationJobConflict:false}
  assert.deepEqual(evaluateSchedulerGateFacts(base as any),{ok:true,code:"OK",hard:false})
- assert.deepEqual(evaluateSchedulerGateFacts({...base,package:{...base.package,complianceStatus:"escalated_approved"},latestHumanReview:{outcome:"escalate",reason:"approved by reviewer"}} as any),{ok:true,code:"OK",hard:false})
- assert.equal(evaluateSchedulerGateFacts({...base,latestHumanReview:{outcome:"manual_review"}} as any).code,"BLOCKING_MANUAL_REVIEW")
+ assert.deepEqual(evaluateSchedulerGateFacts({...base,package:{...base.package,complianceStatus:"escalated_approved"},complianceReviews:[{id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",reviewSource:"human",outcome:"escalate",reason:"approved by reviewer",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:00:00Z"}]} as any),{ok:true,code:"OK",hard:false})
+ assert.equal(evaluateSchedulerGateFacts({...base,complianceReviews:[...(base as any).complianceReviews,{id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",reviewSource:"human",outcome:"manual_review",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:01:00Z"}]} as any).code,"COMPLIANCE_LATER_BLOCKING_REVIEW")
  assert.equal(evaluateSchedulerGateFacts({...base,media:[]} as any).code,"MEDIA_REQUIRED")
  assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],sha256:"bad"}]} as any).code,"GENERATED_MEDIA_PROVENANCE_REQUIRED")
  assert.equal(evaluateSchedulerGateFacts({...base,package:{...base.package,secondPersonPresent:true},coPerformers:[]} as any).code,"CO_PERFORMER_RELEASE_REQUIRED")
@@ -334,7 +334,7 @@ test("remaining blockers: due-time facts are locked after plan-job-event and bef
 })
 
 test("remaining blockers: generation ownership rejects null and unrelated owners",()=>{
- const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},package:{complianceStatus:"passed",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated"},creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{status:"granted",revokedAt:null,attestationVersion:"v1"},media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true}
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},contentPackageId:"66666666-6666-4666-8666-666666666666",platformAccountId:"77777777-7777-4777-8777-777777777777",package:{complianceStatus:"passed",compliancePolicyVersion:"v1",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111",aiFlag:"ai_generated"},complianceReviews:[{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",reviewSource:"automated",outcome:"pass",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:00:00Z"}],creatorVerificationStatus:"verified",accountVerificationStatus:"verified",aiTwinConsent:{status:"granted",revokedAt:null,attestationVersion:"v1"},media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true}
  assert.equal(evaluateSchedulerGateFacts(base as any).code,"OK")
  assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],generation:{...base.media[0].generation,userId:base.profileId}}]} as any).code,"OK")
  for(const owner of [null,"44444444-4444-4444-8444-444444444444","55555555-5555-4555-8555-555555555555"]) assert.equal(evaluateSchedulerGateFacts({...base,media:[{...base.media[0],generation:{...base.media[0].generation,userId:owner}}]} as any).code,"GENERATED_MEDIA_PROVENANCE_REQUIRED")
@@ -362,11 +362,68 @@ test("remaining blockers: cancellation not-found and strict cancellation DTO beh
 test("remaining blockers: processor verifies protected row counts before audit and processed response",()=>{
  assert.match(migration,/get diagnostics v_job_rows = row_count/)
  assert.match(migration,/get diagnostics v_event_rows = row_count/)
- assert.match(migration,/PROTECTED_UPDATE_MISSED/)
+ assert.match(migration,/raise exception 'PROTECTED_UPDATE_MISSED'/)
+ assert.doesNotMatch(migration,/return jsonb_build_object\('ok',false,'failed',true,'code','PROTECTED_UPDATE_MISSED'\)/)
+ assert.doesNotMatch(migration,/job_state <> any\(terminal_states\)/)
  const successUpdate=migration.indexOf("update public.creator_publishing_platform_jobs set job_state=v_state")
  const eventUpdate=migration.indexOf("update public.creator_publishing_scheduler_events set event_status='processed'", successUpdate)
  const rowCheck=migration.indexOf("if v_job_rows<>1 or v_event_rows<>1", eventUpdate)
  const audit=migration.indexOf("creator_publishing_due_state_transition_completed", rowCheck)
  assert.ok(successUpdate>0&&eventUpdate>successUpdate&&rowCheck>eventUpdate&&audit>rowCheck)
  assert.match(migration,/p\.status='cancelled'/)
+})
+
+test("final review: legacy Task 5 queue compatibility allows only the matching ready_for_handoff artifact",()=>{
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",contentPackageId:"22222222-2222-4222-8222-222222222222",targetPlatform:"onlyfans",platformAccountId:"33333333-3333-4333-8333-333333333333"}
+ const task={id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",...base,status:"ready_for_handoff"}
+ const before=JSON.stringify(task)
+ assert.deepEqual(classifyLegacyQueueCompatibility({...base,queueTasks:[task]}),{ok:true,code:"OK",compatibleLegacyQueueTask:task})
+ assert.equal(JSON.stringify(task),before)
+ for(const status of ["scheduled_internally","due_now","claimed","draft","needs_compliance_review","needs_creator_approval","needs_fix","mystery"]) assert.equal(classifyLegacyQueueCompatibility({...base,queueTasks:[{...task,status}]}).code,"ACTIVE_QUEUE_TASK_CONFLICT")
+ assert.equal(classifyLegacyQueueCompatibility({...base,queueTasks:[{...task,creatorId:"99999999-9999-4999-8999-999999999999"}]}).code,"ACTIVE_QUEUE_TASK_CONFLICT")
+ assert.equal(classifyLegacyQueueCompatibility({...base,queueTasks:[{...task,platformAccountId:"99999999-9999-4999-8999-999999999999"}]}).code,"ACTIVE_QUEUE_TASK_CONFLICT")
+ assert.equal(classifyLegacyQueueCompatibility({...base,queueTasks:[{...task,targetPlatform:"fansly"}]}).code,"ACTIVE_QUEUE_TASK_CONFLICT")
+ assert.equal(classifyLegacyQueueCompatibility({...base,queueTasks:[task,{...task,id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}]}).code,"ACTIVE_QUEUE_TASK_CONFLICT")
+ assert.equal(classifyLegacyQueueCompatibility({...base,queueTasks:[{...task,status:"confirmed_posted_manual"},{...task,status:"archived"}]}).code,"OK")
+ assert.match(migration,/creator_publishing_scheduler_queue_gate/)
+ assert.match(migration,/status='ready_for_handoff'/)
+ assert.match(migration,/compatible_legacy_queue_task/)
+ assert.doesNotMatch(migration,/update public\.creator_publishing_queue_tasks|delete from public\.creator_publishing_queue_tasks/)
+})
+
+test("final review: current policy-version compliance evidence semantics are behavioral",()=>{
+ const base={creatorId:"11111111-1111-4111-8111-111111111111",profileId:"22222222-2222-4222-8222-222222222222",jobState:"draft",planOk:true,packageOk:true,accountOk:true,targetPlatform:"onlyfans",publishingMode:"assisted",contentPackageId:"66666666-6666-4666-8666-666666666666",platformAccountId:"77777777-7777-4777-8777-777777777777",capability:{available:true,mode:"assisted",registryVersionMatches:true,requiresTrustedAccountVerification:true},package:{complianceStatus:"passed",compliancePolicyVersion:"v2",creatorApprovalStatus:"approved",creatorApprovedAt:"2026-07-12T00:00:00Z",creatorApprovedBy:"11111111-1111-4111-8111-111111111111"},creatorVerificationStatus:"verified",accountVerificationStatus:"verified",media:[{source:"ai_pipeline",generationId:"33333333-3333-4333-8333-333333333333",storageKey:"private/key",mimeType:"image/png",sha256:"a".repeat(64),generation:{id:"33333333-3333-4333-8333-333333333333",userId:"11111111-1111-4111-8111-111111111111",status:"completed",r2Bucket:"b",r2Key:"k",metadata:{}}}],sourceIsCurrent:true}
+ const pass={id:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",reviewSource:"automated",outcome:"pass",compliancePolicyVersion:"v2",createdAt:"2026-07-12T00:02:00Z"}
+ assert.equal(evaluateSchedulerGateFacts({...base,complianceReviews:[{id:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",reviewSource:"human",outcome:"manual_review",compliancePolicyVersion:"v2",createdAt:"2026-07-12T00:01:00Z"},pass]} as any).code,"OK")
+ assert.equal(evaluateSchedulerGateFacts({...base,complianceReviews:[pass,{id:"cccccccc-cccc-4ccc-8ccc-cccccccccccc",reviewSource:"human",outcome:"manual_review",compliancePolicyVersion:"v2",createdAt:"2026-07-12T00:03:00Z"}]} as any).code,"COMPLIANCE_LATER_BLOCKING_REVIEW")
+ assert.equal(evaluateSchedulerGateFacts({...base,complianceReviews:[{...pass,compliancePolicyVersion:"v1"}]} as any).code,"COMPLIANCE_CURRENT_EVIDENCE_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,package:{...base.package,complianceStatus:"escalated_approved"},complianceReviews:[{id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd",reviewSource:"human",outcome:"escalate",reason:"valid",compliancePolicyVersion:"v2",createdAt:"2026-07-12T00:02:00Z"}]} as any).code,"OK")
+ assert.equal(evaluateSchedulerGateFacts({...base,package:{...base.package,complianceStatus:"escalated_approved"},complianceReviews:[{id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd",reviewSource:"human",outcome:"escalate",reason:"valid",compliancePolicyVersion:"v1",createdAt:"2026-07-12T00:02:00Z"}]} as any).code,"COMPLIANCE_CURRENT_EVIDENCE_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,package:{...base.package,complianceStatus:"escalated_approved"},complianceReviews:[{id:"dddddddd-dddd-4ddd-8ddd-dddddddddddd",reviewSource:"human",outcome:"escalate",reason:" ",compliancePolicyVersion:"v2",createdAt:"2026-07-12T00:02:00Z"}]} as any).code,"COMPLIANCE_CURRENT_EVIDENCE_REQUIRED")
+ assert.equal(evaluateSchedulerGateFacts({...base,complianceReviews:[pass,{id:"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",reviewSource:"human",outcome:"block",compliancePolicyVersion:"v2",createdAt:"2026-07-12T00:03:00Z"}]} as any).code,"COMPLIANCE_LATER_BLOCKING_REVIEW")
+ assert.equal(evaluateSchedulerGateFacts({...base,complianceReviews:[]} as any).code,"COMPLIANCE_CURRENT_EVIDENCE_REQUIRED")
+ assert.match(migration,/review_source='automated' and r\.outcome='pass'/)
+ assert.match(migration,/r\.compliance_policy_version=pkg\.compliance_policy_version/)
+ assert.match(migration,/COMPLIANCE_LATER_BLOCKING_REVIEW/)
+})
+
+test("final review: needs_fix can reschedule but blocked remains terminal",()=>{
+ assert.match(migration,/j\.job_state not in \('scheduled_internally','awaiting_operator','due_now','ready_to_publish','package_ready','ready_for_export','needs_fix'\)/)
+ assert.match(migration,/event_status='superseded'/)
+ assert.match(migration,/creator_publishing_job_rescheduled/)
+ assert.match(migration,/STALE_SCHEDULE_REVISION/)
+ assert.match(migration,/terminal_states constant text\[\].*'blocked'/s)
+})
+
+test("final review: worker classification never treats failed or malformed processor results as processed",()=>{
+ assert.equal(classifySchedulerProcessorResult({ok:false,blocked:true}),"blocked")
+ assert.equal(classifySchedulerProcessorResult({ok:true,skipped:true}),"skipped")
+ assert.equal(classifySchedulerProcessorResult({ok:true,processed:true}),"processed")
+ assert.equal(classifySchedulerProcessorResult({ok:false,failed:true}),"failed")
+ assert.equal(classifySchedulerProcessorResult({ok:false}),"failed")
+ assert.equal(classifySchedulerProcessorResult({processed:true}),"failed")
+ assert.equal(classifySchedulerProcessorResult(null),"failed")
+ assert.match(service,/classifySchedulerProcessorResult\(r\.data\)/)
+ assert.match(service,/summary\[classification\]\+\+/)
+ assert.doesNotMatch(service,/else summary\.processed\+\+/)
 })
