@@ -205,7 +205,7 @@ begin
   for update of idempotency_source;
   if found then
     if idempotency_rec.publishing_plan_id <> p_publishing_plan_id or idempotency_rec.request_fingerprint <> v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
-    return idempotency_rec.result;
+    return idempotency_rec.result || jsonb_build_object('idempotent', true);
   end if;
 
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_scheduler_plan:'||p_publishing_plan_id::text,0));
@@ -322,7 +322,7 @@ begin
   v_request_fingerprint := encode(extensions.digest(jsonb_build_object('creator_id',p_creator_id,'publishing_plan_id',p_publishing_plan_id,'action_type','cancel_plan','reason',v_reason)::text,'sha256'),'hex');
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_scheduler_idempotency:'||p_creator_id::text||':cancel_plan:'||p_idempotency_key,0));
   select * into idempotency_rec from public.creator_publishing_scheduler_idempotency as idempotency_source where creator_id=p_creator_id and action_type='cancel_plan' and idempotency_key=p_idempotency_key for update of idempotency_source;
-  if found then if idempotency_rec.publishing_plan_id<>p_publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result; end if;
+  if found then if idempotency_rec.publishing_plan_id<>p_publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result || jsonb_build_object('idempotent', true); end if;
   select * into plan_rec from public.creator_publishing_plans as plan_source where id=p_publishing_plan_id and creator_id=p_creator_id for update of plan_source;
   if not found then raise exception 'PLAN_NOT_FOUND'; end if;
   perform 1 from public.creator_publishing_platform_jobs as job_source where publishing_plan_id=p_publishing_plan_id order by id for update of job_source;
@@ -356,7 +356,7 @@ begin
   v_request_fingerprint := encode(extensions.digest(jsonb_build_object('creator_id',p_creator_id,'publishing_plan_id',job_rec.publishing_plan_id,'job_id',p_platform_job_id,'action_type','cancel_job','reason',v_reason)::text,'sha256'),'hex');
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_scheduler_idempotency:'||p_creator_id::text||':cancel_job:'||p_idempotency_key,0));
   select * into idempotency_rec from public.creator_publishing_scheduler_idempotency as idempotency_source where creator_id=p_creator_id and action_type='cancel_job' and idempotency_key=p_idempotency_key for update of idempotency_source;
-  if found then if idempotency_rec.publishing_plan_id<>job_rec.publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result; end if;
+  if found then if idempotency_rec.publishing_plan_id<>job_rec.publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result || jsonb_build_object('idempotent', true); end if;
   select * into plan_rec from public.creator_publishing_plans as plan_source where id=job_rec.publishing_plan_id and creator_id=p_creator_id for update of plan_source;
   select * into job_rec from public.creator_publishing_platform_jobs as job_source where id=p_platform_job_id and creator_id=p_creator_id for update of job_source;
   v_resulting_job_state := job_rec.job_state;

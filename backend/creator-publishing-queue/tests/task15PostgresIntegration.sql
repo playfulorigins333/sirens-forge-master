@@ -157,6 +157,7 @@ select public.task15_assert(schedule_revision is null and intended_publish_at is
 
 select now() + interval '3 hours' as schedule_intended_publish_at \gset
 select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',:'schedule_intended_publish_at'::timestamptz,'UTC','schedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid,'80000000-0000-4000-8000-000000000002'::uuid],'{}','schedule') as schedule_result \gset
+select public.task15_assert((:'schedule_result')::jsonb->>'idempotent' = 'false', 'first schedule is not idempotent replay');
 select public.task15_assert(((:'schedule_result')::jsonb->>'success_count')::int = 1, 'per-destination isolation lets compatible destination succeed');
 select public.task15_assert(((:'schedule_result')::jsonb->>'failure_count')::int = 1, 'per-destination isolation returns failed destination');
 select public.task15_assert(schedule_revision=1 and job_state='scheduled_internally' and operator_due_at = intended_publish_at - interval '60 minutes', 'assisted schedule fields set') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
@@ -165,7 +166,15 @@ select public.task15_assert(count(*)=2, 'assisted schedule creates two events') 
 select public.task15_assert(not exists(select 1 from public.creator_publishing_queue_tasks where id='60000000-0000-4000-8000-000000000001' and status <> 'ready_for_handoff'), 'queue rows not mutated');
 
 select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',:'schedule_intended_publish_at'::timestamptz,'UTC','schedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid,'80000000-0000-4000-8000-000000000002'::uuid],'{}','schedule') as replay_result \gset
-select public.task15_assert(((:'replay_result')::jsonb->>'success_count')::int = 1, 'idempotent replay returns stored result');
+select public.task15_assert((:'replay_result')::jsonb->>'idempotent' = 'true', 'schedule replay reports idempotent true');
+select public.task15_assert(((:'replay_result')::jsonb->>'success_count')::int = 1, 'idempotent replay returns stored success count');
+select public.task15_assert(((:'replay_result')::jsonb->>'failure_count')::int = 1, 'idempotent replay returns stored failure count');
+select public.task15_assert((:'replay_result')::jsonb - 'idempotent' = (:'schedule_result')::jsonb - 'idempotent', 'schedule replay matches original except idempotent flag');
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_idempotency where creator_id='00000000-0000-4000-8000-000000000001' and action_type='schedule' and idempotency_key='schedule-key-0001')=1, 'single schedule idempotency row');
+select public.task15_assert((select result->>'idempotent' from public.creator_publishing_scheduler_idempotency where creator_id='00000000-0000-4000-8000-000000000001' and action_type='schedule' and idempotency_key='schedule-key-0001')='false', 'stored schedule result remains non-idempotent');
+select public.task15_assert((select count(*) from public.creator_publishing_audit_events where action='creator_publishing_schedule_created' and idempotency_key='schedule-key-0001')=1, 'single schedule-created audit for replay');
+select public.task15_assert(schedule_revision=1, 'schedule replay leaves assisted job revision one') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=1)=2, 'schedule replay creates no duplicate revision one events');
 
 do $$ begin
   begin
@@ -176,9 +185,19 @@ do $$ begin
   end;
 end $$;
 
-select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',now()+interval '5 hours','UTC','reschedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid],jsonb_build_object('80000000-0000-4000-8000-000000000001',1),'reschedule') as reschedule_result \gset
+select now() + interval '5 hours' as reschedule_intended_publish_at \gset
+select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',:'reschedule_intended_publish_at'::timestamptz,'UTC','reschedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid],jsonb_build_object('80000000-0000-4000-8000-000000000001',1),'reschedule') as reschedule_result \gset
+select public.task15_assert((:'reschedule_result')::jsonb->>'idempotent' = 'false', 'first reschedule is not idempotent replay');
 select public.task15_assert(schedule_revision=2, 'reschedule increments revision') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
 select public.task15_assert(count(*)=2, 'prior events superseded') from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000001' and status='superseded';
+select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',:'reschedule_intended_publish_at'::timestamptz,'UTC','reschedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid],jsonb_build_object('80000000-0000-4000-8000-000000000001',1),'reschedule') as reschedule_replay_result \gset
+select public.task15_assert((:'reschedule_replay_result')::jsonb->>'idempotent' = 'true', 'reschedule replay reports idempotent true');
+select public.task15_assert((:'reschedule_replay_result')::jsonb - 'idempotent' = (:'reschedule_result')::jsonb - 'idempotent', 'reschedule replay matches original except idempotent flag');
+select public.task15_assert(schedule_revision=2, 'reschedule replay leaves job revision two') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=2)=2, 'reschedule replay creates no duplicate revision two events');
+select public.task15_assert((select count(*) from public.creator_publishing_audit_events where action='creator_publishing_schedule_rescheduled' and idempotency_key='reschedule-key-0001')=1, 'single reschedule audit for replay');
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_idempotency where action_type='reschedule' and idempotency_key='reschedule-key-0001')=1, 'single reschedule idempotency row');
+select public.task15_assert((select result->>'idempotent' from public.creator_publishing_scheduler_idempotency where action_type='reschedule' and idempotency_key='reschedule-key-0001')='false', 'stored reschedule result remains non-idempotent');
 
 select id as stale_event_id from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=1 and event_type='publish_due' \gset
 update public.creator_publishing_scheduler_events set status='processing', lock_token='90000000-0000-4000-8000-000000000001', locked_at=clock_timestamp(), superseded_at=null where id=:'stale_event_id'::uuid;
@@ -226,14 +245,25 @@ select public.task15_assert((select after_state->>'job_state' from public.creato
 
 select public.creator_publishing_cancel_job_schedule('00000000-0000-4000-8000-000000000001','80000000-0000-4000-8000-000000000001','Task 15 terminal cancellation fixture','cancel-job-key-0001') as cancel_job_result \gset
 select public.task15_assert((:'cancel_job_result')::jsonb->>'ok' = 'true', 'terminal job cancellation succeeds');
+select public.task15_assert((:'cancel_job_result')::jsonb->>'idempotent' = 'false', 'first job cancellation is not idempotent replay');
+select public.creator_publishing_cancel_job_schedule('00000000-0000-4000-8000-000000000001','80000000-0000-4000-8000-000000000001','Task 15 terminal cancellation fixture','cancel-job-key-0001') as cancel_job_replay_result \gset
+select public.task15_assert((:'cancel_job_replay_result')::jsonb->>'idempotent' = 'true', 'job cancellation replay reports idempotent true');
+select public.task15_assert((:'cancel_job_replay_result')::jsonb - 'idempotent' = (:'cancel_job_result')::jsonb - 'idempotent', 'job cancellation replay matches original except idempotent flag');
 select public.task15_assert(job_state='direct_publish_failed', 'terminal job cancellation preserves direct_publish_failed') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
 select public.task15_assert(job_state <> 'archived', 'terminal job cancellation does not archive') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
 select public.task15_assert(cancelled_at is null and cancelled_by is null and cancellation_reason is null, 'terminal job cancellation metadata remains unchanged') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
 select public.task15_assert((select before_state->>'job_state' from public.creator_publishing_audit_events where action='creator_publishing_job_schedule_cancelled' and entity_id='80000000-0000-4000-8000-000000000001' order by id desc limit 1)='direct_publish_failed', 'terminal job cancel audit before state truthful');
 select public.task15_assert((select after_state->>'job_state' from public.creator_publishing_audit_events where action='creator_publishing_job_schedule_cancelled' and entity_id='80000000-0000-4000-8000-000000000001' order by id desc limit 1)='direct_publish_failed', 'terminal job cancel audit after state truthful');
 select public.task15_assert((select after_state->>'reason' from public.creator_publishing_audit_events where action='creator_publishing_job_schedule_cancelled' and entity_id='80000000-0000-4000-8000-000000000001' order by id desc limit 1)='Task 15 terminal cancellation fixture', 'terminal job cancel audit reason truthful');
+select public.task15_assert((select count(*) from public.creator_publishing_audit_events where action='creator_publishing_job_schedule_cancelled' and idempotency_key='cancel-job-key-0001')=1, 'single job cancellation audit for replay');
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_idempotency where action_type='cancel_job' and idempotency_key='cancel-job-key-0001')=1, 'single job cancellation idempotency row');
+select public.task15_assert((select result->>'idempotent' from public.creator_publishing_scheduler_idempotency where action_type='cancel_job' and idempotency_key='cancel-job-key-0001')='false', 'stored job cancellation result remains non-idempotent');
 
 select public.creator_publishing_cancel_plan_schedule('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001','Task 15 plan cancellation fixture','cancel-plan-key-0001') as cancel_plan_result \gset
+select public.task15_assert((:'cancel_plan_result')::jsonb->>'idempotent' = 'false', 'first plan cancellation is not idempotent replay');
+select public.creator_publishing_cancel_plan_schedule('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001','Task 15 plan cancellation fixture','cancel-plan-key-0001') as cancel_plan_replay_result \gset
+select public.task15_assert((:'cancel_plan_replay_result')::jsonb->>'idempotent' = 'true', 'plan cancellation replay reports idempotent true');
+select public.task15_assert((:'cancel_plan_replay_result')::jsonb - 'idempotent' = (:'cancel_plan_result')::jsonb - 'idempotent', 'plan cancellation replay matches original except idempotent flag');
 select public.task15_assert((select status from public.creator_publishing_plans where id='70000000-0000-4000-8000-000000000001')='cancelled', 'plan cancellation marks plan cancelled');
 select public.task15_assert(job_state='direct_publish_failed', 'plan cancellation preserves terminal failed job') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
 select public.task15_assert(job_state='archived', 'plan cancellation archives nonterminal job') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000002';
@@ -241,6 +271,9 @@ select public.task15_assert(cancellation_reason='Task 15 plan cancellation fixtu
 select public.task15_assert(cancelled_at is null and cancelled_by is null and cancellation_reason is null, 'plan cancellation does not replace terminal job metadata') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
 select public.task15_assert((select after_state->>'status' from public.creator_publishing_audit_events where action='creator_publishing_schedule_cancelled' and entity_id='70000000-0000-4000-8000-000000000001' order by id desc limit 1)='cancelled', 'plan cancel audit status');
 select public.task15_assert((select after_state->>'reason' from public.creator_publishing_audit_events where action='creator_publishing_schedule_cancelled' and entity_id='70000000-0000-4000-8000-000000000001' order by id desc limit 1)='Task 15 plan cancellation fixture', 'plan cancel audit reason');
+select public.task15_assert((select count(*) from public.creator_publishing_audit_events where action='creator_publishing_schedule_cancelled' and idempotency_key='cancel-plan-key-0001')=1, 'single plan cancellation audit for replay');
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_idempotency where action_type='cancel_plan' and idempotency_key='cancel-plan-key-0001')=1, 'single plan cancellation idempotency row');
+select public.task15_assert((select result->>'idempotent' from public.creator_publishing_scheduler_idempotency where action_type='cancel_plan' and idempotency_key='cancel-plan-key-0001')='false', 'stored plan cancellation result remains non-idempotent');
 
 -- Test-only direct and planner by modifying disposable Fansly capability only.
 update public.creator_publishing_platform_capabilities set publishing_mode='direct', availability_status='available', connector_can_publish_immediately=true, human_publishing_required=false where platform='fansly';
