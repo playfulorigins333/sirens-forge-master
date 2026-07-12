@@ -328,7 +328,7 @@ begin
   perform 1 from public.creator_publishing_platform_jobs as job_source where publishing_plan_id=p_publishing_plan_id order by id for update of job_source;
   perform 1 from public.creator_publishing_scheduler_events as event_source where publishing_plan_id=p_publishing_plan_id and status in ('pending','processing') order by id for update of event_source;
   update public.creator_publishing_scheduler_events set status='cancelled', cancelled_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where publishing_plan_id=p_publishing_plan_id and status in ('pending','processing');
-  update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where publishing_plan_id=p_publishing_plan_id and job_state not in ('published_direct','confirmed_posted_manual','exported');
+  update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where publishing_plan_id=p_publishing_plan_id and job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived');
   update public.creator_publishing_plans set status='cancelled', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where id=p_publishing_plan_id;
   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_plan',p_publishing_plan_id,p_creator_id,'creator','creator_publishing_schedule_cancelled',jsonb_build_object('status',plan_rec.status),jsonb_build_object('status','cancelled','reason',v_reason),p_idempotency_key,v_now);
   v_result := jsonb_build_object('ok',true,'action_type','cancel_plan','publishing_plan_id',p_publishing_plan_id,'idempotent',false);
@@ -347,6 +347,7 @@ declare
   v_request_fingerprint text;
   idempotency_rec public.creator_publishing_scheduler_idempotency%rowtype;
   v_result jsonb;
+  v_resulting_job_state text;
 begin
   if coalesce(p_idempotency_key,'') !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
   if length(v_reason) not between 1 and 500 then raise exception 'SCHEDULER_CANCELLATION_REASON_REQUIRED'; end if;
@@ -358,11 +359,12 @@ begin
   if found then if idempotency_rec.publishing_plan_id<>job_rec.publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result; end if;
   select * into plan_rec from public.creator_publishing_plans as plan_source where id=job_rec.publishing_plan_id and creator_id=p_creator_id for update of plan_source;
   select * into job_rec from public.creator_publishing_platform_jobs as job_source where id=p_platform_job_id and creator_id=p_creator_id for update of job_source;
+  v_resulting_job_state := job_rec.job_state;
   perform 1 from public.creator_publishing_scheduler_events as event_source where platform_job_id=p_platform_job_id and status in ('pending','processing') order by id for update of event_source;
   update public.creator_publishing_scheduler_events set status='cancelled', cancelled_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where platform_job_id=p_platform_job_id and status in ('pending','processing');
-  if job_rec.job_state not in ('published_direct','confirmed_posted_manual','exported') then update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where id=p_platform_job_id; end if;
+  if job_rec.job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') then update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where id=p_platform_job_id; v_resulting_job_state := 'archived'; end if;
   update public.creator_publishing_plans set status=public.creator_publishing_aggregate_plan_status(job_rec.publishing_plan_id), updated_at=v_now where id=job_rec.publishing_plan_id;
-  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_platform_job',p_platform_job_id,p_creator_id,'creator','creator_publishing_job_schedule_cancelled',jsonb_build_object('job_state',job_rec.job_state),jsonb_build_object('job_state','archived','reason',v_reason),p_idempotency_key,v_now);
+  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_platform_job',p_platform_job_id,p_creator_id,'creator','creator_publishing_job_schedule_cancelled',jsonb_build_object('job_state',job_rec.job_state),jsonb_build_object('job_state',v_resulting_job_state,'reason',v_reason),p_idempotency_key,v_now);
   v_result := jsonb_build_object('ok',true,'action_type','cancel_job','platform_job_id',p_platform_job_id,'publishing_plan_id',job_rec.publishing_plan_id,'idempotent',false);
   insert into public.creator_publishing_scheduler_idempotency values(p_creator_id,job_rec.publishing_plan_id,'cancel_job',p_idempotency_key,v_request_fingerprint,v_result,v_now);
   return v_result;
