@@ -275,6 +275,38 @@ select public.task15_assert((select count(*) from public.creator_publishing_audi
 select public.task15_assert((select count(*) from public.creator_publishing_scheduler_idempotency where action_type='cancel_plan' and idempotency_key='cancel-plan-key-0001')=1, 'single plan cancellation idempotency row');
 select public.task15_assert((select result->>'idempotent' from public.creator_publishing_scheduler_idempotency where action_type='cancel_plan' and idempotency_key='cancel-plan-key-0001')='false', 'stored plan cancellation result remains non-idempotent');
 
+insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at)
+values ('70000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000001','draft','invalid-transition-plan-key-0001','4444444444444444444444444444444444444444444444444444444444444445','task14.20260711.001',now(),now());
+insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at)
+values ('80000000-0000-4000-8000-000000000005','70000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','assisted','draft',(select updated_at from public.creator_publishing_content_packages where id='30000000-0000-4000-8000-000000000001'),public.creator_publishing_autopost_source_fingerprint('30000000-0000-4000-8000-000000000001'),'task14.20260711.001','5555555555555555555555555555555555555555555555555555555555555555',now(),now());
+select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000004',now()+interval '3 hours','UTC','invalid-transition-schedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000005'::uuid],'{}','schedule');
+select public.task15_assert(schedule_revision=1 and job_state='scheduled_internally', 'invalid transition fixture schedules assisted job') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000005';
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000005' and schedule_revision=1 and event_type='operator_due')=1, 'invalid transition fixture creates operator_due event');
+select public.task15_assert((select count(*) from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000005' and schedule_revision=1 and event_type='publish_due')=1, 'invalid transition fixture creates publish_due event');
+update public.creator_publishing_platform_jobs set job_state='ready_to_publish', updated_at=now() where id='80000000-0000-4000-8000-000000000005';
+update public.creator_publishing_scheduler_events set due_at=now()-interval '1 minute', updated_at=now() where platform_job_id='80000000-0000-4000-8000-000000000005' and schedule_revision=1 and event_type='operator_due';
+select event_id as invalid_transition_event_id, lock_token as invalid_transition_lock_token from public.creator_publishing_claim_due_scheduler_events(1,15) \gset
+select public.task15_assert(
+  :'invalid_transition_event_id'::uuid = (
+    select id
+    from public.creator_publishing_scheduler_events
+    where platform_job_id = '80000000-0000-4000-8000-000000000005'
+      and schedule_revision = 1
+      and event_type = 'operator_due'
+  ),
+  'invalid transition test claimed assisted operator_due event'
+);
+select public.creator_publishing_process_scheduler_event(:'invalid_transition_event_id'::uuid, :'invalid_transition_lock_token'::uuid, 'creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12') as invalid_transition_process_result \gset
+select public.task15_assert((:'invalid_transition_process_result')::jsonb->>'status' = 'blocked', 'invalid transition process blocks event');
+select public.task15_assert((:'invalid_transition_process_result')::jsonb->>'safe_error_code' = 'SCHEDULER_STATE_TRANSITION_INVALID', 'invalid transition process returns safe code');
+select public.task15_assert(status='blocked' and safe_error_code='SCHEDULER_STATE_TRANSITION_INVALID' and lock_token is null and locked_at is null, 'invalid transition event blocked and lock cleared') from public.creator_publishing_scheduler_events where id=:'invalid_transition_event_id'::uuid;
+select public.task15_assert(job_state='needs_fix', 'invalid transition assisted job becomes needs_fix') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000005';
+select public.task15_assert(job_state <> 'awaiting_operator', 'invalid transition assisted job does not advance to awaiting_operator') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000005';
+select public.task15_assert(status='superseded', 'invalid transition sibling publish_due superseded') from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000005' and schedule_revision=1 and event_type='publish_due';
+select public.task15_assert((select after_state->>'safe_error_code' from public.creator_publishing_audit_events where action='creator_publishing_scheduler_gate_failed' and entity_id=:'invalid_transition_event_id'::uuid order by id desc limit 1)='SCHEDULER_STATE_TRANSITION_INVALID', 'invalid transition gate audit records safe code');
+select public.task15_assert(not exists(select 1 from public.creator_publishing_audit_events where action='creator_publishing_scheduler_event_processed' and entity_id=:'invalid_transition_event_id'::uuid), 'invalid transition does not write processed audit');
+select public.task15_assert((:'invalid_transition_process_result')::jsonb->>'status' <> 'processed', 'invalid transition result is not processed');
+
 -- Test-only direct and planner by modifying disposable Fansly capability only.
 update public.creator_publishing_platform_capabilities set publishing_mode='direct', availability_status='available', connector_can_publish_immediately=true, human_publishing_required=false where platform='fansly';
 insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at)
