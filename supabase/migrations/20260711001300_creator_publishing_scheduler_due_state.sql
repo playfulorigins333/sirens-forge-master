@@ -514,13 +514,21 @@ begin
   ) then
     v_gate_code := 'DESTINATION_ACCOUNT_NOT_VERIFIED';
   end if;
+  if v_gate_code is null and not exists (
+    select 1
+    from public.creator_publishing_creator_verifications as verification_source
+    where verification_source.creator_id = job_rec.creator_id
+      and verification_source.status = 'verified'
+  ) then
+    v_gate_code := 'CREATOR_VERIFICATION_MISSING';
+  end if;
   if v_gate_code is null and not exists(select 1 from public.creator_publishing_ai_twin_consents as consent_source where consent_source.creator_id=job_rec.creator_id and consent_source.status='granted' and consent_source.revoked_at is null and consent_source.attestation_version=p_current_ai_twin_consent_version and consent_source.attestation_text_sha256=p_current_attestation_text_sha256) then v_gate_code := 'AI_TWIN_CONSENT_MISSING'; end if;
   if v_gate_code is null and public.creator_publishing_autopost_source_fingerprint(job_rec.content_package_id) <> job_rec.source_package_fingerprint then v_gate_code := 'SOURCE_FINGERPRINT_STALE'; end if;
 
   if v_gate_code is not null then
     update public.creator_publishing_scheduler_events set status='blocked', processed_at=v_now, safe_error_code=v_gate_code, lock_token=null, locked_at=null, updated_at=v_now where id=event_rec.id and lock_token=p_lock_token;
     update public.creator_publishing_scheduler_events set status='superseded', superseded_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where platform_job_id=job_rec.id and schedule_revision=event_rec.schedule_revision and id<>event_rec.id and status in ('pending','processing');
-    update public.creator_publishing_platform_jobs set job_state=case when v_gate_code in ('SOURCE_FINGERPRINT_STALE','AI_TWIN_CONSENT_MISSING') then 'needs_fix' else 'blocked' end, updated_at=v_now where id=job_rec.id;
+    update public.creator_publishing_platform_jobs set job_state=case when v_gate_code in ('SOURCE_FINGERPRINT_STALE','AI_TWIN_CONSENT_MISSING','CREATOR_VERIFICATION_MISSING') then 'needs_fix' else 'blocked' end, updated_at=v_now where id=job_rec.id;
     update public.creator_publishing_plans set status=public.creator_publishing_aggregate_plan_status(plan_rec.id), updated_at=v_now where id=plan_rec.id;
     insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_scheduler_event',event_rec.id,null,'scheduler','creator_publishing_scheduler_gate_failed',jsonb_build_object('status','processing','event_type',event_rec.event_type,'schedule_revision',event_rec.schedule_revision),jsonb_build_object('status','blocked','safe_error_code',v_gate_code),v_now);
     return jsonb_build_object('ok',true,'status','blocked','safe_error_code',v_gate_code);

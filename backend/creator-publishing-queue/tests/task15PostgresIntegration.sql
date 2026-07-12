@@ -264,6 +264,31 @@ insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creato
 values ('80000000-0000-4000-8000-000000000004','70000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000004','20000000-0000-4000-8000-000000000004','fansly','planner','draft',(select updated_at from public.creator_publishing_content_packages where id='30000000-0000-4000-8000-000000000004'),public.creator_publishing_autopost_source_fingerprint('30000000-0000-4000-8000-000000000004'),'task14.20260711.001','4444444444444444444444444444444444444444444444444444444444444444',now(),now());
 select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000003',now()+interval '3 hours','UTC','planner-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000004'::uuid],'{}','schedule');
 select public.task15_assert(job_state='package_ready', 'planner schedule stops at package_ready') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000004';
+update public.creator_publishing_creator_verifications
+set status = 'revoked',
+    reason = 'Task 15 creator verification revoked fixture',
+    updated_at = now()
+where creator_id = '00000000-0000-4000-8000-000000000001';
+select public.task15_assert(status='revoked', 'creator verification fixture is revoked') from public.creator_publishing_creator_verifications where creator_id='00000000-0000-4000-8000-000000000001';
+update public.creator_publishing_scheduler_events set due_at=now()-interval '1 minute', updated_at=now() where platform_job_id='80000000-0000-4000-8000-000000000004' and schedule_revision=1 and event_type='publish_due';
+select event_id as revoked_creator_event_id, lock_token as revoked_creator_lock_token from public.creator_publishing_claim_due_scheduler_events(1,15) \gset
+select public.task15_assert(
+  :'revoked_creator_event_id'::uuid = (
+    select id
+    from public.creator_publishing_scheduler_events
+    where platform_job_id = '80000000-0000-4000-8000-000000000004'
+      and schedule_revision = 1
+      and event_type = 'publish_due'
+  ),
+  'revoked creator test claimed planner publish_due event'
+);
+select public.creator_publishing_process_scheduler_event(:'revoked_creator_event_id'::uuid, :'revoked_creator_lock_token'::uuid, 'creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12') as revoked_creator_process_result \gset
+select public.task15_assert((:'revoked_creator_process_result')::jsonb->>'status' = 'blocked', 'revoked creator process blocks event');
+select public.task15_assert((:'revoked_creator_process_result')::jsonb->>'safe_error_code' = 'CREATOR_VERIFICATION_MISSING', 'revoked creator process reports creator verification missing');
+select public.task15_assert(status='blocked' and safe_error_code='CREATOR_VERIFICATION_MISSING', 'revoked creator event blocked with safe code') from public.creator_publishing_scheduler_events where id=:'revoked_creator_event_id'::uuid;
+select public.task15_assert(job_state='needs_fix', 'revoked creator planner job becomes needs_fix') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000004';
+select public.task15_assert(job_state <> 'ready_for_export', 'revoked creator planner job does not advance to ready_for_export') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000004';
+select public.task15_assert((select after_state->>'safe_error_code' from public.creator_publishing_audit_events where action='creator_publishing_scheduler_gate_failed' and entity_id=:'revoked_creator_event_id'::uuid order by id desc limit 1)='CREATOR_VERIFICATION_MISSING', 'revoked creator gate audit records safe code');
 
 select public.task15_assert(has_table_privilege('anon','public.creator_publishing_scheduler_events','select') is false, 'anon has no scheduler event table select');
 select public.task15_assert(has_table_privilege('authenticated','public.creator_publishing_scheduler_idempotency','select') is false, 'authenticated has no scheduler idempotency table select');
