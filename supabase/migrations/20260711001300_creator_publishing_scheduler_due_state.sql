@@ -69,7 +69,7 @@ alter table public.creator_publishing_platform_jobs
   ),
   add constraint creator_publishing_jobs_scheduled_fields_required check (
     schedule_revision is null or (
-      intended_publish_at is not null and length(btrim(schedule_timezone)) > 0 and scheduled_at is not null and scheduled_by is not null
+      intended_publish_at is not null and schedule_timezone is not null and length(btrim(schedule_timezone)) > 0 and scheduled_at is not null and scheduled_by is not null
     )
   ),
   add constraint creator_publishing_jobs_cancellation_metadata_consistent check (

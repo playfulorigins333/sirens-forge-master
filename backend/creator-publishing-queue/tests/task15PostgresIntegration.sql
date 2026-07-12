@@ -154,6 +154,25 @@ values
 ('80000000-0000-4000-8000-000000000002','70000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000002','onlyfans','assisted','draft',(select updated_at from public.creator_publishing_content_packages where id='30000000-0000-4000-8000-000000000002'),public.creator_publishing_autopost_source_fingerprint('30000000-0000-4000-8000-000000000002'),'task14.20260711.001','1111111111111111111111111111111111111111111111111111111111111111',now(),now());
 
 select public.task15_assert(schedule_revision is null and intended_publish_at is null, 'unscheduled draft revision is null') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
+do $$
+begin
+  begin
+    update public.creator_publishing_platform_jobs
+    set schedule_revision = 1,
+        intended_publish_at = now() + interval '3 hours',
+        schedule_timezone = null,
+        scheduled_at = now(),
+        scheduled_by = '00000000-0000-4000-8000-000000000001'
+    where id = '80000000-0000-4000-8000-000000000001';
+
+    raise exception 'expected scheduled timezone constraint violation';
+  exception
+    when check_violation then
+      null;
+  end;
+end
+$$;
+select public.task15_assert(job_state='draft' and schedule_revision is null and intended_publish_at is null and schedule_timezone is null and scheduled_at is null and scheduled_by is null, 'scheduled timezone constraint leaves draft untouched') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
 
 select now() + interval '3 hours' as schedule_intended_publish_at \gset
 select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',:'schedule_intended_publish_at'::timestamptz,'UTC','schedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid,'80000000-0000-4000-8000-000000000002'::uuid],'{}','schedule') as schedule_result \gset
