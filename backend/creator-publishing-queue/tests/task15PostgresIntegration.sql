@@ -53,13 +53,22 @@ begin
   insert into public.creator_publishing_ai_twin_consents(creator_id,status,attestation_version,attestation_text_sha256,granted_at)
     values(v_creator,'granted','creator-ai-twin-consent-v1',v_hash,now()) on conflict (creator_id) do update set status='granted', attestation_version='creator-ai-twin-consent-v1', attestation_text_sha256=v_hash, revoked_at=null;
   insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,ai_flag,compliance_status,compliance_policy_version,creator_approval_status,creator_approved_by,creator_approved_at)
-    values(v_package,v_creator,v_account,'onlyfans','Title','Caption','ai_generated','passed','policy-v1','approved',v_creator,now()) on conflict do nothing;
-  insert into public.creator_publishing_compliance_reviews(content_package_id,reviewer_id,outcome,review_source,compliance_policy_version,created_at)
-    values(v_package,null,'pass','automated','policy-v1',now());
+    values(v_package,v_creator,v_account,'onlyfans','Title','Caption','ai_generated','pending','unassigned','pending',null,null) on conflict do nothing;
   insert into public.generations(id,user_id,status,r2_bucket,r2_key,metadata) values(v_generation,v_creator,'completed','bucket','key','{"safety":"safe"}'::jsonb) on conflict do nothing;
   insert into public.creator_publishing_media_assets(content_package_id,storage_key,mime_type,sha256,source,ai_generation_metadata)
     values(v_package,'media/key.png','image/png',repeat('a',64),'ai_pipeline',jsonb_build_object('generation_id',v_generation::text));
-  insert into public.creator_publishing_queue_tasks(content_package_id,status,due_at) values(v_package,'ready_for_handoff',null);
+  insert into public.creator_publishing_compliance_reviews(content_package_id,reviewer_id,outcome,review_source,compliance_policy_version,created_at)
+    values(v_package,null,'pass','automated','policy-v1',now());
+  update public.creator_publishing_content_packages
+    set compliance_status='passed', compliance_policy_version='policy-v1', creator_approval_status='approved', creator_approved_by=v_creator, creator_approved_at=now(), updated_at=clock_timestamp()
+    where id=v_package;
+  perform public.task15_assert((select compliance_status from public.creator_publishing_content_packages where id=v_package)='passed', 'primary fixture compliance passed');
+  perform public.task15_assert((select compliance_policy_version from public.creator_publishing_content_packages where id=v_package)='policy-v1', 'primary fixture policy current');
+  perform public.task15_assert((select creator_approval_status from public.creator_publishing_content_packages where id=v_package)='approved', 'primary fixture creator approved');
+  perform public.task15_assert((select creator_approved_by from public.creator_publishing_content_packages where id=v_package)=v_creator, 'primary fixture approved by creator');
+  perform public.task15_assert((select creator_approved_at from public.creator_publishing_content_packages where id=v_package) is not null, 'primary fixture approved timestamp');
+  insert into public.creator_publishing_queue_tasks(content_package_id,creator_id,target_platform,platform_account_id,status,due_at) values(v_package,v_creator,'onlyfans',v_account,'ready_for_handoff',null);
+  perform public.task15_assert((select count(*) from public.creator_publishing_queue_tasks where content_package_id=v_package and status='ready_for_handoff' and creator_id=v_creator and target_platform='onlyfans' and platform_account_id=v_account)=1, 'primary fixture compatible queue identity');
   insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version)
     values(v_plan,v_creator,'draft','plan-key-1',repeat('b',64),'task14.20260711.001');
   insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint)
@@ -123,11 +132,20 @@ declare
   v_event uuid; v_token uuid; v_result jsonb; v_hash text := '0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12';
 begin
   insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,ai_flag,compliance_status,compliance_policy_version,creator_approval_status,creator_approved_by,creator_approved_at)
-    values(v_package,v_creator,v_account,'onlyfans','Title 2','Caption','ai_generated','passed','policy-v1','approved',v_creator,now());
-  insert into public.creator_publishing_compliance_reviews(content_package_id,outcome,review_source,compliance_policy_version,created_at) values(v_package,'pass','automated','policy-v1',now());
+    values(v_package,v_creator,v_account,'onlyfans','Title 2','Caption','ai_generated','pending','unassigned','pending',null,null);
   insert into public.generations(id,user_id,status,r2_bucket,r2_key,metadata) values(v_generation,v_creator,'completed','bucket','key','{"safety":"safe"}'::jsonb);
   insert into public.creator_publishing_media_assets(content_package_id,storage_key,mime_type,sha256,source,ai_generation_metadata) values(v_package,'media/2.png','image/png',repeat('b',64),'ai_pipeline',jsonb_build_object('generation_id',v_generation::text));
-  insert into public.creator_publishing_queue_tasks(content_package_id,status) values(v_package,'ready_for_handoff');
+  insert into public.creator_publishing_compliance_reviews(content_package_id,outcome,review_source,compliance_policy_version,created_at) values(v_package,'pass','automated','policy-v1',now());
+  update public.creator_publishing_content_packages
+    set compliance_status='passed', compliance_policy_version='policy-v1', creator_approval_status='approved', creator_approved_by=v_creator, creator_approved_at=now(), updated_at=clock_timestamp()
+    where id=v_package;
+  perform public.task15_assert((select compliance_status from public.creator_publishing_content_packages where id=v_package)='passed', 'obsolete fixture compliance passed');
+  perform public.task15_assert((select compliance_policy_version from public.creator_publishing_content_packages where id=v_package)='policy-v1', 'obsolete fixture policy current');
+  perform public.task15_assert((select creator_approval_status from public.creator_publishing_content_packages where id=v_package)='approved', 'obsolete fixture creator approved');
+  perform public.task15_assert((select creator_approved_by from public.creator_publishing_content_packages where id=v_package)=v_creator, 'obsolete fixture approved by creator');
+  perform public.task15_assert((select creator_approved_at from public.creator_publishing_content_packages where id=v_package) is not null, 'obsolete fixture approved timestamp');
+  insert into public.creator_publishing_queue_tasks(content_package_id,creator_id,target_platform,platform_account_id,status,due_at) values(v_package,v_creator,'onlyfans',v_account,'ready_for_handoff',null);
+  perform public.task15_assert((select count(*) from public.creator_publishing_queue_tasks where content_package_id=v_package and status='ready_for_handoff' and creator_id=v_creator and target_platform='onlyfans' and platform_account_id=v_account)=1, 'obsolete fixture compatible queue identity');
   insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version) values(v_plan,v_creator,'in_progress','plan-key-2',repeat('d',64),'task14.20260711.001');
   insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,schedule_revision,intended_publish_at,schedule_timezone,operator_due_at)
     select v_job,v_plan,v_creator,v_package,v_account,'onlyfans','assisted','due_now',p.updated_at,public.creator_publishing_autopost_source_fingerprint(v_package),'task14.20260711.001',repeat('e',64),1,now()-interval '1 minute','UTC',now()-interval '1 hour' from public.creator_publishing_content_packages p where p.id=v_package;
