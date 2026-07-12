@@ -244,12 +244,12 @@ begin
     if not found or capability_rec.availability_status <> 'available' or capability_rec.publishing_mode <> job_rec.publishing_mode then v_gate_code := 'PLATFORM_UNAVAILABLE'; end if;
     if job_rec.target_platform='fanvue' then v_gate_code := 'FANVUE_NOT_AVAILABLE'; end if;
     if job_rec.job_state in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') or job_rec.cancelled_at is not null then v_gate_code := 'JOB_TERMINAL'; end if;
-    if v_action='schedule' and (job_rec.job_state <> 'draft' or job_rec.schedule_revision is not null) then v_gate_code := 'SCHEDULER_JOB_NOT_DRAFT'; end if;
+    if v_gate_code is null and v_action='schedule' and (job_rec.job_state <> 'draft' or job_rec.schedule_revision is not null) then v_gate_code := 'SCHEDULER_JOB_NOT_DRAFT'; end if;
     if v_action='reschedule' then
       begin v_expected_revision := (p_expected_schedule_revisions ->> job_rec.id::text)::integer; exception when others then raise exception 'SCHEDULER_EXPECTED_REVISIONS_INVALID'; end;
       if v_expected_revision is null or v_expected_revision <= 0 then raise exception 'SCHEDULER_EXPECTED_REVISIONS_INVALID'; end if;
       if job_rec.schedule_revision is distinct from v_expected_revision then raise exception 'SCHEDULER_STALE_REVISION'; end if;
-      if job_rec.job_state not in ('scheduled_internally','awaiting_operator','due_now','ready_to_publish','package_ready','ready_for_export','needs_fix') then v_gate_code := 'SCHEDULER_RESCHEDULE_STATE_BLOCKED'; end if;
+      if v_gate_code is null and job_rec.job_state not in ('scheduled_internally','awaiting_operator','due_now','ready_to_publish','package_ready','ready_for_export','needs_fix') then v_gate_code := 'SCHEDULER_RESCHEDULE_STATE_BLOCKED'; end if;
     end if;
 
     if v_gate_code is null and job_rec.publishing_mode='assisted' then
