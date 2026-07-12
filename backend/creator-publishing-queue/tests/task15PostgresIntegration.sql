@@ -180,6 +180,20 @@ select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-00000000
 select public.task15_assert(schedule_revision=2, 'reschedule increments revision') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
 select public.task15_assert(count(*)=2, 'prior events superseded') from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000001' and status='superseded';
 
+select id as stale_event_id from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=1 and event_type='publish_due' \gset
+update public.creator_publishing_scheduler_events set status='processing', lock_token='90000000-0000-4000-8000-000000000001', locked_at=clock_timestamp(), superseded_at=null where id=:'stale_event_id'::uuid;
+select public.creator_publishing_process_scheduler_event(:'stale_event_id'::uuid, '90000000-0000-4000-8000-000000000001', 'creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12') as stale_revision_process_result \gset
+select public.task15_assert((:'stale_revision_process_result')::jsonb->>'status' = 'superseded', 'stale revision returns superseded');
+select public.task15_assert((:'stale_revision_process_result')::jsonb->>'code' = 'SCHEDULER_STALE_REVISION', 'stale revision returns code');
+select public.task15_assert(((:'stale_revision_process_result')::jsonb->>'schedule_revision')::int = 2, 'stale revision returns current job revision');
+select public.task15_assert(schedule_revision=2 and job_state='scheduled_internally', 'stale revision preserves current job state and revision') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
+select public.task15_assert(status='superseded', 'stale revision event is superseded') from public.creator_publishing_scheduler_events where id=:'stale_event_id'::uuid;
+select public.task15_assert(not exists(select 1 from public.creator_publishing_audit_events where action='creator_publishing_scheduler_gate_failed' and entity_id=:'stale_event_id'::uuid), 'stale revision creates no gate-failed audit');
+select public.task15_assert((select after_state->>'safe_error_code' from public.creator_publishing_audit_events where action='creator_publishing_scheduler_event_superseded' and entity_id=:'stale_event_id'::uuid order by id desc limit 1)='SCHEDULER_STALE_REVISION', 'stale revision audit code');
+select public.task15_assert((select (after_state->>'stale_schedule_revision')::int from public.creator_publishing_audit_events where action='creator_publishing_scheduler_event_superseded' and entity_id=:'stale_event_id'::uuid order by id desc limit 1)=1, 'stale revision audit stale revision');
+select public.task15_assert((select (after_state->>'current_schedule_revision')::int from public.creator_publishing_audit_events where action='creator_publishing_scheduler_event_superseded' and entity_id=:'stale_event_id'::uuid order by id desc limit 1)=2, 'stale revision audit current revision');
+select public.task15_assert((select after_state->>'job_state' from public.creator_publishing_audit_events where action='creator_publishing_scheduler_event_superseded' and entity_id=:'stale_event_id'::uuid order by id desc limit 1)='scheduled_internally', 'stale revision audit preserves job state');
+
 -- Claim explicit grouping: a later pending event cannot bypass earlier-event exclusion.
 update public.creator_publishing_scheduler_events set due_at=now()-interval '2 minutes' where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=2 and event_type='operator_due';
 update public.creator_publishing_scheduler_events set due_at=now()-interval '1 minutes' where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=2 and event_type='publish_due';

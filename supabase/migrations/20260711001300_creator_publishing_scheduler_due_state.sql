@@ -451,7 +451,6 @@ begin
   select * into event_rec from public.creator_publishing_scheduler_events as event_source where event_source.id=p_event_id for update of event_source;
   if not found or event_rec.publishing_plan_id<>identity_rec.publishing_plan_id or event_rec.platform_job_id<>identity_rec.platform_job_id or event_rec.creator_id<>identity_rec.creator_id or event_rec.schedule_revision<>identity_rec.schedule_revision then return jsonb_build_object('ok',false,'code','IDENTITY_MISMATCH'); end if;
   if event_rec.status <> 'processing' or event_rec.lock_token is distinct from p_lock_token then return jsonb_build_object('ok',false,'code','STALE_LOCK_TOKEN'); end if;
-  if job_rec.schedule_revision is distinct from event_rec.schedule_revision then v_gate_code := 'SOURCE_FINGERPRINT_STALE'; end if;
   if job_rec.job_state in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') or job_rec.cancelled_at is not null then
     update public.creator_publishing_scheduler_events
     set status='superseded', superseded_at=v_now, lock_token=null, locked_at=null, updated_at=v_now
@@ -462,6 +461,17 @@ begin
     insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at)
     values('creator_publishing_scheduler_event',event_rec.id,null,'scheduler','creator_publishing_scheduler_event_superseded',jsonb_build_object('status','processing','event_type',event_rec.event_type,'schedule_revision',event_rec.schedule_revision),jsonb_build_object('status','superseded','safe_error_code','JOB_TERMINAL','job_state',job_rec.job_state),v_now);
     return jsonb_build_object('ok', true, 'status', 'superseded', 'code', 'JOB_TERMINAL', 'job_state', job_rec.job_state);
+  end if;
+  if job_rec.schedule_revision is distinct from event_rec.schedule_revision then
+    update public.creator_publishing_scheduler_events
+    set status='superseded', superseded_at=v_now, lock_token=null, locked_at=null, updated_at=v_now
+    where id=event_rec.id and lock_token=p_lock_token;
+    update public.creator_publishing_scheduler_events
+    set status='superseded', superseded_at=v_now, lock_token=null, locked_at=null, updated_at=v_now
+    where platform_job_id=job_rec.id and schedule_revision=event_rec.schedule_revision and id<>event_rec.id and status in ('pending','processing');
+    insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at)
+    values('creator_publishing_scheduler_event',event_rec.id,null,'scheduler','creator_publishing_scheduler_event_superseded',jsonb_build_object('status','processing','event_type',event_rec.event_type,'schedule_revision',event_rec.schedule_revision),jsonb_build_object('status','superseded','safe_error_code','SCHEDULER_STALE_REVISION','stale_schedule_revision',event_rec.schedule_revision,'current_schedule_revision',job_rec.schedule_revision,'job_state',job_rec.job_state),v_now);
+    return jsonb_build_object('ok', true, 'status', 'superseded', 'code', 'SCHEDULER_STALE_REVISION', 'job_state', job_rec.job_state, 'schedule_revision', job_rec.schedule_revision);
   end if;
   if v_gate_code is null and event_rec.event_type='operator_due' and job_rec.publishing_mode='assisted' and job_rec.job_state='due_now' then
     update public.creator_publishing_scheduler_events set status='superseded', superseded_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where id=event_rec.id and lock_token=p_lock_token;
