@@ -681,6 +681,8 @@ test("database-runtime closure: PostgreSQL integration workflow installs migrati
  assert.match(postgresWorkflow,/postgres:15/)
  assert.match(postgresWorkflow,/node backend\/creator-publishing-queue\/tests\/runTask15PostgresIntegration\.mjs/)
  assert.match(postgresRunner,/ON_ERROR_STOP=1/)
+ assert.match(postgresRunner,/set search_path = public, extensions/)
+ assert.match(postgresRunner,/public\.gen_random_uuid\(\) returns uuid/)
  for(const migration of ["20260710000100","20260710000400","20260710001100","20260711001200","20260711001300"]){
    assert.match(postgresRunner,new RegExp(migration))
  }

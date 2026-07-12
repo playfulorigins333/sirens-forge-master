@@ -15,6 +15,12 @@ psql([], `
 create schema if not exists auth;
 create schema if not exists extensions;
 create extension if not exists pgcrypto with schema extensions;
+set search_path = public, extensions;
+do $$ begin
+  execute format('alter database %I set search_path = public, extensions', current_database());
+end $$;
+create or replace function public.gen_random_uuid() returns uuid
+language sql volatile as $$ select pg_catalog.gen_random_uuid() $$;
 do $$ begin
   create role anon nologin;
 exception when duplicate_object then null; end $$;
