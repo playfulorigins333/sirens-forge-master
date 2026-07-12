@@ -55,12 +55,12 @@ test("trusted scheduling command implements per-destination isolation, gates, mo
  assert.match(service,/ASSISTED_OPERATOR_LEAD_MINUTES = 60/)
  assert.match(migration,/p_intended_publish_at - interval '60 minutes'/)
  assert.match(migration,/ASSISTED_LEAD_TIME_REQUIRED/)
- assert.match(migration,/scheduler_locked_jobs[\s\S]+order by j\.id for update/)
+ assert.match(migration,/perform 1 from public\.creator_publishing_platform_jobs as job_source[\s\S]+order by job_source\.id for update of job_source[\s\S]+create temp table scheduler_locked_jobs/)
  assert.match(migration,/creator_publishing_schedule_idempotency/)
  assert.match(migration,/IDEMPOTENCY_CONFLICT/)
  assert.match(migration,/creator_publishing_job_source_is_current/)
- assert.match(migration,/j\.target_platform='fanvue'/)
- assert.match(migration,/cap\.availability_status <> 'available' or cap\.publishing_mode='disabled' or j\.publishing_mode='disabled'/)
+ assert.match(migration,/job_rec\.target_platform='fanvue'/)
+ assert.match(migration,/cap\.availability_status <> 'available' or cap\.publishing_mode='disabled' or job_rec\.publishing_mode='disabled'/)
  assert.match(migration,/when 'assisted' then 'scheduled_internally'/)
  assert.match(migration,/when 'direct' then 'ready_to_publish'/)
  assert.match(migration,/when 'planner' then 'package_ready'/)
@@ -70,7 +70,7 @@ test("trusted scheduling command implements per-destination isolation, gates, mo
 test("rescheduling and cancellation preserve history and use expected revisions",()=>{
  assert.match(migration,/p_expected_schedule_revisions/)
  assert.match(migration,/STALE_SCHEDULE_REVISION/)
- assert.match(migration,/v_rev:=coalesce\(j\.schedule_revision,0\)\+1/)
+ assert.match(migration,/v_rev:=coalesce\(job_rec\.schedule_revision,0\)\+1/)
  assert.match(migration,/event_status='superseded'/)
  assert.match(migration,/creator_publishing_job_rescheduled/)
  assert.match(migration,/creator_publishing_cancel_schedule/)
@@ -87,11 +87,11 @@ test("worker uses cron secret, bounded batch, lock tokens, SKIP LOCKED, expired 
  assert.match(service,/process\.env\.CRON_SECRET\|\|process\.env\.VERCEL_CRON_SECRET/)
  assert.match(service,/if\(!secret\)return false/)
  assert.match(service,/authorization/)
- assert.match(migration,/for update of e skip locked/)
+ assert.match(migration,/for update of event_source skip locked/)
  assert.match(migration,/limit least\(greatest\(coalesce\(p_limit,25\),1\),50\)/)
  assert.match(migration,/lock_token=gen_random_uuid\(\)/)
  assert.match(migration,/locked_at < now\(\) - make_interval/)
- assert.match(migration,/processing_attempts=processing_attempts\+1/)
+ assert.match(migration,/processing_attempts=event_update\.processing_attempts\+1/)
  assert.match(migration,/event_type='operator_due'[\s\S]+then 'awaiting_operator'/)
  assert.match(migration,/event_type='publish_due'[\s\S]+publishing_mode='assisted'[\s\S]+then 'due_now'/)
  assert.match(migration,/event_type='publish_due'[\s\S]+publishing_mode='direct'[\s\S]+connector_can_publish_immediately[\s\S]+direct_publish_queued/)
@@ -101,11 +101,11 @@ test("worker uses cron secret, bounded batch, lock tokens, SKIP LOCKED, expired 
 })
 
 test("due-time gate rechecks block stale or invalidated jobs and aggregate parent through canonical helper",()=>{
- assert.match(migration,/creator_publishing_job_source_is_current\(j\.id\)/)
+ assert.match(migration,/creator_publishing_job_source_is_current\(job_rec\.id\)/)
  assert.match(migration,/creator_publishing_due_state_transition_blocked/)
  assert.match(migration,/job_state=case when coalesce\(\(v_gate->>'hard'\)::boolean,false\) then 'blocked' else 'needs_fix' end/)
  assert.match(migration,/event_status='blocked'/)
- assert.match(migration,/event_status='superseded'[\s\S]+schedule_revision=e\.schedule_revision/)
+ assert.match(migration,/event_status='superseded'[\s\S]+schedule_revision=event_rec\.schedule_revision/)
  assert.match(migration,/creator_publishing_recalculate_plan_status/)
  assert.match(migration,/creator_publishing_aggregate_plan_status/)
  assert.match(migration,/creator_publishing_due_state_transition_completed/)
@@ -170,7 +170,7 @@ test("review fixes: canonical gate covers required trusted facts with narrow saf
  assert.match(migration,/creator_publishing_scheduler_gate/)
  for(const code of ["PLAN_OWNERSHIP_INVALID","PACKAGE_OWNERSHIP_INVALID","DESTINATION_ACCOUNT_INVALID","CAPABILITY_SNAPSHOT_STALE","FANVUE_NOT_AVAILABLE","COMPLIANCE_NOT_PASSED","COMPLIANCE_BLOCKED","COMPLIANCE_CURRENT_EVIDENCE_REQUIRED","COMPLIANCE_LATER_BLOCKING_REVIEW","CREATOR_APPROVAL_REQUIRED","CREATOR_VERIFICATION_REQUIRED","DESTINATION_ACCOUNT_VERIFICATION_REQUIRED","AI_TWIN_CONSENT_REQUIRED","CO_PERFORMER_RELEASE_REQUIRED","GENERATED_MEDIA_PROVENANCE_REQUIRED","STALE_SOURCE_FINGERPRINT","ACTIVE_QUEUE_TASK_CONFLICT","ACTIVE_PUBLICATION_JOB_CONFLICT"]) assert.match(migration,new RegExp(code))
  assert.doesNotMatch(migration,/creator_publishing_build_compliance_facts/)
- assert.match(migration,/g\.user_id <> j\.creator_id and g\.user_id is distinct from v_profile_id/)
+ assert.match(migration,/g\.user_id <> job_rec\.creator_id and g\.user_id is distinct from v_profile_id/)
  assert.match(migration,/g\.status is distinct from 'completed'/)
  assert.match(migration,/r2_bucket/) ; assert.match(migration,/r2_key/)
  assert.match(migration,/placeholder/) ; assert.match(migration,/is_test/) ; assert.match(migration,/unsafe/)
@@ -181,7 +181,7 @@ test("review fixes: idempotency uses a stable request fingerprint before mutatio
  assert.match(migration,/select \* into v_plan[\s\S]+for update/)
  assert.match(migration,/v_request_canonical:=jsonb_build_object[\s\S]+expected_schedule_revisions[\s\S]+assisted_lead_policy/)
  assert.match(migration,/select \* into v_existing[\s\S]+return v_existing\.result/)
- assert.match(migration,/create temp table scheduler_locked_jobs[\s\S]+order by j\.id for update/)
+ assert.match(migration,/perform 1 from public\.creator_publishing_platform_jobs as job_source[\s\S]+order by job_source\.id for update of job_source[\s\S]+create temp table scheduler_locked_jobs/)
  assert.match(migration,/create temp table scheduler_locked_capabilities/)
  assert.match(migration,/create temp table scheduler_locked_media/)
  assert.match(migration,/create temp table scheduler_locked_generations/)
@@ -194,27 +194,27 @@ test("review fixes: idempotency uses a stable request fingerprint before mutatio
 })
 
 test("review fixes: processing locks job before event and clears lock fields for final statuses",()=>{
- assert.match(migration,/select id, platform_job_id, publishing_plan_id, creator_id, schedule_revision into e0/)
- const planLock=migration.indexOf("select * into p from public.creator_publishing_plans")
- const jobLock=migration.indexOf("select * into j from public.creator_publishing_platform_jobs",planLock)
- const eventLock=migration.indexOf("select * into e from public.creator_publishing_scheduler_events",jobLock)
+ assert.match(migration,/select event_source\.id, event_source\.platform_job_id, event_source\.publishing_plan_id, event_source\.creator_id, event_source\.schedule_revision/)
+ const planLock=migration.indexOf("select plan_source.* into plan_rec")
+ const jobLock=migration.indexOf("select job_source.* into job_rec",planLock)
+ const eventLock=migration.indexOf("select event_source.* into event_rec",jobLock)
  assert.ok(planLock>0&&jobLock>planLock&&eventLock>jobLock)
  for(const status of ["processed","blocked","superseded","cancelled"]) assert.match(migration,new RegExp(`${status}[\\s\\S]+lock_token=null,locked_at=null`))
- assert.match(migration,/j\.schedule_revision<>e\.schedule_revision/)
+ assert.match(migration,/job_rec\.schedule_revision<>event_rec\.schedule_revision/)
  assert.match(migration,/event_status='processing'/)
 })
 
 test("review fixes: terminal truth and predecessor states are preserved",()=>{
  for(const state of ["published_direct","confirmed_posted_manual","exported","direct_publish_failed","failed_manual_upload","skipped","blocked","platform_rejected","archived"]) assert.match(migration,new RegExp(state))
- assert.match(migration,/if j\.cancelled_at is not null then/)
- assert.match(migration,/if j\.job_state = any\(terminal_states\) then/)
+ assert.match(migration,/if job_rec\.cancelled_at is not null then/)
+ assert.match(migration,/if job_rec\.job_state = any\(terminal_states\) then/)
  assert.match(migration,/JOB_NOT_FOUND/)
  assert.match(migration,/already_cancelled/)
  assert.match(migration,/already_terminal/)
- assert.match(migration,/j\.job_state='scheduled_internally' then 'awaiting_operator'/)
- assert.match(migration,/j\.job_state in \('scheduled_internally','awaiting_operator'\) then 'due_now'/)
- assert.match(migration,/j\.job_state='ready_to_publish'[\s\S]+connector_can_publish_immediately[\s\S]+direct_publish_queued/)
- assert.match(migration,/j\.job_state='package_ready' then 'ready_for_export'/)
+ assert.match(migration,/job_rec\.job_state='scheduled_internally' then 'awaiting_operator'/)
+ assert.match(migration,/job_rec\.job_state in \('scheduled_internally','awaiting_operator'\) then 'due_now'/)
+ assert.match(migration,/job_rec\.job_state='ready_to_publish'[\s\S]+connector_can_publish_immediately[\s\S]+direct_publish_queued/)
+ assert.match(migration,/job_rec\.job_state='package_ready' then 'ready_for_export'/)
  assert.doesNotMatch(migration,/set job_state='published_direct'|set job_state='confirmed_posted_manual'/)
 })
 
@@ -289,12 +289,12 @@ test("behavioral UTC and explicit offset parser reject malformed choices and ret
 
 
 test("remaining blockers: lock queries use existing creator_id keys and no nonexistent id columns",()=>{
- assert.match(migration,/scheduler_locked_creator_verifications[\s\S]+order by v\.creator_id for update/)
- assert.match(migration,/scheduler_locked_ai_consents[\s\S]+order by c\.creator_id for update/)
- assert.doesNotMatch(migration,/creator_publishing_creator_verifications v[\s\S]{0,120}order by v\.id/)
- assert.doesNotMatch(migration,/creator_publishing_ai_twin_consents c[\s\S]{0,120}order by c\.id/)
+ const scheduleFn=migration.slice(migration.indexOf("create or replace function public.creator_publishing_schedule_plan"),migration.indexOf("create or replace function public.creator_publishing_cancel_schedule"))
+ assert.match(scheduleFn,/perform 1 from public\.creator_publishing_creator_verifications as verification_source[\s\S]+order by verification_source\.creator_id for update of verification_source/)
+ assert.match(scheduleFn,/perform 1 from public\.creator_publishing_ai_twin_consents as consent_source[\s\S]+order by consent_source\.creator_id for update of consent_source/)
+ assert.doesNotMatch(scheduleFn,/creator_publishing_creator_verifications as verification_source[\s\S]{0,120}order by verification_source\.id/)
+ assert.doesNotMatch(scheduleFn,/creator_publishing_ai_twin_consents as consent_source[\s\S]{0,120}order by consent_source\.id/)
  assert.match(readFileSync("supabase/migrations/20260710000900_creator_publishing_trusted_verification.sql","utf8"),/creator_id uuid primary key/)
- assert.match(readFileSync("supabase/migrations/20260710001000_creator_publishing_ai_twin_consent.sql","utf8"),/creator_id uuid primary key/)
 })
 
 test("remaining blockers: plan cancellation metadata satisfies Task 14 constraint and individual cancellation recalculates",()=>{
@@ -309,8 +309,8 @@ test("remaining blockers: plan cancellation metadata satisfies Task 14 constrain
 
 test("remaining blockers: initial schedule cannot bypass reschedule concurrency",()=>{
  assert.match(migration,/p_action_type='schedule'[\s\S]+ALREADY_SCHEDULED/)
- assert.match(migration,/coalesce\(j\.schedule_revision,0\)<>0/)
- assert.match(migration,/j\.job_state <> 'draft'/)
+ assert.match(migration,/coalesce\(job_rec\.schedule_revision,0\)<>0/)
+ assert.match(migration,/job_rec\.job_state <> 'draft'/)
  assert.match(migration,/exists\(select 1 from pg_temp\.scheduler_locked_events/)
  assert.match(migration,/p_action_type='reschedule'[\s\S]+EXPECTED_REVISION_REQUIRED[\s\S]+INVALID_RESCHEDULE_STATE/)
  assert.match(ui,/initialTargetIds/)
@@ -328,9 +328,9 @@ test("remaining blockers: cross-plan idempotency reuses creator-key lookup and c
 })
 
 test("remaining blockers: due-time facts are locked after plan-job-event and before transition",()=>{
- const plan=migration.indexOf("select * into p from public.creator_publishing_plans")
- const job=migration.indexOf("select * into j from public.creator_publishing_platform_jobs", plan)
- const event=migration.indexOf("select * into e from public.creator_publishing_scheduler_events", job)
+ const plan=migration.indexOf("select plan_source.* into plan_rec")
+ const job=migration.indexOf("select job_source.* into job_rec", plan)
+ const event=migration.indexOf("select event_source.* into event_rec", job)
  const facts=migration.indexOf("create temp table process_locked_capabilities", event)
  const gate=migration.indexOf("v_gate:=public.creator_publishing_scheduler_gate", facts)
  const transition=migration.indexOf("v_state:=case", gate)
@@ -376,7 +376,7 @@ test("remaining blockers: processor verifies protected row counts before audit a
  const rowCheck=migration.indexOf("if v_job_rows<>1 or v_event_rows<>1", eventUpdate)
  const audit=migration.indexOf("creator_publishing_due_state_transition_completed", rowCheck)
  assert.ok(successUpdate>0&&eventUpdate>successUpdate&&rowCheck>eventUpdate&&audit>rowCheck)
- assert.match(migration,/p\.status='cancelled'/)
+ assert.match(migration,/plan_rec\.status='cancelled'/)
 })
 
 test("final review: legacy Task 5 queue compatibility allows only the matching ready_for_handoff artifact",()=>{
@@ -414,7 +414,7 @@ test("final review: current policy-version compliance evidence semantics are beh
 })
 
 test("final review: needs_fix can reschedule but blocked remains terminal",()=>{
- assert.match(migration,/j\.job_state not in \('scheduled_internally','awaiting_operator','due_now','ready_to_publish','package_ready','ready_for_export','needs_fix'\)/)
+ assert.match(migration,/job_rec\.job_state not in \('scheduled_internally','awaiting_operator','due_now','ready_to_publish','package_ready','ready_for_export','needs_fix'\)/)
  assert.match(migration,/event_status='superseded'/)
  assert.match(migration,/creator_publishing_job_rescheduled/)
  assert.match(migration,/STALE_SCHEDULE_REVISION/)
@@ -455,7 +455,7 @@ test("closure: authoritative AI-twin consent policy version and hash are server-
 })
 
 test("closure: cancellation closes active events even for terminal and already-cancelled jobs and audits closures",()=>{
- assert.match(migration,/create temp table cancel_locked_events[\s\S]+order by e\.id for update/)
+ assert.match(migration,/perform 1 from public\.creator_publishing_scheduler_events as event_source[\s\S]+order by event_source\.id for update of event_source[\s\S]+create temp table cancel_locked_events/)
  assert.match(migration,/update public\.creator_publishing_scheduler_events set event_status='cancelled',cancelled_at=v_now,lock_token=null,locked_at=null,last_error_code='CANCELLED_BY_CREATOR'/)
  assert.match(migration,/creator_publishing_scheduler_events_cancelled/)
  const eventUpdate=migration.indexOf("last_error_code='CANCELLED_BY_CREATOR'")
@@ -515,10 +515,10 @@ test("runtime correction: cancelled plans are top-level PLAN_CANCELLED conflicts
 })
 
 test("runtime correction: Assisted claim ordering claims only earliest active event per job",()=>{
- assert.match(migration,/not exists \([\s\S]+prior\.platform_job_id=e\.platform_job_id[\s\S]+prior\.event_status in \('pending','processing'\)[\s\S]+prior\.due_at,case when prior\.event_type='operator_due' then 0 else 1 end,prior\.id/)
- assert.match(migration,/order by e\.due_at,case when e\.event_type='operator_due' then 0 else 1 end,e\.id/)
- assert.match(migration,/for update of e skip locked/)
- assert.match(migration,/limit least\(greatest\(coalesce\(p_limit,25\),1\),50\)[\s\S]+for update of e skip locked/)
+ assert.match(migration,/not exists \([\s\S]+prior\.platform_job_id=event_source\.platform_job_id[\s\S]+prior\.event_status in \('pending','processing'\)[\s\S]+prior\.due_at,case when prior\.event_type='operator_due' then 0 else 1 end,prior\.id/)
+ assert.match(migration,/order by event_source\.due_at,case when event_source\.event_type='operator_due' then 0 else 1 end,event_source\.id/)
+ assert.match(migration,/for update of event_source skip locked/)
+ assert.match(migration,/limit least\(greatest\(coalesce\(p_limit,25\),1\),50\)[\s\S]+for update of event_source skip locked/)
  assert.match(migration,/select claimed\.id,claimed\.lock_token from claimed order by claimed\.due_at,claimed\.event_order,claimed\.id/)
 })
 
@@ -526,8 +526,8 @@ test("runtime correction: Assisted obsolete operator events are superseded, not 
  const obsolete=migration.indexOf("OBSOLETE_OPERATOR_DUE")
  const unsupported=migration.indexOf("UNSUPPORTED_DUE_TRANSITION",obsolete)
  assert.ok(obsolete>0&&unsupported>obsolete)
- assert.match(migration,/e\.event_type='operator_due' and j\.publishing_mode='assisted' and j\.job_state='due_now'[\s\S]+event_status='superseded'/)
- assert.match(migration,/e\.event_type='publish_due' and j\.publishing_mode='assisted' and v_state='due_now'[\s\S]+event_type='operator_due'[\s\S]+event_status in \('pending','processing'\)/)
+ assert.match(migration,/event_rec\.event_type='operator_due' and job_rec\.publishing_mode='assisted' and job_rec\.job_state='due_now'[\s\S]+event_status='superseded'/)
+ assert.match(migration,/event_rec\.event_type='publish_due' and job_rec\.publishing_mode='assisted' and v_state='due_now'[\s\S]+event_type='operator_due'[\s\S]+event_status in \('pending','processing'\)/)
  assert.doesNotMatch(migration,/OBSOLETE_OPERATOR_DUE[\s\S]{0,200}creator_publishing_due_state_transition_blocked/)
 })
 
@@ -540,7 +540,7 @@ test("runtime correction: UI target selectors exactly match SQL predecessor cont
  }
  assert.deepEqual(selectInitialScheduleTargets([{id:"draft",jobState:"draft"},{id:"unknown",jobState:"future_state"}],{}),["draft"])
  assert.deepEqual(selectInitialScheduleTargets([{id:"scheduled",jobState:"draft"}],{scheduled:{jobId:"scheduled",currentJobState:"draft",currentScheduleRevision:1,hasEverScheduled:true}}),[])
- assert.match(migration,/j\.job_state not in \('scheduled_internally','awaiting_operator','due_now','ready_to_publish','package_ready','ready_for_export','needs_fix'\)/)
+ assert.match(migration,/job_rec\.job_state not in \('scheduled_internally','awaiting_operator','due_now','ready_to_publish','package_ready','ready_for_export','needs_fix'\)/)
 })
 
 test("runtime correction: UI revisions are monotonic after failed schedule and cancellation results",()=>{
@@ -601,21 +601,21 @@ test("database-runtime closure: normalizes PostgreSQL, schema, local, and malfor
 test("database-runtime closure: bounded claim SQL limits in the locking select and audits claims",()=>{
  const fn=migration.slice(migration.indexOf("create or replace function public.creator_publishing_claim_due_scheduler_events"),migration.indexOf("create or replace function public.creator_publishing_process_scheduler_event"))
  const limit=fn.indexOf("limit least(greatest(coalesce(p_limit,25),1),50)")
- const lock=fn.indexOf("for update of e skip locked")
+ const lock=fn.indexOf("for update of event_source skip locked")
  assert.ok(limit>0&&lock>limit)
  assert.doesNotMatch(fn,/row_number\(\)/)
- assert.match(fn,/not exists \([\s\S]+prior\.platform_job_id=e\.platform_job_id[\s\S]+prior\.event_status in \('pending','processing'\)/)
- assert.match(fn,/order by e\.due_at,case when e\.event_type='operator_due' then 0 else 1 end,e\.id[\s\S]+limit least[\s\S]+for update of e skip locked/)
+ assert.match(fn,/not exists \([\s\S]+prior\.platform_job_id=event_source\.platform_job_id[\s\S]+prior\.event_status in \('pending','processing'\)/)
+ assert.match(fn,/order by event_source\.due_at,case when event_source\.event_type='operator_due' then 0 else 1 end,event_source\.id[\s\S]+limit least[\s\S]+for update of event_source skip locked/)
  assert.match(fn,/creator_publishing_scheduler_event_claimed/)
  assert.doesNotMatch(fn,/lock_token[^\n]+jsonb_build_object/)
 })
 
 test("database-runtime closure: processor validates token before every mutation and audits cleanup",()=>{
  const fn=migration.slice(migration.indexOf("create or replace function public.creator_publishing_process_scheduler_event"),migration.indexOf("revoke all on function public.creator_publishing_recalculate_plan_status"))
- const planLock=fn.indexOf("select * into p")
- const jobLock=fn.indexOf("select * into j")
- const eventLock=fn.indexOf("select * into e")
- const tokenCheck=fn.indexOf("e.lock_token is distinct from p_lock_token")
+ const planLock=fn.indexOf("select plan_source.* into plan_rec")
+ const jobLock=fn.indexOf("select job_source.* into job_rec")
+ const eventLock=fn.indexOf("select event_source.* into event_rec")
+ const tokenCheck=fn.indexOf("event_rec.lock_token is distinct from p_lock_token")
  const cancelledPlan=fn.indexOf("PLAN_CANCELLED")
  assert.ok(planLock>0&&jobLock>planLock&&eventLock>jobLock&&tokenCheck>eventLock&&cancelledPlan>tokenCheck)
  for(const code of ["PLAN_CANCELLED","JOB_NOT_FOUND","REVISION_SUPERSEDED","CANCELLED","TERMINAL_JOB","OBSOLETE_OPERATOR_DUE"]){
@@ -674,6 +674,28 @@ test("database-runtime closure: invalid RFC3339 offsets are safe creator-input e
  assert.equal(validateScheduleInstant("2026-07-12T14:00:00+14:00","Pacific/Kiritimati").iso,"2026-07-12T00:00:00.000Z")
  assert.equal(schedulerHttpStatusForErrorCode("INVALID_RFC3339_OFFSET"),400)
  assert.match(service,/INVALID_RFC3339_OFFSET:"The publication instant contains an invalid UTC offset\."/)
+})
+
+
+test("sql-runtime closure: Task 15 functions avoid PL/pgSQL identifier collisions and reset temp snapshots",()=>{
+ const task15=migration.slice(migration.indexOf("create or replace function public.creator_publishing_scheduler_fact_snapshot"),migration.indexOf("revoke all on function public.creator_publishing_recalculate_plan_status"))
+ const scheduleFn=migration.slice(migration.indexOf("create or replace function public.creator_publishing_schedule_plan"),migration.indexOf("create or replace function public.creator_publishing_cancel_schedule"))
+ const cancelFn=migration.slice(migration.indexOf("create or replace function public.creator_publishing_cancel_schedule"),migration.indexOf("create or replace function public.creator_publishing_claim_due_scheduler_events"))
+ const processFn=migration.slice(migration.indexOf("create or replace function public.creator_publishing_process_scheduler_event"),migration.indexOf("revoke all on function public.creator_publishing_recalculate_plan_status"))
+ assert.doesNotMatch(task15,/\bj\s+record\b/)
+ assert.doesNotMatch(task15,/\b[ejpc]\s+public\./)
+ assert.doesNotMatch(task15,/select\s+[ejpc]\.\*/i)
+ assert.doesNotMatch(scheduleFn,/\b(?:from|join)\s+[^\n;]+\s+j\b/i)
+ assert.doesNotMatch(cancelFn,/\b(?:from|join)\s+[^\n;]+\s+j\b/i)
+ assert.doesNotMatch(processFn,/\b(?:from|join)\s+[^\n;]+\s+[ejpc]\b/i)
+ assert.match(scheduleFn,/drop table if exists pg_temp\.scheduler_gate_snapshot,pg_temp\.scheduler_locked_publication_conflicts,[\s\S]+pg_temp\.scheduler_locked_jobs/)
+ assert.match(cancelFn,/drop table if exists pg_temp\.cancel_locked_events,pg_temp\.cancel_locked_jobs/)
+ assert.match(processFn,/drop table if exists pg_temp\.process_locked_publication_conflicts,[\s\S]+pg_temp\.process_locked_capabilities/)
+ assert.doesNotMatch(task15,/create temp table if not exists/i)
+ for(const fn of [scheduleFn,cancelFn,processFn]) assert.match(fn,/#variable_conflict error/)
+ assert.match(scheduleFn,/perform 1 from public\.creator_publishing_platform_jobs as job_source[\s\S]+for update of job_source/)
+ assert.match(cancelFn,/perform 1 from public\.creator_publishing_scheduler_events as event_source[\s\S]+for update of event_source/)
+ assert.match(processFn,/perform 1 from public\.creator_publishing_platform_capabilities as capability_source[\s\S]+for update of capability_source/)
 })
 
 
