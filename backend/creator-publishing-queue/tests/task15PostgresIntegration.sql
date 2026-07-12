@@ -199,6 +199,17 @@ select public.task15_assert((select (after_state->>'processing_attempts')::int f
 select public.creator_publishing_process_scheduler_event(:'event_id'::uuid, :'lock_token'::uuid, 'creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12') as process_result \gset
 select public.task15_assert((:'process_result')::jsonb->>'status' in ('processed','superseded'), 'processor returns safe status');
 
+update public.creator_publishing_platform_jobs set job_state='direct_publish_failed', updated_at=now() where id='80000000-0000-4000-8000-000000000001';
+update public.creator_publishing_scheduler_events set due_at=now()-interval '1 minute' where platform_job_id='80000000-0000-4000-8000-000000000001' and schedule_revision=2 and event_type='publish_due';
+select * from public.creator_publishing_claim_due_scheduler_events(1,15) \gset
+select public.creator_publishing_process_scheduler_event(:'event_id'::uuid, :'lock_token'::uuid, 'creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12') as terminal_process_result \gset
+select public.task15_assert((:'terminal_process_result')::jsonb->>'status' = 'superseded', 'terminal job process returns superseded');
+select public.task15_assert((:'terminal_process_result')::jsonb->>'code' = 'JOB_TERMINAL', 'terminal job process returns JOB_TERMINAL');
+select public.task15_assert(job_state='direct_publish_failed', 'terminal job state remains direct_publish_failed') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';
+select public.task15_assert(status='superseded', 'terminal publish event is superseded') from public.creator_publishing_scheduler_events where id=:'event_id'::uuid;
+select public.task15_assert(not exists(select 1 from public.creator_publishing_audit_events where action='creator_publishing_scheduler_gate_failed' and entity_id=:'event_id'::uuid), 'terminal supersede creates no gate-failed audit');
+select public.task15_assert((select after_state->>'job_state' from public.creator_publishing_audit_events where action='creator_publishing_scheduler_event_superseded' and entity_id=:'event_id'::uuid order by id desc limit 1)='direct_publish_failed', 'terminal supersede audit preserves direct_publish_failed state');
+
 -- Test-only direct and planner by modifying disposable Fansly capability only.
 update public.creator_publishing_platform_capabilities set publishing_mode='direct', availability_status='available', connector_can_publish_immediately=true, human_publishing_required=false where platform='fansly';
 insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at)
