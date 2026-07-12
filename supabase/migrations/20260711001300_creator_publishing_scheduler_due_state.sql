@@ -494,6 +494,26 @@ begin
   select * into capability_rec from public.creator_publishing_platform_capabilities where platform=job_rec.target_platform;
   if v_gate_code is null and (not found or capability_rec.availability_status <> 'available' or capability_rec.publishing_mode <> job_rec.publishing_mode) then v_gate_code := 'PLATFORM_UNAVAILABLE'; end if;
   if v_gate_code is null and job_rec.target_platform='fanvue' then v_gate_code := 'FANVUE_NOT_AVAILABLE'; end if;
+  if v_gate_code is null and exists (
+    select 1
+    from public.creator_platform_accounts as account_source
+    where account_source.id = job_rec.platform_account_id
+      and account_source.creator_id = job_rec.creator_id
+      and account_source.platform = job_rec.target_platform
+      and account_source.verification_status = 'revoked'
+  ) then
+    v_gate_code := 'DESTINATION_ACCOUNT_REVOKED';
+  end if;
+  if v_gate_code is null and not exists (
+    select 1
+    from public.creator_platform_accounts as account_source
+    where account_source.id = job_rec.platform_account_id
+      and account_source.creator_id = job_rec.creator_id
+      and account_source.platform = job_rec.target_platform
+      and account_source.verification_status = 'verified'
+  ) then
+    v_gate_code := 'DESTINATION_ACCOUNT_NOT_VERIFIED';
+  end if;
   if v_gate_code is null and not exists(select 1 from public.creator_publishing_ai_twin_consents as consent_source where consent_source.creator_id=job_rec.creator_id and consent_source.status='granted' and consent_source.revoked_at is null and consent_source.attestation_version=p_current_ai_twin_consent_version and consent_source.attestation_text_sha256=p_current_attestation_text_sha256) then v_gate_code := 'AI_TWIN_CONSENT_MISSING'; end if;
   if v_gate_code is null and public.creator_publishing_autopost_source_fingerprint(job_rec.content_package_id) <> job_rec.source_package_fingerprint then v_gate_code := 'SOURCE_FINGERPRINT_STALE'; end if;
 
