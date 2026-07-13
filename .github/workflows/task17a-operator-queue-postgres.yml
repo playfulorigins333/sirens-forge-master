@@ -29,8 +29,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run test:creator-publishing-task17a-postgres
       - run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
+      - run: npm run test:creator-publishing-task17a-postgres
       - name: Upload diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4

@@ -19,6 +19,7 @@ test('claim ownership is complete, bounded, and never uses assigned_operator_id'
   assert.match(src, /status = 'claimed' and claimed_by is not null and claimed_at is not null and claim_token is not null and claim_expires_at is not null/)
   assert.match(src, /status <> 'claimed' and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null/)
   assert.match(src, /claim_attempt_count >= 0/)
+  assert.match(src, /claim_expires_at <= claimed_at \+ interval '30 minutes'/)
   assert.match(src, /interval '30 minutes'/)
   assert.doesNotMatch(src, /set[^;]*assigned_operator_id/i)
   assert.doesNotMatch(src, /assigned_operator_id\s*=/i)
@@ -40,7 +41,7 @@ test('RPC gates cover Task 17A trusted validation categories and lock job before
     'verification_status=\'verified\'', 'creator_publishing_ai_twin_consents', 'creator_approval_status<>\'approved\'',
     'creator_publishing_compliance_reviews', 'review_source=\'automated\'', 'later.outcome in',
     'creator_publishing_co_performer_records', 'creator_publishing_autopost_source_fingerprint',
-    'ACTIVE_PUBLICATION_JOB_CONFLICT', 'OPERATOR_NOT_DUE', 'OPERATOR_TASK_ALREADY_CLAIMED'
+    'ACTIVE_PUBLICATION_JOB_CONFLICT', 'OPERATOR_NOT_DUE', 'OPERATOR_TASK_ALREADY_CLAIMED', 'OPERATOR_TASK_NOT_READY'
   ]) assert.match(src, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(src, /select \* into v_job from public\.creator_publishing_platform_jobs where id=p_platform_job_id for update;[\s\S]+select \* into v_task from public\.creator_publishing_queue_tasks where id=p_queue_task_id for update;/)
 })
@@ -48,11 +49,15 @@ test('RPC gates cover Task 17A trusted validation categories and lock job before
 test('migration 01400 redefines exact Task 15 functions with valid-claim compatibility and publish-due preservation', () => {
   const src = migration()
   assert.match(src, /create or replace function public\.creator_publishing_schedule_plan\(\s*p_creator_id uuid,\s*p_publishing_plan_id uuid,\s*p_intended_publish_at timestamptz,/)
+  assert.match(src, /create or replace function public\.creator_publishing_claim_onlyfans_operator_task\(p_actor_id uuid, p_queue_task_id uuid, p_platform_job_id uuid, p_current_ai_twin_consent_version text, p_current_attestation_text_sha256 text, p_idempotency_key text\)/)
+  assert.match(src, /create or replace function public\.creator_publishing_update_onlyfans_operator_progress\(p_actor_id uuid, p_queue_task_id uuid, p_platform_job_id uuid, p_claim_token uuid, p_expected_progress_state text, p_next_progress_state text, p_current_ai_twin_consent_version text, p_current_attestation_text_sha256 text, p_idempotency_key text\)/)
   assert.match(src, /create or replace function public\.creator_publishing_process_scheduler_event\(p_event_id uuid, p_lock_token uuid, p_current_ai_twin_consent_version text, p_current_attestation_text_sha256 text\)/)
   assert.match(src, /creator_publishing_task17a_queue_task_compatible/)
   assert.match(src, /q\.status = 'claimed'[\s\S]+q\.claim_expires_at > p_now[\s\S]+creator_publishing_onlyfans_operator_authorized/)
   assert.match(src, /and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null/)
   assert.match(src, /case when event_rec\.event_type='operator_due' then 'awaiting_operator' else 'due_now' end/)
+  assert.match(src, /case when v_action='schedule' then array\['ready_for_handoff'\]/)
+  assert.match(src, /case when event_rec\.event_type='operator_due' then array\['ready_for_handoff','scheduled_internally'\]/)
 })
 
 test('Task 17A does not introduce Task 18 states, platform automation, loaders, or credential material', () => {
@@ -61,6 +66,7 @@ test('Task 17A does not introduce Task 18 states, platform automation, loaders, 
     assert.doesNotMatch(src, new RegExp(bad, 'i'))
   }
   assert.doesNotMatch(src, /page loader|on select|browser automation|scrap/i)
+  assert.match(src, /creator_publishing_onlyfans_queue_status_from_schedule\(p_job public\.creator_publishing_platform_jobs, p_now timestamptz\)/)
 })
 
 test('protected files and earlier migrations remain bounded', () => {

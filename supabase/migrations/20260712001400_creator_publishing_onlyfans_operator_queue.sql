@@ -17,7 +17,7 @@ alter table public.creator_publishing_queue_tasks
 
 alter table public.creator_publishing_queue_tasks
   add constraint creator_publishing_queue_claim_fields_consistent check (
-    (status = 'claimed' and claimed_by is not null and claimed_at is not null and claim_token is not null and claim_expires_at is not null and claim_expires_at > claimed_at)
+    (status = 'claimed' and claimed_by is not null and claimed_at is not null and claim_token is not null and claim_expires_at is not null and claim_expires_at > claimed_at and claim_expires_at <= claimed_at + interval '30 minutes')
     or (status <> 'claimed' and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null)
   ),
   add constraint creator_publishing_queue_claim_attempt_count_nonnegative check (claim_attempt_count >= 0),
@@ -74,15 +74,15 @@ returns boolean language sql stable security definer set search_path = public, p
   );
 $$;
 
-create or replace function public.creator_publishing_onlyfans_queue_status_from_schedule(p_job public.creator_publishing_platform_jobs)
+create or replace function public.creator_publishing_onlyfans_queue_status_from_schedule(p_job public.creator_publishing_platform_jobs, p_now timestamptz)
 returns text language sql stable set search_path = public, pg_catalog as $$
   select case
     when p_job.cancelled_at is not null then null
     when p_job.job_state in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') then null
     when p_job.schedule_revision is null and p_job.job_state in ('draft','ready_for_export','ready_for_handoff') then 'ready_for_handoff'
     when p_job.schedule_revision is null then 'ready_for_handoff'
-    when p_job.intended_publish_at is not null and p_job.intended_publish_at <= now() then 'due_now'
-    when p_job.operator_due_at is not null and p_job.operator_due_at <= now() then 'awaiting_operator'
+    when p_job.intended_publish_at is not null and p_job.intended_publish_at <= p_now then 'due_now'
+    when p_job.operator_due_at is not null and p_job.operator_due_at <= p_now then 'awaiting_operator'
     when p_job.schedule_revision is not null then 'scheduled_internally'
     else null end;
 $$;
@@ -93,7 +93,7 @@ returns text language sql immutable set search_path = public, extensions, pg_cat
 $$;
 
 
-create or replace function public.creator_publishing_onlyfans_operator_gate_code(p_job public.creator_publishing_platform_jobs, p_actor_id uuid)
+create or replace function public.creator_publishing_onlyfans_operator_gate_code(p_job public.creator_publishing_platform_jobs, p_actor_id uuid, p_require_current_safety boolean, p_current_ai_twin_consent_version text default null, p_current_attestation_text_sha256 text default null)
 returns text language plpgsql stable security definer set search_path = public, pg_catalog as $$
 declare package_rec public.creator_publishing_content_packages%rowtype; evidence_rec public.creator_publishing_compliance_reviews%rowtype;
 begin
@@ -103,9 +103,10 @@ begin
   if p_job.cancelled_at is not null or p_job.job_state in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') then return 'OPERATOR_TERMINAL_TASK'; end if;
   if not exists (select 1 from public.creator_publishing_platform_capabilities c where c.platform='onlyfans' and c.availability_status='available' and c.publishing_mode='assisted' and c.human_operator_queue_supported is true and c.human_publishing_required is true) then return 'PLATFORM_UNAVAILABLE'; end if;
   if not public.creator_publishing_onlyfans_operator_authorized(p_job.creator_id,p_actor_id) then return 'OPERATOR_NOT_AUTHORIZED'; end if;
+  if not p_require_current_safety then return null; end if;
   if not exists (select 1 from public.creator_publishing_creator_verifications v where v.creator_id=p_job.creator_id and v.status='verified') then return 'CREATOR_VERIFICATION_MISSING'; end if;
   if not exists (select 1 from public.creator_platform_accounts a where a.id=p_job.platform_account_id and a.creator_id=p_job.creator_id and a.platform='onlyfans' and a.verification_status='verified') then return 'DESTINATION_ACCOUNT_NOT_VERIFIED'; end if;
-  if not exists (select 1 from public.creator_publishing_ai_twin_consents c where c.creator_id=p_job.creator_id and c.status='granted' and c.revoked_at is null) then return 'AI_TWIN_CONSENT_MISSING'; end if;
+  if not exists (select 1 from public.creator_publishing_ai_twin_consents c where c.creator_id=p_job.creator_id and c.status='granted' and c.revoked_at is null and c.attestation_version=p_current_ai_twin_consent_version and c.attestation_text_sha256=p_current_attestation_text_sha256) then return 'AI_TWIN_CONSENT_MISSING'; end if;
   select * into package_rec from public.creator_publishing_content_packages p where p.id=p_job.content_package_id;
   if not found or package_rec.creator_id<>p_job.creator_id or package_rec.platform_account_id<>p_job.platform_account_id or package_rec.target_platform<>'onlyfans' or package_rec.creator_approval_status<>'approved' or package_rec.compliance_status not in ('passed','escalated_approved') or package_rec.compliance_policy_version is null or package_rec.compliance_policy_version='unassigned' then return 'CREATOR_APPROVAL_MISSING'; end if;
   if package_rec.compliance_status='passed' then
@@ -120,12 +121,12 @@ begin
   return null;
 end; $$;
 
-create or replace function public.creator_publishing_claim_onlyfans_operator_task(p_actor_id uuid, p_queue_task_id uuid, p_platform_job_id uuid, p_idempotency_key text)
+create or replace function public.creator_publishing_claim_onlyfans_operator_task(p_actor_id uuid, p_queue_task_id uuid, p_platform_job_id uuid, p_current_ai_twin_consent_version text, p_current_attestation_text_sha256 text, p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path = public, extensions, pg_catalog as $$
 declare v_task public.creator_publishing_queue_tasks%rowtype; v_job public.creator_publishing_platform_jobs%rowtype; v_now timestamptz:=clock_timestamp(); v_fp text; v_existing public.creator_publishing_operator_action_idempotency%rowtype; v_token uuid; v_result jsonb; v_prior_status text; v_recovered boolean:=false; v_count integer; v_gate_code text;
 begin
   if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null or length(btrim(coalesce(p_idempotency_key,''))) < 8 then raise exception 'OPERATOR_INVALID_REQUEST'; end if;
-  v_fp := public.creator_publishing_onlyfans_operator_request_fingerprint('claim',p_actor_id,p_queue_task_id,p_platform_job_id,null,null);
+  v_fp := public.creator_publishing_onlyfans_operator_request_fingerprint('claim',p_actor_id,p_queue_task_id,p_platform_job_id,null,concat_ws(':',p_current_ai_twin_consent_version,p_current_attestation_text_sha256));
   perform pg_advisory_xact_lock(hashtextextended('creator_operator_idempotency:'||p_actor_id||':claim:'||p_idempotency_key,0));
   select * into v_existing from public.creator_publishing_operator_action_idempotency where actor_id=p_actor_id and action_type='claim' and idempotency_key=p_idempotency_key;
   if found then if v_existing.request_fingerprint<>v_fp then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return v_existing.stored_result; end if;
@@ -133,16 +134,17 @@ begin
   select * into v_task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if not found then raise exception 'OPERATOR_TASK_NOT_FOUND'; end if;
   select count(*) into v_count from public.creator_publishing_queue_tasks where content_package_id=v_job.content_package_id and target_platform='onlyfans' and status <> 'archived';
   if v_count<>1 or v_task.creator_id<>v_job.creator_id or v_task.content_package_id<>v_job.content_package_id or v_task.platform_account_id<>v_job.platform_account_id or v_task.target_platform<>'onlyfans' or v_job.target_platform<>'onlyfans' then raise exception 'OPERATOR_TASK_IDENTITY_AMBIGUOUS'; end if;
-  v_gate_code := public.creator_publishing_onlyfans_operator_gate_code(v_job,p_actor_id);
+  v_gate_code := public.creator_publishing_onlyfans_operator_gate_code(v_job,p_actor_id,true,p_current_ai_twin_consent_version,p_current_attestation_text_sha256);
   if v_gate_code is not null then raise exception '%', v_gate_code; end if;
   if v_task.status='claimed' and v_task.claim_expires_at <= v_now then
     v_prior_status:=v_task.status; v_recovered:=true;
-    update public.creator_publishing_queue_tasks set status=public.creator_publishing_onlyfans_queue_status_from_schedule(v_job), claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, updated_at=v_now where id=v_task.id returning * into v_task;
+    update public.creator_publishing_queue_tasks set status=public.creator_publishing_onlyfans_queue_status_from_schedule(v_job, v_now), claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, updated_at=v_now where id=v_task.id returning * into v_task;
     insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',v_task.id,p_actor_id,'operator','creator_publishing_operator_claim_recovered',jsonb_build_object('status',v_prior_status),jsonb_build_object('status',v_task.status,'platform_job_id',v_job.id),p_idempotency_key,v_now);
   elsif v_task.status='claimed' and v_task.claim_expires_at > v_now then raise exception 'OPERATOR_TASK_ALREADY_CLAIMED';
   end if;
   if v_job.schedule_revision is null then if v_task.status<>'ready_for_handoff' or v_job.operator_due_at is not null then raise exception 'OPERATOR_TASK_NOT_READY'; end if;
-  elsif v_job.operator_due_at is null or v_job.operator_due_at > v_now then raise exception 'OPERATOR_NOT_DUE'; end if;
+  elsif v_job.operator_due_at is null or v_job.operator_due_at > v_now then raise exception 'OPERATOR_NOT_DUE';
+  elsif v_task.status not in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_NOT_READY'; end if;
   v_token:=gen_random_uuid(); v_prior_status:=v_task.status;
   update public.creator_publishing_queue_tasks set status='claimed', claimed_by=p_actor_id, claimed_at=v_now, claim_token=v_token, claim_expires_at=v_now+interval '30 minutes', claim_attempt_count=claim_attempt_count+1, updated_at=v_now where id=v_task.id returning * into v_task;
   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',v_task.id,p_actor_id,'operator','creator_publishing_operator_task_claimed',jsonb_build_object('status',v_prior_status),jsonb_build_object('status','claimed','platform_job_id',v_job.id,'claim_expires_at',v_task.claim_expires_at,'request_fingerprint',v_fp),p_idempotency_key,v_now);
@@ -155,6 +157,7 @@ create or replace function public.creator_publishing_release_onlyfans_operator_t
 returns jsonb language plpgsql security definer set search_path = public, extensions, pg_catalog as $$
 declare v_task public.creator_publishing_queue_tasks%rowtype; v_job public.creator_publishing_platform_jobs%rowtype; v_now timestamptz:=clock_timestamp(); v_fp text; v_existing public.creator_publishing_operator_action_idempotency%rowtype; v_status text; v_result jsonb; v_count integer; v_gate_code text;
 begin
+  if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null or length(btrim(coalesce(p_idempotency_key,''))) < 8 then raise exception 'OPERATOR_INVALID_REQUEST'; end if;
   v_fp:=public.creator_publishing_onlyfans_operator_request_fingerprint('release',p_actor_id,p_queue_task_id,p_platform_job_id,p_claim_token,null);
   perform pg_advisory_xact_lock(hashtextextended('creator_operator_idempotency:'||p_actor_id||':release:'||p_idempotency_key,0));
   select * into v_existing from public.creator_publishing_operator_action_idempotency where actor_id=p_actor_id and action_type='release' and idempotency_key=p_idempotency_key; if found then if v_existing.request_fingerprint<>v_fp then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return v_existing.stored_result; end if;
@@ -162,9 +165,9 @@ begin
   select * into v_task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if not found then raise exception 'OPERATOR_TASK_NOT_FOUND'; end if;
   select count(*) into v_count from public.creator_publishing_queue_tasks where content_package_id=v_job.content_package_id and target_platform='onlyfans' and status <> 'archived';
   if v_count<>1 or v_task.creator_id<>v_job.creator_id or v_task.content_package_id<>v_job.content_package_id or v_task.platform_account_id<>v_job.platform_account_id or v_task.target_platform<>'onlyfans' or v_job.target_platform<>'onlyfans' then raise exception 'OPERATOR_TASK_IDENTITY_AMBIGUOUS'; end if;
-  v_gate_code := public.creator_publishing_onlyfans_operator_gate_code(v_job,p_actor_id); if v_gate_code is not null then raise exception '%', v_gate_code; end if;
+  v_gate_code := public.creator_publishing_onlyfans_operator_gate_code(v_job,p_actor_id,false,null,null); if v_gate_code is not null then raise exception '%', v_gate_code; end if;
   if v_task.claimed_by<>p_actor_id or v_task.claim_token<>p_claim_token or v_task.status<>'claimed' then raise exception 'OPERATOR_CLAIM_TOKEN_MISMATCH'; end if;
-  v_status:=public.creator_publishing_onlyfans_queue_status_from_schedule(v_job);
+  v_status:=public.creator_publishing_onlyfans_queue_status_from_schedule(v_job, v_now);
   if v_status is null then raise exception 'OPERATOR_TERMINAL_TASK'; end if;
   update public.creator_publishing_queue_tasks set status=v_status, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, updated_at=v_now where id=v_task.id;
   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',v_task.id,p_actor_id,'operator','creator_publishing_operator_task_released',jsonb_build_object('status','claimed'),jsonb_build_object('status',v_status,'platform_job_id',v_job.id),p_idempotency_key,v_now);
@@ -173,19 +176,20 @@ begin
   return v_result;
 end; $$;
 
-create or replace function public.creator_publishing_update_onlyfans_operator_progress(p_actor_id uuid, p_queue_task_id uuid, p_platform_job_id uuid, p_claim_token uuid, p_expected_progress_state text, p_next_progress_state text, p_idempotency_key text)
+create or replace function public.creator_publishing_update_onlyfans_operator_progress(p_actor_id uuid, p_queue_task_id uuid, p_platform_job_id uuid, p_claim_token uuid, p_expected_progress_state text, p_next_progress_state text, p_current_ai_twin_consent_version text, p_current_attestation_text_sha256 text, p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path = public, extensions, pg_catalog as $$
 declare v_task public.creator_publishing_queue_tasks%rowtype; v_job public.creator_publishing_platform_jobs%rowtype; v_now timestamptz:=clock_timestamp(); v_fp text; v_existing public.creator_publishing_operator_action_idempotency%rowtype; v_action text; v_result jsonb; v_count integer; v_gate_code text;
 begin
+  if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null or length(btrim(coalesce(p_idempotency_key,''))) < 8 then raise exception 'OPERATOR_INVALID_REQUEST'; end if;
   if (p_expected_progress_state,p_next_progress_state) not in (('not_started','preparing'),('preparing','prepared'),('prepared','handoff_ready')) then raise exception 'OPERATOR_PROGRESS_INVALID_TRANSITION'; end if;
-  v_fp:=public.creator_publishing_onlyfans_operator_request_fingerprint('progress_update',p_actor_id,p_queue_task_id,p_platform_job_id,p_claim_token,p_next_progress_state);
+  v_fp:=public.creator_publishing_onlyfans_operator_request_fingerprint('progress_update',p_actor_id,p_queue_task_id,p_platform_job_id,p_claim_token,concat_ws(':',p_next_progress_state,p_current_ai_twin_consent_version,p_current_attestation_text_sha256));
   perform pg_advisory_xact_lock(hashtextextended('creator_operator_idempotency:'||p_actor_id||':progress_update:'||p_idempotency_key,0));
   select * into v_existing from public.creator_publishing_operator_action_idempotency where actor_id=p_actor_id and action_type='progress_update' and idempotency_key=p_idempotency_key; if found then if v_existing.request_fingerprint<>v_fp then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return v_existing.stored_result; end if;
   select * into v_job from public.creator_publishing_platform_jobs where id=p_platform_job_id for update; if not found then raise exception 'OPERATOR_JOB_NOT_FOUND'; end if;
   select * into v_task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if not found then raise exception 'OPERATOR_TASK_NOT_FOUND'; end if;
   select count(*) into v_count from public.creator_publishing_queue_tasks where content_package_id=v_job.content_package_id and target_platform='onlyfans' and status <> 'archived';
   if v_count<>1 or v_task.creator_id<>v_job.creator_id or v_task.content_package_id<>v_job.content_package_id or v_task.platform_account_id<>v_job.platform_account_id or v_task.target_platform<>'onlyfans' or v_job.target_platform<>'onlyfans' then raise exception 'OPERATOR_TASK_IDENTITY_AMBIGUOUS'; end if;
-  v_gate_code := public.creator_publishing_onlyfans_operator_gate_code(v_job,p_actor_id); if v_gate_code is not null then raise exception '%', v_gate_code; end if;
+  v_gate_code := public.creator_publishing_onlyfans_operator_gate_code(v_job,p_actor_id,true,p_current_ai_twin_consent_version,p_current_attestation_text_sha256); if v_gate_code is not null then raise exception '%', v_gate_code; end if;
   if v_task.status<>'claimed' or v_task.claimed_by<>p_actor_id or v_task.claim_token<>p_claim_token or v_task.claim_expires_at<=v_now then raise exception 'OPERATOR_ACTIVE_CLAIM_REQUIRED'; end if;
   if v_task.operator_progress_state<>p_expected_progress_state then raise exception 'OPERATOR_PROGRESS_STALE'; end if;
   update public.creator_publishing_queue_tasks set operator_progress_state=p_next_progress_state, operator_progress_updated_by=p_actor_id, operator_progress_updated_at=v_now, operator_progress_revision=operator_progress_revision+1, updated_at=v_now where id=v_task.id;
@@ -200,6 +204,7 @@ create or replace function public.creator_publishing_recover_expired_onlyfans_op
 returns jsonb language plpgsql security definer set search_path = public, extensions, pg_catalog as $$
 declare v_task public.creator_publishing_queue_tasks%rowtype; v_job public.creator_publishing_platform_jobs%rowtype; v_now timestamptz:=clock_timestamp(); v_fp text; v_existing public.creator_publishing_operator_action_idempotency%rowtype; v_status text; v_result jsonb; v_count integer; v_gate_code text;
 begin
+  if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null or length(btrim(coalesce(p_idempotency_key,''))) < 8 then raise exception 'OPERATOR_INVALID_REQUEST'; end if;
   v_fp:=public.creator_publishing_onlyfans_operator_request_fingerprint('expired_claim_recovery',p_actor_id,p_queue_task_id,p_platform_job_id,null,null);
   perform pg_advisory_xact_lock(hashtextextended('creator_operator_idempotency:'||p_actor_id||':expired_claim_recovery:'||p_idempotency_key,0));
   select * into v_existing from public.creator_publishing_operator_action_idempotency where actor_id=p_actor_id and action_type='expired_claim_recovery' and idempotency_key=p_idempotency_key; if found then if v_existing.request_fingerprint<>v_fp then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return v_existing.stored_result; end if;
@@ -207,9 +212,9 @@ begin
   select * into v_task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if not found then raise exception 'OPERATOR_TASK_NOT_FOUND'; end if;
   select count(*) into v_count from public.creator_publishing_queue_tasks where content_package_id=v_job.content_package_id and target_platform='onlyfans' and status <> 'archived';
   if v_count<>1 or v_task.creator_id<>v_job.creator_id or v_task.content_package_id<>v_job.content_package_id or v_task.platform_account_id<>v_job.platform_account_id or v_task.target_platform<>'onlyfans' or v_job.target_platform<>'onlyfans' then raise exception 'OPERATOR_TASK_IDENTITY_AMBIGUOUS'; end if;
-  v_gate_code := public.creator_publishing_onlyfans_operator_gate_code(v_job,p_actor_id); if v_gate_code is not null then raise exception '%', v_gate_code; end if;
+  v_gate_code := public.creator_publishing_onlyfans_operator_gate_code(v_job,p_actor_id,false,null,null); if v_gate_code is not null then raise exception '%', v_gate_code; end if;
   if v_task.status<>'claimed' or v_task.claim_expires_at>v_now then raise exception 'OPERATOR_CLAIM_NOT_EXPIRED'; end if;
-  v_status:=public.creator_publishing_onlyfans_queue_status_from_schedule(v_job);
+  v_status:=public.creator_publishing_onlyfans_queue_status_from_schedule(v_job, v_now);
   if v_status is null then raise exception 'OPERATOR_TERMINAL_TASK'; end if;
   update public.creator_publishing_queue_tasks set status=v_status, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, updated_at=v_now where id=v_task.id;
   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',v_task.id,p_actor_id,'operator','creator_publishing_operator_claim_recovered',jsonb_build_object('status','claimed'),jsonb_build_object('status',v_status,'platform_job_id',v_job.id),p_idempotency_key,v_now);
@@ -219,16 +224,16 @@ begin
 end; $$;
 
 revoke all on function public.creator_publishing_onlyfans_operator_authorized(uuid,uuid) from public, anon, authenticated;
-revoke all on function public.creator_publishing_onlyfans_queue_status_from_schedule(public.creator_publishing_platform_jobs) from public, anon, authenticated;
+revoke all on function public.creator_publishing_onlyfans_queue_status_from_schedule(public.creator_publishing_platform_jobs,timestamptz) from public, anon, authenticated;
 revoke all on function public.creator_publishing_onlyfans_operator_request_fingerprint(text,uuid,uuid,uuid,uuid,text) from public, anon, authenticated;
-revoke all on function public.creator_publishing_onlyfans_operator_gate_code(public.creator_publishing_platform_jobs,uuid) from public, anon, authenticated;
-revoke all on function public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text) from public, anon, authenticated;
+revoke all on function public.creator_publishing_onlyfans_operator_gate_code(public.creator_publishing_platform_jobs,uuid,boolean,text,text) from public, anon, authenticated;
+revoke all on function public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text,text,text) from public, anon, authenticated;
 revoke all on function public.creator_publishing_release_onlyfans_operator_task(uuid,uuid,uuid,uuid,text) from public, anon, authenticated;
-revoke all on function public.creator_publishing_update_onlyfans_operator_progress(uuid,uuid,uuid,uuid,text,text,text) from public, anon, authenticated;
+revoke all on function public.creator_publishing_update_onlyfans_operator_progress(uuid,uuid,uuid,uuid,text,text,text,text,text) from public, anon, authenticated;
 revoke all on function public.creator_publishing_recover_expired_onlyfans_operator_claim(uuid,uuid,uuid,text) from public, anon, authenticated;
-grant execute on function public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text) to service_role;
+grant execute on function public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text,text,text) to service_role;
 grant execute on function public.creator_publishing_release_onlyfans_operator_task(uuid,uuid,uuid,uuid,text) to service_role;
-grant execute on function public.creator_publishing_update_onlyfans_operator_progress(uuid,uuid,uuid,uuid,text,text,text) to service_role;
+grant execute on function public.creator_publishing_update_onlyfans_operator_progress(uuid,uuid,uuid,uuid,text,text,text,text,text) to service_role;
 grant execute on function public.creator_publishing_recover_expired_onlyfans_operator_claim(uuid,uuid,uuid,text) to service_role;
 
 
@@ -398,7 +403,7 @@ begin
       v_operator_due_at := p_intended_publish_at - interval '60 minutes';
       if v_operator_due_at <= v_now then v_gate_code := 'SCHEDULER_OPERATOR_DUE_PASSED'; end if;
       select count(*) into v_queue_count from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.target_platform='onlyfans' and queue_source.status <> 'archived';
-      if v_queue_count <> 1 or not public.creator_publishing_task17a_queue_task_compatible(job_rec, v_now, array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']) then v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT'; end if;
+      if v_queue_count <> 1 or not public.creator_publishing_task17a_queue_task_compatible(job_rec, v_now, case when v_action='schedule' then array['ready_for_handoff']::text[] else array['scheduled_internally','awaiting_operator','due_now']::text[] end) then v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT'; end if;
     end if;
 
     if v_gate_code is null and not exists (select 1 from public.creator_publishing_creator_verifications as verification_source where verification_source.creator_id=p_creator_id and verification_source.status='verified') then v_gate_code := 'CREATOR_VERIFICATION_MISSING'; end if;
@@ -566,7 +571,7 @@ begin
   if v_gate_code is null and package_rec.second_person_present and (not exists (select 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=package_rec.id) or exists (select 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=package_rec.id and performer_source.platform_release_confirmed is not true)) then
     v_gate_code := 'CO_PERFORMER_RELEASE_MISSING';
   end if;
-  if v_gate_code is null and job_rec.publishing_mode='assisted' and not public.creator_publishing_task17a_queue_task_compatible(job_rec, v_now, array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']) then
+  if v_gate_code is null and job_rec.publishing_mode='assisted' and not public.creator_publishing_task17a_queue_task_compatible(job_rec, v_now, case when event_rec.event_type='operator_due' then array['ready_for_handoff','scheduled_internally']::text[] else array['scheduled_internally','awaiting_operator','due_now']::text[] end) then
     v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT';
   end if;
   if v_gate_code is null and public.creator_publishing_autopost_source_fingerprint(job_rec.content_package_id) <> job_rec.source_package_fingerprint then v_gate_code := 'SOURCE_FINGERPRINT_STALE'; end if;

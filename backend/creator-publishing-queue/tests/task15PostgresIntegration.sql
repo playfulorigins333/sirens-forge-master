@@ -140,7 +140,25 @@ update public.creator_publishing_content_packages set compliance_status='passed'
 insert into public.creator_publishing_queue_tasks(id,content_package_id,creator_id,target_platform,platform_account_id,status,due_at,created_at,updated_at)
 values
 ('60000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000001','ready_for_handoff',null,now(),now()),
-('60000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000002','claimed',null,now(),now());
+('60000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000002','ready_for_handoff',null,now(),now());
+
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='creator_publishing_queue_tasks' and column_name='claim_token') then
+    update public.creator_publishing_queue_tasks
+    set status='claimed',
+        claimed_by='00000000-0000-4000-8000-000000000002',
+        claimed_at=now(),
+        claim_token='90000000-0000-4000-8000-000000000222',
+        claim_expires_at=now()+interval '30 minutes',
+        updated_at=now()
+    where id='60000000-0000-4000-8000-000000000002';
+  else
+    update public.creator_publishing_queue_tasks
+    set status='claimed', claimed_by='00000000-0000-4000-8000-000000000001', claimed_at=now(), updated_at=now()
+    where id='60000000-0000-4000-8000-000000000002';
+  end if;
+end $$;
 
 insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at)
 values
