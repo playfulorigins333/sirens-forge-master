@@ -128,3 +128,9 @@ begin
       and claim_expires_at < clock_timestamp()
   ), 'expired_claim_fixture_valid');
 end $$;
+
+create or replace function task17a_test.create_secondary_work(seed integer)
+returns jsonb language plpgsql as $$
+begin
+  return task17a_test.reset_fixture(seed);
+end $$;

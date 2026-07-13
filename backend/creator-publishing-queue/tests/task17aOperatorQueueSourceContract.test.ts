@@ -47,6 +47,8 @@ test('authorization, idempotency, locks, and trusted RPC contracts exist', () =>
   assert.match(migration, /p_expected_ai_twin_consent_version/);
   assert.match(migration, /p_expected_attestation_text_sha256/);
   assert.match(migration, /creator_publishing_operator_current_safety_gate/);
+  assert.match(migration, /creator_publishing_operator_queue_is_clean/);
+  assert.match(migration, /if not public\.creator_publishing_operator_queue_is_clean\(task\) then raise exception 'OPERATOR_TASK_INELIGIBLE'/);
   assert.match(migration, /review_source='automated'[\s\S]*outcome='pass'/);
   assert.match(migration, /review_source='human'[\s\S]*outcome='escalate'[\s\S]*escalated_approval_reason/);
   assert.match(migration, /outcome in \('block','manual_review'\)/);
@@ -80,6 +82,7 @@ test('internal helpers are not executable by browser roles and action RPCs remai
     String.raw`creator_publishing_operator_is_authorized\(uuid,uuid,text\)`,
     String.raw`creator_publishing_operator_current_safety_gate\(public\.creator_publishing_platform_jobs,public\.creator_publishing_queue_tasks,uuid,text,text\)`,
     String.raw`creator_publishing_operator_restore_queue_status\(public\.creator_publishing_platform_jobs,timestamptz\)`,
+    String.raw`creator_publishing_operator_queue_is_clean\(public\.creator_publishing_queue_tasks\)`,
     String.raw`creator_publishing_operator_request_fingerprint\(jsonb\)`,
     String.raw`creator_publishing_operator_replay_or_conflict\(uuid,text,text,text\)`,
   ]) {
