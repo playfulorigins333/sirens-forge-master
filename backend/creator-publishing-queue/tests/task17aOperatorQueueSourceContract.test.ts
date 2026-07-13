@@ -40,6 +40,8 @@ test('authorization, idempotency, locks, and trusted RPC contracts exist', () =>
   assert.doesNotMatch(migration, /creator_publishing_trusted_reviewers[\s\S]*authorized/i);
   assert.match(migration, /create table if not exists public\.creator_publishing_operator_action_idempotency/);
   assert.match(migration, /\^\[A-Za-z0-9_-\]\{8,128\}\$/);
+  assert.match(migration, /extensions\.digest\(p::text,'sha256'\)/);
+  assert.doesNotMatch(migration, /[^.]digest\(p::text,'sha256'\)/);
   assert.match(migration, /pg_advisory_xact_lock[\s\S]*creator_operator_idempotency/);
   assert.match(migration, /from public\.creator_publishing_platform_jobs where id=p_platform_job_id for update[\s\S]*from public\.creator_publishing_queue_tasks where id=p_queue_task_id for update/);
   assert.match(migration, /p_expected_ai_twin_consent_version/);

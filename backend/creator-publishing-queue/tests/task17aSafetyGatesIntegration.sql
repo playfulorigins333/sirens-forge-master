@@ -1,16 +1,24 @@
 \set ON_ERROR_STOP on
-create schema if not exists task17a_test;
-create or replace function task17a_test.assert(ok boolean, label text) returns void language plpgsql as $$ begin if not ok then raise exception 'TASK17A_ASSERT:%', label; end if; end $$;
-create or replace function task17a_test.expect_error(label text, expected text, statement text) returns void language plpgsql as $$
+\i backend/creator-publishing-queue/tests/task17aTestSupport.sql
+create or replace function task17a_test.assert_claim_rejected(seed integer, label text, expected text, mutate text) returns void language plpgsql as $$
+declare f jsonb; before_row public.creator_publishing_queue_tasks%rowtype;
 begin
-  execute statement;
-  raise exception 'TASK17A_ASSERT:% expected %', label, expected;
-exception when others then
-  if sqlerrm not like '%' || expected || '%' then
-    raise exception 'TASK17A_ASSERT:% expected %, got %', label, expected, sqlerrm;
-  end if;
+  f := task17a_test.reset_fixture(seed);
+  execute mutate using f;
+  select * into before_row from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  perform task17a_test.expect_error(label, expected, format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)', f->>'creator', f->>'task', f->>'job', f->>'consent_version', f->>'consent_hash', 'gate'||seed));
+  perform task17a_test.assert((select claimed_by is not distinct from before_row.claimed_by and claimed_at is not distinct from before_row.claimed_at and claim_token is not distinct from before_row.claim_token and claim_expires_at is not distinct from before_row.claim_expires_at and claim_attempt_count=before_row.claim_attempt_count and operator_progress_state=before_row.operator_progress_state and assigned_operator_id is not distinct from before_row.assigned_operator_id from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), label || ' no mutation');
+  perform task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claimed' and idempotency_key='gate'||seed), label || ' no success audit');
+  perform task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='claim' and idempotency_key='gate'||seed), label || ' no idempotency success');
 end $$;
-select task17a_test.assert(pg_get_functiondef('public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text,text,text)'::regprocedure) like '%OPERATOR_TASK_JOB_MISMATCH%', 'claim validates exact task job identity');
-select task17a_test.assert(pg_get_functiondef('public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text,text,text)'::regprocedure) like '%OPERATOR_TARGET_NOT_SUPPORTED%', 'claim rejects non OnlyFans or non assisted');
-select task17a_test.assert(pg_get_functiondef('public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text,text,text)'::regprocedure) like '%OPERATOR_QUEUE_TASK_AMBIGUOUS%', 'claim rejects duplicate active queue tasks');
-select task17a_test.expect_error('progress invalid key deterministic','OPERATOR_IDEMPOTENCY_KEY_INVALID',$$select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000001','80000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-000000000001','not_started',0,'preparing','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','bad')$$);
+select task17a_test.assert_claim_rejected(923001,'capability unavailable','PLATFORM_UNAVAILABLE',$$update public.creator_publishing_platform_capabilities set availability_status='frozen', publishing_mode='disabled' where platform='onlyfans'$$);
+update public.creator_publishing_platform_capabilities set availability_status='available', publishing_mode='assisted' where platform='onlyfans';
+select task17a_test.assert_claim_rejected(923002,'creator verification missing','CREATOR_VERIFICATION_MISSING',$$delete from public.creator_publishing_creator_verifications where creator_id=($1->>'creator')::uuid$$);
+select task17a_test.assert_claim_rejected(923003,'account revoked','DESTINATION_ACCOUNT_NOT_VERIFIED',$$update public.creator_platform_accounts set verification_status='revoked', verification_reason='revoked', verification_reviewed_by=($1->>'global_only')::uuid, verification_reviewed_at=clock_timestamp() where id=($1->>'account')::uuid$$);
+select task17a_test.assert_claim_rejected(923004,'consent missing','AI_TWIN_CONSENT_MISSING',$$delete from public.creator_publishing_ai_twin_consents where creator_id=($1->>'creator')::uuid$$);
+select task17a_test.assert_claim_rejected(923005,'approval missing','CREATOR_APPROVAL_MISSING',$$update public.creator_publishing_content_packages set creator_approval_status='pending' where id=($1->>'package')::uuid$$);
+select task17a_test.assert_claim_rejected(923006,'source fingerprint stale','SOURCE_FINGERPRINT_STALE',$$update public.creator_publishing_platform_jobs set source_package_fingerprint='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' where id=($1->>'job')::uuid$$);
+select task17a_test.assert_claim_rejected(923007,'duplicate active queue task','OPERATOR_QUEUE_TASK_AMBIGUOUS',$$insert into public.creator_publishing_queue_tasks(content_package_id,creator_id,target_platform,platform_account_id,status) values(($1->>'package')::uuid,($1->>'creator')::uuid,'onlyfans',($1->>'account')::uuid,'ready_for_handoff')$$);
+select task17a_test.assert_claim_rejected(923008,'cancelled job','OPERATOR_TASK_INELIGIBLE',$$update public.creator_publishing_platform_jobs set cancelled_at=clock_timestamp(), cancelled_by=($1->>'creator')::uuid, cancellation_reason='cancelled' where id=($1->>'job')::uuid$$);
+select task17a_test.assert_claim_rejected(923009,'ineligible job state','OPERATOR_TASK_INELIGIBLE',$$update public.creator_publishing_platform_jobs set job_state='blocked' where id=($1->>'job')::uuid$$);
+select task17a_test.assert_claim_rejected(923010,'mismatched account','OPERATOR_TASK_JOB_MISMATCH',$$update public.creator_publishing_queue_tasks set platform_account_id=($1->>'operator_a')::uuid where id=($1->>'task')::uuid$$);

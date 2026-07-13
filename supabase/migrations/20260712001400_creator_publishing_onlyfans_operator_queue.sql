@@ -73,7 +73,7 @@ begin
  return 'awaiting_operator';
 end; $$;
 
-create or replace function public.creator_publishing_operator_request_fingerprint(p jsonb) returns text language sql immutable set search_path=public,pg_temp as $$ select encode(digest(p::text,'sha256'),'hex') $$;
+create or replace function public.creator_publishing_operator_request_fingerprint(p jsonb) returns text language sql immutable set search_path=public,pg_temp as $$ select encode(extensions.digest(p::text,'sha256'),'hex') $$;
 
 create or replace function public.creator_publishing_operator_replay_or_conflict(p_actor uuid,p_action text,p_key text,p_fingerprint text) returns jsonb language plpgsql set search_path=public,pg_temp as $$
 declare r record; begin perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_operator_idempotency:'||p_actor::text||':'||p_action||':'||p_key,0)); select * into r from public.creator_publishing_operator_action_idempotency where actor_id=p_actor and action_type=p_action and idempotency_key=p_key for update; if found then if r.request_fingerprint<>p_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return r.stored_result || jsonb_build_object('idempotent',true); end if; return null; end; $$;

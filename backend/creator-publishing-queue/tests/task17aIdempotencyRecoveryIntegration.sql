@@ -1,16 +1,25 @@
 \set ON_ERROR_STOP on
-create schema if not exists task17a_test;
-create or replace function task17a_test.assert(ok boolean, label text) returns void language plpgsql as $$ begin if not ok then raise exception 'TASK17A_ASSERT:%', label; end if; end $$;
-create or replace function task17a_test.expect_error(label text, expected text, statement text) returns void language plpgsql as $$
-begin
-  execute statement;
-  raise exception 'TASK17A_ASSERT:% expected %', label, expected;
-exception when others then
-  if sqlerrm not like '%' || expected || '%' then
-    raise exception 'TASK17A_ASSERT:% expected %, got %', label, expected, sqlerrm;
-  end if;
-end $$;
-select task17a_test.assert(exists(select 1 from pg_proc where proname='creator_publishing_operator_replay_or_conflict'), 'idempotency replay helper exists');
-select task17a_test.assert(pg_get_functiondef('public.creator_publishing_operator_replay_or_conflict(uuid,text,text,text)'::regprocedure) like '%pg_advisory_xact_lock%', 'idempotency helper acquires deterministic advisory lock');
-select task17a_test.expect_error('recovery invalid key deterministic','OPERATOR_IDEMPOTENCY_KEY_INVALID',$$select public.creator_publishing_recover_expired_onlyfans_operator_claim('00000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000001','80000000-0000-4000-8000-000000000001','bad')$$);
-select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key='bad'), 'invalid recovery stores no idempotency row');
+\i backend/creator-publishing-queue/tests/task17aTestSupport.sql
+select task17a_test.reset_fixture(922001) as fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','idemclaim1') as claim_first \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','idemclaim1') as claim_replay \gset
+select task17a_test.assert((:'claim_replay')::jsonb->>'idempotent'='true' and (select claim_attempt_count from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid)=1, 'claim exact replay returns stored result and one mutation');
+select task17a_test.expect_error('claim changed task conflicts','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)',(:'fixture'::jsonb->>'creator'),(:'fixture'::jsonb->>'operator_a'),(:'fixture'::jsonb->>'job'),:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','idemclaim1'));
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_task_claimed' and idempotency_key='idemclaim1')=1, 'claim writes one successful audit');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='claim' and idempotency_key='idemclaim1')=1, 'claim writes one idempotency row');
+select claim_token as token from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid \gset
+select public.creator_publishing_update_onlyfans_operator_progress((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'token'::uuid,'not_started',0,'preparing',:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','idemprog1') as progress_first \gset
+select public.creator_publishing_update_onlyfans_operator_progress((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'token'::uuid,'not_started',0,'preparing',:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','idemprog1') as progress_replay \gset
+select task17a_test.assert((:'progress_replay')::jsonb->>'idempotent'='true' and (select operator_progress_revision from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid)=1, 'progress replay one mutation');
+select public.creator_publishing_release_onlyfans_operator_task((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'token'::uuid,'idemrel01') as release_first \gset
+select public.creator_publishing_release_onlyfans_operator_task((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'token'::uuid,'idemrel01') as release_replay \gset
+select task17a_test.assert((:'release_replay')::jsonb->>'idempotent'='true' and (select status from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid)='ready_for_handoff', 'release replay and unscheduled restoration');
+select task17a_test.assert((select operator_progress_state from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid)='preparing', 'release preserves progress');
+select task17a_test.assert((select claim_attempt_count from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid)=1, 'release preserves claim attempts');
+select task17a_test.reset_fixture(922002) as fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','recoverclaim') as recover_claim \gset
+update public.creator_publishing_queue_tasks set claim_expires_at=clock_timestamp()-interval '1 minute' where id=(:'fixture'::jsonb->>'task')::uuid;
+select public.creator_publishing_recover_expired_onlyfans_operator_claim((:'fixture'::jsonb->>'operator_a')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,'recover01') as recover_first \gset
+select public.creator_publishing_recover_expired_onlyfans_operator_claim((:'fixture'::jsonb->>'operator_a')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,'recover01') as recover_replay \gset
+select task17a_test.assert((:'recover_replay')::jsonb->>'idempotent'='true' and (select status from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid)='ready_for_handoff', 'expired recovery replay and restoration');
+select task17a_test.expect_error('active claim cannot be recovered','OPERATOR_CLAIM_NOT_EXPIRED',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',(:'fixture'::jsonb->>'creator'),(:'fixture'::jsonb->>'task'),(:'fixture'::jsonb->>'job'),'active001'));
