@@ -8,7 +8,26 @@ begin
   execute mutate using f;
   select * into before_row from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
   perform task17a_test.expect_error(label, expected, format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)', f->>'creator', f->>'task', f->>'job', f->>'consent_version', f->>'consent_hash', 'gate'||seed));
-  perform task17a_test.assert((select claimed_by is not distinct from before_row.claimed_by and claimed_at is not distinct from before_row.claimed_at and claim_token is not distinct from before_row.claim_token and claim_expires_at is not distinct from before_row.claim_expires_at and claim_attempt_count=before_row.claim_attempt_count and operator_progress_state=before_row.operator_progress_state and assigned_operator_id is not distinct from before_row.assigned_operator_id from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), label || ' no mutation');
+  perform task17a_test.assert((select
+      status is not distinct from before_row.status
+      and claimed_by is not distinct from before_row.claimed_by
+      and claimed_at is not distinct from before_row.claimed_at
+      and claim_token is not distinct from before_row.claim_token
+      and claim_expires_at is not distinct from before_row.claim_expires_at
+      and claim_attempt_count is not distinct from before_row.claim_attempt_count
+      and operator_progress_state is not distinct from before_row.operator_progress_state
+      and operator_progress_revision is not distinct from before_row.operator_progress_revision
+      and operator_progress_updated_by is not distinct from before_row.operator_progress_updated_by
+      and operator_progress_updated_at is not distinct from before_row.operator_progress_updated_at
+      and assigned_operator_id is not distinct from before_row.assigned_operator_id
+      and posted_by is not distinct from before_row.posted_by
+      and posted_at is not distinct from before_row.posted_at
+      and posted_confirmation is not distinct from before_row.posted_confirmation
+      and final_post_url is not distinct from before_row.final_post_url
+      and final_post_url_skip_reason is not distinct from before_row.final_post_url_skip_reason
+      and proof_screenshot_storage_key is not distinct from before_row.proof_screenshot_storage_key
+      and skip_or_fail_reason is not distinct from before_row.skip_or_fail_reason
+    from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), label || ' full no mutation');
   perform task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claimed' and idempotency_key='gate'||seed), label || ' no success audit');
   perform task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='claim' and idempotency_key='gate'||seed), label || ' no idempotency success');
 end $$;
@@ -47,8 +66,30 @@ select task17a_test.assert_claim_rejected(923011,'capability mode not assisted',
 update public.creator_publishing_platform_capabilities set availability_status='available', publishing_mode='assisted' where platform='onlyfans';
 \echo TASK17A_SCENARIO_START: safety_creator_verification_revoked
 select task17a_test.assert_claim_rejected(923012,'creator verification revoked','CREATOR_VERIFICATION_MISSING',$$update public.creator_publishing_creator_verifications set status='revoked' where creator_id=($1->>'creator')::uuid$$);
-\echo TASK17A_SCENARIO_START: safety_account_missing
-select task17a_test.assert_claim_rejected(923013,'destination account missing','DESTINATION_ACCOUNT_NOT_FOUND',$$delete from public.creator_platform_accounts where id=($1->>'account')::uuid$$);
+\echo TASK17A_SCENARIO_START: account_missing_foreign_key_boundary
+select task17a_test.reset_fixture(923013) as account_fk_fixture \gset
+select task17a_test.expect_error('account missing foreign key boundary','foreign key constraint',format('delete from public.creator_platform_accounts where id=%L',(:'account_fk_fixture'::jsonb->>'account')));
+select task17a_test.assert(exists(select 1 from public.creator_platform_accounts where id=(:'account_fk_fixture'::jsonb->>'account')::uuid), 'account FK boundary leaves account present');
+select task17a_test.assert((select platform_account_id=(:'account_fk_fixture'::jsonb->>'account')::uuid from public.creator_publishing_content_packages where id=(:'account_fk_fixture'::jsonb->>'package')::uuid), 'account FK boundary package still references account');
+select task17a_test.assert((select platform_account_id=(:'account_fk_fixture'::jsonb->>'account')::uuid from public.creator_publishing_platform_jobs where id=(:'account_fk_fixture'::jsonb->>'job')::uuid), 'account FK boundary job still references account');
+select task17a_test.assert((select claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null from public.creator_publishing_queue_tasks where id=(:'account_fk_fixture'::jsonb->>'task')::uuid), 'account FK boundary leaves queue ownership empty');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claimed' and entity_id=(:'account_fk_fixture'::jsonb->>'task')::uuid), 'account FK boundary writes no claim audit');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='claim' and queue_task_id=(:'account_fk_fixture'::jsonb->>'task')::uuid), 'account FK boundary writes no idempotency');
+\echo TASK17A_SCENARIO_START: account_missing_defensive_rpc_boundary
+select task17a_test.reset_fixture(923113) as account_rpc_fixture \gset
+begin;
+alter table public.creator_publishing_content_packages drop constraint creator_publishing_content_platform_account_fk;
+alter table public.creator_publishing_platform_jobs drop constraint creator_publishing_jobs_account_creator_platform_fk;
+delete from public.creator_platform_accounts where id=(:'account_rpc_fixture'::jsonb->>'account')::uuid;
+select task17a_test.assert(not exists(select 1 from public.creator_platform_accounts where id=(:'account_rpc_fixture'::jsonb->>'account')::uuid), 'account defensive RPC setup deleted account');
+select task17a_test.expect_error('account missing defensive RPC boundary','DESTINATION_ACCOUNT_NOT_FOUND',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)',(:'account_rpc_fixture'::jsonb->>'creator'),(:'account_rpc_fixture'::jsonb->>'task'),(:'account_rpc_fixture'::jsonb->>'job'),(:'account_rpc_fixture'::jsonb->>'consent_version'),(:'account_rpc_fixture'::jsonb->>'consent_hash'),'acctmissing1'));
+select task17a_test.assert((select claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and claim_attempt_count=0 and operator_progress_state='not_started' from public.creator_publishing_queue_tasks where id=(:'account_rpc_fixture'::jsonb->>'task')::uuid), 'account defensive RPC leaves queue unmutated');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claimed' and idempotency_key='acctmissing1'), 'account defensive RPC writes no claim audit');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='claim' and idempotency_key='acctmissing1'), 'account defensive RPC writes no idempotency');
+rollback;
+select task17a_test.assert(exists(select 1 from pg_constraint where conname='creator_publishing_content_platform_account_fk'), 'account defensive RPC rollback restores package account FK');
+select task17a_test.assert(exists(select 1 from pg_constraint where conname='creator_publishing_jobs_account_creator_platform_fk'), 'account defensive RPC rollback restores job account FK');
+select task17a_test.assert(exists(select 1 from public.creator_platform_accounts where id=(:'account_rpc_fixture'::jsonb->>'account')::uuid), 'account defensive RPC rollback restores account');
 \echo TASK17A_SCENARIO_START: safety_account_unverified
 select task17a_test.assert_claim_rejected(923014,'destination account unverified','DESTINATION_ACCOUNT_NOT_VERIFIED',$$update public.creator_platform_accounts set verification_status='pending' where id=($1->>'account')::uuid$$);
 \echo TASK17A_SCENARIO_START: safety_consent_revoked
@@ -65,8 +106,31 @@ select task17a_test.assert_claim_rejected(923019,'co-performer record missing','
 select task17a_test.assert_claim_rejected(923020,'co-performer release incomplete','CO_PERFORMER_RELEASE_MISSING',$$with upd as (update public.creator_publishing_content_packages set second_person_present=true where id=($1->>'package')::uuid returning id) insert into public.creator_publishing_co_performer_records(content_package_id,person_name,release_document_reference,platform_release_confirmed) select id,'Incomplete Performer','',false from upd$$);
 \echo TASK17A_SCENARIO_START: safety_source_updated_stale
 select task17a_test.assert_claim_rejected(923021,'source package updated timestamp stale','SOURCE_FINGERPRINT_STALE',$$update public.creator_publishing_platform_jobs set source_package_updated_at=source_package_updated_at - interval '1 second' where id=($1->>'job')::uuid$$);
-\echo TASK17A_SCENARIO_START: safety_active_publication_conflict
-select task17a_test.assert_claim_rejected(923022,'conflicting active publication job','ACTIVE_PUBLICATION_JOB_CONFLICT',$$insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at) values(task17a_test.uuid_for('17690000-0000-4000-8000-',923022),($1->>'plan')::uuid,($1->>'creator')::uuid,($1->>'package')::uuid,($1->>'account')::uuid,'onlyfans','assisted','draft',(select updated_at from public.creator_publishing_content_packages where id=($1->>'package')::uuid),public.creator_publishing_autopost_source_fingerprint(($1->>'package')::uuid),'task14.20260711.001','9999999999999999999999999999999999999999999999999999999999999999',clock_timestamp(),clock_timestamp())$$);
+\echo TASK17A_SCENARIO_START: active_publication_unique_index_boundary
+select task17a_test.reset_fixture(923022) as active_unique_fixture \gset
+insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at)
+values('17590000-0000-4000-8000-000000923022',(:'active_unique_fixture'::jsonb->>'creator')::uuid,'draft','active-unique-plan-923022','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','task14.20260711.001',clock_timestamp(),clock_timestamp());
+select task17a_test.expect_error('active publication unique index boundary','creator_publishing_jobs_active_package_uidx',format('insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at) values(%L,%L,%L,%L,%L,%L,%L,%L,(select updated_at from public.creator_publishing_content_packages where id=%L),public.creator_publishing_autopost_source_fingerprint(%L),%L,%L,clock_timestamp(),clock_timestamp())','17690000-0000-4000-8000-000000923022','17590000-0000-4000-8000-000000923022',(:'active_unique_fixture'::jsonb->>'creator'),(:'active_unique_fixture'::jsonb->>'package'),(:'active_unique_fixture'::jsonb->>'account'),'onlyfans','assisted','draft',(:'active_unique_fixture'::jsonb->>'package'),(:'active_unique_fixture'::jsonb->>'package'),'task14.20260711.001','9999999999999999999999999999999999999999999999999999999999999999'));
+select task17a_test.assert((select count(*) from public.creator_publishing_platform_jobs where content_package_id=(:'active_unique_fixture'::jsonb->>'package')::uuid and job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived'))=1, 'active publication unique boundary leaves one active job');
+select task17a_test.assert((select claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null from public.creator_publishing_queue_tasks where id=(:'active_unique_fixture'::jsonb->>'task')::uuid), 'active publication unique boundary leaves queue unclaimed');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claimed' and entity_id=(:'active_unique_fixture'::jsonb->>'task')::uuid), 'active publication unique boundary writes no claim audit');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='claim' and queue_task_id=(:'active_unique_fixture'::jsonb->>'task')::uuid), 'active publication unique boundary writes no idempotency');
+\echo TASK17A_SCENARIO_START: active_publication_defensive_rpc_boundary
+select task17a_test.reset_fixture(923122) as active_rpc_fixture \gset
+begin;
+drop index public.creator_publishing_jobs_active_package_uidx;
+insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at)
+values('17590000-0000-4000-8000-000000923122',(:'active_rpc_fixture'::jsonb->>'creator')::uuid,'draft','active-rpc-plan-923122','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','task14.20260711.001',clock_timestamp(),clock_timestamp());
+insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at)
+values('17690000-0000-4000-8000-000000923122','17590000-0000-4000-8000-000000923122',(:'active_rpc_fixture'::jsonb->>'creator')::uuid,(:'active_rpc_fixture'::jsonb->>'package')::uuid,(:'active_rpc_fixture'::jsonb->>'account')::uuid,'onlyfans','assisted','draft',(select updated_at from public.creator_publishing_content_packages where id=(:'active_rpc_fixture'::jsonb->>'package')::uuid),public.creator_publishing_autopost_source_fingerprint((:'active_rpc_fixture'::jsonb->>'package')::uuid),'task14.20260711.001','9999999999999999999999999999999999999999999999999999999999999999',clock_timestamp(),clock_timestamp());
+select task17a_test.expect_error('active publication defensive RPC boundary','ACTIVE_PUBLICATION_JOB_CONFLICT',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)',(:'active_rpc_fixture'::jsonb->>'creator'),(:'active_rpc_fixture'::jsonb->>'task'),(:'active_rpc_fixture'::jsonb->>'job'),(:'active_rpc_fixture'::jsonb->>'consent_version'),(:'active_rpc_fixture'::jsonb->>'consent_hash'),'activeconf1'));
+select task17a_test.assert((select claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null from public.creator_publishing_queue_tasks where id=(:'active_rpc_fixture'::jsonb->>'task')::uuid), 'active publication defensive RPC leaves queue unclaimed');
+select task17a_test.assert((select count(*) from public.creator_publishing_platform_jobs where content_package_id=(:'active_rpc_fixture'::jsonb->>'package')::uuid and job_state='draft')=2, 'active publication defensive RPC setup has two active jobs');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claimed' and idempotency_key='activeconf1'), 'active publication defensive RPC writes no claim audit');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='claim' and idempotency_key='activeconf1'), 'active publication defensive RPC writes no idempotency');
+rollback;
+select task17a_test.assert(to_regclass('public.creator_publishing_jobs_active_package_uidx') is not null, 'active publication defensive RPC rollback restores active job index');
+select task17a_test.assert((select count(*) from public.creator_publishing_platform_jobs where content_package_id=(:'active_rpc_fixture'::jsonb->>'package')::uuid and job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived'))=1, 'active publication defensive RPC rollback leaves one active job');
 \echo TASK17A_SCENARIO_START: safety_mismatched_creator
 select task17a_test.assert_claim_rejected(923023,'mismatched creator','OPERATOR_TASK_JOB_MISMATCH',$$update public.creator_publishing_queue_tasks set creator_id=($1->>'other_creator')::uuid where id=($1->>'task')::uuid$$);
 \echo TASK17A_SCENARIO_START: safety_mismatched_platform
