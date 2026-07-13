@@ -47,6 +47,12 @@ test('authorization, idempotency, locks, and trusted RPC contracts exist', () =>
   assert.match(migration, /p_expected_ai_twin_consent_version/);
   assert.match(migration, /p_expected_attestation_text_sha256/);
   assert.match(migration, /creator_publishing_operator_current_safety_gate/);
+  assert.match(migration, /review_source='automated'[\s\S]*outcome='pass'/);
+  assert.match(migration, /review_source='human'[\s\S]*outcome='escalate'[\s\S]*escalated_approval_reason/);
+  assert.match(migration, /outcome in \('block','manual_review'\)/);
+  assert.match(migration, /if not found then raise exception 'OPERATOR_JOB_NOT_FOUND'/);
+  assert.match(migration, /if not found then raise exception 'OPERATOR_TASK_NOT_FOUND'/);
+  assert.match(migration, /before_state[\s\S]*prior_task\.status[\s\S]*prior_task\.operator_progress_revision[\s\S]*prior_task\.assigned_operator_id/);
 });
 
 test('audit inserts use real audit schema and idempotency inserts use explicit columns', () => {
@@ -65,6 +71,29 @@ test('Task 15 compatibility is narrow and active claims are preserved', () => {
   assert.match(migration, /claim_expires_at > v_now/);
   assert.match(migration, /when event_rec\.event_type='operator_due'/);
   assert.match(migration, /when event_rec\.event_type='publish_due'/);
+});
+
+
+test('internal helpers are not executable by browser roles and action RPCs remain service-role only', () => {
+  for (const signature of [
+    String.raw`creator_publishing_operator_validate_idempotency_key\(text\)`,
+    String.raw`creator_publishing_operator_is_authorized\(uuid,uuid,text\)`,
+    String.raw`creator_publishing_operator_current_safety_gate\(public\.creator_publishing_platform_jobs,public\.creator_publishing_queue_tasks,uuid,text,text\)`,
+    String.raw`creator_publishing_operator_restore_queue_status\(public\.creator_publishing_platform_jobs,timestamptz\)`,
+    String.raw`creator_publishing_operator_request_fingerprint\(jsonb\)`,
+    String.raw`creator_publishing_operator_replay_or_conflict\(uuid,text,text,text\)`,
+  ]) {
+    assert.match(migration, new RegExp(String.raw`revoke all on function public\.${signature} from public, anon, authenticated`));
+  }
+  for (const signature of [
+    String.raw`creator_publishing_claim_onlyfans_operator_task\(uuid,uuid,uuid,text,text,text\)`,
+    String.raw`creator_publishing_release_onlyfans_operator_task\(uuid,uuid,uuid,uuid,text\)`,
+    String.raw`creator_publishing_update_onlyfans_operator_progress\(uuid,uuid,uuid,uuid,text,integer,text,text,text,text\)`,
+    String.raw`creator_publishing_recover_expired_onlyfans_operator_claim\(uuid,uuid,uuid,text\)`,
+  ]) {
+    assert.match(migration, new RegExp(String.raw`revoke all on function public\.${signature} from public, anon, authenticated`));
+    assert.match(migration, new RegExp(String.raw`grant execute on function public\.${signature} to service_role`));
+  }
 });
 
 test('prohibited Task 17B, Task 18, platform, and deployment work is absent', () => {
