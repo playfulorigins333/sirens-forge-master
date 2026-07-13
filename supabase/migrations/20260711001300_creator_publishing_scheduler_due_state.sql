@@ -441,6 +441,8 @@ declare
   job_rec public.creator_publishing_platform_jobs%rowtype;
   event_rec public.creator_publishing_scheduler_events%rowtype;
   capability_rec public.creator_publishing_platform_capabilities%rowtype;
+  package_rec public.creator_publishing_content_packages%rowtype;
+  evidence_rec public.creator_publishing_compliance_reviews%rowtype;
   v_now timestamptz := clock_timestamp();
   v_next_state text;
   v_gate_code text;
@@ -492,8 +494,8 @@ begin
   perform 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=job_rec.content_package_id order by performer_source.content_package_id, performer_source.id for update of performer_source;
   perform 1 from public.creator_publishing_media_assets as media_source where media_source.content_package_id=job_rec.content_package_id order by media_source.content_package_id, media_source.id for update of media_source;
   perform 1 from public.generations as generation_source where generation_source.id in (select (media_source.ai_generation_metadata->>'generation_id')::uuid from public.creator_publishing_media_assets as media_source where media_source.content_package_id=job_rec.content_package_id and coalesce(media_source.ai_generation_metadata->>'generation_id','') ~* '^[0-9a-f-]{36}$') order by generation_source.id for update of generation_source;
-  perform 1 from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.target_platform=job_rec.target_platform and queue_source.status <> 'archived' order by queue_source.id for update of queue_source;
-  perform 1 from public.creator_publishing_platform_jobs as publication_source where publication_source.content_package_id=job_rec.content_package_id and publication_source.id<>job_rec.id and publication_source.job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived') order by publication_source.id for update of publication_source;
+  perform 1 from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.target_platform=job_rec.target_platform order by queue_source.id for update of queue_source;
+  perform 1 from public.creator_publishing_platform_jobs as publication_source where publication_source.content_package_id=job_rec.content_package_id and publication_source.id<>job_rec.id order by publication_source.id for update of publication_source;
 
   select * into capability_rec from public.creator_publishing_platform_capabilities where platform=job_rec.target_platform;
   if v_gate_code is null and (not found or capability_rec.availability_status <> 'available' or capability_rec.publishing_mode <> job_rec.publishing_mode) then v_gate_code := 'PLATFORM_UNAVAILABLE'; end if;
@@ -527,7 +529,30 @@ begin
     v_gate_code := 'CREATOR_VERIFICATION_MISSING';
   end if;
   if v_gate_code is null and not exists(select 1 from public.creator_publishing_ai_twin_consents as consent_source where consent_source.creator_id=job_rec.creator_id and consent_source.status='granted' and consent_source.revoked_at is null and consent_source.attestation_version=p_current_ai_twin_consent_version and consent_source.attestation_text_sha256=p_current_attestation_text_sha256) then v_gate_code := 'AI_TWIN_CONSENT_MISSING'; end if;
+  if v_gate_code is null then
+    select * into package_rec from public.creator_publishing_content_packages as package_source where package_source.id=job_rec.content_package_id;
+    if not found or package_rec.creator_id<>job_rec.creator_id or package_rec.platform_account_id<>job_rec.platform_account_id or package_rec.target_platform<>job_rec.target_platform or package_rec.creator_approval_status<>'approved' or package_rec.compliance_status not in ('passed','escalated_approved') or package_rec.compliance_policy_version is null or package_rec.compliance_policy_version='unassigned' then
+      v_gate_code := 'CREATOR_APPROVAL_MISSING';
+    end if;
+  end if;
+  if v_gate_code is null then
+    if package_rec.compliance_status='passed' then
+      select * into evidence_rec from public.creator_publishing_compliance_reviews as review_source where review_source.content_package_id=package_rec.id and review_source.review_source='automated' and review_source.outcome='pass' and review_source.compliance_policy_version=package_rec.compliance_policy_version order by review_source.created_at desc, review_source.id desc limit 1;
+    else
+      select * into evidence_rec from public.creator_publishing_compliance_reviews as review_source where review_source.content_package_id=package_rec.id and review_source.review_source='human' and review_source.outcome='escalate' and length(btrim(coalesce(review_source.escalated_approval_reason,'')))>0 and review_source.compliance_policy_version=package_rec.compliance_policy_version order by review_source.created_at desc, review_source.id desc limit 1;
+    end if;
+    if not found or exists (select 1 from public.creator_publishing_compliance_reviews as later_source where later_source.content_package_id=package_rec.id and later_source.outcome in ('block','manual_review') and (later_source.created_at > evidence_rec.created_at or (later_source.created_at = evidence_rec.created_at and later_source.id > evidence_rec.id))) then
+      v_gate_code := 'COMPLIANCE_EVIDENCE_INVALID';
+    end if;
+  end if;
+  if v_gate_code is null and package_rec.second_person_present and (not exists (select 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=package_rec.id) or exists (select 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=package_rec.id and performer_source.platform_release_confirmed is not true)) then
+    v_gate_code := 'CO_PERFORMER_RELEASE_MISSING';
+  end if;
+  if v_gate_code is null and job_rec.publishing_mode='assisted' and (not exists (select 1 from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.creator_id=job_rec.creator_id and queue_source.target_platform='onlyfans' and queue_source.platform_account_id=job_rec.platform_account_id and queue_source.status='ready_for_handoff' and queue_source.claimed_by is null and queue_source.claimed_at is null and queue_source.posted_by is null and queue_source.posted_at is null and queue_source.posted_confirmation is false and queue_source.final_post_url is null and queue_source.final_post_url_skip_reason is null and queue_source.proof_screenshot_storage_key is null and queue_source.skip_or_fail_reason is null) or (select count(*) from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.target_platform='onlyfans' and queue_source.status <> 'archived') <> 1) then
+    v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT';
+  end if;
   if v_gate_code is null and public.creator_publishing_autopost_source_fingerprint(job_rec.content_package_id) <> job_rec.source_package_fingerprint then v_gate_code := 'SOURCE_FINGERPRINT_STALE'; end if;
+  if v_gate_code is null and exists (select 1 from public.creator_publishing_platform_jobs as publication_source where publication_source.content_package_id=job_rec.content_package_id and publication_source.id<>job_rec.id and publication_source.job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived')) then v_gate_code := 'ACTIVE_PUBLICATION_JOB_CONFLICT'; end if;
 
   v_next_state := case
     when job_rec.publishing_mode='assisted' and event_rec.event_type='operator_due' and job_rec.job_state='scheduled_internally' then 'awaiting_operator'
@@ -542,7 +567,7 @@ begin
   if v_gate_code is not null then
     update public.creator_publishing_scheduler_events set status='blocked', processed_at=v_now, safe_error_code=v_gate_code, lock_token=null, locked_at=null, updated_at=v_now where id=event_rec.id and lock_token=p_lock_token;
     update public.creator_publishing_scheduler_events set status='superseded', superseded_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where platform_job_id=job_rec.id and schedule_revision=event_rec.schedule_revision and id<>event_rec.id and status in ('pending','processing');
-    update public.creator_publishing_platform_jobs set job_state=case when v_gate_code in ('SOURCE_FINGERPRINT_STALE','AI_TWIN_CONSENT_MISSING','CREATOR_VERIFICATION_MISSING','SCHEDULER_STATE_TRANSITION_INVALID') then 'needs_fix' else 'blocked' end, updated_at=v_now where id=job_rec.id;
+    update public.creator_publishing_platform_jobs set job_state=case when v_gate_code in ('SOURCE_FINGERPRINT_STALE','AI_TWIN_CONSENT_MISSING','CREATOR_VERIFICATION_MISSING','SCHEDULER_STATE_TRANSITION_INVALID','CREATOR_APPROVAL_MISSING','COMPLIANCE_EVIDENCE_INVALID','CO_PERFORMER_RELEASE_MISSING') then 'needs_fix' else 'blocked' end, updated_at=v_now where id=job_rec.id;
     update public.creator_publishing_plans set status=public.creator_publishing_aggregate_plan_status(plan_rec.id), updated_at=v_now where id=plan_rec.id;
     insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_scheduler_event',event_rec.id,null,'scheduler','creator_publishing_scheduler_gate_failed',jsonb_build_object('status','processing','event_type',event_rec.event_type,'schedule_revision',event_rec.schedule_revision),jsonb_build_object('status','blocked','safe_error_code',v_gate_code),v_now);
     return jsonb_build_object('ok',true,'status','blocked','safe_error_code',v_gate_code);
