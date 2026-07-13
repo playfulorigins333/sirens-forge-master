@@ -163,3 +163,88 @@ update public.creator_publishing_queue_tasks set status='due_now', updated_at=no
 select public.task17a_assert(public.creator_publishing_task17a_queue_task_compatible(j, now(), array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[]), 'operator_due compatibility accepts existing due_now queue task without regression') from public.creator_publishing_platform_jobs j where j.id='81000000-0000-4000-8000-000000000001';
 update public.creator_publishing_queue_tasks set status='blocked', updated_at=now() where id='61000000-0000-4000-8000-000000000001';
 select public.task17a_assert(not public.creator_publishing_task17a_queue_task_compatible(j, now(), array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[]), 'blocked queue status fails closed') from public.creator_publishing_platform_jobs j where j.id='81000000-0000-4000-8000-000000000001';
+
+-- Additional behavioral coverage on the same fully valid fixture: authorized operator,
+-- ownership, progress, release failure modes, idempotent release, and expired recovery.
+update public.creator_publishing_platform_jobs
+set schedule_revision=null,
+    intended_publish_at=null,
+    operator_due_at=null,
+    schedule_timezone=null,
+    scheduled_at=null,
+    scheduled_by=null,
+    rescheduled_at=null,
+    job_state='draft',
+    updated_at=now()
+where id='81000000-0000-4000-8000-000000000001';
+update public.creator_publishing_queue_tasks
+set status='ready_for_handoff',
+    claimed_by=null,
+    claimed_at=null,
+    claim_token=null,
+    claim_expires_at=null,
+    updated_at=now()
+where id='61000000-0000-4000-8000-000000000001';
+
+select public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-operator-claim-key-0001') as task17a_operator_claim_result \gset
+select public.task17a_assert((:'task17a_operator_claim_result')::jsonb->>'status'='claimed', 'active creator-specific operator can claim through RPC');
+select public.task17a_assert((select claimed_by='00000000-0000-4000-8000-0000000000aa' and claimed_at is not null and claim_token is not null and claim_expires_at is not null and claim_expires_at <= claimed_at + interval '30 minutes' from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'operator claim populates exactly the four active ownership fields with bounded lifetime');
+
+create temp table task17a_operator_claim_token as select ((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid as claim_token;
+do $$
+declare v_stolen boolean := false; v_wrong_owner boolean := false; v_wrong_token boolean := false; v_invalid_progress boolean := false; v_stale_progress boolean := false; v_claim_token uuid; v_original_token uuid;
+begin
+  select claim_token into v_claim_token from task17a_operator_claim_token;
+  v_original_token := v_claim_token;
+  begin
+    perform public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-steal-claim-key-0001');
+  exception when others then v_stolen := sqlerrm like '%OPERATOR_TASK_ALREADY_CLAIMED%'; end;
+  perform public.task17a_assert(v_stolen and (select claim_token=v_original_token from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'active claim cannot be stolen or rotated by a new key');
+  begin
+    perform public.creator_publishing_release_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',v_claim_token,'task17a-release-wrong-owner-0001');
+  exception when others then v_wrong_owner := sqlerrm like '%OPERATOR_NOT_CLAIM_OWNER%'; end;
+  begin
+    perform public.creator_publishing_release_onlyfans_operator_task('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-00000000bad1','task17a-release-wrong-token-0001');
+  exception when others then v_wrong_token := sqlerrm like '%OPERATOR_CLAIM_TOKEN_MISMATCH%'; end;
+  begin
+    perform public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',v_claim_token,'not_started','handoff_ready','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-invalid-key-0001');
+  exception when others then v_invalid_progress := sqlerrm like '%OPERATOR_PROGRESS_INVALID_TRANSITION%'; end;
+  begin
+    perform public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',v_claim_token,'preparing','prepared','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-stale-key-0001');
+  exception when others then v_stale_progress := sqlerrm like '%OPERATOR_PROGRESS_STATE_MISMATCH%'; end;
+  perform public.task17a_assert(v_wrong_owner and v_wrong_token and v_invalid_progress and v_stale_progress, 'release/progress wrong owner token invalid transition and stale expected state fail safely');
+end $$;
+
+select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'preparing','prepared','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0003') as task17a_progress_prepared_result \gset
+select public.task17a_assert((:'task17a_progress_prepared_result')::jsonb->>'progress_state'='prepared', 'progress transition preparing to prepared succeeds');
+select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'prepared','handoff_ready','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0004') as task17a_progress_handoff_result \gset
+select public.task17a_assert((:'task17a_progress_handoff_result')::jsonb->>'progress_state'='handoff_ready', 'progress transition prepared to handoff_ready succeeds');
+
+select public.creator_publishing_release_onlyfans_operator_task('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'task17a-release-key-0002') as task17a_operator_release_result \gset
+select public.task17a_assert((:'task17a_operator_release_result')::jsonb->>'status'='ready_for_handoff', 'operator release restores unscheduled ready_for_handoff');
+select public.task17a_assert(public.creator_publishing_release_onlyfans_operator_task('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'task17a-release-key-0002') = (:'task17a_operator_release_result')::jsonb, 'release exact replay is idempotent');
+select public.task17a_assert((select operator_progress_state='handoff_ready' from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'release preserves handoff_ready progress history');
+
+update public.creator_publishing_queue_tasks
+set status='claimed',
+    claimed_by='00000000-0000-4000-8000-0000000000aa',
+    claimed_at=now()-interval '29 minutes',
+    claim_token='90000000-0000-4000-8000-00000000eeee',
+    claim_expires_at=now()-interval '1 minute',
+    updated_at=now()
+where id='61000000-0000-4000-8000-000000000001';
+select public.task17a_assert((select status='claimed' from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'ordinary select observes expired claim without recovering it');
+select public.creator_publishing_recover_expired_onlyfans_operator_claim('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','task17a-recovery-key-0001') as task17a_recovery_result \gset
+select public.task17a_assert((:'task17a_recovery_result')::jsonb->>'status'='ready_for_handoff', 'explicit creator recovery clears expired claim and restores ready status');
+select public.task17a_assert((select operator_progress_state='handoff_ready' and assigned_operator_id is null from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'expired recovery preserves progress and assigned_operator_id');
+
+update public.creator_publishing_queue_tasks
+set status='claimed',
+    claimed_by='00000000-0000-4000-8000-0000000000aa',
+    claimed_at=now()-interval '29 minutes',
+    claim_token='90000000-0000-4000-8000-00000000eeef',
+    claim_expires_at=now()-interval '1 minute',
+    updated_at=now()
+where id='61000000-0000-4000-8000-000000000001';
+select public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-claim-recovers-expired-0001') as task17a_claim_recovery_result \gset
+select public.task17a_assert((:'task17a_claim_recovery_result')::jsonb->>'expired_claim_recovered'='true' and (:'task17a_claim_recovery_result')::jsonb->>'status'='claimed', 'claim RPC recovers expired claim before granting replacement claim');
