@@ -2,13 +2,41 @@
 create schema if not exists task17a_test;
 create or replace function task17a_test.assert(ok boolean, label text) returns void language plpgsql as $$ begin if not ok then raise exception 'TASK17A_ASSERT:%', label; end if; end $$;
 create or replace function task17a_test.expect_error(label text, expected text, statement text) returns void language plpgsql as $$
+declare
+  v_saw_expected_error boolean := false;
 begin
-  execute statement;
-  raise exception 'TASK17A_ASSERT:% expected %', label, expected;
-exception when others then
-  if sqlerrm not like '%' || expected || '%' then
-    raise exception 'TASK17A_ASSERT:% expected %, got %', label, expected, sqlerrm;
+  begin
+    execute statement;
+  exception when others then
+    if sqlerrm not like '%' || expected || '%' then
+      raise exception 'TASK17A_ASSERT:% expected %, got %', label, expected, sqlerrm;
+    end if;
+    v_saw_expected_error := true;
+  end;
+  if not v_saw_expected_error then
+    raise exception 'TASK17A_ASSERT:% expected %, but statement succeeded', label, expected;
   end if;
+end $$;
+create or replace function task17a_test.raise_text(message text) returns void language plpgsql as $$ begin raise exception '%', message; end $$;
+do $$
+declare
+  v_failed boolean;
+begin
+  perform task17a_test.expect_error('expect_error self expected','EXPECTED','select task17a_test.raise_text(''EXPECTED'')');
+  v_failed := false;
+  begin
+    perform task17a_test.expect_error('expect_error self wrong','EXPECTED','select task17a_test.raise_text(''OTHER'')');
+  exception when others then
+    if sqlerrm like '%expected EXPECTED, got OTHER%' then v_failed := true; else raise; end if;
+  end;
+  perform task17a_test.assert(v_failed, 'expect_error self-test rejects wrong error');
+  v_failed := false;
+  begin
+    perform task17a_test.expect_error('expect_error self no error','EXPECTED','create temporary table if not exists task17a_expect_error_noop(x integer) on commit drop');
+  exception when others then
+    if sqlerrm like '%expected EXPECTED, but statement succeeded%' then v_failed := true; else raise; end if;
+  end;
+  perform task17a_test.assert(v_failed, 'expect_error self-test rejects missing error');
 end $$;
 create or replace function task17a_test.uuid_for(prefix text, seed integer) returns uuid language sql immutable as $$
   select (substr(prefix,1,24) || lpad(seed::text,12,'0'))::uuid;
@@ -53,7 +81,7 @@ begin
   insert into public.creator_publishing_creator_verifications(creator_id,status,evidence_reference,reason,reviewed_by,reviewed_at) values(v_creator,'verified','evidence','verified',v_global_only,v_now) on conflict (creator_id) do update set status='verified', evidence_reference='evidence', reason='verified', reviewed_by=v_global_only, reviewed_at=v_now;
   insert into public.creator_platform_accounts(id,creator_id,platform,platform_username,verification_status,verification_attested_at,is_virtual_entity,verification_reviewed_by,verification_reviewed_at,verification_evidence_reference,verification_reason) values(v_account,v_creator,'onlyfans','creator'||seed,'verified',v_now,false,v_global_only,v_now,'account evidence','verified');
   insert into public.creator_publishing_ai_twin_consents(creator_id,status,attestation_version,attestation_text_sha256,granted_at) values(v_creator,'granted','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',v_now) on conflict (creator_id) do update set status='granted', attestation_version='creator-ai-twin-consent-v1', attestation_text_sha256='0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12', granted_at=v_now, revoked_at=null;
-  insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,compliance_status,review_status,creator_approval_status,created_at,updated_at) values(v_package,v_creator,v_account,'onlyfans','Task17A package '||seed,'caption','#AI','ai_generated','{}','pending','unassigned','pending',v_now,v_now);
+  insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,compliance_status,compliance_policy_version,creator_approval_status,created_at,updated_at) values(v_package,v_creator,v_account,'onlyfans','Task17A package '||seed,'caption','#AI','ai_generated','{}','pending','unassigned','pending',v_now,v_now);
   insert into public.generations(id,user_id,status,r2_bucket,r2_key,metadata) values(v_generation,v_creator,'completed','bucket','task17a/'||seed,'{}') on conflict (id) do nothing;
   insert into public.creator_publishing_media_assets(id,content_package_id,storage_key,mime_type,sha256,source,ai_generation_metadata,created_at) values(v_media,v_package,'media/task17a/'||seed,'image/png','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','ai_pipeline',jsonb_build_object('generation_id',v_generation::text),v_now);
   insert into public.creator_publishing_compliance_reviews(content_package_id,reviewer_id,outcome,review_source,rule_hits,compliance_policy_version,created_at,review_metadata) values(v_package,v_global_only,'pass','automated','[]','policy-v1',v_now,'{}');
@@ -67,5 +95,13 @@ begin
   perform task17a_test.assert(exists(select 1 from public.creator_publishing_operator_authorizations where creator_id=v_creator and operator_id=v_revoked and status='revoked' and revoked_at is not null and revoked_at >= authorized_at), 'revoked authorization fixture is constraint-valid');
   perform task17a_test.assert(public.creator_publishing_operator_is_authorized(v_creator,v_revoked,'onlyfans') is false, 'revoked authorization helper returns false');
   insert into public.creator_publishing_operator_authorizations(creator_id,operator_id,platform,status,authorized_at) values(v_other_creator,v_unauthorized,'onlyfans','active',v_now) on conflict do nothing;
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_content_packages where id=v_package and compliance_policy_version='policy-v1' and creator_approval_status='approved' and compliance_status='passed'), 'fixture package exists approved with policy-v1');
+  perform task17a_test.assert(exists(select 1 from public.creator_platform_accounts where id=v_account and creator_id=v_creator and platform='onlyfans' and verification_status='verified'), 'fixture account verified');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_creator_verifications where creator_id=v_creator and status='verified'), 'fixture creator verified');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_ai_twin_consents where creator_id=v_creator and status='granted' and revoked_at is null and attestation_version='creator-ai-twin-consent-v1' and attestation_text_sha256='0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12'), 'fixture consent current');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and source_package_updated_at=v_updated and source_package_fingerprint=public.creator_publishing_autopost_source_fingerprint(v_package)), 'fixture source fingerprint current');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_queue_tasks where content_package_id=v_package and creator_id=v_creator and target_platform='onlyfans' and platform_account_id=v_account and status not in ('archived','skipped','failed_manual_upload','confirmed_posted_manual'))=1, 'fixture exactly one active queue task');
+  perform task17a_test.assert(public.creator_publishing_operator_is_authorized(v_creator,v_creator,'onlyfans') and public.creator_publishing_operator_is_authorized(v_creator,v_operator_a,'onlyfans') and public.creator_publishing_operator_is_authorized(v_creator,v_operator_b,'onlyfans') and not public.creator_publishing_operator_is_authorized(v_creator,v_unauthorized,'onlyfans') and not public.creator_publishing_operator_is_authorized(v_creator,v_revoked,'onlyfans'), 'fixture authorization matrix valid');
+  perform task17a_test.assert((not scheduled and exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and schedule_revision is null and intended_publish_at is null and operator_due_at is null and schedule_timezone is null and scheduled_at is null and scheduled_by is null)) or (scheduled and exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and schedule_revision=1 and intended_publish_at is not null and operator_due_at is not null and schedule_timezone='UTC' and scheduled_at is not null and scheduled_by=v_creator)), 'fixture scheduling fields valid');
   return jsonb_build_object('creator',v_creator,'operator_a',v_operator_a,'operator_b',v_operator_b,'unauthorized',v_unauthorized,'revoked',v_revoked,'other_creator',v_other_creator,'global_only',v_global_only,'account',v_account,'package',v_package,'plan',v_plan,'job',v_job,'task',v_task,'consent_version','creator-ai-twin-consent-v1','consent_hash','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12');
 end $$;

@@ -1,5 +1,6 @@
 \set ON_ERROR_STOP on
 \i backend/creator-publishing-queue/tests/task17aTestSupport.sql
+\echo TASK17A_SCENARIO_START: safety_capability_unavailable
 create or replace function task17a_test.assert_claim_rejected(seed integer, label text, expected text, mutate text) returns void language plpgsql as $$
 declare f jsonb; before_row public.creator_publishing_queue_tasks%rowtype;
 begin
@@ -21,4 +22,4 @@ select task17a_test.assert_claim_rejected(923006,'source fingerprint stale','SOU
 select task17a_test.assert_claim_rejected(923007,'duplicate active queue task','OPERATOR_QUEUE_TASK_AMBIGUOUS',$$insert into public.creator_publishing_queue_tasks(content_package_id,creator_id,target_platform,platform_account_id,status) values(($1->>'package')::uuid,($1->>'creator')::uuid,'onlyfans',($1->>'account')::uuid,'ready_for_handoff')$$);
 select task17a_test.assert_claim_rejected(923008,'cancelled job','OPERATOR_TASK_INELIGIBLE',$$update public.creator_publishing_platform_jobs set cancelled_at=clock_timestamp(), cancelled_by=($1->>'creator')::uuid, cancellation_reason='cancelled' where id=($1->>'job')::uuid$$);
 select task17a_test.assert_claim_rejected(923009,'ineligible job state','OPERATOR_TASK_INELIGIBLE',$$update public.creator_publishing_platform_jobs set job_state='blocked' where id=($1->>'job')::uuid$$);
-select task17a_test.assert_claim_rejected(923010,'mismatched account','OPERATOR_TASK_JOB_MISMATCH',$$update public.creator_publishing_queue_tasks set platform_account_id=($1->>'operator_a')::uuid where id=($1->>'task')::uuid$$);
+select task17a_test.assert_claim_rejected(923010,'mismatched account','OPERATOR_TASK_JOB_MISMATCH',$$with alt_account as (insert into public.creator_platform_accounts(id,creator_id,platform,platform_username,verification_status,verification_attested_at,is_virtual_entity,verification_reviewed_by,verification_reviewed_at,verification_evidence_reference,verification_reason) values(task17a_test.uuid_for('17190000-0000-4000-8000-',923010),($1->>'creator')::uuid,'onlyfans','alt923010','verified',clock_timestamp(),false,($1->>'global_only')::uuid,clock_timestamp(),'alt evidence','verified') returning id) update public.creator_publishing_queue_tasks set platform_account_id=(select id from alt_account) where id=($1->>'task')::uuid$$);

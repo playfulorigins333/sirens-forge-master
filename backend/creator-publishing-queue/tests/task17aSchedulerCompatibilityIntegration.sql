@@ -1,5 +1,6 @@
 \set ON_ERROR_STOP on
 \i backend/creator-publishing-queue/tests/task17aTestSupport.sql
+\echo TASK17A_SCENARIO_START: scheduler_operator_due_ready
 select task17a_test.reset_fixture(924001,'ready_for_handoff','scheduled_internally',true) as fixture \gset
 update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '1 minute', intended_publish_at=clock_timestamp()+interval '1 hour' where id=(:'fixture'::jsonb->>'job')::uuid;
 insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at) values('92400000-0000-4000-8000-000000000001',(:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'plan')::uuid,(:'fixture'::jsonb->>'job')::uuid,'operator_due','processing',clock_timestamp()-interval '1 minute',1,'92400000-0000-4000-8000-000000000101',clock_timestamp());
@@ -36,8 +37,8 @@ begin
     update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '2 hours', intended_publish_at=clock_timestamp()-interval '1 minute' where id=(f->>'job')::uuid;
   end if;
   insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at)
-  values(v_event,(f->>'creator')::uuid,(f->>'plan')::uuid,(f->>'job')::uuid,event,'processing',clock_timestamp()-interval '1 minute',1,v_lock::text,clock_timestamp());
-  v_result := public.creator_publishing_process_scheduler_event(v_event,v_lock::text,f->>'consent_version',f->>'consent_hash');
+  values(v_event,(f->>'creator')::uuid,(f->>'plan')::uuid,(f->>'job')::uuid,event,'processing',clock_timestamp()-interval '1 minute',1,v_lock,clock_timestamp());
+  v_result := public.creator_publishing_process_scheduler_event(v_event,v_lock,f->>'consent_version',f->>'consent_hash');
   perform task17a_test.assert(v_result->>'status'='processed', label || ' processed');
   perform task17a_test.assert((select job_state=expected_job_state from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid), label || ' job state');
   perform task17a_test.assert((select status=expected_queue_status from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), label || ' queue state');
@@ -65,8 +66,8 @@ begin
   perform public.creator_publishing_claim_onlyfans_operator_task((f->>'creator')::uuid,(f->>'task')::uuid,(f->>'job')::uuid,f->>'consent_version',f->>'consent_hash','schedpubclaim');
   select * into before_row from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
   insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at)
-  values(v_event,(f->>'creator')::uuid,(f->>'plan')::uuid,(f->>'job')::uuid,'publish_due','processing',clock_timestamp()-interval '1 minute',1,v_lock::text,clock_timestamp());
-  v_result := public.creator_publishing_process_scheduler_event(v_event,v_lock::text,f->>'consent_version',f->>'consent_hash');
+  values(v_event,(f->>'creator')::uuid,(f->>'plan')::uuid,(f->>'job')::uuid,'publish_due','processing',clock_timestamp()-interval '1 minute',1,v_lock,clock_timestamp());
+  v_result := public.creator_publishing_process_scheduler_event(v_event,v_lock,f->>'consent_version',f->>'consent_hash');
   perform task17a_test.assert(v_result->>'status'='processed','active claim publish_due processed');
   perform task17a_test.assert((select job_state='due_now' from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid),'active claim publish_due job due_now');
   perform task17a_test.assert((select status='claimed' and claimed_by=before_row.claimed_by and claimed_at=before_row.claimed_at and claim_token=before_row.claim_token and claim_expires_at=before_row.claim_expires_at and operator_progress_state=before_row.operator_progress_state and operator_progress_revision=before_row.operator_progress_revision and assigned_operator_id=before_row.assigned_operator_id and posted_by is null and posted_at is null and posted_confirmation=false and final_post_url is null and proof_screenshot_storage_key is null from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid),'active claim publish_due preserves claim progress assigned and Task18 fields');

@@ -1,5 +1,6 @@
 \set ON_ERROR_STOP on
 \i backend/creator-publishing-queue/tests/task17aTestSupport.sql
+\echo TASK17A_SCENARIO_START: authorization_creator_claim
 select task17a_test.reset_fixture(921001) as fixture \gset
 select public.creator_publishing_claim_onlyfans_operator_task((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','selfclaim1') as self_claim \gset
 select task17a_test.assert((:'self_claim')::jsonb->>'ok'='true', 'creator self-claim succeeds');
