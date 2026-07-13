@@ -571,7 +571,7 @@ begin
   if v_gate_code is null and package_rec.second_person_present and (not exists (select 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=package_rec.id) or exists (select 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=package_rec.id and performer_source.platform_release_confirmed is not true)) then
     v_gate_code := 'CO_PERFORMER_RELEASE_MISSING';
   end if;
-  if v_gate_code is null and job_rec.publishing_mode='assisted' and not public.creator_publishing_task17a_queue_task_compatible(job_rec, v_now, case when event_rec.event_type='operator_due' then array['ready_for_handoff','scheduled_internally']::text[] else array['scheduled_internally','awaiting_operator','due_now']::text[] end) then
+  if v_gate_code is null and job_rec.publishing_mode='assisted' and not public.creator_publishing_task17a_queue_task_compatible(job_rec, v_now, array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[]) then
     v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT';
   end if;
   if v_gate_code is null and public.creator_publishing_autopost_source_fingerprint(job_rec.content_package_id) <> job_rec.source_package_fingerprint then v_gate_code := 'SOURCE_FINGERPRINT_STALE'; end if;
@@ -599,7 +599,11 @@ begin
   update public.creator_publishing_platform_jobs set job_state=v_next_state, updated_at=v_now where id=job_rec.id;
   if job_rec.publishing_mode='assisted' then
     update public.creator_publishing_queue_tasks
-    set status = case when event_rec.event_type='operator_due' then 'awaiting_operator' else 'due_now' end,
+    set status = case
+          when event_rec.event_type='operator_due' and status in ('ready_for_handoff','scheduled_internally') then 'awaiting_operator'
+          when event_rec.event_type='publish_due' and status in ('ready_for_handoff','scheduled_internally','awaiting_operator') then 'due_now'
+          else status
+        end,
         updated_at = v_now
     where content_package_id=job_rec.content_package_id
       and creator_id=job_rec.creator_id

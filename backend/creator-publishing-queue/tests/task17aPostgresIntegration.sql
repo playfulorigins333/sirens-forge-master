@@ -102,6 +102,31 @@ select public.task17a_assert((select status from public.creator_publishing_queue
 select public.task17a_assert(public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-claim-key-0001') = (:'task17a_claim_result')::jsonb, 'claim replay returns stored result');
 select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_claim_result')::jsonb->>'claim_token')::uuid,'not_started','preparing','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0001') as task17a_progress_result \gset
 select public.task17a_assert((:'task17a_progress_result')::jsonb->>'progress_state'='preparing', 'progress transition succeeds');
+create temp table task17a_claim_token as select ((:'task17a_claim_result')::jsonb->>'claim_token')::uuid as claim_token;
+update public.creator_publishing_platform_capabilities set availability_status='disabled', publishing_mode='disabled', updated_at=now() where platform='onlyfans';
+do $$
+declare v_progress_blocked boolean := false; v_claim_blocked boolean := false; v_claim_token uuid;
+begin
+  select claim_token into v_claim_token from task17a_claim_token;
+  begin
+    perform public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',v_claim_token,'preparing','prepared','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0002');
+  exception when others then v_progress_blocked := sqlerrm like '%PLATFORM_UNAVAILABLE%'; end;
+  begin
+    perform public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-claim-key-0002');
+  exception when others then v_claim_blocked := sqlerrm like '%PLATFORM_UNAVAILABLE%' or sqlerrm like '%OPERATOR_TASK_ALREADY_CLAIMED%'; end;
+  perform public.task17a_assert(v_progress_blocked, 'progress is blocked by capability drift');
+  perform public.task17a_assert(v_claim_blocked, 'new claim is blocked while capability is unavailable');
+end $$;
 select public.creator_publishing_release_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_claim_result')::jsonb->>'claim_token')::uuid,'task17a-release-key-0001') as task17a_release_result \gset
 select public.task17a_assert((:'task17a_release_result')::jsonb->>'status'='ready_for_handoff', 'release restores unscheduled queue state');
 select public.task17a_assert((select operator_progress_state from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001')='preparing', 'release preserves progress history');
+update public.creator_publishing_platform_capabilities set availability_status='available', publishing_mode='assisted', updated_at=now() where platform='onlyfans';
+
+-- Task 15 compatibility helper accepts legitimate unclaimed due states but does not require a queue-status regression.
+update public.creator_publishing_platform_jobs set schedule_revision=1, operator_due_at=now()-interval '5 minutes', intended_publish_at=now()+interval '55 minutes', job_state='scheduled_internally' where id='81000000-0000-4000-8000-000000000001';
+update public.creator_publishing_queue_tasks set status='awaiting_operator', updated_at=now() where id='61000000-0000-4000-8000-000000000001';
+select public.task17a_assert(public.creator_publishing_task17a_queue_task_compatible(j, now(), array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[]), 'operator_due compatibility accepts existing awaiting_operator queue task') from public.creator_publishing_platform_jobs j where j.id='81000000-0000-4000-8000-000000000001';
+update public.creator_publishing_queue_tasks set status='due_now', updated_at=now() where id='61000000-0000-4000-8000-000000000001';
+select public.task17a_assert(public.creator_publishing_task17a_queue_task_compatible(j, now(), array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[]), 'operator_due compatibility accepts existing due_now queue task without regression') from public.creator_publishing_platform_jobs j where j.id='81000000-0000-4000-8000-000000000001';
+update public.creator_publishing_queue_tasks set status='blocked', updated_at=now() where id='61000000-0000-4000-8000-000000000001';
+select public.task17a_assert(not public.creator_publishing_task17a_queue_task_compatible(j, now(), array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[]), 'blocked queue status fails closed') from public.creator_publishing_platform_jobs j where j.id='81000000-0000-4000-8000-000000000001';

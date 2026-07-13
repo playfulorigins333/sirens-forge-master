@@ -56,10 +56,11 @@ test('migration 01400 redefines exact Task 15 functions with valid-claim compati
   assert.match(src, /creator_publishing_task17a_queue_task_compatible/)
   assert.match(src, /q\.status = 'claimed'[\s\S]+q\.claim_expires_at > p_now[\s\S]+creator_publishing_onlyfans_operator_authorized/)
   assert.match(src, /and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null/)
-  assert.match(src, /case when event_rec\.event_type='operator_due' then 'awaiting_operator' else 'due_now' end/)
   assert.match(src, /case when v_action='schedule' then array\['ready_for_handoff','awaiting_operator','due_now'\]/)
   assert.match(src, /else array\['ready_for_handoff','scheduled_internally','awaiting_operator','due_now'\]/)
-  assert.match(src, /case when event_rec\.event_type='operator_due' then array\['ready_for_handoff','scheduled_internally'\]/)
+  assert.match(src, /creator_publishing_task17a_queue_task_compatible\(job_rec, v_now, array\['ready_for_handoff','scheduled_internally','awaiting_operator','due_now'\]/)
+  assert.match(src, /when event_rec\.event_type='operator_due' and status in \('ready_for_handoff','scheduled_internally'\) then 'awaiting_operator'/)
+  assert.match(src, /when event_rec\.event_type='publish_due' and status in \('ready_for_handoff','scheduled_internally','awaiting_operator'\) then 'due_now'/)
 })
 
 test('Task 17A does not introduce Task 18 states, platform automation, loaders, or credential material', () => {
