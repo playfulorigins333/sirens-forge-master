@@ -146,7 +146,17 @@ select public.task17a_assert((select operator_progress_state from public.creator
 update public.creator_publishing_platform_capabilities set availability_status='available', publishing_mode='assisted', updated_at=now() where platform='onlyfans';
 
 -- Task 15 compatibility helper accepts legitimate unclaimed due states but does not require a queue-status regression.
-update public.creator_publishing_platform_jobs set schedule_revision=1, operator_due_at=now()-interval '5 minutes', intended_publish_at=now()+interval '55 minutes', job_state='scheduled_internally' where id='81000000-0000-4000-8000-000000000001';
+update public.creator_publishing_platform_jobs
+set schedule_revision=1,
+    intended_publish_at=now()+interval '55 minutes',
+    operator_due_at=(now()+interval '55 minutes')-interval '60 minutes',
+    schedule_timezone='UTC',
+    scheduled_at=now(),
+    scheduled_by='00000000-0000-4000-8000-000000000001',
+    job_state='scheduled_internally',
+    updated_at=now()
+where id='81000000-0000-4000-8000-000000000001';
+select public.task17a_assert((select schedule_revision is not null and intended_publish_at is not null and length(btrim(schedule_timezone)) > 0 and scheduled_at is not null and scheduled_by is not null from public.creator_publishing_platform_jobs where id='81000000-0000-4000-8000-000000000001'), 'fixture scheduled job has all Task 15 required scheduling fields');
 update public.creator_publishing_queue_tasks set status='awaiting_operator', updated_at=now() where id='61000000-0000-4000-8000-000000000001';
 select public.task17a_assert(public.creator_publishing_task17a_queue_task_compatible(j, now(), array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[]), 'operator_due compatibility accepts existing awaiting_operator queue task') from public.creator_publishing_platform_jobs j where j.id='81000000-0000-4000-8000-000000000001';
 update public.creator_publishing_queue_tasks set status='due_now', updated_at=now() where id='61000000-0000-4000-8000-000000000001';
