@@ -414,7 +414,28 @@ insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key
 values ('70000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000001','draft','invalid-transition-plan-key-0001','4444444444444444444444444444444444444444444444444444444444444445','task14.20260711.001',now(),now());
 insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at)
 values ('80000000-0000-4000-8000-000000000005','70000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','assisted','draft',(select updated_at from public.creator_publishing_content_packages where id='30000000-0000-4000-8000-000000000001'),public.creator_publishing_autopost_source_fingerprint('30000000-0000-4000-8000-000000000001'),'task14.20260711.001','5555555555555555555555555555555555555555555555555555555555555555',now(),now());
-select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000004',now()+interval '3 hours','UTC','invalid-transition-schedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000005'::uuid],'{}','schedule');
+do $$
+declare
+  v_has_claim_token boolean := exists (select 1 from information_schema.columns where table_schema='public' and table_name='creator_publishing_queue_tasks' and column_name='claim_token');
+  v_status text;
+  v_claimed_by uuid;
+  v_claimed_at timestamptz;
+  v_active_count integer;
+begin
+  if v_has_claim_token then
+    execute $sql$update public.creator_publishing_queue_tasks set status='ready_for_handoff', claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, posted_by=null, posted_at=null, posted_confirmation=false, final_post_url=null, final_post_url_skip_reason=null, proof_screenshot_storage_key=null, skip_or_fail_reason=null, updated_at=now() where id='60000000-0000-4000-8000-000000000001'$sql$;
+    execute $sql$select status, claimed_by, claimed_at from public.creator_publishing_queue_tasks where id='60000000-0000-4000-8000-000000000001'$sql$ into v_status, v_claimed_by, v_claimed_at;
+    perform public.task15_assert(exists(select 1 from public.creator_publishing_queue_tasks where id='60000000-0000-4000-8000-000000000001' and status='ready_for_handoff' and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and posted_by is null and posted_at is null and posted_confirmation=false and final_post_url is null and final_post_url_skip_reason is null and proof_screenshot_storage_key is null and skip_or_fail_reason is null), 'invalid transition fixture reset queue task for isolated new schedule');
+  else
+    update public.creator_publishing_queue_tasks set status='ready_for_handoff', claimed_by=null, claimed_at=null, updated_at=now() where id='60000000-0000-4000-8000-000000000001';
+    select status, claimed_by, claimed_at into v_status, v_claimed_by, v_claimed_at from public.creator_publishing_queue_tasks where id='60000000-0000-4000-8000-000000000001';
+    perform public.task15_assert(v_status='ready_for_handoff' and v_claimed_by is null and v_claimed_at is null, 'invalid transition fixture reset legacy queue task for isolated new schedule');
+  end if;
+  select count(*) into v_active_count from public.creator_publishing_queue_tasks where content_package_id='30000000-0000-4000-8000-000000000001' and target_platform='onlyfans' and status not in ('archived','blocked','needs_fix','skipped','failed_manual_upload','confirmed_posted_manual');
+  raise notice 'invalid_transition_queue_diagnostics task=60000000-0000-4000-8000-000000000001 status=% claimed_by=% claimed_at=% has_claim_token=% active_count=%', v_status, v_claimed_by, v_claimed_at, v_has_claim_token, v_active_count;
+end $$;
+select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000004',now()+interval '3 hours','UTC','invalid-transition-schedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000005'::uuid],'{}','schedule') as invalid_transition_schedule_result \gset
+select (:'invalid_transition_schedule_result')::jsonb as invalid_transition_schedule_result_json;
 select public.task15_assert(schedule_revision=1 and job_state='scheduled_internally', 'invalid transition fixture schedules assisted job') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000005';
 select public.task15_assert((select count(*) from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000005' and schedule_revision=1 and event_type='operator_due')=1, 'invalid transition fixture creates operator_due event');
 select public.task15_assert((select count(*) from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000005' and schedule_revision=1 and event_type='publish_due')=1, 'invalid transition fixture creates publish_due event');
