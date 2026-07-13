@@ -1,0 +1,50 @@
+name: Task 17A Operator Queue PostgreSQL
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql'
+      - 'backend/creator-publishing-queue/tests/task17a*'
+      - 'backend/creator-publishing-queue/tests/runTask17a*'
+      - '.github/workflows/task17a-operator-queue-postgres.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    paths:
+      - 'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql'
+      - 'backend/creator-publishing-queue/tests/task17a*'
+      - 'backend/creator-publishing-queue/tests/runTask17a*'
+      - '.github/workflows/task17a-operator-queue-postgres.yml'
+      - 'package.json'
+      - 'package-lock.json'
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Source contract tests
+        run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
+      - name: Task 17A PostgreSQL integration and concurrency
+        run: npm run test:creator-publishing-task17a-postgres
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task17a-diagnostics
+          path: backend/creator-publishing-queue/tests/.task17a-diagnostics
+          if-no-files-found: ignore
