@@ -1,0 +1,41 @@
+name: Task 17A Operator Queue PostgreSQL
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql'
+      - 'backend/creator-publishing-queue/tests/task17aPostgresIntegration.sql'
+      - 'backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs'
+      - 'backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts'
+      - 'package.json'
+      - '.github/workflows/task17a-operator-queue-postgres.yml'
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      TASK17A_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:creator-publishing-task17a-postgres
+      - run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task17a-postgres-diagnostics
+          path: |
+            task17a-postgres-diagnostics.log
+            task15-postgres-diagnostics.log
