@@ -496,10 +496,10 @@ select public.task15_assert(status='verified', 'creator verification restored fo
 
 insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,second_person_present,compliance_status,compliance_policy_version,creator_approval_status,creator_approved_at,creator_approved_by,created_at,updated_at)
 values
-('30000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','due queue pkg','caption','#AI','ai_generated','{}',false,'passed','policy-v1','approved',now(),'00000000-0000-4000-8000-000000000001',now(),now()),
-('30000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','fansly','due co pkg','caption',null,'ai_generated','{}',true,'passed','policy-v1','approved',now(),'00000000-0000-4000-8000-000000000001',now(),now()),
-('30000000-0000-4000-8000-000000000007','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','fansly','due compliance pkg','caption',null,'ai_generated','{}',false,'passed','policy-v1','approved',now(),'00000000-0000-4000-8000-000000000001',now(),now()),
-('30000000-0000-4000-8000-000000000008','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','fansly','due conflict pkg','caption',null,'ai_generated','{}',false,'passed','policy-v1','approved',now(),'00000000-0000-4000-8000-000000000001',now(),now());
+('30000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','due queue pkg','caption','#AI','ai_generated','{}',false,'pending','unassigned','pending',null,null,now(),now()),
+('30000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','fansly','due co pkg','caption',null,'ai_generated','{}',true,'pending','unassigned','pending',null,null,now(),now()),
+('30000000-0000-4000-8000-000000000007','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','fansly','due compliance pkg','caption',null,'ai_generated','{}',false,'pending','unassigned','pending',null,null,now(),now()),
+('30000000-0000-4000-8000-000000000008','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','fansly','due conflict pkg','caption',null,'ai_generated','{}',false,'pending','unassigned','pending',null,null,now(),now());
 insert into public.generations(id,user_id,status,r2_bucket,r2_key,metadata) values
 ('40000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000001','completed','bucket','key5','{}'),
 ('40000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000001','completed','bucket','key6','{}'),
@@ -516,6 +516,19 @@ values
 ('30000000-0000-4000-8000-000000000006',null,'pass','automated','[]'::jsonb,'policy-v1',now()-interval '10 minutes','{}'::jsonb),
 ('30000000-0000-4000-8000-000000000007',null,'pass','automated','[]'::jsonb,'policy-v1',now()-interval '10 minutes','{}'::jsonb),
 ('30000000-0000-4000-8000-000000000008',null,'pass','automated','[]'::jsonb,'policy-v1',now()-interval '10 minutes','{}'::jsonb);
+update public.creator_publishing_content_packages
+set compliance_status='passed',
+    compliance_policy_version='policy-v1',
+    creator_approval_status='approved',
+    creator_approved_at=now(),
+    creator_approved_by='00000000-0000-4000-8000-000000000001',
+    updated_at=now()
+where id in (
+  '30000000-0000-4000-8000-000000000005',
+  '30000000-0000-4000-8000-000000000006',
+  '30000000-0000-4000-8000-000000000007',
+  '30000000-0000-4000-8000-000000000008'
+);
 insert into public.creator_publishing_queue_tasks(id,content_package_id,creator_id,target_platform,platform_account_id,status,due_at,created_at,updated_at)
 values ('60000000-0000-4000-8000-000000000003','30000000-0000-4000-8000-000000000005','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000001','ready_for_handoff',null,now(),now());
 insert into public.creator_publishing_co_performer_records(id,content_package_id,person_name,release_document_reference,platform_release_confirmed,created_at)
