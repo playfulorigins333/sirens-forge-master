@@ -62,16 +62,37 @@ begin
 end $$;
 
 create or replace function task17a_test.assert_claim_queue_status_rejected(seed integer, queue_status text) returns void language plpgsql as $$
-declare f jsonb;
+declare
+  f jsonb;
+  original_assignee uuid;
 begin
-  f := task17a_test.reset_fixture(seed, queue_status, 'draft', false);
+  f := task17a_test.reset_fixture(seed, 'ready_for_handoff', 'draft', false);
+  select assigned_operator_id into original_assignee from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  if queue_status='confirmed_posted_manual' then
+    update public.creator_publishing_queue_tasks
+    set status='confirmed_posted_manual',
+        posted_confirmation=true,
+        final_post_url_skip_reason='Task 17A terminal-status rejection fixture'
+    where id=(f->>'task')::uuid;
+  else
+    update public.creator_publishing_queue_tasks set status=queue_status where id=(f->>'task')::uuid;
+  end if;
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), 'queue status fixture task exists ' || queue_status);
+  perform task17a_test.assert((select status=queue_status and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and claim_attempt_count=0 and operator_progress_state='not_started' and operator_progress_revision=0 and operator_progress_updated_by is null and operator_progress_updated_at is null and assigned_operator_id is not distinct from original_assignee from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), 'queue status fixture ownership/progress valid ' || queue_status);
+  if queue_status='confirmed_posted_manual' then
+    perform task17a_test.assert((select posted_confirmation is true and (final_post_url is not null or final_post_url_skip_reason is not null) from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), 'confirmed_posted_manual fixture has confirmation evidence');
+  else
+    perform task17a_test.assert((select posted_by is null and posted_at is null and posted_confirmation is false and final_post_url is null and final_post_url_skip_reason is null and proof_screenshot_storage_key is null and skip_or_fail_reason is null from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), 'queue status fixture manual result fields empty ' || queue_status);
+  end if;
   perform task17a_test.assert_claim_no_mutation(f,(f->>'creator')::uuid,'OPERATOR_TASK_INELIGIBLE','qstatus'||seed,'claim queue status ' || queue_status || ' rejected');
 end $$;
 
 create or replace function task17a_test.assert_claim_job_state_rejected(seed integer, state text) returns void language plpgsql as $$
 declare f jsonb;
 begin
-  f := task17a_test.reset_fixture(seed, 'ready_for_handoff', state, false);
+  f := task17a_test.reset_fixture(seed, 'ready_for_handoff', 'draft', false);
+  update public.creator_publishing_platform_jobs set job_state=state where id=(f->>'job')::uuid;
+  perform task17a_test.assert((select job_state=state and cancelled_at is null from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid), 'job state fixture setup valid ' || state);
   perform task17a_test.assert_claim_no_mutation(f,(f->>'creator')::uuid,'OPERATOR_TASK_INELIGIBLE','jstate'||seed,'claim job state ' || state || ' rejected');
 end $$;
 
