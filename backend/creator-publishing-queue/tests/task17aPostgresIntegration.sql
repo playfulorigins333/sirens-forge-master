@@ -59,20 +59,43 @@ begin
   perform public.task17a_assert(v_nonclaimed_ok, 'nonclaimed task cannot retain ownership fields');
 end $$;
 
--- Behavioral RPC fixture: creator self-claim, idempotent replay, progress transitions, and release.
+-- Behavioral RPC fixture: create media before creator approval so the production media
+-- invalidation trigger is respected, then fingerprint the final approved package state.
 insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,compliance_status,compliance_policy_version,creator_approval_status,creator_approved_by,creator_approved_at,created_at,updated_at)
-values ('31000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','task17a claim pkg','caption','#AI','ai_generated','{}','passed','policy-v1','approved','00000000-0000-4000-8000-000000000001',now(),now(),now());
+values ('31000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','task17a claim pkg','caption',null,'ai_generated','{}','pending','unassigned','pending',null,null,now(),now());
 insert into public.generations(id,user_id,status,r2_bucket,r2_key,metadata) values ('41000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','completed','bucket','task17a-key','{}');
 insert into public.creator_publishing_media_assets(id,content_package_id,storage_key,mime_type,sha256,source,ai_generation_metadata,created_at)
 values ('51000000-0000-4000-8000-000000000001','31000000-0000-4000-8000-000000000001','media/task17a','image/png','eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee','ai_pipeline','{"generation_id":"41000000-0000-4000-8000-000000000001"}',now());
 insert into public.creator_publishing_compliance_reviews(content_package_id,reviewer_id,outcome,review_source,rule_hits,compliance_policy_version,created_at,review_metadata)
 values ('31000000-0000-4000-8000-000000000001',null,'pass','automated','[]'::jsonb,'policy-v1',now(),'{}'::jsonb);
+update public.creator_publishing_content_packages
+set compliance_status='passed',
+    compliance_policy_version='policy-v1',
+    forced_disclosure_text='#AI',
+    creator_approval_status='approved',
+    creator_approved_by='00000000-0000-4000-8000-000000000001',
+    creator_approved_at=now(),
+    updated_at=now()
+where id='31000000-0000-4000-8000-000000000001';
 insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at)
 values ('71000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','draft','task17a-plan-key-0001','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','task14.20260711.001',now(),now());
 insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at)
 values ('81000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','31000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','assisted','draft',(select updated_at from public.creator_publishing_content_packages where id='31000000-0000-4000-8000-000000000001'),public.creator_publishing_autopost_source_fingerprint('31000000-0000-4000-8000-000000000001'),'task14.20260711.001','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',now(),now());
 insert into public.creator_publishing_queue_tasks(id,content_package_id,creator_id,target_platform,platform_account_id,status,due_at,created_at,updated_at)
 values ('61000000-0000-4000-8000-000000000001','31000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000001','ready_for_handoff',null,now(),now());
+
+select public.task17a_assert((select creator_approval_status from public.creator_publishing_content_packages where id='31000000-0000-4000-8000-000000000001')='approved', 'fixture package is approved before claim');
+select public.task17a_assert((select compliance_status from public.creator_publishing_content_packages where id='31000000-0000-4000-8000-000000000001')='passed', 'fixture package compliance is passed');
+select public.task17a_assert((select compliance_policy_version from public.creator_publishing_content_packages where id='31000000-0000-4000-8000-000000000001')='policy-v1', 'fixture package policy is current');
+select public.task17a_assert((select creator_approved_by from public.creator_publishing_content_packages where id='31000000-0000-4000-8000-000000000001')='00000000-0000-4000-8000-000000000001', 'fixture package approval actor is creator');
+select public.task17a_assert((select creator_approved_at is not null from public.creator_publishing_content_packages where id='31000000-0000-4000-8000-000000000001'), 'fixture package approval timestamp exists');
+select public.task17a_assert((select count(*) from public.creator_publishing_queue_tasks where content_package_id='31000000-0000-4000-8000-000000000001' and target_platform='onlyfans' and status <> 'archived')=1, 'fixture has exactly one active matching queue task');
+select public.task17a_assert((select status from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001')='ready_for_handoff', 'fixture queue task starts ready_for_handoff');
+select public.task17a_assert((select source_package_fingerprint=public.creator_publishing_autopost_source_fingerprint(content_package_id) from public.creator_publishing_platform_jobs where id='81000000-0000-4000-8000-000000000001'), 'fixture job stores final source fingerprint');
+select public.task17a_assert(exists(select 1 from public.creator_platform_accounts where id='20000000-0000-4000-8000-000000000001' and platform='onlyfans' and verification_status='verified'), 'fixture destination account is verified');
+select public.task17a_assert(exists(select 1 from public.creator_publishing_creator_verifications where creator_id='00000000-0000-4000-8000-000000000001' and status='verified'), 'fixture creator verification is valid');
+select public.task17a_assert(exists(select 1 from public.creator_publishing_ai_twin_consents where creator_id='00000000-0000-4000-8000-000000000001' and attestation_version='creator-ai-twin-consent-v1' and attestation_text_sha256='0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12' and status='granted' and revoked_at is null), 'fixture consent matches current policy identity');
+select public.task17a_assert(exists(select 1 from public.creator_publishing_platform_capabilities where platform='onlyfans' and availability_status='available' and publishing_mode='assisted'), 'fixture OnlyFans capability is available assisted');
 
 -- Deterministic invalid input validation happens before mutation or audit.
 do $$
