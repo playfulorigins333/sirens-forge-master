@@ -30,17 +30,17 @@ test("active claim ownership uses only the four approved claim fields", () => {
 
 test("creator-specific authorization is required and global role membership is not consulted", () => {
   const src = functionBlock(migration(), "creator_publishing_onlyfans_operator_is_authorized")
-  assert.match(src, /creator_id = p_operator_id/)
+  assert.match(src, /p_creator_id\s*=\s*p_operator_id/)
   assert.match(src, /creator_publishing_operator_authorizations/)
-  assert.match(src, /platform = 'onlyfans'/)
-  assert.match(src, /status = 'active'/)
+  assert.match(src, /platform\s*=\s*'onlyfans'/)
+  assert.match(src, /status\s*=\s*'active'/)
   assert.doesNotMatch(src, /creator_publishing_trusted_reviewers/)
 })
 
 test("claim rules distinguish unscheduled ready work from scheduled operator due work", () => {
   const src = functionBlock(migration(), "creator_publishing_claim_onlyfans_operator_task")
-  assert.match(src, /job_rec\.schedule_revision is null[\s\S]+queue_rec\.status <> 'ready_for_handoff'/)
-  assert.match(src, /job_rec\.operator_due_at is null or job_rec\.operator_due_at > v_now[\s\S]+OPERATOR_NOT_DUE/)
+  assert.match(src, /job_rec\.schedule_revision is null[\s\S]+queue_rec\.status\s*<>\s*'ready_for_handoff'/)
+  assert.match(src, /job_rec\.operator_due_at is null or job_rec\.operator_due_at\s*>\s*v_now[\s\S]+OPERATOR_NOT_DUE/)
   assert.doesNotMatch(src, /assigned_operator_id\s*=/)
 })
 
@@ -64,9 +64,9 @@ test("Task 15 compatibility is a narrow wrapper around the preserved Task 15 fun
   const wrapper = functionBlock(src, "creator_publishing_process_scheduler_event")
   assert.match(wrapper, /creator_publishing_process_scheduler_event_task15\(/)
   assert.match(wrapper, /v_valid_active_claim/)
-  assert.match(wrapper, /claim_expires_at > v_now/)
+  assert.match(wrapper, /claim_expires_at\s*>\s*v_now/)
   assert.match(wrapper, /creator_publishing_onlyfans_operator_is_authorized/)
-  assert.match(wrapper, /set status = 'claimed',[\s\S]+claim_token = v_claim_token[\s\S]+claim_expires_at = v_claim_expires_at/)
+  assert.match(wrapper, /set status\s*=\s*'claimed',[\s\S]+claim_token\s*=\s*v_claim_token[\s\S]+claim_expires_at\s*=\s*v_claim_expires_at/)
   assert.doesNotMatch(wrapper, /update public\.creator_publishing_platform_jobs/)
   assert.doesNotMatch(wrapper, /update public\.creator_publishing_plans/)
   assert.doesNotMatch(wrapper, /update public\.creator_publishing_scheduler_events/)
