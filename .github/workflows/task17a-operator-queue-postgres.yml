@@ -1,0 +1,40 @@
+name: Task 17A Operator Queue PostgreSQL Integration
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  task17a-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Run Task 17A source contract
+        run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
+      - name: Run Task 17A PostgreSQL integration and Task 15 regression
+        env:
+          TASK17A_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: npm run test:creator-publishing-task17a-postgres
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task17a-postgres-diagnostics
+          path: task17a-postgres-diagnostics.log
