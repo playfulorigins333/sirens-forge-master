@@ -100,7 +100,7 @@ test('internal helpers are not executable by browser roles and action RPCs remai
 });
 
 
-test('Task 17A behavioral coverage labels are present and runner emits completion marker', () => {
+test('Task 17A current Task 17A scenario labels are present and runner emits non-final marker', () => {
   const scenarioFiles = [
     'backend/creator-publishing-queue/tests/task17aPostgresIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aAuthorizationTimingIntegration.sql',
@@ -143,6 +143,26 @@ test('Task 17A behavioral coverage labels are present and runner emits completio
     'scheduler_operator_due_ready',
     'scheduler_terminal_blocked_superseded',
     'scheduler_terminal_cancelled_superseded',
+    'claim_queue_status_draft_rejected',
+    'claim_queue_status_needs_compliance_review_rejected',
+    'claim_queue_status_needs_creator_approval_rejected',
+    'claim_queue_status_needs_fix_rejected',
+    'claim_queue_status_blocked_rejected',
+    'claim_queue_status_skipped_rejected',
+    'claim_queue_status_failed_manual_upload_rejected',
+    'claim_queue_status_archived_rejected',
+    'claim_queue_status_confirmed_posted_manual_rejected',
+    'claim_job_state_needs_fix_rejected',
+    'claim_job_state_authentication_required_rejected',
+    'claim_job_state_platform_rejected_rejected',
+    'claim_job_state_blocked_rejected',
+    'claim_job_state_archived_rejected',
+    'claim_job_state_published_direct_rejected',
+    'claim_job_state_confirmed_posted_manual_rejected',
+    'claim_job_state_direct_publish_failed_rejected',
+    'claim_job_state_exported_rejected',
+    'claim_job_state_skipped_rejected',
+    'claim_job_cancelled_rejected',
   ];
   for (const label of requiredLabels) {
     assert.match(scenarioSource, new RegExp(`TASK17A_SCENARIO_START: ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
@@ -151,7 +171,7 @@ test('Task 17A behavioral coverage labels are present and runner emits completio
   assert.match(runner, /ON_ERROR_STOP=1/);
   assert.match(runner, /task15 regression post-01400/);
   assert.match(runner, /runTask17aConcurrency\.mjs/);
-  assert.match(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
 });
 
 test('prohibited Task 17B, Task 18, platform, and deployment work is absent', () => {

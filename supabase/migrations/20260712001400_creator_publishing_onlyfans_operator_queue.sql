@@ -71,6 +71,7 @@ begin
   if p_job.id is null or p_task.id is null or p_actor_id is null then return 'OPERATOR_REQUEST_INVALID'; end if;
   if p_task.creator_id<>p_job.creator_id or p_task.content_package_id<>p_job.content_package_id or p_task.platform_account_id<>p_job.platform_account_id or p_task.target_platform<>p_job.target_platform then return 'OPERATOR_TASK_JOB_MISMATCH'; end if;
   if not public.creator_publishing_operator_queue_is_clean(p_task) then return 'OPERATOR_TASK_INELIGIBLE'; end if;
+  if p_task.status not in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now','claimed') then return 'OPERATOR_TASK_INELIGIBLE'; end if;
   select count(*) into v_queue_count from public.creator_publishing_queue_tasks q where q.content_package_id=p_job.content_package_id and q.creator_id=p_job.creator_id and q.platform_account_id=p_job.platform_account_id and q.target_platform=p_job.target_platform and q.status not in ('archived','skipped','failed_manual_upload','confirmed_posted_manual');
   if v_queue_count<>1 then return 'OPERATOR_QUEUE_TASK_AMBIGUOUS'; end if;
   if p_job.target_platform<>'onlyfans' or p_task.target_platform<>'onlyfans' then return 'OPERATOR_TARGET_NOT_SUPPORTED'; end if;

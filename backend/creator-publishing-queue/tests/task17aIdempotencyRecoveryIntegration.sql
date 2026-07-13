@@ -86,7 +86,7 @@ declare
   field_is_present boolean;
 begin
   value_sql := case field_name
-    when 'posted_by' then quote_literal(task17a_test.uuid_for('17009999-0000-4000-8000-',seed)::text) || '::uuid'
+    when 'posted_by' then 'FIXTURE_CREATOR'
     when 'posted_at' then 'clock_timestamp()'
     when 'posted_confirmation' then 'true'
     when 'final_post_url' then quote_literal('https://example.test/manual/' || seed)
@@ -98,7 +98,13 @@ begin
   perform task17a_test.assert(value_sql is not null, 'manual result field supported ' || field_name);
 
   f := task17a_test.reset_fixture(seed);
-  execute format('update public.creator_publishing_queue_tasks set %I = %s where id=$1', field_name, value_sql) using (f->>'task')::uuid;
+  if field_name='posted_by' then
+    update public.creator_publishing_queue_tasks set posted_by=(f->>'creator')::uuid where id=(f->>'task')::uuid;
+    perform task17a_test.assert(exists(select 1 from auth.users where id=(f->>'creator')::uuid), 'posted_by unclaimed fixture user exists');
+    perform task17a_test.assert((select posted_by=(f->>'creator')::uuid and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), 'posted_by unclaimed fixture setup valid');
+  else
+    execute format('update public.creator_publishing_queue_tasks set %I = %s where id=$1', field_name, value_sql) using (f->>'task')::uuid;
+  end if;
   select * into before_row from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
   perform task17a_test.expect_error(field_name || ' blocks unclaimed claim','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)', f->>'creator', f->>'task', f->>'job', f->>'consent_version', f->>'consent_hash', claim_key));
   perform task17a_test.assert((select status is not distinct from before_row.status and claimed_by is not distinct from before_row.claimed_by and claimed_at is not distinct from before_row.claimed_at and claim_token is not distinct from before_row.claim_token and claim_expires_at is not distinct from before_row.claim_expires_at and claim_attempt_count is not distinct from before_row.claim_attempt_count and operator_progress_state is not distinct from before_row.operator_progress_state and operator_progress_revision is not distinct from before_row.operator_progress_revision and operator_progress_updated_by is not distinct from before_row.operator_progress_updated_by and operator_progress_updated_at is not distinct from before_row.operator_progress_updated_at and assigned_operator_id is not distinct from before_row.assigned_operator_id from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), field_name || ' unclaimed claim preserves queue');
@@ -110,7 +116,13 @@ begin
   active_f := task17a_test.reset_fixture(seed + 1000);
   perform public.creator_publishing_claim_onlyfans_operator_task((active_f->>'creator')::uuid,(active_f->>'task')::uuid,(active_f->>'job')::uuid,active_f->>'consent_version',active_f->>'consent_hash','manualactiveclaim' || seed);
   select claim_token into token from public.creator_publishing_queue_tasks where id=(active_f->>'task')::uuid;
-  execute format('update public.creator_publishing_queue_tasks set %I = %s where id=$1', field_name, value_sql) using (active_f->>'task')::uuid;
+  if field_name='posted_by' then
+    update public.creator_publishing_queue_tasks set posted_by=(active_f->>'creator')::uuid where id=(active_f->>'task')::uuid;
+    perform task17a_test.assert(exists(select 1 from auth.users where id=(active_f->>'creator')::uuid), 'posted_by active fixture user exists');
+    perform task17a_test.assert((select posted_by=(active_f->>'creator')::uuid and status='claimed' and claimed_by is not null and claimed_at is not null and claim_token is not null and claim_expires_at is not null from public.creator_publishing_queue_tasks where id=(active_f->>'task')::uuid), 'posted_by active fixture setup valid');
+  else
+    execute format('update public.creator_publishing_queue_tasks set %I = %s where id=$1', field_name, value_sql) using (active_f->>'task')::uuid;
+  end if;
   select * into active_before from public.creator_publishing_queue_tasks where id=(active_f->>'task')::uuid;
   perform task17a_test.expect_error(field_name || ' blocks progress','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',active_f->>'creator',active_f->>'task',active_f->>'job',token,'not_started',0,'preparing',active_f->>'consent_version',active_f->>'consent_hash',progress_key));
   perform task17a_test.expect_error(field_name || ' blocks release','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_release_onlyfans_operator_task(%L,%L,%L,%L,%L)',active_f->>'creator',active_f->>'task',active_f->>'job',token,release_key));

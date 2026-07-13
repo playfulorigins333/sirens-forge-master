@@ -61,8 +61,8 @@ try {
   for (const f of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql']) runFile(`task17a ${f}`, `backend/creator-publishing-queue/tests/${f}`)
   const c = spawnSync(process.execPath, ['backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs'], { stdio: 'inherit', env: process.env })
   if (c.status !== 0) throw new Error(`task17a concurrency failed with status ${c.status}`)
-  console.log('TASK17A_BEHAVIORAL_COVERAGE_COMPLETE')
-  appendFileSync(logPath, `\nTASK17A_BEHAVIORAL_COVERAGE_COMPLETE\ncompleted_at=${new Date().toISOString()}\n`)
+  console.log('TASK17A_CURRENT_SCENARIOS_PASSED')
+  appendFileSync(logPath, `\nTASK17A_CURRENT_SCENARIOS_PASSED\ncompleted_at=${new Date().toISOString()}\n`)
 } catch (error) {
   appendFileSync(logPath, `\nFAILED: ${error?.stack || error}\n`)
   process.exit(1)
