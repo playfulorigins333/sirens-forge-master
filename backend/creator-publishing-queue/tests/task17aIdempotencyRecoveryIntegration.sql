@@ -69,3 +69,92 @@ select task17a_test.expect_error('manual result blocks in-claim recovery','OPERA
 select task17a_test.assert((select status='claimed' and posted_confirmation=true and claim_attempt_count=:'evidence_attempts'::int and operator_progress_state='not_started' from public.creator_publishing_queue_tasks where id=(:'evidence_fixture'::jsonb->>'task')::uuid), 'manual result evidence preserves ownership progress attempts');
 select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where idempotency_key in ('evidenceprog','evidencerel','evidencerec','evidenceclaim2')), 'manual result evidence writes no success audit');
 select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where idempotency_key in ('evidenceprog','evidencerel','evidencerec','evidenceclaim2')), 'manual result evidence writes no idempotency');
+
+create or replace function task17a_test.assert_manual_result_field_blocks(seed integer, field_name text) returns void language plpgsql as $$
+declare
+  f jsonb;
+  active_f jsonb;
+  before_row public.creator_publishing_queue_tasks%rowtype;
+  active_before public.creator_publishing_queue_tasks%rowtype;
+  token uuid;
+  value_sql text;
+  claim_key text := 'manualclaim' || seed;
+  progress_key text := 'manualprog' || seed;
+  release_key text := 'manualrel' || seed;
+  recovery_key text := 'manualrec' || seed;
+  inclaim_key text := 'manualinclaim' || seed;
+  field_is_present boolean;
+begin
+  value_sql := case field_name
+    when 'posted_by' then quote_literal(task17a_test.uuid_for('17009999-0000-4000-8000-',seed)::text) || '::uuid'
+    when 'posted_at' then 'clock_timestamp()'
+    when 'posted_confirmation' then 'true'
+    when 'final_post_url' then quote_literal('https://example.test/manual/' || seed)
+    when 'final_post_url_skip_reason' then quote_literal('operator skipped ' || seed)
+    when 'proof_screenshot_storage_key' then quote_literal('proof/task17a/' || seed)
+    when 'skip_or_fail_reason' then quote_literal('manual result ' || seed)
+    else null
+  end;
+  perform task17a_test.assert(value_sql is not null, 'manual result field supported ' || field_name);
+
+  f := task17a_test.reset_fixture(seed);
+  execute format('update public.creator_publishing_queue_tasks set %I = %s where id=$1', field_name, value_sql) using (f->>'task')::uuid;
+  select * into before_row from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  perform task17a_test.expect_error(field_name || ' blocks unclaimed claim','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)', f->>'creator', f->>'task', f->>'job', f->>'consent_version', f->>'consent_hash', claim_key));
+  perform task17a_test.assert((select status is not distinct from before_row.status and claimed_by is not distinct from before_row.claimed_by and claimed_at is not distinct from before_row.claimed_at and claim_token is not distinct from before_row.claim_token and claim_expires_at is not distinct from before_row.claim_expires_at and claim_attempt_count is not distinct from before_row.claim_attempt_count and operator_progress_state is not distinct from before_row.operator_progress_state and operator_progress_revision is not distinct from before_row.operator_progress_revision and operator_progress_updated_by is not distinct from before_row.operator_progress_updated_by and operator_progress_updated_at is not distinct from before_row.operator_progress_updated_at and assigned_operator_id is not distinct from before_row.assigned_operator_id from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), field_name || ' unclaimed claim preserves queue');
+  execute format('select (%I is not null%s) from public.creator_publishing_queue_tasks where id=$1', field_name, case when field_name='posted_confirmation' then ' and posted_confirmation is true' else '' end) using (f->>'task')::uuid into field_is_present;
+  perform task17a_test.assert(field_is_present, field_name || ' evidence remains present after claim rejection');
+  perform task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claimed' and idempotency_key=claim_key), field_name || ' claim rejection writes no success audit');
+  perform task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='claim' and idempotency_key=claim_key), field_name || ' claim rejection writes no idempotency');
+
+  active_f := task17a_test.reset_fixture(seed + 1000);
+  perform public.creator_publishing_claim_onlyfans_operator_task((active_f->>'creator')::uuid,(active_f->>'task')::uuid,(active_f->>'job')::uuid,active_f->>'consent_version',active_f->>'consent_hash','manualactiveclaim' || seed);
+  select claim_token into token from public.creator_publishing_queue_tasks where id=(active_f->>'task')::uuid;
+  execute format('update public.creator_publishing_queue_tasks set %I = %s where id=$1', field_name, value_sql) using (active_f->>'task')::uuid;
+  select * into active_before from public.creator_publishing_queue_tasks where id=(active_f->>'task')::uuid;
+  perform task17a_test.expect_error(field_name || ' blocks progress','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',active_f->>'creator',active_f->>'task',active_f->>'job',token,'not_started',0,'preparing',active_f->>'consent_version',active_f->>'consent_hash',progress_key));
+  perform task17a_test.expect_error(field_name || ' blocks release','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_release_onlyfans_operator_task(%L,%L,%L,%L,%L)',active_f->>'creator',active_f->>'task',active_f->>'job',token,release_key));
+  perform task17a_test.expire_claim((active_f->>'task')::uuid);
+  select * into active_before from public.creator_publishing_queue_tasks where id=(active_f->>'task')::uuid;
+  perform task17a_test.expect_error(field_name || ' blocks explicit recovery','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',active_f->>'creator',active_f->>'task',active_f->>'job',recovery_key));
+  perform task17a_test.expect_error(field_name || ' blocks in-claim recovery','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)',active_f->>'creator',active_f->>'task',active_f->>'job',active_f->>'consent_version',active_f->>'consent_hash',inclaim_key));
+  perform task17a_test.assert((select status is not distinct from active_before.status and claimed_by is not distinct from active_before.claimed_by and claimed_at is not distinct from active_before.claimed_at and claim_token is not distinct from active_before.claim_token and claim_expires_at is not distinct from active_before.claim_expires_at and claim_attempt_count is not distinct from active_before.claim_attempt_count and operator_progress_state is not distinct from active_before.operator_progress_state and operator_progress_revision is not distinct from active_before.operator_progress_revision and operator_progress_updated_by is not distinct from active_before.operator_progress_updated_by and operator_progress_updated_at is not distinct from active_before.operator_progress_updated_at and assigned_operator_id is not distinct from active_before.assigned_operator_id from public.creator_publishing_queue_tasks where id=(active_f->>'task')::uuid), field_name || ' active errors preserve ownership progress attempts');
+  perform task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where idempotency_key in (progress_key,release_key,recovery_key,inclaim_key)), field_name || ' active errors write no success audit');
+  perform task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where idempotency_key in (progress_key,release_key,recovery_key,inclaim_key)), field_name || ' active errors write no idempotency');
+end $$;
+
+\echo TASK17A_SCENARIO_START: manual_result_field_posted_by
+select task17a_test.assert_manual_result_field_blocks(924001,'posted_by');
+\echo TASK17A_SCENARIO_START: manual_result_field_posted_at
+select task17a_test.assert_manual_result_field_blocks(924002,'posted_at');
+\echo TASK17A_SCENARIO_START: manual_result_field_posted_confirmation
+select task17a_test.assert_manual_result_field_blocks(924003,'posted_confirmation');
+\echo TASK17A_SCENARIO_START: manual_result_field_final_post_url
+select task17a_test.assert_manual_result_field_blocks(924004,'final_post_url');
+\echo TASK17A_SCENARIO_START: manual_result_field_final_post_url_skip_reason
+select task17a_test.assert_manual_result_field_blocks(924005,'final_post_url_skip_reason');
+\echo TASK17A_SCENARIO_START: manual_result_field_proof_screenshot_storage_key
+select task17a_test.assert_manual_result_field_blocks(924006,'proof_screenshot_storage_key');
+\echo TASK17A_SCENARIO_START: manual_result_field_skip_or_fail_reason
+select task17a_test.assert_manual_result_field_blocks(924007,'skip_or_fail_reason');
+
+\echo TASK17A_SCENARIO_START: recovery_deterministic_errors
+select task17a_test.reset_fixture(924101) as recovery_det_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'recovery_det_fixture'::jsonb->>'creator')::uuid,(:'recovery_det_fixture'::jsonb->>'task')::uuid,(:'recovery_det_fixture'::jsonb->>'job')::uuid,:'recovery_det_fixture'::jsonb->>'consent_version',:'recovery_det_fixture'::jsonb->>'consent_hash','recdetclaim') as recovery_det_claim \gset
+select claim_token as recovery_det_token from public.creator_publishing_queue_tasks where id=(:'recovery_det_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.expect_error('recovery null actor invalid','OPERATOR_REQUEST_INVALID',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(null,%L,%L,%L)',(:'recovery_det_fixture'::jsonb->>'task'),(:'recovery_det_fixture'::jsonb->>'job'),'recdetnullactor'));
+select task17a_test.expect_error('recovery null task invalid','OPERATOR_REQUEST_INVALID',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,null,%L,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),(:'recovery_det_fixture'::jsonb->>'job'),'recdetnulltask'));
+select task17a_test.expect_error('recovery null job invalid','OPERATOR_REQUEST_INVALID',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,null,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),(:'recovery_det_fixture'::jsonb->>'task'),'recdetnulljob'));
+select task17a_test.expect_error('recovery bad idempotency key','OPERATOR_IDEMPOTENCY_KEY_INVALID',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),(:'recovery_det_fixture'::jsonb->>'task'),(:'recovery_det_fixture'::jsonb->>'job'),'bad key'));
+select task17a_test.expect_error('recovery missing job','OPERATOR_JOB_NOT_FOUND',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),(:'recovery_det_fixture'::jsonb->>'task'),'92410100-ffff-4000-8000-000000000001','recdetmissingjob'));
+select task17a_test.expect_error('recovery missing task','OPERATOR_TASK_NOT_FOUND',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),'92410100-ffff-4000-8000-000000000002',(:'recovery_det_fixture'::jsonb->>'job'),'recdetmissingtask'));
+select task17a_test.create_secondary_work(924102) as recovery_det_other \gset
+select task17a_test.expect_error('recovery mismatched work','OPERATOR_TASK_JOB_MISMATCH',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),(:'recovery_det_fixture'::jsonb->>'task'),(:'recovery_det_other'::jsonb->>'job'),'recdetmismatch'));
+update public.creator_publishing_platform_jobs set publishing_mode='direct' where id=(:'recovery_det_fixture'::jsonb->>'job')::uuid;
+select task17a_test.expect_error('recovery non assisted','OPERATOR_TARGET_NOT_SUPPORTED',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),(:'recovery_det_fixture'::jsonb->>'task'),(:'recovery_det_fixture'::jsonb->>'job'),'recdetdirect'));
+update public.creator_publishing_platform_jobs set publishing_mode='assisted', job_state='blocked' where id=(:'recovery_det_fixture'::jsonb->>'job')::uuid;
+select task17a_test.expect_error('recovery ineligible job','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),(:'recovery_det_fixture'::jsonb->>'task'),(:'recovery_det_fixture'::jsonb->>'job'),'recdetblocked'));
+update public.creator_publishing_platform_jobs set job_state='draft', cancelled_at=clock_timestamp(), cancelled_by=(:'recovery_det_fixture'::jsonb->>'creator')::uuid, cancellation_reason='cancelled' where id=(:'recovery_det_fixture'::jsonb->>'job')::uuid;
+select task17a_test.expect_error('recovery cancelled job','OPERATOR_TASK_INELIGIBLE',format('select public.creator_publishing_recover_expired_onlyfans_operator_claim(%L,%L,%L,%L)',(:'recovery_det_fixture'::jsonb->>'creator'),(:'recovery_det_fixture'::jsonb->>'task'),(:'recovery_det_fixture'::jsonb->>'job'),'recdetcancel'));
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where idempotency_key like 'recdet%' and action='operator_expired_claim_recovered'), 'recovery deterministic errors write no recovery audit');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where idempotency_key like 'recdet%'), 'recovery deterministic errors write no idempotency');

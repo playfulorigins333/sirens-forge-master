@@ -260,12 +260,15 @@ declare
   restore text;
   result jsonb;
 begin
+ if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null then raise exception 'OPERATOR_REQUEST_INVALID'; end if;
  perform public.creator_publishing_operator_validate_idempotency_key(p_idempotency_key);
  fp:=public.creator_publishing_operator_request_fingerprint(jsonb_build_object('actor',p_actor_id,'task',p_queue_task_id,'job',p_platform_job_id));
  replay:=public.creator_publishing_operator_replay_or_conflict(p_actor_id,'expired_claim_recovery',p_idempotency_key,fp); if replay is not null then return replay; end if;
  select * into job from public.creator_publishing_platform_jobs where id=p_platform_job_id for update; if not found then raise exception 'OPERATOR_JOB_NOT_FOUND'; end if;
  select * into task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if not found then raise exception 'OPERATOR_TASK_NOT_FOUND'; end if;
- if task.content_package_id<>job.content_package_id or task.creator_id<>job.creator_id or task.platform_account_id<>job.platform_account_id or task.target_platform<>job.target_platform or task.target_platform<>'onlyfans' or job.publishing_mode<>'assisted' or job.cancelled_at is not null or job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_JOB_MISMATCH'; end if;
+ if task.content_package_id<>job.content_package_id or task.creator_id<>job.creator_id or task.platform_account_id<>job.platform_account_id or task.target_platform<>job.target_platform then raise exception 'OPERATOR_TASK_JOB_MISMATCH'; end if;
+ if task.target_platform<>'onlyfans' or job.target_platform<>'onlyfans' or job.publishing_mode<>'assisted' then raise exception 'OPERATOR_TARGET_NOT_SUPPORTED'; end if;
+ if job.cancelled_at is not null or job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if;
  if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if;
  if not public.creator_publishing_operator_queue_is_clean(task) then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if;
  if task.status<>'claimed' or task.claim_expires_at>v_now then raise exception 'OPERATOR_CLAIM_NOT_EXPIRED'; end if;

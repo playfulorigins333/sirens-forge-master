@@ -99,6 +99,61 @@ test('internal helpers are not executable by browser roles and action RPCs remai
   }
 });
 
+
+test('Task 17A behavioral coverage labels are present and runner emits completion marker', () => {
+  const scenarioFiles = [
+    'backend/creator-publishing-queue/tests/task17aPostgresIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aAuthorizationTimingIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
+  ];
+  const scenarioSource = scenarioFiles.map((file) => readFileSync(file, 'utf8')).join('\n');
+  const requiredLabels = [
+    'ownership_creator_claim',
+    'claim_audit_prior_status_matrix',
+    'runtime_privilege_assertions',
+    'authorization_creator_claim',
+    'idempotency_claim_replay',
+    'expired_claim_fixture_valid',
+    'recovery_select_no_mutation',
+    'explicit_recovery_authorized_operator',
+    'recovery_active_claim_rejected',
+    'release_identity_rejections',
+    'manual_result_evidence_blocks_release_recovery_and_progress',
+    'manual_result_field_posted_by',
+    'manual_result_field_posted_at',
+    'manual_result_field_posted_confirmation',
+    'manual_result_field_final_post_url',
+    'manual_result_field_final_post_url_skip_reason',
+    'manual_result_field_proof_screenshot_storage_key',
+    'manual_result_field_skip_or_fail_reason',
+    'recovery_deterministic_errors',
+    'safety_capability_unavailable',
+    'duplicate_task_unique_index_boundary',
+    'duplicate_task_rpc_ambiguity',
+    'account_missing_foreign_key_boundary',
+    'account_missing_defensive_rpc_boundary',
+    'safety_account_unverified',
+    'safety_consent_revoked',
+    'active_publication_unique_index_boundary',
+    'active_publication_defensive_rpc_boundary',
+    'safety_compliance_later_manual_review_rejected',
+    'safety_manual_result_claim_rejected',
+    'scheduler_operator_due_ready',
+    'scheduler_terminal_blocked_superseded',
+    'scheduler_terminal_cancelled_superseded',
+  ];
+  for (const label of requiredLabels) {
+    assert.match(scenarioSource, new RegExp(`TASK17A_SCENARIO_START: ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  }
+  const runner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
+  assert.match(runner, /ON_ERROR_STOP=1/);
+  assert.match(runner, /task15 regression post-01400/);
+  assert.match(runner, /runTask17aConcurrency\.mjs/);
+  assert.match(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+});
+
 test('prohibited Task 17B, Task 18, platform, and deployment work is absent', () => {
   assert.doesNotMatch(migration, /final_post_url\s*=|scheduled_on_platform\s*=|awaiting_post_confirmation\s*=/i);
   assert.doesNotMatch(migration, /fetch\(|playwright|puppeteer|onlyfans\.com/i);
