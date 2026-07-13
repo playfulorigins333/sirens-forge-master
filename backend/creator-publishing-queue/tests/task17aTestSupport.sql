@@ -105,3 +105,26 @@ begin
   perform task17a_test.assert((not scheduled and exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and schedule_revision is null and intended_publish_at is null and operator_due_at is null and schedule_timezone is null and scheduled_at is null and scheduled_by is null)) or (scheduled and exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and schedule_revision=1 and intended_publish_at is not null and operator_due_at is not null and schedule_timezone='UTC' and scheduled_at is not null and scheduled_by=v_creator)), 'fixture scheduling fields valid');
   return jsonb_build_object('creator',v_creator,'operator_a',v_operator_a,'operator_b',v_operator_b,'unauthorized',v_unauthorized,'revoked',v_revoked,'other_creator',v_other_creator,'global_only',v_global_only,'account',v_account,'package',v_package,'plan',v_plan,'job',v_job,'task',v_task,'consent_version','creator-ai-twin-consent-v1','consent_hash','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12');
 end $$;
+
+
+create or replace function task17a_test.expire_claim(p_task_id uuid) returns void language plpgsql as $$
+declare
+  v_now timestamptz := clock_timestamp();
+begin
+  update public.creator_publishing_queue_tasks
+  set claimed_at = v_now - interval '30 minutes',
+      claim_expires_at = v_now - interval '1 second'
+  where id = p_task_id;
+  perform task17a_test.assert(exists(
+    select 1 from public.creator_publishing_queue_tasks
+    where id=p_task_id
+      and status='claimed'
+      and claimed_by is not null
+      and claimed_at is not null
+      and claim_token is not null
+      and claim_expires_at is not null
+      and claim_expires_at > claimed_at
+      and claim_expires_at <= claimed_at + interval '30 minutes'
+      and claim_expires_at < clock_timestamp()
+  ), 'expired_claim_fixture_valid');
+end $$;
