@@ -236,6 +236,7 @@ select public.task15_assert(job_state='draft' and schedule_revision is null and 
 select now() + interval '3 hours' as schedule_intended_publish_at \gset
 select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001',:'schedule_intended_publish_at'::timestamptz,'UTC','schedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000001'::uuid,'80000000-0000-4000-8000-000000000002'::uuid],'{}','schedule') as schedule_result \gset
 select public.task15_assert((:'schedule_result')::jsonb->>'idempotent' = 'false', 'first schedule is not idempotent replay');
+select (:'schedule_result')::jsonb as task15_per_destination_schedule_result;
 select public.task15_assert(((:'schedule_result')::jsonb->>'success_count')::int = 1, 'per-destination isolation lets compatible destination succeed');
 select public.task15_assert(((:'schedule_result')::jsonb->>'failure_count')::int = 1, 'per-destination isolation returns failed destination');
 select public.task15_assert(schedule_revision=1 and job_state='scheduled_internally' and operator_due_at = intended_publish_at - interval '60 minutes', 'assisted schedule fields set') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000001';

@@ -283,7 +283,40 @@ begin
       v_operator_due_at := p_intended_publish_at - interval '60 minutes';
       if v_operator_due_at <= v_now then v_gate_code := 'SCHEDULER_OPERATOR_DUE_PASSED'; end if;
       select count(*) into v_queue_count from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.target_platform='onlyfans' and queue_source.status not in ('archived','blocked','needs_fix','skipped','failed_manual_upload','confirmed_posted_manual');
-      if v_queue_count <> 1 or not exists (select 1 from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.creator_id=job_rec.creator_id and queue_source.target_platform='onlyfans' and queue_source.platform_account_id=job_rec.platform_account_id and ((queue_source.status in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now') and queue_source.claimed_by is null and queue_source.claimed_at is null and queue_source.claim_token is null and queue_source.claim_expires_at is null) or (queue_source.status='claimed' and queue_source.claimed_by is not null and queue_source.claimed_at is not null and queue_source.claim_token is not null and queue_source.claim_expires_at > v_now)) and queue_source.posted_by is null and queue_source.posted_at is null and queue_source.posted_confirmation is false and queue_source.final_post_url is null and queue_source.final_post_url_skip_reason is null and queue_source.proof_screenshot_storage_key is null and queue_source.skip_or_fail_reason is null) then v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT'; end if;
+      if v_queue_count <> 1 or not exists (
+        select 1
+        from public.creator_publishing_queue_tasks as queue_source
+        where queue_source.content_package_id=job_rec.content_package_id
+          and queue_source.creator_id=job_rec.creator_id
+          and queue_source.target_platform='onlyfans'
+          and queue_source.platform_account_id=job_rec.platform_account_id
+          and (
+            (
+              ((v_action='schedule' and queue_source.status='ready_for_handoff')
+                or (v_action='reschedule' and queue_source.status in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now')))
+              and queue_source.claimed_by is null
+              and queue_source.claimed_at is null
+              and queue_source.claim_token is null
+              and queue_source.claim_expires_at is null
+            )
+            or (
+              queue_source.status='claimed'
+              and queue_source.claimed_by is not null
+              and queue_source.claimed_at is not null
+              and queue_source.claim_token is not null
+              and queue_source.claim_expires_at is not null
+              and queue_source.claim_expires_at > v_now
+              and public.creator_publishing_operator_is_authorized(job_rec.creator_id,queue_source.claimed_by,'onlyfans')
+            )
+          )
+          and queue_source.posted_by is null
+          and queue_source.posted_at is null
+          and queue_source.posted_confirmation is false
+          and queue_source.final_post_url is null
+          and queue_source.final_post_url_skip_reason is null
+          and queue_source.proof_screenshot_storage_key is null
+          and queue_source.skip_or_fail_reason is null
+      ) then v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT'; end if;
     end if;
 
     if v_gate_code is null and not exists (select 1 from public.creator_publishing_creator_verifications as verification_source where verification_source.creator_id=p_creator_id and verification_source.status='verified') then v_gate_code := 'CREATOR_VERIFICATION_MISSING'; end if;
@@ -450,7 +483,33 @@ begin
   if v_gate_code is null and package_rec.second_person_present and (not exists (select 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=package_rec.id) or exists (select 1 from public.creator_publishing_co_performer_records as performer_source where performer_source.content_package_id=package_rec.id and performer_source.platform_release_confirmed is not true)) then
     v_gate_code := 'CO_PERFORMER_RELEASE_MISSING';
   end if;
-  if v_gate_code is null and job_rec.publishing_mode='assisted' and (not exists (select 1 from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.creator_id=job_rec.creator_id and queue_source.target_platform='onlyfans' and queue_source.platform_account_id=job_rec.platform_account_id and ((queue_source.status in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now') and queue_source.claimed_by is null and queue_source.claimed_at is null and queue_source.claim_token is null and queue_source.claim_expires_at is null) or (queue_source.status='claimed' and queue_source.claimed_by is not null and queue_source.claimed_at is not null and queue_source.claim_token is not null and queue_source.claim_expires_at > v_now)) and queue_source.posted_by is null and queue_source.posted_at is null and queue_source.posted_confirmation is false and queue_source.final_post_url is null and queue_source.final_post_url_skip_reason is null and queue_source.proof_screenshot_storage_key is null and queue_source.skip_or_fail_reason is null) or (select count(*) from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.target_platform='onlyfans' and queue_source.status not in ('archived','blocked','needs_fix','skipped','failed_manual_upload','confirmed_posted_manual')) <> 1) then
+  if v_gate_code is null and job_rec.publishing_mode='assisted' and (not exists (
+    select 1
+    from public.creator_publishing_queue_tasks as queue_source
+    where queue_source.content_package_id=job_rec.content_package_id
+      and queue_source.creator_id=job_rec.creator_id
+      and queue_source.target_platform='onlyfans'
+      and queue_source.platform_account_id=job_rec.platform_account_id
+      and ((queue_source.status in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now')
+            and queue_source.claimed_by is null
+            and queue_source.claimed_at is null
+            and queue_source.claim_token is null
+            and queue_source.claim_expires_at is null)
+        or (queue_source.status='claimed'
+            and queue_source.claimed_by is not null
+            and queue_source.claimed_at is not null
+            and queue_source.claim_token is not null
+            and queue_source.claim_expires_at is not null
+            and queue_source.claim_expires_at > v_now
+            and public.creator_publishing_operator_is_authorized(job_rec.creator_id,queue_source.claimed_by,'onlyfans')))
+      and queue_source.posted_by is null
+      and queue_source.posted_at is null
+      and queue_source.posted_confirmation is false
+      and queue_source.final_post_url is null
+      and queue_source.final_post_url_skip_reason is null
+      and queue_source.proof_screenshot_storage_key is null
+      and queue_source.skip_or_fail_reason is null
+  ) or (select count(*) from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.target_platform='onlyfans' and queue_source.status not in ('archived','blocked','needs_fix','skipped','failed_manual_upload','confirmed_posted_manual')) <> 1) then
     v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT';
   end if;
   if v_gate_code is null and public.creator_publishing_autopost_source_fingerprint(job_rec.content_package_id) <> job_rec.source_package_fingerprint then v_gate_code := 'SOURCE_FINGERPRINT_STALE'; end if;
