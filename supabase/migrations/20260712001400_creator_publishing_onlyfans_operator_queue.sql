@@ -101,9 +101,9 @@ begin
   if p_job.target_platform <> 'onlyfans' then return 'OPERATOR_ONLYFANS_REQUIRED'; end if;
   if p_job.publishing_mode <> 'assisted' then return 'OPERATOR_ASSISTED_REQUIRED'; end if;
   if p_job.cancelled_at is not null or p_job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') then return 'OPERATOR_TERMINAL_TASK'; end if;
-  if not exists (select 1 from public.creator_publishing_platform_capabilities c where c.platform='onlyfans' and c.availability_status='available' and c.publishing_mode='assisted' and c.human_operator_queue_supported is true and c.human_publishing_required is true) then return 'PLATFORM_UNAVAILABLE'; end if;
   if not public.creator_publishing_onlyfans_operator_authorized(p_job.creator_id,p_actor_id) then return 'OPERATOR_NOT_AUTHORIZED'; end if;
   if not p_require_current_safety then return null; end if;
+  if not exists (select 1 from public.creator_publishing_platform_capabilities c where c.platform='onlyfans' and c.availability_status='available' and c.publishing_mode='assisted' and c.human_operator_queue_supported is true and c.human_publishing_required is true) then return 'PLATFORM_UNAVAILABLE'; end if;
   if not exists (select 1 from public.creator_publishing_creator_verifications v where v.creator_id=p_job.creator_id and v.status='verified') then return 'CREATOR_VERIFICATION_MISSING'; end if;
   if not exists (select 1 from public.creator_platform_accounts a where a.id=p_job.platform_account_id and a.creator_id=p_job.creator_id and a.platform='onlyfans' and a.verification_status='verified') then return 'DESTINATION_ACCOUNT_NOT_VERIFIED'; end if;
   if not exists (select 1 from public.creator_publishing_ai_twin_consents c where c.creator_id=p_job.creator_id and c.status='granted' and c.revoked_at is null and c.attestation_version=p_current_ai_twin_consent_version and c.attestation_text_sha256=p_current_attestation_text_sha256) then return 'AI_TWIN_CONSENT_MISSING'; end if;
@@ -403,7 +403,7 @@ begin
       v_operator_due_at := p_intended_publish_at - interval '60 minutes';
       if v_operator_due_at <= v_now then v_gate_code := 'SCHEDULER_OPERATOR_DUE_PASSED'; end if;
       select count(*) into v_queue_count from public.creator_publishing_queue_tasks as queue_source where queue_source.content_package_id=job_rec.content_package_id and queue_source.target_platform='onlyfans' and queue_source.status <> 'archived';
-      if v_queue_count <> 1 or not public.creator_publishing_task17a_queue_task_compatible(job_rec, v_now, case when v_action='schedule' then array['ready_for_handoff']::text[] else array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[] end) then v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT'; end if;
+      if v_queue_count <> 1 or not public.creator_publishing_task17a_queue_task_compatible(job_rec, v_now, case when v_action='schedule' then array['ready_for_handoff','awaiting_operator','due_now']::text[] else array['ready_for_handoff','scheduled_internally','awaiting_operator','due_now']::text[] end) then v_gate_code := 'ACTIVE_QUEUE_TASK_CONFLICT'; end if;
     end if;
 
     if v_gate_code is null and not exists (select 1 from public.creator_publishing_creator_verifications as verification_source where verification_source.creator_id=p_creator_id and verification_source.status='verified') then v_gate_code := 'CREATOR_VERIFICATION_MISSING'; end if;
