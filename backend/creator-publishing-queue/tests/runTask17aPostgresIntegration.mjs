@@ -43,7 +43,7 @@ try {
     create table if not exists public.generations(id uuid primary key default gen_random_uuid(), user_id uuid, status text, r2_bucket text, r2_key text, metadata jsonb not null default '{}'::jsonb, created_at timestamptz default now());
   `)
 
-  const migrations = [
+  const task15Migrations = [
     "supabase/migrations/20260710000100_creator_publishing_queue_foundation.sql",
     "supabase/migrations/20260710000200_creator_publishing_compliance_manual_review_outcome.sql",
     "supabase/migrations/20260710000300_creator_publishing_manual_review_workflow.sql",
@@ -57,11 +57,11 @@ try {
     "supabase/migrations/20260710001100_creator_publishing_trusted_compliance_submission.sql",
     "supabase/migrations/20260711001200_creator_publishing_autopost_orchestration.sql",
     "supabase/migrations/20260711001300_creator_publishing_scheduler_due_state.sql",
-    "supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql",
   ]
 
-  for (const migration of migrations) runFile("migration", migration)
-  runFile("Task 15 regression assertions", "backend/creator-publishing-queue/tests/task15PostgresIntegration.sql")
+  for (const migration of task15Migrations) runFile("migration", migration)
+  runFile("Task 15 regression assertions before Task 17A", "backend/creator-publishing-queue/tests/task15PostgresIntegration.sql")
+  runFile("Task 17A migration", "supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql")
   runFile("Task 17A assertions", "backend/creator-publishing-queue/tests/task17aPostgresIntegration.sql")
   appendFileSync(logPath, `\ncompleted_at=${new Date().toISOString()}\n`)
 } catch (error) {
