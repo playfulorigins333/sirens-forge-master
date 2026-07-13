@@ -14,8 +14,11 @@ select task17a_test.expect_error('revoked operator fails','OPERATOR_NOT_AUTHORIZ
 select task17a_test.reset_fixture(921005) as fixture \gset
 select task17a_test.expect_error('other creator authorization fails','OPERATOR_NOT_AUTHORIZED',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)',(:'fixture'::jsonb->>'unauthorized'),(:'fixture'::jsonb->>'task'),(:'fixture'::jsonb->>'job'),:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','otherauth'));
 select task17a_test.reset_fixture(921006) as fixture \gset
+select task17a_test.assert(exists(select 1 from public.creator_publishing_trusted_reviewers where reviewer_id=(:'fixture'::jsonb->>'global_only')::uuid and role='operator' and active is true), 'global-role-only fixture has active operator role');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_authorizations where creator_id=(:'fixture'::jsonb->>'creator')::uuid and operator_id=(:'fixture'::jsonb->>'global_only')::uuid and status='active'), 'global-role-only fixture has no creator authorization');
 select task17a_test.expect_error('global role alone fails','OPERATOR_NOT_AUTHORIZED',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)',(:'fixture'::jsonb->>'global_only'),(:'fixture'::jsonb->>'task'),(:'fixture'::jsonb->>'job'),:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','global01'));
 select task17a_test.reset_fixture(921007) as fixture \gset
+-- Platform-job Fanvue is schema-blocked by the existing no-Fanvue publication-job constraint; the RPC still fails closed before any mutation.
 update public.creator_publishing_queue_tasks set target_platform='fanvue' where id=(:'fixture'::jsonb->>'task')::uuid;
 select task17a_test.expect_error('Fanvue fails','OPERATOR_TASK_JOB_MISMATCH',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)',(:'fixture'::jsonb->>'creator'),(:'fixture'::jsonb->>'task'),(:'fixture'::jsonb->>'job'),:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','fanvue01'));
 select task17a_test.reset_fixture(921008,'ready_for_handoff','scheduled_internally',true) as fixture \gset

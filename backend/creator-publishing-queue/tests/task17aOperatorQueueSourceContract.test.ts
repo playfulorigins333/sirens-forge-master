@@ -46,6 +46,7 @@ test('authorization, idempotency, locks, and trusted RPC contracts exist', () =>
   assert.match(migration, /from public\.creator_publishing_platform_jobs where id=p_platform_job_id for update[\s\S]*from public\.creator_publishing_queue_tasks where id=p_queue_task_id for update/);
   assert.match(migration, /p_expected_ai_twin_consent_version/);
   assert.match(migration, /p_expected_attestation_text_sha256/);
+  assert.match(migration, /creator_publishing_operator_current_safety_gate/);
 });
 
 test('audit inserts use real audit schema and idempotency inserts use explicit columns', () => {
