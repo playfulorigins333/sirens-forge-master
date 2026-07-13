@@ -73,6 +73,29 @@ insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creato
 values ('81000000-0000-4000-8000-000000000001','71000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','31000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','onlyfans','assisted','draft',(select updated_at from public.creator_publishing_content_packages where id='31000000-0000-4000-8000-000000000001'),public.creator_publishing_autopost_source_fingerprint('31000000-0000-4000-8000-000000000001'),'task14.20260711.001','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',now(),now());
 insert into public.creator_publishing_queue_tasks(id,content_package_id,creator_id,target_platform,platform_account_id,status,due_at,created_at,updated_at)
 values ('61000000-0000-4000-8000-000000000001','31000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000001','ready_for_handoff',null,now(),now());
+
+-- Deterministic invalid input validation happens before mutation or audit.
+do $$
+declare v_bad_short boolean := false; v_bad_chars boolean := false; v_missing_consent boolean := false; v_bad_hash boolean := false; v_audits_before integer; v_audits_after integer;
+begin
+  select count(*) into v_audits_before from public.creator_publishing_audit_events where entity_id='61000000-0000-4000-8000-000000000001';
+  begin
+    perform public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','short');
+  exception when others then v_bad_short := sqlerrm like '%OPERATOR_INVALID_REQUEST%'; end;
+  begin
+    perform public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','bad key!');
+  exception when others then v_bad_chars := sqlerrm like '%OPERATOR_INVALID_REQUEST%'; end;
+  begin
+    perform public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-bad-consent-key-0001');
+  exception when others then v_missing_consent := sqlerrm like '%OPERATOR_INVALID_REQUEST%'; end;
+  begin
+    perform public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','not-a-sha','task17a-bad-hash-key-0001');
+  exception when others then v_bad_hash := sqlerrm like '%OPERATOR_INVALID_REQUEST%'; end;
+  select count(*) into v_audits_after from public.creator_publishing_audit_events where entity_id='61000000-0000-4000-8000-000000000001';
+  perform public.task17a_assert(v_bad_short and v_bad_chars and v_missing_consent and v_bad_hash, 'invalid request inputs fail deterministically');
+  perform public.task17a_assert(v_audits_before = v_audits_after, 'invalid request inputs write no audit');
+  perform public.task17a_assert((select status from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001')='ready_for_handoff', 'invalid request inputs do not mutate queue task');
+end $$;
 select public.creator_publishing_claim_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-claim-key-0001') as task17a_claim_result \gset
 select public.task17a_assert((:'task17a_claim_result')::jsonb->>'status'='claimed', 'creator self-claim succeeds');
 select public.task17a_assert((select status from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001')='claimed', 'claim mutates queue task to claimed');

@@ -20,6 +20,7 @@ test('claim ownership is complete, bounded, and never uses assigned_operator_id'
   assert.match(src, /status <> 'claimed' and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null/)
   assert.match(src, /claim_attempt_count >= 0/)
   assert.match(src, /claim_expires_at <= claimed_at \+ interval '30 minutes'/)
+  assert.match(src, /idempotency_key ~ '\^\[A-Za-z0-9_-\]\{8,128\}\$'/)
   assert.match(src, /interval '30 minutes'/)
   assert.doesNotMatch(src, /set[^;]*assigned_operator_id/i)
   assert.doesNotMatch(src, /assigned_operator_id\s*=/i)
@@ -41,7 +42,7 @@ test('RPC gates cover Task 17A trusted validation categories and lock job before
     'verification_status=\'verified\'', 'creator_publishing_ai_twin_consents', 'creator_approval_status<>\'approved\'',
     'creator_publishing_compliance_reviews', 'review_source=\'automated\'', 'later.outcome in',
     'creator_publishing_co_performer_records', 'creator_publishing_autopost_source_fingerprint',
-    'ACTIVE_PUBLICATION_JOB_CONFLICT', 'OPERATOR_NOT_DUE', 'OPERATOR_TASK_ALREADY_CLAIMED', 'OPERATOR_TASK_NOT_READY'
+    'ACTIVE_PUBLICATION_JOB_CONFLICT', 'OPERATOR_NOT_DUE', 'OPERATOR_TASK_ALREADY_CLAIMED', 'OPERATOR_TASK_NOT_READY', "job_state not in ('draft','scheduled_internally','awaiting_operator','due_now')", "coalesce(p_idempotency_key,'') !~ '^[A-Za-z0-9_-]{8,128}$'", "p_current_attestation_text_sha256,'') !~ '^[0-9a-f]{64}$'"
   ]) assert.match(src, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(src, /select \* into v_job from public\.creator_publishing_platform_jobs where id=p_platform_job_id for update;[\s\S]+select \* into v_task from public\.creator_publishing_queue_tasks where id=p_queue_task_id for update;/)
 })
@@ -57,6 +58,7 @@ test('migration 01400 redefines exact Task 15 functions with valid-claim compati
   assert.match(src, /and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null/)
   assert.match(src, /case when event_rec\.event_type='operator_due' then 'awaiting_operator' else 'due_now' end/)
   assert.match(src, /case when v_action='schedule' then array\['ready_for_handoff'\]/)
+  assert.match(src, /else array\['ready_for_handoff','scheduled_internally','awaiting_operator','due_now'\]/)
   assert.match(src, /case when event_rec\.event_type='operator_due' then array\['ready_for_handoff','scheduled_internally'\]/)
 })
 
