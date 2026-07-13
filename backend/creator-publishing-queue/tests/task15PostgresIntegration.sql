@@ -140,7 +140,16 @@ update public.creator_publishing_content_packages set compliance_status='passed'
 insert into public.creator_publishing_queue_tasks(id,content_package_id,creator_id,target_platform,platform_account_id,status,due_at,created_at,updated_at)
 values
 ('60000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000001','ready_for_handoff',null,now(),now()),
-('60000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000002','claimed',null,now(),now());
+('60000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','onlyfans','20000000-0000-4000-8000-000000000002','ready_for_handoff',null,now(),now());
+
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='creator_publishing_queue_tasks' and column_name='claim_token') then
+    update public.creator_publishing_queue_tasks set status='claimed', claimed_by='00000000-0000-4000-8000-000000000002', claimed_at=clock_timestamp(), claim_token='90000000-0000-4000-8000-000000000102', claim_expires_at=clock_timestamp()+interval '30 minutes', updated_at=now() where id='60000000-0000-4000-8000-000000000002';
+  else
+    update public.creator_publishing_queue_tasks set status='claimed', claimed_by='00000000-0000-4000-8000-000000000002', claimed_at=clock_timestamp(), updated_at=now() where id='60000000-0000-4000-8000-000000000002';
+  end if;
+end $$;
 
 insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at)
 values
@@ -548,7 +557,14 @@ values
 
 select public.creator_publishing_schedule_plan('00000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000005',now()+interval '3 hours','UTC','due-queue-schedule-key-0001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12',array['80000000-0000-4000-8000-000000000006'::uuid],'{}','schedule');
 select public.task15_assert(job_state='scheduled_internally' and schedule_revision=1, 'due queue fixture scheduled assisted job') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000006';
-update public.creator_publishing_queue_tasks set status='claimed', claimed_by='00000000-0000-4000-8000-000000000001', claimed_at=now(), updated_at=now() where id='60000000-0000-4000-8000-000000000003';
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='creator_publishing_queue_tasks' and column_name='claim_token') then
+    update public.creator_publishing_queue_tasks set status='claimed', claimed_by='00000000-0000-4000-8000-000000000002', claimed_at=clock_timestamp(), claim_token='90000000-0000-4000-8000-000000000103', claim_expires_at=clock_timestamp()+interval '30 minutes', updated_at=now() where id='60000000-0000-4000-8000-000000000003';
+  else
+    update public.creator_publishing_queue_tasks set status='claimed', claimed_by='00000000-0000-4000-8000-000000000002', claimed_at=clock_timestamp(), updated_at=now() where id='60000000-0000-4000-8000-000000000003';
+  end if;
+end $$;
 select public.task15_assert(source_package_fingerprint=public.creator_publishing_autopost_source_fingerprint(content_package_id), 'due queue mutation leaves source fingerprint current') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000006';
 update public.creator_publishing_scheduler_events set status='processing', lock_token='90000000-0000-4000-8000-000000000006', locked_at=clock_timestamp(), updated_at=now() where platform_job_id='80000000-0000-4000-8000-000000000006' and schedule_revision=1 and event_type='operator_due';
 select id as due_queue_event_id from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000006' and schedule_revision=1 and event_type='operator_due' \gset

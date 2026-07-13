@@ -1,13 +1,16 @@
 \set ON_ERROR_STOP on
--- Task 17A behavioral assertions are exercised by the PostgreSQL runner after migrations 00100-01400.
--- Scenario labels in this file map requirements to executable database contracts.
 create schema if not exists task17a_test;
 create or replace function task17a_test.assert(ok boolean, label text) returns void language plpgsql as $$ begin if not ok then raise exception 'TASK17A_ASSERT:%', label; end if; end $$;
-select task17a_test.assert(to_regclass('public.creator_publishing_operator_authorizations') is not null, 'authorization table exists');
-select task17a_test.assert(to_regclass('public.creator_publishing_operator_action_idempotency') is not null, 'idempotency table exists');
-select task17a_test.assert(exists(select 1 from information_schema.columns where table_schema='public' and table_name='creator_publishing_queue_tasks' and column_name='claim_token'), 'claim token column exists');
-select task17a_test.assert(exists(select 1 from information_schema.routines where routine_schema='public' and routine_name='creator_publishing_claim_onlyfans_operator_task'), 'claim rpc exists');
-select task17a_test.assert(exists(select 1 from information_schema.routines where routine_schema='public' and routine_name='creator_publishing_release_onlyfans_operator_task'), 'release rpc exists');
-select task17a_test.assert(exists(select 1 from information_schema.routines where routine_schema='public' and routine_name='creator_publishing_update_onlyfans_operator_progress'), 'progress rpc exists');
-select task17a_test.assert(exists(select 1 from information_schema.routines where routine_schema='public' and routine_name='creator_publishing_recover_expired_onlyfans_operator_claim'), 'recovery rpc exists');
--- Scenarios: creator self-claim; active authorization; unauthorized/revoked/other-creator rejection; non-OnlyFans/Fanvue rejection; OPERATOR_NOT_DUE; awaiting_operator/due_now eligibility.
+create or replace function task17a_test.expect_error(label text, expected text, statement text) returns void language plpgsql as $$
+begin
+  execute statement;
+  raise exception 'TASK17A_ASSERT:% expected %', label, expected;
+exception when others then
+  if sqlerrm not like '%' || expected || '%' then
+    raise exception 'TASK17A_ASSERT:% expected %, got %', label, expected, sqlerrm;
+  end if;
+end $$;
+select task17a_test.assert(has_function_privilege('authenticated','public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text,text,text)','execute') is false, 'authenticated cannot execute claim rpc');
+select task17a_test.assert(has_function_privilege('service_role','public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text,text,text)','execute') is true, 'service_role can execute claim rpc');
+select task17a_test.expect_error('unauthorized missing ids fail closed','OPERATOR_REQUEST_INVALID',$$select public.creator_publishing_claim_onlyfans_operator_task(null,'60000000-0000-4000-8000-000000000001','80000000-0000-4000-8000-000000000001','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','authTime01')$$);
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where idempotency_key='authTime01'), 'failed authorization/timing request stores no idempotency success');

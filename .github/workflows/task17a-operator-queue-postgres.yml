@@ -3,19 +3,13 @@ on:
   pull_request:
     paths:
       - 'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql'
+      - 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql'
       - 'backend/creator-publishing-queue/tests/task17a*'
       - 'backend/creator-publishing-queue/tests/runTask17a*'
       - '.github/workflows/task17a-operator-queue-postgres.yml'
       - 'package.json'
       - 'package-lock.json'
-  push:
-    paths:
-      - 'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql'
-      - 'backend/creator-publishing-queue/tests/task17a*'
-      - 'backend/creator-publishing-queue/tests/runTask17a*'
-      - '.github/workflows/task17a-operator-queue-postgres.yml'
-      - 'package.json'
-      - 'package-lock.json'
+  workflow_dispatch:
 jobs:
   postgres:
     runs-on: ubuntu-latest
@@ -32,6 +26,8 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -45,6 +41,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: task17a-diagnostics
-          path: backend/creator-publishing-queue/tests/.task17a-diagnostics
+          name: task17a-postgres-diagnostics
+          path: task17a-postgres-diagnostics.log
           if-no-files-found: ignore

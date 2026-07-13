@@ -66,7 +66,7 @@ $$;
 
 create or replace function public.creator_publishing_operator_restore_queue_status(p_job public.creator_publishing_platform_jobs,p_now timestamptz) returns text language plpgsql stable set search_path=public,pg_temp as $$
 begin
- if p_job.job_state not in ('draft','ready_to_publish','scheduled_internally','awaiting_operator','due_now','claimed','retry_scheduled') or p_job.cancelled_at is not null then return null; end if;
+ if p_job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') or p_job.cancelled_at is not null then return null; end if;
  if p_job.schedule_revision is null then return 'ready_for_handoff'; end if;
  if p_job.operator_due_at is not null and p_now < p_job.operator_due_at then return 'scheduled_internally'; end if;
  if p_job.intended_publish_at is not null and p_now >= p_job.intended_publish_at then return 'due_now'; end if;
@@ -76,7 +76,7 @@ end; $$;
 create or replace function public.creator_publishing_operator_request_fingerprint(p jsonb) returns text language sql immutable set search_path=public,pg_temp as $$ select encode(digest(p::text,'sha256'),'hex') $$;
 
 create or replace function public.creator_publishing_operator_replay_or_conflict(p_actor uuid,p_action text,p_key text,p_fingerprint text) returns jsonb language plpgsql set search_path=public,pg_temp as $$
-declare r record; begin select * into r from public.creator_publishing_operator_action_idempotency where actor_id=p_actor and action_type=p_action and idempotency_key=p_key for update; if found then if r.request_fingerprint<>p_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return r.stored_result || jsonb_build_object('idempotent',true); end if; return null; end; $$;
+declare r record; begin perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_operator_idempotency:'||p_actor::text||':'||p_action||':'||p_key,0)); select * into r from public.creator_publishing_operator_action_idempotency where actor_id=p_actor and action_type=p_action and idempotency_key=p_key for update; if found then if r.request_fingerprint<>p_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return r.stored_result || jsonb_build_object('idempotent',true); end if; return null; end; $$;
 
 create or replace function public.creator_publishing_claim_onlyfans_operator_task(p_actor_id uuid,p_queue_task_id uuid,p_platform_job_id uuid,p_expected_ai_twin_consent_version text,p_expected_attestation_text_sha256 text,p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
@@ -90,30 +90,30 @@ begin
  if task.target_platform <> 'onlyfans' or job.publishing_mode <> 'assisted' then raise exception 'OPERATOR_TARGET_NOT_SUPPORTED'; end if;
  if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if;
  if (select count(*) from public.creator_publishing_queue_tasks q where q.content_package_id=job.content_package_id and q.creator_id=job.creator_id and q.target_platform='onlyfans' and q.platform_account_id=job.platform_account_id and q.status not in ('archived','skipped','failed_manual_upload','confirmed_posted_manual'))<>1 then raise exception 'OPERATOR_QUEUE_TASK_AMBIGUOUS'; end if;
- if task.status='claimed' and task.claim_expires_at <= v_now then restore:=public.creator_publishing_operator_restore_queue_status(job,v_now); if restore is null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; update public.creator_publishing_queue_tasks set status=restore, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null where id=task.id returning * into task; insert into public.creator_publishing_audit_events(actor_id,action,entity_type,entity_id,metadata) values(p_actor_id,'operator_expired_claim_recovered','creator_publishing_queue_task',task.id,jsonb_build_object('queue_task_id',task.id,'platform_job_id',job.id)); end if;
+ if task.status='claimed' and task.claim_expires_at <= v_now then restore:=public.creator_publishing_operator_restore_queue_status(job,v_now); if restore is null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; update public.creator_publishing_queue_tasks set status=restore, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null where id=task.id returning * into task; insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',task.id,p_actor_id,'operator','operator_expired_claim_recovered',jsonb_build_object('status','claimed','claimed_by',task.claimed_by,'claim_expires_at',task.claim_expires_at),jsonb_build_object('queue_task_id',task.id,'platform_job_id',job.id,'status',restore),p_idempotency_key,v_now); end if;
  if task.status='claimed' then raise exception 'OPERATOR_TASK_ALREADY_CLAIMED'; end if;
- if job.cancelled_at is not null or job.job_state not in ('draft','ready_to_publish','scheduled_internally','awaiting_operator','due_now','retry_scheduled') then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if;
+ if job.cancelled_at is not null or job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if;
  if job.schedule_revision is null then if task.status<>'ready_for_handoff' or job.operator_due_at is not null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; else if job.operator_due_at is null or v_now < job.operator_due_at then raise exception 'OPERATOR_NOT_DUE'; end if; if task.status not in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; end if;
  update public.creator_publishing_queue_tasks set status='claimed', claimed_by=p_actor_id, claimed_at=v_now, claim_token=token, claim_expires_at=v_now+interval '30 minutes', claim_attempt_count=claim_attempt_count+1 where id=task.id returning * into task;
  result:=jsonb_build_object('ok',true,'action','claim','queue_task_id',task.id,'platform_job_id',job.id,'creator_id',job.creator_id,'operator_id',p_actor_id,'claim_token',token,'claim_expires_at',task.claim_expires_at,'status',task.status);
- insert into public.creator_publishing_audit_events(actor_id,action,entity_type,entity_id,metadata) values(p_actor_id,'operator_task_claimed','creator_publishing_queue_task',task.id,result - 'claim_token');
+ insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',task.id,p_actor_id,'operator','operator_task_claimed',jsonb_build_object('status','ready_for_handoff'),result - 'claim_token',p_idempotency_key,v_now);
  insert into public.creator_publishing_operator_action_idempotency(actor_id,creator_id,queue_task_id,platform_job_id,action_type,idempotency_key,request_fingerprint,stored_result) values(p_actor_id,job.creator_id,task.id,job.id,'claim',p_idempotency_key,fp,result); return result;
 end; $$;
 
 create or replace function public.creator_publishing_release_onlyfans_operator_task(p_actor_id uuid,p_queue_task_id uuid,p_platform_job_id uuid,p_claim_token uuid,p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare v_now timestamptz:=clock_timestamp(); job public.creator_publishing_platform_jobs%rowtype; task public.creator_publishing_queue_tasks%rowtype; fp text; replay jsonb; restore text; result jsonb;
-begin perform public.creator_publishing_operator_validate_idempotency_key(p_idempotency_key); if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null or p_claim_token is null then raise exception 'OPERATOR_REQUEST_INVALID'; end if; fp:=public.creator_publishing_operator_request_fingerprint(jsonb_build_object('actor',p_actor_id,'task',p_queue_task_id,'job',p_platform_job_id,'token',p_claim_token)); replay:=public.creator_publishing_operator_replay_or_conflict(p_actor_id,'release',p_idempotency_key,fp); if replay is not null then return replay; end if; select * into job from public.creator_publishing_platform_jobs where id=p_platform_job_id for update; select * into task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if not found or task.content_package_id<>job.content_package_id then raise exception 'OPERATOR_TASK_JOB_MISMATCH'; end if; if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if; if task.status<>'claimed' or task.claimed_by<>p_actor_id or task.claim_token<>p_claim_token then raise exception 'OPERATOR_CLAIM_TOKEN_MISMATCH'; end if; restore:=public.creator_publishing_operator_restore_queue_status(job,v_now); if restore is null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; update public.creator_publishing_queue_tasks set status=restore, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null where id=task.id returning * into task; result:=jsonb_build_object('ok',true,'action','release','queue_task_id',task.id,'platform_job_id',job.id,'status',task.status); insert into public.creator_publishing_audit_events(actor_id,action,entity_type,entity_id,metadata) values(p_actor_id,'operator_task_released','creator_publishing_queue_task',task.id,result); insert into public.creator_publishing_operator_action_idempotency values(p_actor_id,job.creator_id,task.id,job.id,'release',p_idempotency_key,fp,result,v_now); return result; end; $$;
+begin perform public.creator_publishing_operator_validate_idempotency_key(p_idempotency_key); if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null or p_claim_token is null then raise exception 'OPERATOR_REQUEST_INVALID'; end if; fp:=public.creator_publishing_operator_request_fingerprint(jsonb_build_object('actor',p_actor_id,'task',p_queue_task_id,'job',p_platform_job_id,'token',p_claim_token)); replay:=public.creator_publishing_operator_replay_or_conflict(p_actor_id,'release',p_idempotency_key,fp); if replay is not null then return replay; end if; select * into job from public.creator_publishing_platform_jobs where id=p_platform_job_id for update; select * into task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if not found or task.content_package_id<>job.content_package_id or task.creator_id<>job.creator_id or task.platform_account_id<>job.platform_account_id or task.target_platform<>job.target_platform or task.target_platform<>'onlyfans' or job.publishing_mode<>'assisted' or job.cancelled_at is not null or job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_JOB_MISMATCH'; end if; if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if; if task.status<>'claimed' or task.claimed_by<>p_actor_id or task.claim_token<>p_claim_token then raise exception 'OPERATOR_CLAIM_TOKEN_MISMATCH'; end if; restore:=public.creator_publishing_operator_restore_queue_status(job,v_now); if restore is null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; update public.creator_publishing_queue_tasks set status=restore, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null where id=task.id returning * into task; result:=jsonb_build_object('ok',true,'action','release','queue_task_id',task.id,'platform_job_id',job.id,'status',task.status); insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',task.id,p_actor_id,'operator','operator_task_released',jsonb_build_object('status','claimed','claimed_by',p_actor_id),result,p_idempotency_key,v_now); insert into public.creator_publishing_operator_action_idempotency(actor_id,creator_id,queue_task_id,platform_job_id,action_type,idempotency_key,request_fingerprint,stored_result,created_at) values(p_actor_id,job.creator_id,task.id,job.id,'release',p_idempotency_key,fp,result,v_now); return result; end; $$;
 
 create or replace function public.creator_publishing_update_onlyfans_operator_progress(p_actor_id uuid,p_queue_task_id uuid,p_platform_job_id uuid,p_claim_token uuid,p_expected_progress_state text,p_expected_progress_revision integer,p_next_progress_state text,p_expected_ai_twin_consent_version text,p_expected_attestation_text_sha256 text,p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare v_now timestamptz:=clock_timestamp(); job public.creator_publishing_platform_jobs%rowtype; task public.creator_publishing_queue_tasks%rowtype; fp text; replay jsonb; result jsonb; action text;
-begin perform public.creator_publishing_operator_validate_idempotency_key(p_idempotency_key); fp:=public.creator_publishing_operator_request_fingerprint(jsonb_build_object('actor',p_actor_id,'task',p_queue_task_id,'job',p_platform_job_id,'token',p_claim_token,'expected_state',p_expected_progress_state,'expected_revision',p_expected_progress_revision,'next',p_next_progress_state,'consent',p_expected_ai_twin_consent_version,'hash',p_expected_attestation_text_sha256)); replay:=public.creator_publishing_operator_replay_or_conflict(p_actor_id,'progress_update',p_idempotency_key,fp); if replay is not null then return replay; end if; select * into job from public.creator_publishing_platform_jobs where id=p_platform_job_id for update; select * into task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if task.status<>'claimed' or task.claimed_by<>p_actor_id or task.claim_token<>p_claim_token or task.claim_expires_at<=v_now then raise exception 'OPERATOR_CLAIM_TOKEN_MISMATCH'; end if; if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if; if task.operator_progress_state<>p_expected_progress_state or task.operator_progress_revision<>p_expected_progress_revision then raise exception 'OPERATOR_PROGRESS_STALE'; end if; if not ((p_expected_progress_state='not_started' and p_next_progress_state='preparing') or (p_expected_progress_state='preparing' and p_next_progress_state='prepared') or (p_expected_progress_state='prepared' and p_next_progress_state='handoff_ready')) then raise exception 'OPERATOR_PROGRESS_INVALID_TRANSITION'; end if; update public.creator_publishing_queue_tasks set operator_progress_state=p_next_progress_state, operator_progress_updated_by=p_actor_id, operator_progress_updated_at=v_now, operator_progress_revision=operator_progress_revision+1 where id=task.id returning * into task; action:=case p_next_progress_state when 'preparing' then 'operator_preparation_started' when 'prepared' then 'operator_package_prepared' else 'operator_handoff_ready' end; result:=jsonb_build_object('ok',true,'action','progress_update','queue_task_id',task.id,'platform_job_id',job.id,'progress_state',task.operator_progress_state,'progress_revision',task.operator_progress_revision); insert into public.creator_publishing_audit_events(actor_id,action,entity_type,entity_id,metadata) values(p_actor_id,action,'creator_publishing_queue_task',task.id,result); insert into public.creator_publishing_operator_action_idempotency values(p_actor_id,job.creator_id,task.id,job.id,'progress_update',p_idempotency_key,fp,result,v_now); return result; end; $$;
+begin perform public.creator_publishing_operator_validate_idempotency_key(p_idempotency_key); fp:=public.creator_publishing_operator_request_fingerprint(jsonb_build_object('actor',p_actor_id,'task',p_queue_task_id,'job',p_platform_job_id,'token',p_claim_token,'expected_state',p_expected_progress_state,'expected_revision',p_expected_progress_revision,'next',p_next_progress_state,'consent',p_expected_ai_twin_consent_version,'hash',p_expected_attestation_text_sha256)); replay:=public.creator_publishing_operator_replay_or_conflict(p_actor_id,'progress_update',p_idempotency_key,fp); if replay is not null then return replay; end if; select * into job from public.creator_publishing_platform_jobs where id=p_platform_job_id for update; select * into task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if task.status<>'claimed' or task.claimed_by<>p_actor_id or task.claim_token<>p_claim_token or task.claim_expires_at<=v_now then raise exception 'OPERATOR_CLAIM_TOKEN_MISMATCH'; end if; if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if; if task.operator_progress_state<>p_expected_progress_state or task.operator_progress_revision<>p_expected_progress_revision then raise exception 'OPERATOR_PROGRESS_STALE'; end if; if not ((p_expected_progress_state='not_started' and p_next_progress_state='preparing') or (p_expected_progress_state='preparing' and p_next_progress_state='prepared') or (p_expected_progress_state='prepared' and p_next_progress_state='handoff_ready')) then raise exception 'OPERATOR_PROGRESS_INVALID_TRANSITION'; end if; update public.creator_publishing_queue_tasks set operator_progress_state=p_next_progress_state, operator_progress_updated_by=p_actor_id, operator_progress_updated_at=v_now, operator_progress_revision=operator_progress_revision+1 where id=task.id returning * into task; action:=case p_next_progress_state when 'preparing' then 'operator_preparation_started' when 'prepared' then 'operator_package_prepared' else 'operator_handoff_ready' end; result:=jsonb_build_object('ok',true,'action','progress_update','queue_task_id',task.id,'platform_job_id',job.id,'progress_state',task.operator_progress_state,'progress_revision',task.operator_progress_revision); insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',task.id,p_actor_id,'operator',action,jsonb_build_object('progress_state',p_expected_progress_state,'progress_revision',p_expected_progress_revision),result,p_idempotency_key,v_now); insert into public.creator_publishing_operator_action_idempotency(actor_id,creator_id,queue_task_id,platform_job_id,action_type,idempotency_key,request_fingerprint,stored_result,created_at) values(p_actor_id,job.creator_id,task.id,job.id,'progress_update',p_idempotency_key,fp,result,v_now); return result; end; $$;
 
 create or replace function public.creator_publishing_recover_expired_onlyfans_operator_claim(p_actor_id uuid,p_queue_task_id uuid,p_platform_job_id uuid,p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path=public,pg_temp as $$
 declare v_now timestamptz:=clock_timestamp(); job public.creator_publishing_platform_jobs%rowtype; task public.creator_publishing_queue_tasks%rowtype; fp text; replay jsonb; restore text; result jsonb;
-begin perform public.creator_publishing_operator_validate_idempotency_key(p_idempotency_key); fp:=public.creator_publishing_operator_request_fingerprint(jsonb_build_object('actor',p_actor_id,'task',p_queue_task_id,'job',p_platform_job_id)); replay:=public.creator_publishing_operator_replay_or_conflict(p_actor_id,'expired_claim_recovery',p_idempotency_key,fp); if replay is not null then return replay; end if; select * into job from public.creator_publishing_platform_jobs where id=p_platform_job_id for update; select * into task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if; if task.status<>'claimed' or task.claim_expires_at>v_now then raise exception 'OPERATOR_CLAIM_NOT_EXPIRED'; end if; restore:=public.creator_publishing_operator_restore_queue_status(job,v_now); if restore is null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; update public.creator_publishing_queue_tasks set status=restore, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null where id=task.id returning * into task; result:=jsonb_build_object('ok',true,'action','expired_claim_recovery','queue_task_id',task.id,'platform_job_id',job.id,'status',task.status); insert into public.creator_publishing_audit_events(actor_id,action,entity_type,entity_id,metadata) values(p_actor_id,'operator_expired_claim_recovered','creator_publishing_queue_task',task.id,result); insert into public.creator_publishing_operator_action_idempotency values(p_actor_id,job.creator_id,task.id,job.id,'expired_claim_recovery',p_idempotency_key,fp,result,v_now); return result; end; $$;
+begin perform public.creator_publishing_operator_validate_idempotency_key(p_idempotency_key); fp:=public.creator_publishing_operator_request_fingerprint(jsonb_build_object('actor',p_actor_id,'task',p_queue_task_id,'job',p_platform_job_id)); replay:=public.creator_publishing_operator_replay_or_conflict(p_actor_id,'expired_claim_recovery',p_idempotency_key,fp); if replay is not null then return replay; end if; select * into job from public.creator_publishing_platform_jobs where id=p_platform_job_id for update; select * into task from public.creator_publishing_queue_tasks where id=p_queue_task_id for update; if task.content_package_id<>job.content_package_id or task.creator_id<>job.creator_id or task.platform_account_id<>job.platform_account_id or task.target_platform<>job.target_platform or task.target_platform<>'onlyfans' or job.publishing_mode<>'assisted' or job.cancelled_at is not null or job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_JOB_MISMATCH'; end if; if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if; if task.status<>'claimed' or task.claim_expires_at>v_now then raise exception 'OPERATOR_CLAIM_NOT_EXPIRED'; end if; restore:=public.creator_publishing_operator_restore_queue_status(job,v_now); if restore is null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; update public.creator_publishing_queue_tasks set status=restore, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null where id=task.id returning * into task; result:=jsonb_build_object('ok',true,'action','expired_claim_recovery','queue_task_id',task.id,'platform_job_id',job.id,'status',task.status); insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_queue_task',task.id,p_actor_id,'operator','operator_expired_claim_recovered',jsonb_build_object('status','claimed','claim_expires_at',task.claim_expires_at),result,p_idempotency_key,v_now); insert into public.creator_publishing_operator_action_idempotency(actor_id,creator_id,queue_task_id,platform_job_id,action_type,idempotency_key,request_fingerprint,stored_result,created_at) values(p_actor_id,job.creator_id,task.id,job.id,'expired_claim_recovery',p_idempotency_key,fp,result,v_now); return result; end; $$;
 
 revoke all on function public.creator_publishing_claim_onlyfans_operator_task(uuid,uuid,uuid,text,text,text) from public, anon, authenticated;
 revoke all on function public.creator_publishing_release_onlyfans_operator_task(uuid,uuid,uuid,uuid,text) from public, anon, authenticated;
@@ -295,130 +295,6 @@ begin
 end;
 $$;
 
-create or replace function public.creator_publishing_cancel_plan_schedule(p_creator_id uuid, p_publishing_plan_id uuid, p_cancellation_reason text, p_idempotency_key text)
-returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
-#variable_conflict error
-declare
-  plan_rec public.creator_publishing_plans%rowtype;
-  v_now timestamptz := clock_timestamp();
-  v_reason text := btrim(coalesce(p_cancellation_reason,''));
-  v_request_fingerprint text;
-  idempotency_rec public.creator_publishing_scheduler_idempotency%rowtype;
-  v_result jsonb;
-begin
-  if coalesce(p_idempotency_key,'') !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
-  if length(v_reason) not between 1 and 500 then raise exception 'SCHEDULER_CANCELLATION_REASON_REQUIRED'; end if;
-  v_request_fingerprint := encode(extensions.digest(jsonb_build_object('creator_id',p_creator_id,'publishing_plan_id',p_publishing_plan_id,'action_type','cancel_plan','reason',v_reason)::text,'sha256'),'hex');
-  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_scheduler_idempotency:'||p_creator_id::text||':cancel_plan:'||p_idempotency_key,0));
-  select * into idempotency_rec from public.creator_publishing_scheduler_idempotency as idempotency_source where creator_id=p_creator_id and action_type='cancel_plan' and idempotency_key=p_idempotency_key for update of idempotency_source;
-  if found then if idempotency_rec.publishing_plan_id<>p_publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result || jsonb_build_object('idempotent', true); end if;
-  select * into plan_rec from public.creator_publishing_plans as plan_source where id=p_publishing_plan_id and creator_id=p_creator_id for update of plan_source;
-  if not found then raise exception 'PLAN_NOT_FOUND'; end if;
-  perform 1 from public.creator_publishing_platform_jobs as job_source where publishing_plan_id=p_publishing_plan_id order by id for update of job_source;
-  perform 1 from public.creator_publishing_scheduler_events as event_source where publishing_plan_id=p_publishing_plan_id and status in ('pending','processing') order by id for update of event_source;
-  update public.creator_publishing_scheduler_events set status='cancelled', cancelled_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where publishing_plan_id=p_publishing_plan_id and status in ('pending','processing');
-  update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where publishing_plan_id=p_publishing_plan_id and job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived');
-  update public.creator_publishing_plans set status='cancelled', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where id=p_publishing_plan_id;
-  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_plan',p_publishing_plan_id,p_creator_id,'creator','creator_publishing_schedule_cancelled',jsonb_build_object('status',plan_rec.status),jsonb_build_object('status','cancelled','reason',v_reason),p_idempotency_key,v_now);
-  v_result := jsonb_build_object('ok',true,'action_type','cancel_plan','publishing_plan_id',p_publishing_plan_id,'idempotent',false);
-  insert into public.creator_publishing_scheduler_idempotency values(p_creator_id,p_publishing_plan_id,'cancel_plan',p_idempotency_key,v_request_fingerprint,v_result,v_now);
-  return v_result;
-end; $$;
-
-create or replace function public.creator_publishing_cancel_job_schedule(p_creator_id uuid, p_platform_job_id uuid, p_cancellation_reason text, p_idempotency_key text)
-returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
-#variable_conflict error
-declare
-  job_rec public.creator_publishing_platform_jobs%rowtype;
-  plan_rec public.creator_publishing_plans%rowtype;
-  v_now timestamptz := clock_timestamp();
-  v_reason text := btrim(coalesce(p_cancellation_reason,''));
-  v_request_fingerprint text;
-  idempotency_rec public.creator_publishing_scheduler_idempotency%rowtype;
-  v_result jsonb;
-  v_resulting_job_state text;
-begin
-  if coalesce(p_idempotency_key,'') !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
-  if length(v_reason) not between 1 and 500 then raise exception 'SCHEDULER_CANCELLATION_REASON_REQUIRED'; end if;
-  select * into job_rec from public.creator_publishing_platform_jobs where id=p_platform_job_id and creator_id=p_creator_id;
-  if not found then raise exception 'JOB_NOT_FOUND'; end if;
-  v_request_fingerprint := encode(extensions.digest(jsonb_build_object('creator_id',p_creator_id,'publishing_plan_id',job_rec.publishing_plan_id,'job_id',p_platform_job_id,'action_type','cancel_job','reason',v_reason)::text,'sha256'),'hex');
-  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_scheduler_idempotency:'||p_creator_id::text||':cancel_job:'||p_idempotency_key,0));
-  select * into idempotency_rec from public.creator_publishing_scheduler_idempotency as idempotency_source where creator_id=p_creator_id and action_type='cancel_job' and idempotency_key=p_idempotency_key for update of idempotency_source;
-  if found then if idempotency_rec.publishing_plan_id<>job_rec.publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result || jsonb_build_object('idempotent', true); end if;
-  select * into plan_rec from public.creator_publishing_plans as plan_source where id=job_rec.publishing_plan_id and creator_id=p_creator_id for update of plan_source;
-  select * into job_rec from public.creator_publishing_platform_jobs as job_source where id=p_platform_job_id and creator_id=p_creator_id for update of job_source;
-  v_resulting_job_state := job_rec.job_state;
-  perform 1 from public.creator_publishing_scheduler_events as event_source where platform_job_id=p_platform_job_id and status in ('pending','processing') order by id for update of event_source;
-  update public.creator_publishing_scheduler_events set status='cancelled', cancelled_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where platform_job_id=p_platform_job_id and status in ('pending','processing');
-  if job_rec.job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') then update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where id=p_platform_job_id; v_resulting_job_state := 'archived'; end if;
-  update public.creator_publishing_plans set status=public.creator_publishing_aggregate_plan_status(job_rec.publishing_plan_id), updated_at=v_now where id=job_rec.publishing_plan_id;
-  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_platform_job',p_platform_job_id,p_creator_id,'creator','creator_publishing_job_schedule_cancelled',jsonb_build_object('job_state',job_rec.job_state),jsonb_build_object('job_state',v_resulting_job_state,'reason',v_reason),p_idempotency_key,v_now);
-  v_result := jsonb_build_object('ok',true,'action_type','cancel_job','platform_job_id',p_platform_job_id,'publishing_plan_id',job_rec.publishing_plan_id,'idempotent',false);
-  insert into public.creator_publishing_scheduler_idempotency values(p_creator_id,job_rec.publishing_plan_id,'cancel_job',p_idempotency_key,v_request_fingerprint,v_result,v_now);
-  return v_result;
-end; $$;
-
-create or replace function public.creator_publishing_claim_due_scheduler_events(p_limit integer default 25, p_lock_minutes integer default 15)
-returns table(event_id uuid, lock_token uuid)
-language sql
-security definer
-set search_path = public, pg_temp
-as $$
-with bounds as (
-  select least(greatest(coalesce(p_limit,25),1),50) as claim_limit,
-         make_interval(mins => least(greatest(coalesce(p_lock_minutes,15),1),60)) as lock_ttl,
-         clock_timestamp() as db_now
-), eligible as (
-  select event_source.id, event_source.platform_job_id, event_source.due_at, event_source.event_type, event_source.schedule_revision,
-         event_source.status as prior_status, event_source.processing_attempts as prior_processing_attempts,
-         case event_source.event_type when 'operator_due' then 0 else 1 end as event_order
-  from public.creator_publishing_scheduler_events as event_source cross join bounds
-  where (
-    (event_source.status = 'pending' and event_source.due_at <= bounds.db_now)
-    or
-    (event_source.status = 'processing' and event_source.locked_at < bounds.db_now - bounds.lock_ttl)
-  )
-  and not exists (
-    select 1 from public.creator_publishing_scheduler_events as earlier_event_source
-    where earlier_event_source.platform_job_id=event_source.platform_job_id
-      and earlier_event_source.status in ('pending','processing')
-      and earlier_event_source.id<>event_source.id
-      and (
-        earlier_event_source.due_at < event_source.due_at or
-        (earlier_event_source.due_at = event_source.due_at and (case earlier_event_source.event_type when 'operator_due' then 0 else 1 end) < (case event_source.event_type when 'operator_due' then 0 else 1 end)) or
-        (earlier_event_source.due_at = event_source.due_at and earlier_event_source.event_type=event_source.event_type and earlier_event_source.id < event_source.id)
-      )
-  )
-  and not exists (
-    select 1 from public.creator_publishing_scheduler_events as processing_event_source cross join bounds as processing_bounds
-    where processing_event_source.platform_job_id=event_source.platform_job_id
-      and processing_event_source.status='processing'
-      and processing_event_source.id<>event_source.id
-      and processing_event_source.locked_at >= processing_bounds.db_now - processing_bounds.lock_ttl
-  )
-  order by event_source.due_at, case event_source.event_type when 'operator_due' then 0 else 1 end, event_source.id
-  limit (select claim_limit from bounds)
-  for update of event_source skip locked
-), claimed as (
-  update public.creator_publishing_scheduler_events as event_update
-  set status='processing', lock_token=gen_random_uuid(), locked_at=(select db_now from bounds), processing_attempts=event_update.processing_attempts+1, updated_at=(select db_now from bounds)
-  from eligible
-  where event_update.id=eligible.id and event_update.status in ('pending','processing')
-  returning event_update.id, event_update.lock_token, event_update.status as new_status, event_update.processing_attempts as new_processing_attempts,
-            eligible.prior_status, eligible.prior_processing_attempts, eligible.due_at, eligible.event_type, eligible.schedule_revision, eligible.event_order, eligible.platform_job_id
-), claim_audits as (
-  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at)
-  select 'creator_publishing_scheduler_event', claimed.id, null, 'scheduler', 'creator_publishing_scheduler_event_claimed',
-         jsonb_build_object('status',claimed.prior_status,'processing_attempts',claimed.prior_processing_attempts,'event_type',claimed.event_type,'due_at',claimed.due_at,'schedule_revision',claimed.schedule_revision),
-         jsonb_build_object('status',claimed.new_status,'processing_attempts',claimed.new_processing_attempts,'event_type',claimed.event_type,'due_at',claimed.due_at,'schedule_revision',claimed.schedule_revision),
-         (select db_now from bounds)
-  from claimed
-  returning id
-)
-select claimed.id as event_id, claimed.lock_token from claimed;
-$$;
-
 create or replace function public.creator_publishing_process_scheduler_event(p_event_id uuid, p_lock_token uuid, p_current_ai_twin_consent_version text, p_current_attestation_text_sha256 text)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 #variable_conflict error
@@ -561,6 +437,7 @@ begin
   end if;
 
   update public.creator_publishing_platform_jobs set job_state=v_next_state, updated_at=v_now where id=job_rec.id;
+  update public.creator_publishing_queue_tasks set status=case when status='claimed' then 'claimed' when event_rec.event_type='operator_due' and status in ('ready_for_handoff','scheduled_internally','awaiting_operator') then 'awaiting_operator' when event_rec.event_type='operator_due' and status='due_now' then 'due_now' when event_rec.event_type='publish_due' and status in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now') then 'due_now' else status end, updated_at=v_now where content_package_id=job_rec.content_package_id and creator_id=job_rec.creator_id and target_platform=job_rec.target_platform and platform_account_id=job_rec.platform_account_id and status in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now','claimed');
   update public.creator_publishing_scheduler_events set status='processed', processed_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where id=event_rec.id and lock_token=p_lock_token;
   update public.creator_publishing_plans set status=public.creator_publishing_aggregate_plan_status(plan_rec.id), updated_at=v_now where id=plan_rec.id;
   insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_scheduler_event',event_rec.id,null,'scheduler','creator_publishing_scheduler_event_processed',jsonb_build_object('status','processing','event_type',event_rec.event_type,'schedule_revision',event_rec.schedule_revision),jsonb_build_object('status','processed','job_state',v_next_state),v_now);
@@ -568,12 +445,6 @@ begin
 end; $$;
 
 revoke all on function public.creator_publishing_schedule_plan(uuid,uuid,timestamptz,text,text,text,text,uuid[],jsonb,text) from public, anon, authenticated;
-revoke all on function public.creator_publishing_cancel_plan_schedule(uuid,uuid,text,text) from public, anon, authenticated;
-revoke all on function public.creator_publishing_cancel_job_schedule(uuid,uuid,text,text) from public, anon, authenticated;
-revoke all on function public.creator_publishing_claim_due_scheduler_events(integer,integer) from public, anon, authenticated;
 revoke all on function public.creator_publishing_process_scheduler_event(uuid,uuid,text,text) from public, anon, authenticated;
 grant execute on function public.creator_publishing_schedule_plan(uuid,uuid,timestamptz,text,text,text,text,uuid[],jsonb,text) to service_role;
-grant execute on function public.creator_publishing_cancel_plan_schedule(uuid,uuid,text,text) to service_role;
-grant execute on function public.creator_publishing_cancel_job_schedule(uuid,uuid,text,text) to service_role;
-grant execute on function public.creator_publishing_claim_due_scheduler_events(integer,integer) to service_role;
 grant execute on function public.creator_publishing_process_scheduler_event(uuid,uuid,text,text) to service_role;

@@ -1,24 +1,67 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
-import path from 'node:path';
+import { spawnSync } from 'node:child_process'
+import { appendFileSync, writeFileSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-const diagnosticsDir = 'backend/creator-publishing-queue/tests/.task17a-diagnostics';
-mkdirSync(diagnosticsDir, { recursive: true });
-const psql = process.env.PSQL || 'psql';
-const dbUrl = process.env.DATABASE_URL || 'postgres://postgres:postgres@127.0.0.1:5432/postgres';
-function run(label, args, input) {
-  const res = spawnSync(psql, args, { input, encoding: 'utf8', env: { ...process.env, PGOPTIONS: '-v ON_ERROR_STOP=1' } });
-  if (res.status !== 0) {
-    console.error(JSON.stringify({ scenario: label, status: res.status, stdout: res.stdout, stderr: res.stderr }, null, 2));
-    process.exit(res.status ?? 1);
-  }
-  console.log(`[task17a] ${label} ok`);
+const logPath = 'task17a-postgres-diagnostics.log'
+writeFileSync(logPath, `Task 17A PostgreSQL diagnostics\nstarted_at=${new Date().toISOString()}\n`)
+const databaseUrl = process.env.TASK17A_DATABASE_URL || process.env.DATABASE_URL || 'postgres://postgres:postgres@127.0.0.1:5432/postgres'
+function runSql(label, sql) {
+  appendFileSync(logPath, `\n## ${label}\n`)
+  const file = join(mkdtempSync(join(tmpdir(), 'task17a-sql-')), `${label.replace(/[^a-z0-9_-]/gi, '_')}.sql`)
+  writeFileSync(file, sql)
+  const res = spawnSync('psql', [databaseUrl, '-v', 'ON_ERROR_STOP=1', '-f', file], { encoding: 'utf8' })
+  appendFileSync(logPath, res.stdout || '')
+  appendFileSync(logPath, res.stderr || '')
+  if (res.error) appendFileSync(logPath, `spawn_error=${res.error.message}\n`)
+  if (res.status !== 0) throw new Error(`${label} failed with status ${res.status}`)
 }
-const probe = spawnSync(psql, ['--version'], { encoding: 'utf8' });
-if (probe.status !== 0) { console.error('[task17a] psql unavailable; PostgreSQL 15 GitHub workflow is authoritative'); process.exit(127); }
-run('bootstrap roles', [dbUrl], "do $$ begin create role anon; exception when duplicate_object then null; end $$; do $$ begin create role authenticated; exception when duplicate_object then null; end $$; do $$ begin create role service_role; exception when duplicate_object then null; end $$; create schema if not exists auth; create table if not exists auth.users(id uuid primary key);\n");
-for (const f of readdirSync('supabase/migrations').filter(f=>f.endsWith('.sql') && f <= '20260712001400_creator_publishing_onlyfans_operator_queue.sql').sort()) run(`migration ${f}`, [dbUrl, '-f', path.join('supabase/migrations', f)]);
-run('task15 regression post-01400', [dbUrl, '-f', 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql']);
-for (const f of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql']) run(f, [dbUrl, '-f', `backend/creator-publishing-queue/tests/${f}`]);
-const c = spawnSync(process.execPath, ['backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs'], { stdio: 'inherit', env: process.env });
-process.exit(c.status ?? 1);
+function runFile(label, file) {
+  appendFileSync(logPath, `\n## ${label}: ${file}\n`)
+  const res = spawnSync('psql', [databaseUrl, '-v', 'ON_ERROR_STOP=1', '-f', file], { encoding: 'utf8' })
+  appendFileSync(logPath, res.stdout || '')
+  appendFileSync(logPath, res.stderr || '')
+  if (res.error) appendFileSync(logPath, `spawn_error=${res.error.message}\n`)
+  if (res.status !== 0) throw new Error(`${label} failed with status ${res.status}`)
+}
+try {
+  runSql('bootstrap', `
+    do $$ begin
+      if not exists (select 1 from pg_roles where rolname='anon') then create role anon; end if;
+      if not exists (select 1 from pg_roles where rolname='authenticated') then create role authenticated; end if;
+      if not exists (select 1 from pg_roles where rolname='service_role') then create role service_role bypassrls; end if;
+    end $$;
+    create schema if not exists auth;
+    create schema if not exists extensions;
+    create extension if not exists pgcrypto with schema extensions;
+    create or replace function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub', true),'')::uuid $$;
+    create table if not exists auth.users(id uuid primary key, email text, created_at timestamptz default now());
+    create table if not exists public.profiles(id uuid primary key default gen_random_uuid(), user_id uuid references auth.users(id), created_at timestamptz default now());
+    create table if not exists public.generations(id uuid primary key default gen_random_uuid(), user_id uuid, status text, r2_bucket text, r2_key text, metadata jsonb not null default '{}'::jsonb, created_at timestamptz default now());
+  `)
+  const migrations = [
+    'supabase/migrations/20260710000100_creator_publishing_queue_foundation.sql',
+    'supabase/migrations/20260710000200_creator_publishing_compliance_manual_review_outcome.sql',
+    'supabase/migrations/20260710000300_creator_publishing_manual_review_workflow.sql',
+    'supabase/migrations/20260710000400_creator_publishing_creator_approval_queue.sql',
+    'supabase/migrations/20260710000500_creator_publishing_media_upload_intents.sql',
+    'supabase/migrations/20260710000600_creator_publishing_generated_media_association.sql',
+    'supabase/migrations/20260710000700_creator_publishing_platform_account_setup.sql',
+    'supabase/migrations/20260710000800_creator_publishing_package_composer.sql',
+    'supabase/migrations/20260710000900_creator_publishing_trusted_verification.sql',
+    'supabase/migrations/20260710001000_creator_publishing_ai_twin_consent.sql',
+    'supabase/migrations/20260710001100_creator_publishing_trusted_compliance_submission.sql',
+    'supabase/migrations/20260711001200_creator_publishing_autopost_orchestration.sql',
+    'supabase/migrations/20260711001300_creator_publishing_scheduler_due_state.sql',
+    'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql'
+  ]
+  for (const migration of migrations) runFile('migration', migration)
+  runFile('task15 regression post-01400', 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql')
+  for (const f of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql']) runFile(`task17a ${f}`, `backend/creator-publishing-queue/tests/${f}`)
+  const c = spawnSync(process.execPath, ['backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs'], { stdio: 'inherit', env: process.env })
+  if (c.status !== 0) throw new Error(`task17a concurrency failed with status ${c.status}`)
+  appendFileSync(logPath, `\ncompleted_at=${new Date().toISOString()}\n`)
+} catch (error) {
+  appendFileSync(logPath, `\nFAILED: ${error?.stack || error}\n`)
+  process.exit(1)
+}
