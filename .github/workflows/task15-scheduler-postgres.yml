@@ -1,0 +1,38 @@
+name: Task 15 Scheduler PostgreSQL Integration
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  task15-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Run Task 15 PostgreSQL integration
+        env:
+          TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+        run: node backend/creator-publishing-queue/tests/runTask15PostgresIntegration.mjs
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task15-postgres-diagnostics
+          path: task15-postgres-diagnostics.log
