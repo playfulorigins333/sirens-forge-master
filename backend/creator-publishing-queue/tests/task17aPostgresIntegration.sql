@@ -183,6 +183,10 @@ set status='ready_for_handoff',
     claimed_at=null,
     claim_token=null,
     claim_expires_at=null,
+    operator_progress_state='not_started',
+    operator_progress_updated_by=null,
+    operator_progress_updated_at=null,
+    operator_progress_revision=0,
     updated_at=now()
 where id='61000000-0000-4000-8000-000000000001';
 
@@ -202,7 +206,7 @@ begin
   perform public.task17a_assert(v_stolen and (select claim_token=v_original_token from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'active claim cannot be stolen or rotated by a new key');
   begin
     perform public.creator_publishing_release_onlyfans_operator_task('00000000-0000-4000-8000-000000000001','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',v_claim_token,'task17a-release-wrong-owner-0001');
-  exception when others then v_wrong_owner := sqlerrm like '%OPERATOR_NOT_CLAIM_OWNER%'; end;
+  exception when others then v_wrong_owner := sqlerrm like '%OPERATOR_CLAIM_TOKEN_MISMATCH%'; end;
   begin
     perform public.creator_publishing_release_onlyfans_operator_task('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001','90000000-0000-4000-8000-00000000bad1','task17a-release-wrong-token-0001');
   exception when others then v_wrong_token := sqlerrm like '%OPERATOR_CLAIM_TOKEN_MISMATCH%'; end;
@@ -211,14 +215,20 @@ begin
   exception when others then v_invalid_progress := sqlerrm like '%OPERATOR_PROGRESS_INVALID_TRANSITION%'; end;
   begin
     perform public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',v_claim_token,'preparing','prepared','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-stale-key-0001');
-  exception when others then v_stale_progress := sqlerrm like '%OPERATOR_PROGRESS_STATE_MISMATCH%'; end;
-  perform public.task17a_assert(v_wrong_owner and v_wrong_token and v_invalid_progress and v_stale_progress, 'release/progress wrong owner token invalid transition and stale expected state fail safely');
+  exception when others then v_stale_progress := sqlerrm like '%OPERATOR_PROGRESS_STALE%'; end;
+  perform public.task17a_assert(v_stolen, 'active claim cannot be stolen');
+  perform public.task17a_assert(v_wrong_owner, 'wrong owner release fails with safe mismatch code');
+  perform public.task17a_assert(v_wrong_token, 'wrong token release fails with safe mismatch code');
+  perform public.task17a_assert(v_invalid_progress, 'invalid progress transition fails');
+  perform public.task17a_assert(v_stale_progress, 'stale progress expectation fails');
 end $$;
 
-select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'preparing','prepared','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0003') as task17a_progress_prepared_result \gset
-select public.task17a_assert((:'task17a_progress_prepared_result')::jsonb->>'progress_state'='prepared', 'progress transition preparing to prepared succeeds');
-select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'prepared','handoff_ready','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0004') as task17a_progress_handoff_result \gset
-select public.task17a_assert((:'task17a_progress_handoff_result')::jsonb->>'progress_state'='handoff_ready', 'progress transition prepared to handoff_ready succeeds');
+select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'not_started','preparing','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0003') as task17a_progress_preparing_result \gset
+select public.task17a_assert((:'task17a_progress_preparing_result')::jsonb->>'progress_state'='preparing' and (select operator_progress_revision=1 from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'progress transition not_started to preparing increments revision');
+select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'preparing','prepared','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0004') as task17a_progress_prepared_result \gset
+select public.task17a_assert((:'task17a_progress_prepared_result')::jsonb->>'progress_state'='prepared' and (select operator_progress_revision=2 from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'progress transition preparing to prepared increments revision');
+select public.creator_publishing_update_onlyfans_operator_progress('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'prepared','handoff_ready','creator-ai-twin-consent-v1','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12','task17a-progress-key-0005') as task17a_progress_handoff_result \gset
+select public.task17a_assert((:'task17a_progress_handoff_result')::jsonb->>'progress_state'='handoff_ready' and (select operator_progress_revision=3 from public.creator_publishing_queue_tasks where id='61000000-0000-4000-8000-000000000001'), 'progress transition prepared to handoff_ready increments revision');
 
 select public.creator_publishing_release_onlyfans_operator_task('00000000-0000-4000-8000-0000000000aa','61000000-0000-4000-8000-000000000001','81000000-0000-4000-8000-000000000001',((:'task17a_operator_claim_result')::jsonb->>'claim_token')::uuid,'task17a-release-key-0002') as task17a_operator_release_result \gset
 select public.task17a_assert((:'task17a_operator_release_result')::jsonb->>'status'='ready_for_handoff', 'operator release restores unscheduled ready_for_handoff');
