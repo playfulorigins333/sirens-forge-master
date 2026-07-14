@@ -248,3 +248,73 @@ select task17a_test.reset_fixture(927202,'ready_for_handoff','archived',false) a
 select public.creator_publishing_cancel_job_schedule((:'cancel_terminal_fixture'::jsonb->>'creator')::uuid,(:'cancel_terminal_fixture'::jsonb->>'job')::uuid,'Already terminal','cancelterm1') as cancel_terminal_result \gset
 select task17a_test.assert((:'cancel_terminal_result')::jsonb->>'task17a_queue_claims_cleared'='0', 'terminal cancel reports zero cleanup');
 select task17a_test.assert((select status='ready_for_handoff' and claimed_by is null and claim_token is null from public.creator_publishing_queue_tasks where id=(:'cancel_terminal_fixture'::jsonb->>'task')::uuid), 'terminal cancel leaves unclaimed queue unchanged');
+
+\echo TASK17A_SCENARIO_START: cancel_job_changed_job_conflict
+select task17a_test.reset_fixture(927203,'scheduled_internally','scheduled_internally',true) as cancel_changed_a \gset
+select task17a_test.set_valid_schedule_phase((:'cancel_changed_a'::jsonb->>'job')::uuid,'after_operator_due');
+select task17a_test.reset_fixture(927204,'scheduled_internally','scheduled_internally',true) as cancel_changed_b \gset
+select task17a_test.set_valid_schedule_phase((:'cancel_changed_b'::jsonb->>'job')::uuid,'after_operator_due');
+update public.creator_publishing_platform_jobs set creator_id=(:'cancel_changed_a'::jsonb->>'creator')::uuid where id=(:'cancel_changed_b'::jsonb->>'job')::uuid;
+select public.creator_publishing_cancel_job_schedule((:'cancel_changed_a'::jsonb->>'creator')::uuid,(:'cancel_changed_a'::jsonb->>'job')::uuid,'first job','canceljobchg') as cancel_changed_first \gset
+select task17a_test.assert((:'cancel_changed_first')::jsonb->>'task17a_queue_claims_cleared'='0', 'changed-job baseline has no cleanup');
+select task17a_test.expect_error('cancel job same key changed job conflicts','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_cancel_job_schedule(%L,%L,%L,%L)',(:'cancel_changed_a'::jsonb->>'creator'),(:'cancel_changed_b'::jsonb->>'job'),'first job','canceljobchg'));
+
+\echo TASK17A_SCENARIO_START: cancel_job_expired_claim_cleanup
+select task17a_test.reset_fixture(927205,'scheduled_internally','scheduled_internally',true) as cancel_expired_fixture \gset
+select task17a_test.set_valid_schedule_phase((:'cancel_expired_fixture'::jsonb->>'job')::uuid,'after_operator_due');
+select public.creator_publishing_claim_onlyfans_operator_task((:'cancel_expired_fixture'::jsonb->>'creator')::uuid,(:'cancel_expired_fixture'::jsonb->>'task')::uuid,(:'cancel_expired_fixture'::jsonb->>'job')::uuid,:'cancel_expired_fixture'::jsonb->>'consent_version',:'cancel_expired_fixture'::jsonb->>'consent_hash','cancelxclaim') as cancel_expired_claim \gset
+select task17a_test.expire_claim((:'cancel_expired_fixture'::jsonb->>'task')::uuid);
+select claim_attempt_count as cancel_expired_attempts from public.creator_publishing_queue_tasks where id=(:'cancel_expired_fixture'::jsonb->>'task')::uuid \gset
+select public.creator_publishing_cancel_job_schedule((:'cancel_expired_fixture'::jsonb->>'creator')::uuid,(:'cancel_expired_fixture'::jsonb->>'job')::uuid,'Cancel expired claim','cancelxjob1') as cancel_expired_result \gset
+select task17a_test.assert((:'cancel_expired_result')::jsonb->>'task17a_queue_claims_cleared'='1', 'expired claim cancellation clears one claim');
+select task17a_test.assert((select status='archived' and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and claim_attempt_count=:'cancel_expired_attempts'::int from public.creator_publishing_queue_tasks where id=(:'cancel_expired_fixture'::jsonb->>'task')::uuid), 'expired claim cancellation archives unclaimed preserving attempts');
+
+\echo TASK17A_SCENARIO_START: cancel_job_unclaimed_cleanup
+select task17a_test.reset_fixture(927206,'scheduled_internally','scheduled_internally',true) as cancel_unclaimed_fixture \gset
+select task17a_test.set_valid_schedule_phase((:'cancel_unclaimed_fixture'::jsonb->>'job')::uuid,'after_operator_due');
+select public.creator_publishing_cancel_job_schedule((:'cancel_unclaimed_fixture'::jsonb->>'creator')::uuid,(:'cancel_unclaimed_fixture'::jsonb->>'job')::uuid,'Cancel unclaimed','cancelunj1') as cancel_unclaimed_result \gset
+select task17a_test.assert((:'cancel_unclaimed_result')::jsonb->>'task17a_queue_claims_cleared'='0', 'unclaimed cancellation reports zero cleanup');
+select task17a_test.assert((select status='scheduled_internally' and claimed_by is null and claim_token is null from public.creator_publishing_queue_tasks where id=(:'cancel_unclaimed_fixture'::jsonb->>'task')::uuid), 'unclaimed cancellation leaves queue ownership untouched');
+select task17a_test.assert((select job_state='archived' from public.creator_publishing_platform_jobs where id=(:'cancel_unclaimed_fixture'::jsonb->>'job')::uuid), 'unclaimed cancellation archives job');
+
+\echo TASK17A_SCENARIO_START: cancel_job_non_onlyfans_assisted_exclusion
+select task17a_test.reset_fixture(927207,'scheduled_internally','scheduled_internally',true) as cancel_exclusion_fixture \gset
+select task17a_test.set_valid_schedule_phase((:'cancel_exclusion_fixture'::jsonb->>'job')::uuid,'after_operator_due');
+select public.creator_publishing_claim_onlyfans_operator_task((:'cancel_exclusion_fixture'::jsonb->>'creator')::uuid,(:'cancel_exclusion_fixture'::jsonb->>'task')::uuid,(:'cancel_exclusion_fixture'::jsonb->>'job')::uuid,:'cancel_exclusion_fixture'::jsonb->>'consent_version',:'cancel_exclusion_fixture'::jsonb->>'consent_hash','cancelexclclaim') as cancel_exclusion_claim \gset
+update public.creator_publishing_platform_jobs set publishing_mode='direct' where id=(:'cancel_exclusion_fixture'::jsonb->>'job')::uuid;
+select public.creator_publishing_cancel_job_schedule((:'cancel_exclusion_fixture'::jsonb->>'creator')::uuid,(:'cancel_exclusion_fixture'::jsonb->>'job')::uuid,'Cancel direct mode','cancelexcl') as cancel_exclusion_result \gset
+select task17a_test.assert((:'cancel_exclusion_result')::jsonb->>'task17a_queue_claims_cleared'='0', 'direct-mode cancellation reports zero Task 17A cleanup');
+select task17a_test.assert((select status='claimed' and claimed_by is not null and claim_token is not null from public.creator_publishing_queue_tasks where id=(:'cancel_exclusion_fixture'::jsonb->>'task')::uuid), 'direct-mode queue claim is excluded from Task 17A cleanup helper');
+
+\echo TASK17A_SCENARIO_START: cancel_plan_multi_job_cleanup
+select task17a_test.reset_fixture(927301,'scheduled_internally','scheduled_internally',true) as cancel_plan_claimed \gset
+select task17a_test.set_valid_schedule_phase((:'cancel_plan_claimed'::jsonb->>'job')::uuid,'after_operator_due');
+select public.creator_publishing_claim_onlyfans_operator_task((:'cancel_plan_claimed'::jsonb->>'creator')::uuid,(:'cancel_plan_claimed'::jsonb->>'task')::uuid,(:'cancel_plan_claimed'::jsonb->>'job')::uuid,:'cancel_plan_claimed'::jsonb->>'consent_version',:'cancel_plan_claimed'::jsonb->>'consent_hash','cancelplclaim') as cancel_plan_claim \gset
+select claim_attempt_count as cancel_plan_attempts, operator_progress_state as cancel_plan_progress, operator_progress_revision as cancel_plan_revision, assigned_operator_id as cancel_plan_assigned from public.creator_publishing_queue_tasks where id=(:'cancel_plan_claimed'::jsonb->>'task')::uuid \gset
+select task17a_test.reset_fixture(927302,'scheduled_internally','scheduled_internally',true) as cancel_plan_unclaimed \gset
+select task17a_test.set_valid_schedule_phase((:'cancel_plan_unclaimed'::jsonb->>'job')::uuid,'after_operator_due');
+select task17a_test.reset_fixture(927303,'ready_for_handoff','archived',false) as cancel_plan_terminal \gset
+update public.creator_publishing_platform_jobs set publishing_plan_id=(:'cancel_plan_claimed'::jsonb->>'plan')::uuid where id in ((:'cancel_plan_unclaimed'::jsonb->>'job')::uuid,(:'cancel_plan_terminal'::jsonb->>'job')::uuid);
+insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at) values('92730000-0000-4000-8000-000000000301',(:'cancel_plan_claimed'::jsonb->>'creator')::uuid,(:'cancel_plan_claimed'::jsonb->>'plan')::uuid,(:'cancel_plan_claimed'::jsonb->>'job')::uuid,'publish_due','processing',clock_timestamp()-interval '1 minute',1,'92730000-0000-4000-8000-000000000401',clock_timestamp());
+select public.creator_publishing_cancel_plan_schedule((:'cancel_plan_claimed'::jsonb->>'creator')::uuid,(:'cancel_plan_claimed'::jsonb->>'plan')::uuid,'Cancel multi-job plan','cancelplan1') as cancel_plan_result \gset
+select task17a_test.assert((:'cancel_plan_result')::jsonb->>'task17a_queue_claims_cleared'='1', 'plan cancellation reports one claimed queue cleanup');
+select task17a_test.assert((select status='cancelled' and cancelled_at is not null and cancelled_by=(:'cancel_plan_claimed'::jsonb->>'creator')::uuid from public.creator_publishing_plans where id=(:'cancel_plan_claimed'::jsonb->>'plan')::uuid), 'plan cancellation stores cancellation evidence');
+select task17a_test.assert((select job_state='archived' from public.creator_publishing_platform_jobs where id=(:'cancel_plan_claimed'::jsonb->>'job')::uuid), 'plan cancellation archives claimed job');
+select task17a_test.assert((select job_state='archived' from public.creator_publishing_platform_jobs where id=(:'cancel_plan_unclaimed'::jsonb->>'job')::uuid), 'plan cancellation archives unclaimed scheduled job');
+select task17a_test.assert((select job_state='archived' from public.creator_publishing_platform_jobs where id=(:'cancel_plan_terminal'::jsonb->>'job')::uuid), 'plan cancellation leaves terminal job terminal');
+select task17a_test.assert((select status='archived' and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and claim_attempt_count=:'cancel_plan_attempts'::int and operator_progress_state=:'cancel_plan_progress' and operator_progress_revision=:'cancel_plan_revision'::int and assigned_operator_id=:'cancel_plan_assigned'::uuid and posted_by is null and posted_at is null and posted_confirmation is false and final_post_url is null and final_post_url_skip_reason is null and proof_screenshot_storage_key is null and skip_or_fail_reason is null from public.creator_publishing_queue_tasks where id=(:'cancel_plan_claimed'::jsonb->>'task')::uuid), 'plan cancellation clears claimed queue and preserves attempts progress assignment evidence');
+select task17a_test.assert((select status='cancelled' and lock_token is null and locked_at is null from public.creator_publishing_scheduler_events where id='92730000-0000-4000-8000-000000000301'::uuid), 'plan cancellation cancels scheduler event and clears lock');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_task_claim_cancelled_by_schedule_cancellation' and entity_id=(:'cancel_plan_claimed'::jsonb->>'task')::uuid and idempotency_key='cancelplan1')=1, 'plan cancellation writes exactly one cleanup audit');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claim_cancelled_by_schedule_cancellation' and entity_id=(:'cancel_plan_claimed'::jsonb->>'task')::uuid and (before_state ? 'claim_token' or after_state ? 'claim_token')), 'plan cancellation cleanup audit omits claim token');
+
+\echo TASK17A_SCENARIO_START: cancel_plan_replay
+select public.creator_publishing_cancel_plan_schedule((:'cancel_plan_claimed'::jsonb->>'creator')::uuid,(:'cancel_plan_claimed'::jsonb->>'plan')::uuid,'Cancel multi-job plan','cancelplan1') as cancel_plan_replay \gset
+select task17a_test.assert((:'cancel_plan_replay')::jsonb->>'idempotent'='true' and (select count(*) from public.creator_publishing_audit_events where action='operator_task_claim_cancelled_by_schedule_cancellation' and entity_id=(:'cancel_plan_claimed'::jsonb->>'task')::uuid)=1, 'plan cancellation replay deterministic without duplicate cleanup audit');
+
+\echo TASK17A_SCENARIO_START: cancel_plan_changed_reason_conflict
+select task17a_test.expect_error('cancel plan same key changed reason conflicts','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_cancel_plan_schedule(%L,%L,%L,%L)',(:'cancel_plan_claimed'::jsonb->>'creator'),(:'cancel_plan_claimed'::jsonb->>'plan'),'changed reason','cancelplan1'));
+
+\echo TASK17A_SCENARIO_START: cancel_plan_changed_plan_conflict
+select task17a_test.reset_fixture(927304,'scheduled_internally','scheduled_internally',true) as cancel_plan_other \gset
+select task17a_test.set_valid_schedule_phase((:'cancel_plan_other'::jsonb->>'job')::uuid,'after_operator_due');
+select task17a_test.expect_error('cancel plan same key changed plan conflicts','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_cancel_plan_schedule(%L,%L,%L,%L)',(:'cancel_plan_claimed'::jsonb->>'creator'),(:'cancel_plan_other'::jsonb->>'plan'),'Cancel multi-job plan','cancelplan1'));

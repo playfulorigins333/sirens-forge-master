@@ -118,7 +118,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
   ];
-  const scenarioSource = scenarioFiles.map((file) => readFileSync(file, 'utf8')).join('\n');
+  const scenarioSource = scenarioFiles.map((file) => readFileSync(file, 'utf8')).join('\n') + '\n' + readFileSync('backend/creator-publishing-queue/tests/runTask17aUpgradeIntegration.mjs', 'utf8') + '\n' + readFileSync('backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs', 'utf8');
   const requiredLabels = [
     'ownership_creator_claim',
     'claim_audit_prior_status_matrix',
@@ -185,6 +185,26 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'claim_job_state_exported_rejected',
     'claim_job_state_skipped_rejected',
     'claim_job_cancelled_rejected',
+
+    'clean_01300_to_01400_upgrade',
+    'legacy_ownership_claimed_full_preflight',
+    'legacy_ownership_claimed_missing_both_preflight',
+    'legacy_ownership_claimed_missing_claimed_at_preflight',
+    'legacy_ownership_claimed_missing_claimed_by_preflight',
+    'legacy_ownership_nonclaimed_claimed_by_preflight',
+    'legacy_ownership_nonclaimed_claimed_at_preflight',
+    'legacy_ownership_nonclaimed_both_preflight',
+    'cancel_job_changed_job_conflict',
+    'cancel_job_expired_claim_cleanup',
+    'cancel_job_unclaimed_cleanup',
+    'cancel_job_non_onlyfans_assisted_exclusion',
+    'cancel_plan_multi_job_cleanup',
+    'cancel_plan_replay',
+    'cancel_plan_changed_reason_conflict',
+    'cancel_plan_changed_plan_conflict',
+    'claim_vs_job_cancel_concurrency',
+    'claim_vs_plan_cancel_concurrency',
+    'recovery_vs_job_cancel_concurrency',
   ];
   for (const label of requiredLabels) {
     assert.match(scenarioSource, new RegExp(`TASK17A_SCENARIO_START: ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
@@ -193,7 +213,11 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   assert.match(runner, /ON_ERROR_STOP=1/);
   assert.match(runner, /task15 regression post-01400/);
   assert.match(runner, /runTask17aConcurrency\.mjs/);
+  assert.match(runner, /runTask17aCancellationConcurrency\.mjs/);
   assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
+  const workflow = readFileSync('.github/workflows/task17a-operator-queue-postgres.yml', 'utf8');
+  assert.match(workflow, /test:creator-publishing-task17a-upgrade/);
+  assert.match(workflow, /test:creator-publishing-task17a-postgres/);
 });
 
 
@@ -231,6 +255,7 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
   assert.match(idempotencyRecovery, /seed \+ 1000/);
   const runner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
   assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
+  assert.match(runner, /runTask17aCancellationConcurrency\.mjs/);
   assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
 });
 

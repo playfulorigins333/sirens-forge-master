@@ -61,6 +61,8 @@ try {
   for (const f of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql']) runFile(`task17a ${f}`, `backend/creator-publishing-queue/tests/${f}`)
   const c = spawnSync(process.execPath, ['backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs'], { stdio: 'inherit', env: process.env })
   if (c.status !== 0) throw new Error(`task17a concurrency failed with status ${c.status}`)
+  const cc = spawnSync(process.execPath, ['backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs'], { stdio: 'inherit', env: process.env })
+  if (cc.status !== 0) throw new Error(`task17a cancellation concurrency failed with status ${cc.status}`)
   console.log('TASK17A_CURRENT_SCENARIOS_PASSED')
   appendFileSync(logPath, `\nTASK17A_CURRENT_SCENARIOS_PASSED\ncompleted_at=${new Date().toISOString()}\n`)
 } catch (error) {
