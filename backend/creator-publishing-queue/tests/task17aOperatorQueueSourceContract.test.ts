@@ -24,6 +24,13 @@ test('Task 17A migration exists and migrations 00100 through 01300 are unchanged
   assert.equal(changedFiles.some((f) => /^supabase\/migrations\/2026071[01].*\.sql$/.test(f) && !f.endsWith('20260712001400_creator_publishing_onlyfans_operator_queue.sql')), false);
 });
 
+test('migration 01400 fails fast on legacy claimed queue rows before DDL', () => {
+  const preflight = migration.indexOf('TASK17A_LEGACY_CLAIMED_ROWS_REQUIRE_REMEDIATION');
+  const firstDdl = migration.indexOf('create extension if not exists pgcrypto');
+  assert.notEqual(preflight, -1);
+  assert.ok(preflight < firstDdl);
+});
+
 test('extends existing queue task table without a second operator-task table', () => {
   assert.match(migration, /alter table public\.creator_publishing_queue_tasks[\s\S]*claim_token uuid/);
   assert.doesNotMatch(migration, /create table[^;]+operator_tasks/i);
@@ -66,8 +73,9 @@ test('audit inserts use real audit schema and idempotency inserts use explicit c
 test('Task 15 compatibility is narrow and active claims are preserved', () => {
   assert.match(migration, /create or replace function public\.creator_publishing_schedule_plan/);
   assert.match(migration, /create or replace function public\.creator_publishing_process_scheduler_event/);
-  assert.doesNotMatch(migration, /create or replace function public\.creator_publishing_cancel_plan_schedule/);
-  assert.doesNotMatch(migration, /create or replace function public\.creator_publishing_cancel_job_schedule/);
+  assert.match(migration, /create or replace function public\.creator_publishing_cancel_plan_schedule/);
+  assert.match(migration, /create or replace function public\.creator_publishing_cancel_job_schedule/);
+  assert.match(migration, /creator_publishing_cancel_task17a_queue_claims/);
   assert.doesNotMatch(migration, /create or replace function public\.creator_publishing_claim_due_scheduler_events/);
   assert.match(migration, /status='claimed'/);
   assert.match(migration, /claim_expires_at > v_now/);
@@ -129,6 +137,10 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'manual_result_field_proof_screenshot_storage_key',
     'manual_result_field_skip_or_fail_reason',
     'recovery_deterministic_errors',
+    'in_claim_recovery_replacement_success',
+    'in_claim_recovery_not_due_structured',
+    'in_claim_recovery_safety_drift_structured',
+    'in_claim_recovery_duplicate_task_structured',
     'safety_capability_unavailable',
     'duplicate_task_unique_index_boundary',
     'duplicate_task_rpc_ambiguity',

@@ -1,5 +1,12 @@
 -- Task 17A: OnlyFans operator queue database foundation and Task 15 compatibility.
 -- Forward-only. Does not deploy, call platforms, automate browsers, or store platform credentials.
+do $$
+begin
+  if exists (select 1 from public.creator_publishing_queue_tasks where status='claimed') then
+    raise exception 'TASK17A_LEGACY_CLAIMED_ROWS_REQUIRE_REMEDIATION';
+  end if;
+end $$;
+
 create extension if not exists pgcrypto with schema extensions;
 
 alter table public.creator_publishing_queue_tasks drop constraint if exists creator_publishing_queue_tasks_status_check;
@@ -143,11 +150,31 @@ $$;
 
 create or replace function public.creator_publishing_operator_restore_queue_status(p_job public.creator_publishing_platform_jobs,p_now timestamptz) returns text language plpgsql stable set search_path=public,pg_temp as $$
 begin
- if p_job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') or p_job.cancelled_at is not null then return null; end if;
- if p_job.schedule_revision is null then return 'ready_for_handoff'; end if;
- if p_job.operator_due_at is not null and p_now < p_job.operator_due_at then return 'scheduled_internally'; end if;
- if p_job.intended_publish_at is not null and p_now >= p_job.intended_publish_at then return 'due_now'; end if;
- return 'awaiting_operator';
+ if p_job.cancelled_at is not null then return null; end if;
+ if p_job.schedule_revision is null then
+   if p_job.job_state='draft'
+      and p_job.intended_publish_at is null
+      and p_job.operator_due_at is null
+      and p_job.schedule_timezone is null
+      and p_job.scheduled_at is null
+      and p_job.scheduled_by is null then
+     return 'ready_for_handoff';
+   end if;
+   return null;
+ end if;
+ if p_job.schedule_revision <= 0
+    or p_job.job_state not in ('scheduled_internally','awaiting_operator','due_now')
+    or p_job.intended_publish_at is null
+    or p_job.operator_due_at is null
+    or length(btrim(coalesce(p_job.schedule_timezone,''))) = 0
+    or p_job.scheduled_at is null
+    or p_job.scheduled_by is null
+    or p_job.operator_due_at <> p_job.intended_publish_at - interval '60 minutes' then
+   return null;
+ end if;
+ if p_now >= p_job.intended_publish_at then return 'due_now'; end if;
+ if p_now >= p_job.operator_due_at then return 'awaiting_operator'; end if;
+ return 'scheduled_internally';
 end; $$;
 
 create or replace function public.creator_publishing_operator_request_fingerprint(p jsonb) returns text language sql immutable set search_path=public,pg_temp as $$ select encode(extensions.digest(p::text,'sha256'),'hex') $$;
@@ -168,6 +195,7 @@ declare
   result jsonb;
   restore text;
   v_gate_code text;
+  v_denial_code text;
   v_expired_claim_recovered boolean := false;
 begin
  if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null then raise exception 'OPERATOR_REQUEST_INVALID'; end if;
@@ -198,9 +226,21 @@ begin
    end if;
    raise exception '%', v_gate_code;
  end if;
- if (select count(*) from public.creator_publishing_queue_tasks q where q.content_package_id=job.content_package_id and q.creator_id=job.creator_id and q.target_platform='onlyfans' and q.platform_account_id=job.platform_account_id and q.status not in ('archived','skipped','failed_manual_upload','confirmed_posted_manual'))<>1 then raise exception 'OPERATOR_QUEUE_TASK_AMBIGUOUS'; end if;
- if task.status='claimed' then raise exception 'OPERATOR_TASK_ALREADY_CLAIMED'; end if;
- if job.schedule_revision is null then if task.status<>'ready_for_handoff' or job.operator_due_at is not null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; else if job.operator_due_at is null or v_now < job.operator_due_at then raise exception 'OPERATOR_NOT_DUE'; end if; if task.status not in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if; end if;
+ v_denial_code := null;
+ if (select count(*) from public.creator_publishing_queue_tasks q where q.content_package_id=job.content_package_id and q.creator_id=job.creator_id and q.target_platform='onlyfans' and q.platform_account_id=job.platform_account_id and q.status not in ('archived','skipped','failed_manual_upload','confirmed_posted_manual'))<>1 then v_denial_code := 'OPERATOR_QUEUE_TASK_AMBIGUOUS'; end if;
+ if v_denial_code is null and task.status='claimed' then v_denial_code := 'OPERATOR_TASK_ALREADY_CLAIMED'; end if;
+ restore := public.creator_publishing_operator_restore_queue_status(job,v_now);
+ if v_denial_code is null and restore is null then v_denial_code := 'OPERATOR_TASK_INELIGIBLE'; end if;
+ if v_denial_code is null and restore='scheduled_internally' then v_denial_code := 'OPERATOR_NOT_DUE'; end if;
+ if v_denial_code is null and task.status <> restore and not (restore in ('awaiting_operator','due_now') and task.status in ('ready_for_handoff','scheduled_internally','awaiting_operator','due_now')) then v_denial_code := 'OPERATOR_TASK_INELIGIBLE'; end if;
+ if v_denial_code is not null then
+   if v_expired_claim_recovered then
+     result:=jsonb_build_object('ok',false,'action','claim','queue_task_id',task.id,'platform_job_id',job.id,'creator_id',job.creator_id,'operator_id',p_actor_id,'expired_claim_recovered',true,'replacement_claim_granted',false,'safe_error_code',v_denial_code,'status',task.status);
+     insert into public.creator_publishing_operator_action_idempotency(actor_id,creator_id,queue_task_id,platform_job_id,action_type,idempotency_key,request_fingerprint,stored_result,created_at) values(p_actor_id,job.creator_id,task.id,job.id,'claim',p_idempotency_key,fp,result,v_now);
+     return result;
+   end if;
+   raise exception '%', v_denial_code;
+ end if;
  prior_task := task;
  update public.creator_publishing_queue_tasks set status='claimed', claimed_by=p_actor_id, claimed_at=v_now, claim_token=token, claim_expires_at=v_now+interval '30 minutes', claim_attempt_count=claim_attempt_count+1 where id=task.id returning * into task;
  result:=jsonb_build_object('ok',true,'action','claim','queue_task_id',task.id,'platform_job_id',job.id,'creator_id',job.creator_id,'operator_id',p_actor_id,'claim_token',token,'claim_expires_at',task.claim_expires_at,'status',task.status,'expired_claim_recovered',v_expired_claim_recovered,'replacement_claim_granted',true);
@@ -298,6 +338,111 @@ grant execute on function public.creator_publishing_claim_onlyfans_operator_task
 grant execute on function public.creator_publishing_release_onlyfans_operator_task(uuid,uuid,uuid,uuid,text) to service_role;
 grant execute on function public.creator_publishing_update_onlyfans_operator_progress(uuid,uuid,uuid,uuid,text,integer,text,text,text,text) to service_role;
 grant execute on function public.creator_publishing_recover_expired_onlyfans_operator_claim(uuid,uuid,uuid,text) to service_role;
+
+
+create or replace function public.creator_publishing_cancel_task17a_queue_claims(p_platform_job_ids uuid[], p_actor_id uuid, p_idempotency_key text, p_now timestamptz)
+returns integer language plpgsql security definer set search_path=public,pg_temp as $$
+declare
+  task_rec public.creator_publishing_queue_tasks%rowtype;
+  v_count integer := 0;
+begin
+  for task_rec in
+    select q.*
+    from public.creator_publishing_queue_tasks q
+    join public.creator_publishing_platform_jobs j
+      on j.content_package_id=q.content_package_id
+     and j.creator_id=q.creator_id
+     and j.platform_account_id=q.platform_account_id
+     and j.target_platform=q.target_platform
+    where j.id=any(p_platform_job_ids)
+      and j.target_platform='onlyfans'
+      and j.publishing_mode='assisted'
+      and q.status='claimed'
+    order by q.id
+    for update of q
+  loop
+    update public.creator_publishing_queue_tasks
+    set status='archived', claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, updated_at=p_now
+    where id=task_rec.id;
+    insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at)
+    values('creator_publishing_queue_task',task_rec.id,p_actor_id,'creator','operator_task_claim_cancelled_by_schedule_cancellation',
+      jsonb_build_object('status',task_rec.status,'claimed_by',task_rec.claimed_by,'claimed_at',task_rec.claimed_at,'claim_expires_at',task_rec.claim_expires_at,'progress_state',task_rec.operator_progress_state,'progress_revision',task_rec.operator_progress_revision,'assigned_operator_id',task_rec.assigned_operator_id),
+      jsonb_build_object('status','archived','queue_task_id',task_rec.id),p_idempotency_key,p_now);
+    v_count := v_count + 1;
+  end loop;
+  return v_count;
+end; $$;
+
+revoke all on function public.creator_publishing_cancel_task17a_queue_claims(uuid[],uuid,text,timestamptz) from public, anon, authenticated;
+
+create or replace function public.creator_publishing_cancel_plan_schedule(p_creator_id uuid, p_publishing_plan_id uuid, p_cancellation_reason text, p_idempotency_key text)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+#variable_conflict error
+declare
+  plan_rec public.creator_publishing_plans%rowtype;
+  v_now timestamptz := clock_timestamp();
+  v_reason text := btrim(coalesce(p_cancellation_reason,''));
+  v_request_fingerprint text;
+  idempotency_rec public.creator_publishing_scheduler_idempotency%rowtype;
+  v_result jsonb;
+  v_cancelled_job_ids uuid[];
+  v_queue_cleanup_count integer := 0;
+begin
+  if coalesce(p_idempotency_key,'') !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
+  if length(v_reason) not between 1 and 500 then raise exception 'SCHEDULER_CANCELLATION_REASON_REQUIRED'; end if;
+  v_request_fingerprint := encode(extensions.digest(jsonb_build_object('creator_id',p_creator_id,'publishing_plan_id',p_publishing_plan_id,'action_type','cancel_plan','reason',v_reason)::text,'sha256'),'hex');
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_scheduler_idempotency:'||p_creator_id::text||':cancel_plan:'||p_idempotency_key,0));
+  select * into idempotency_rec from public.creator_publishing_scheduler_idempotency as idempotency_source where creator_id=p_creator_id and action_type='cancel_plan' and idempotency_key=p_idempotency_key for update of idempotency_source;
+  if found then if idempotency_rec.publishing_plan_id<>p_publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result || jsonb_build_object('idempotent', true); end if;
+  select * into plan_rec from public.creator_publishing_plans as plan_source where id=p_publishing_plan_id and creator_id=p_creator_id for update of plan_source;
+  if not found then raise exception 'PLAN_NOT_FOUND'; end if;
+  perform 1 from public.creator_publishing_platform_jobs as job_source where publishing_plan_id=p_publishing_plan_id order by id for update of job_source;
+  perform 1 from public.creator_publishing_scheduler_events as event_source where publishing_plan_id=p_publishing_plan_id and status in ('pending','processing') order by id for update of event_source;
+  update public.creator_publishing_scheduler_events set status='cancelled', cancelled_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where publishing_plan_id=p_publishing_plan_id and status in ('pending','processing');
+  select array_agg(id order by id) into v_cancelled_job_ids from public.creator_publishing_platform_jobs where publishing_plan_id=p_publishing_plan_id and job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived');
+  update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where publishing_plan_id=p_publishing_plan_id and job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived');
+  if coalesce(array_length(v_cancelled_job_ids,1),0) > 0 then v_queue_cleanup_count := public.creator_publishing_cancel_task17a_queue_claims(v_cancelled_job_ids,p_creator_id,p_idempotency_key,v_now); end if;
+  update public.creator_publishing_plans set status='cancelled', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where id=p_publishing_plan_id;
+  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_plan',p_publishing_plan_id,p_creator_id,'creator','creator_publishing_schedule_cancelled',jsonb_build_object('status',plan_rec.status),jsonb_build_object('status','cancelled','reason',v_reason,'task17a_queue_claims_cleared',v_queue_cleanup_count),p_idempotency_key,v_now);
+  v_result := jsonb_build_object('ok',true,'action_type','cancel_plan','publishing_plan_id',p_publishing_plan_id,'task17a_queue_claims_cleared',v_queue_cleanup_count,'idempotent',false);
+  insert into public.creator_publishing_scheduler_idempotency values(p_creator_id,p_publishing_plan_id,'cancel_plan',p_idempotency_key,v_request_fingerprint,v_result,v_now);
+  return v_result;
+end; $$;
+
+create or replace function public.creator_publishing_cancel_job_schedule(p_creator_id uuid, p_platform_job_id uuid, p_cancellation_reason text, p_idempotency_key text)
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+#variable_conflict error
+declare
+  job_rec public.creator_publishing_platform_jobs%rowtype;
+  plan_rec public.creator_publishing_plans%rowtype;
+  v_now timestamptz := clock_timestamp();
+  v_reason text := btrim(coalesce(p_cancellation_reason,''));
+  v_request_fingerprint text;
+  idempotency_rec public.creator_publishing_scheduler_idempotency%rowtype;
+  v_result jsonb;
+  v_resulting_job_state text;
+  v_queue_cleanup_count integer := 0;
+begin
+  if coalesce(p_idempotency_key,'') !~ '^[A-Za-z0-9_-]{8,128}$' then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
+  if length(v_reason) not between 1 and 500 then raise exception 'SCHEDULER_CANCELLATION_REASON_REQUIRED'; end if;
+  select * into job_rec from public.creator_publishing_platform_jobs where id=p_platform_job_id and creator_id=p_creator_id;
+  if not found then raise exception 'JOB_NOT_FOUND'; end if;
+  v_request_fingerprint := encode(extensions.digest(jsonb_build_object('creator_id',p_creator_id,'publishing_plan_id',job_rec.publishing_plan_id,'job_id',p_platform_job_id,'action_type','cancel_job','reason',v_reason)::text,'sha256'),'hex');
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('creator_scheduler_idempotency:'||p_creator_id::text||':cancel_job:'||p_idempotency_key,0));
+  select * into idempotency_rec from public.creator_publishing_scheduler_idempotency as idempotency_source where creator_id=p_creator_id and action_type='cancel_job' and idempotency_key=p_idempotency_key for update of idempotency_source;
+  if found then if idempotency_rec.publishing_plan_id<>job_rec.publishing_plan_id or idempotency_rec.request_fingerprint<>v_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if; return idempotency_rec.result || jsonb_build_object('idempotent', true); end if;
+  select * into plan_rec from public.creator_publishing_plans as plan_source where id=job_rec.publishing_plan_id and creator_id=p_creator_id for update of plan_source;
+  select * into job_rec from public.creator_publishing_platform_jobs as job_source where id=p_platform_job_id and creator_id=p_creator_id for update of job_source;
+  v_resulting_job_state := job_rec.job_state;
+  perform 1 from public.creator_publishing_scheduler_events as event_source where platform_job_id=p_platform_job_id and status in ('pending','processing') order by id for update of event_source;
+  update public.creator_publishing_scheduler_events set status='cancelled', cancelled_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where platform_job_id=p_platform_job_id and status in ('pending','processing');
+  if job_rec.job_state not in ('published_direct','confirmed_posted_manual','exported','direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived') then update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=v_now, cancelled_by=p_creator_id, cancellation_reason=v_reason, updated_at=v_now where id=p_platform_job_id; v_resulting_job_state := 'archived'; v_queue_cleanup_count := public.creator_publishing_cancel_task17a_queue_claims(array[p_platform_job_id],p_creator_id,p_idempotency_key,v_now); end if;
+  update public.creator_publishing_plans set status=public.creator_publishing_aggregate_plan_status(job_rec.publishing_plan_id), updated_at=v_now where id=job_rec.publishing_plan_id;
+  insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at) values('creator_publishing_platform_job',p_platform_job_id,p_creator_id,'creator','creator_publishing_job_schedule_cancelled',jsonb_build_object('job_state',job_rec.job_state),jsonb_build_object('job_state',v_resulting_job_state,'reason',v_reason,'task17a_queue_claims_cleared',v_queue_cleanup_count),p_idempotency_key,v_now);
+  v_result := jsonb_build_object('ok',true,'action_type','cancel_job','platform_job_id',p_platform_job_id,'publishing_plan_id',job_rec.publishing_plan_id,'task17a_queue_claims_cleared',v_queue_cleanup_count,'idempotent',false);
+  insert into public.creator_publishing_scheduler_idempotency values(p_creator_id,job_rec.publishing_plan_id,'cancel_job',p_idempotency_key,v_request_fingerprint,v_result,v_now);
+  return v_result;
+end; $$;
 
 -- Narrow Task 15 compatibility: direct CREATE OR REPLACE definitions derived from 01300.
 create or replace function public.creator_publishing_schedule_plan(
