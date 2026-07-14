@@ -23,8 +23,8 @@ function psql(label, sql, expectOk = true) {
 }
 function setup(seed, mode) {
   psql(`setup-${mode}`, `
-    \i backend/creator-publishing-queue/tests/task17aTestSupport.sql
-    select task17a_test.reset_fixture(${seed},'scheduled_internally','scheduled_internally',true) as f \gset
+    \\i backend/creator-publishing-queue/tests/task17aTestSupport.sql
+    select task17a_test.reset_fixture(${seed},'scheduled_internally','scheduled_internally',true) as f \\gset
     select task17a_test.set_valid_schedule_phase((:'f'::jsonb->>'job')::uuid,'after_operator_due');
     insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision)
     values(task17a_test.uuid_for('92790000-0000-4000-8000-',${seed}),(:'f'::jsonb->>'creator')::uuid,(:'f'::jsonb->>'plan')::uuid,(:'f'::jsonb->>'job')::uuid,'publish_due','pending',clock_timestamp()-interval '1 minute',1)

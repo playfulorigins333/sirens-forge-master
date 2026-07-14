@@ -305,6 +305,27 @@ test('valid scheduled Task 17A fixtures use the schedule-phase helper', () => {
   assert.doesNotMatch(nonDriftSource, /operator_due_at\s*=\s*clock_timestamp\(\)\s*-\s*interval '2 hours'[\s\S]{0,160}intended_publish_at\s*=\s*clock_timestamp\(\)\s*-\s*interval '1 minute'/);
 });
 
+
+test('Task 17A cancellation concurrency runner escapes psql meta-commands in JavaScript templates', () => {
+  const cancelRunner = readFileSync('backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs', 'utf8');
+  const lines = cancelRunner.split('\n').map((line) => line.trim());
+  const escapedInclude = String.raw`\\i backend/creator-publishing-queue/tests/task17aTestSupport.sql`;
+  const unescapedInclude = String.raw`\i backend/creator-publishing-queue/tests/task17aTestSupport.sql`;
+  const escapedGset = String.raw`as f \\gset`;
+  const unescapedGset = String.raw`as f \gset`;
+  assert.ok(lines.includes(escapedInclude));
+  assert.equal(lines.includes(unescapedInclude), false);
+  assert.ok(lines.some((line) => line.includes(escapedGset)));
+  assert.equal(lines.some((line) => line.includes(unescapedGset)), false);
+  assert.ok(cancelRunner.indexOf(escapedInclude) < cancelRunner.indexOf('task17a_test.reset_fixture'));
+  for (const label of ['claim_vs_job_cancel_concurrency','claim_vs_plan_cancel_concurrency','recovery_vs_job_cancel_concurrency']) {
+    assert.match(cancelRunner, new RegExp(`TASK17A_SCENARIO_START: ${label}`));
+  }
+  const integrationRunner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
+  assert.match(integrationRunner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
+  assert.doesNotMatch(integrationRunner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+});
+
 test('prohibited Task 17B, Task 18, platform, and deployment work is absent', () => {
   assert.doesNotMatch(migration, /final_post_url\s*=|scheduled_on_platform\s*=|awaiting_post_confirmation\s*=/i);
   assert.doesNotMatch(migration, /fetch\(|playwright|puppeteer|onlyfans\.com/i);
