@@ -2,17 +2,17 @@
 \i backend/creator-publishing-queue/tests/task17aTestSupport.sql
 \echo TASK17A_SCENARIO_START: scheduler_operator_due_ready
 select task17a_test.reset_fixture(926001,'ready_for_handoff','scheduled_internally',true) as fixture \gset
-update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '1 minute', intended_publish_at=clock_timestamp()+interval '1 hour' where id=(:'fixture'::jsonb->>'job')::uuid;
+select task17a_test.set_valid_schedule_phase((:'fixture'::jsonb->>'job')::uuid,'after_operator_due');
 insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at) values('92600000-0000-4000-8000-000000000001',(:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'plan')::uuid,(:'fixture'::jsonb->>'job')::uuid,'operator_due','processing',clock_timestamp()-interval '1 minute',1,'92600000-0000-4000-8000-000000000101',clock_timestamp());
 select public.creator_publishing_process_scheduler_event('92600000-0000-4000-8000-000000000001','92600000-0000-4000-8000-000000000101',:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash') as op_due_result \gset
 select task17a_test.assert((:'op_due_result')::jsonb->>'status'='processed' and (select job_state from public.creator_publishing_platform_jobs where id=(:'fixture'::jsonb->>'job')::uuid)='awaiting_operator' and (select status from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid)='awaiting_operator', 'operator_due advances unclaimed queue to awaiting_operator');
 select task17a_test.reset_fixture(926002,'awaiting_operator','awaiting_operator',true) as fixture \gset
-update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '2 hours', intended_publish_at=clock_timestamp()-interval '1 minute' where id=(:'fixture'::jsonb->>'job')::uuid;
+select task17a_test.set_valid_schedule_phase((:'fixture'::jsonb->>'job')::uuid,'after_publish_due');
 insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at) values('92600000-0000-4000-8000-000000000002',(:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'plan')::uuid,(:'fixture'::jsonb->>'job')::uuid,'publish_due','processing',clock_timestamp()-interval '1 minute',1,'92600000-0000-4000-8000-000000000102',clock_timestamp());
 select public.creator_publishing_process_scheduler_event('92600000-0000-4000-8000-000000000002','92600000-0000-4000-8000-000000000102',:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash') as pub_due_result \gset
 select task17a_test.assert((:'pub_due_result')::jsonb->>'status'='processed' and (select job_state from public.creator_publishing_platform_jobs where id=(:'fixture'::jsonb->>'job')::uuid)='due_now' and (select status from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid)='due_now', 'publish_due advances unclaimed queue to due_now');
 select task17a_test.reset_fixture(926003,'scheduled_internally','scheduled_internally',true) as fixture \gset
-update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '1 minute', intended_publish_at=clock_timestamp()+interval '1 hour' where id=(:'fixture'::jsonb->>'job')::uuid;
+select task17a_test.set_valid_schedule_phase((:'fixture'::jsonb->>'job')::uuid,'after_operator_due');
 select public.creator_publishing_claim_onlyfans_operator_task((:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'task')::uuid,(:'fixture'::jsonb->>'job')::uuid,:'fixture'::jsonb->>'consent_version',:'fixture'::jsonb->>'consent_hash','schedclaim') as claim_result \gset
 select claimed_by as before_by, claimed_at as before_at, claim_token as before_token, claim_expires_at as before_expires, operator_progress_state as before_progress from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid \gset
 insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at) values('92600000-0000-4000-8000-000000000003',(:'fixture'::jsonb->>'creator')::uuid,(:'fixture'::jsonb->>'plan')::uuid,(:'fixture'::jsonb->>'job')::uuid,'operator_due','processing',clock_timestamp()-interval '1 minute',1,'92600000-0000-4000-8000-000000000103',clock_timestamp());
@@ -28,9 +28,9 @@ declare
 begin
   f := task17a_test.reset_fixture(seed,input_queue_status,input_job_state,true);
   if event='operator_due' then
-    update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '1 minute', intended_publish_at=clock_timestamp()+interval '1 hour' where id=(f->>'job')::uuid;
+    perform task17a_test.set_valid_schedule_phase((f->>'job')::uuid,'after_operator_due');
   else
-    update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '2 hours', intended_publish_at=clock_timestamp()-interval '1 minute' where id=(f->>'job')::uuid;
+    perform task17a_test.set_valid_schedule_phase((f->>'job')::uuid,'after_publish_due');
   end if;
   insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at)
   values(v_event,(f->>'creator')::uuid,(f->>'plan')::uuid,(f->>'job')::uuid,event,'processing',clock_timestamp()-interval '1 minute',1,v_lock,clock_timestamp());
@@ -112,7 +112,7 @@ declare
   before_row public.creator_publishing_queue_tasks%rowtype;
 begin
   f := task17a_test.reset_fixture(926205,'scheduled_internally','scheduled_internally',true);
-  update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '2 hours', intended_publish_at=clock_timestamp()-interval '1 minute' where id=(f->>'job')::uuid;
+  perform task17a_test.set_valid_schedule_phase((f->>'job')::uuid,'after_publish_due');
   perform public.creator_publishing_claim_onlyfans_operator_task((f->>'creator')::uuid,(f->>'task')::uuid,(f->>'job')::uuid,f->>'consent_version',f->>'consent_hash','schedpubclaim');
   select * into before_row from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
   insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at)

@@ -26,7 +26,7 @@ select task17a_test.expect_error('wrong progress owner','OPERATOR_CLAIM_TOKEN_MI
 select task17a_test.assert(status not in ('scheduled_on_platform','awaiting_post_confirmation','confirmed_posted_manual'), 'no Task 18 queue state written') from public.creator_publishing_queue_tasks where id=(:'fixture'::jsonb->>'task')::uuid;
 \echo TASK17A_SCENARIO_START: claim_audit_prior_status_matrix
 select task17a_test.reset_fixture(920201,'scheduled_internally','scheduled_internally',true) as audit_fixture \gset
-update public.creator_publishing_platform_jobs set operator_due_at=clock_timestamp()-interval '1 minute', intended_publish_at=clock_timestamp()+interval '1 hour' where id=(:'audit_fixture'::jsonb->>'job')::uuid;
+select task17a_test.set_valid_schedule_phase((:'audit_fixture'::jsonb->>'job')::uuid,'after_operator_due');
 select status as audit_prior_status from public.creator_publishing_queue_tasks where id=(:'audit_fixture'::jsonb->>'task')::uuid \gset
 select public.creator_publishing_claim_onlyfans_operator_task((:'audit_fixture'::jsonb->>'creator')::uuid,(:'audit_fixture'::jsonb->>'task')::uuid,(:'audit_fixture'::jsonb->>'job')::uuid,:'audit_fixture'::jsonb->>'consent_version',:'audit_fixture'::jsonb->>'consent_hash','auditsched1') as audit_claim \gset
 select task17a_test.assert((select before_state->>'status' from public.creator_publishing_audit_events where action='operator_task_claimed' and idempotency_key='auditsched1' order by id desc limit 1)=:'audit_prior_status', 'claim audit records actual scheduled prior status');

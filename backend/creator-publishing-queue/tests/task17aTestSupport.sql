@@ -107,6 +107,71 @@ begin
 end $$;
 
 
+create or replace function task17a_test.set_valid_schedule_phase(p_job_id uuid, p_phase text, p_schedule_revision integer default null)
+returns void language plpgsql as $$
+declare
+  v_now timestamptz := clock_timestamp();
+  v_intended timestamptz;
+  v_operator_due timestamptz;
+  v_creator uuid;
+  v_revision integer;
+begin
+  select creator_id, coalesce(p_schedule_revision, schedule_revision, 1)
+  into v_creator, v_revision
+  from public.creator_publishing_platform_jobs
+  where id=p_job_id;
+  if not found then
+    raise exception 'TASK17A_SCHEDULE_FIXTURE_JOB_NOT_FOUND';
+  end if;
+  if v_revision is null or v_revision <= 0 then
+    raise exception 'TASK17A_SCHEDULE_FIXTURE_REVISION_INVALID';
+  end if;
+
+  if p_phase='before_operator_due' then
+    v_intended := v_now + interval '2 hours';
+    v_operator_due := v_now + interval '1 hour';
+  elsif p_phase='after_operator_due' then
+    v_intended := v_now + interval '59 minutes';
+    v_operator_due := v_now - interval '1 minute';
+  elsif p_phase='after_publish_due' then
+    v_intended := v_now - interval '1 minute';
+    v_operator_due := v_now - interval '61 minutes';
+  else
+    raise exception 'TASK17A_SCHEDULE_FIXTURE_PHASE_UNSUPPORTED';
+  end if;
+
+  update public.creator_publishing_platform_jobs
+  set intended_publish_at=v_intended,
+      operator_due_at=v_operator_due,
+      schedule_timezone=coalesce(nullif(schedule_timezone,''),'UTC'),
+      schedule_revision=v_revision,
+      scheduled_at=coalesce(scheduled_at,v_now),
+      scheduled_by=coalesce(scheduled_by,v_creator)
+  where id=p_job_id;
+
+  perform task17a_test.assert(exists(
+    select 1
+    from public.creator_publishing_platform_jobs
+    where id=p_job_id
+      and schedule_revision is not null
+      and schedule_revision > 0
+      and intended_publish_at is not null
+      and operator_due_at is not null
+      and length(btrim(coalesce(schedule_timezone,''))) > 0
+      and scheduled_at is not null
+      and scheduled_by is not null
+      and operator_due_at = intended_publish_at - interval '60 minutes'
+  ), 'valid schedule phase exact sixty minute offset');
+
+  perform task17a_test.assert(
+    (p_phase='before_operator_due' and exists(select 1 from public.creator_publishing_platform_jobs where id=p_job_id and operator_due_at > clock_timestamp()))
+    or (p_phase='after_operator_due' and exists(select 1 from public.creator_publishing_platform_jobs where id=p_job_id and operator_due_at <= clock_timestamp() and intended_publish_at > clock_timestamp()))
+    or (p_phase='after_publish_due' and exists(select 1 from public.creator_publishing_platform_jobs where id=p_job_id and intended_publish_at <= clock_timestamp())),
+    'valid schedule phase requested time window holds'
+  );
+end $$;
+
+
 create or replace function task17a_test.expire_claim(p_task_id uuid) returns void language plpgsql as $$
 declare
   v_now timestamptz := clock_timestamp();

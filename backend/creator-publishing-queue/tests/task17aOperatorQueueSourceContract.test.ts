@@ -224,6 +224,36 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
   assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
 });
 
+
+test('valid scheduled Task 17A fixtures use the schedule-phase helper', () => {
+  const support = readFileSync('backend/creator-publishing-queue/tests/task17aTestSupport.sql', 'utf8');
+  assert.match(support, /create or replace function task17a_test\.set_valid_schedule_phase/);
+  assert.match(support, /operator_due_at=v_operator_due/);
+  assert.match(support, /operator_due_at = intended_publish_at - interval '60 minutes'/);
+
+  const postgres = readFileSync('backend/creator-publishing-queue/tests/task17aPostgresIntegration.sql', 'utf8');
+  assert.match(postgres, /claim_audit_prior_status_matrix[\s\S]*set_valid_schedule_phase\([^\n]+after_operator_due/);
+
+  const authorization = readFileSync('backend/creator-publishing-queue/tests/task17aAuthorizationTimingIntegration.sql', 'utf8');
+  assert.match(authorization, /reset_fixture\(921009[\s\S]*set_valid_schedule_phase\([^\n]+after_operator_due/);
+  assert.match(authorization, /reset_fixture\(921010[\s\S]*set_valid_schedule_phase\([^\n]+after_publish_due/);
+
+  const scheduler = readFileSync('backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql', 'utf8');
+  assert.match(scheduler, /reset_fixture\(926001[\s\S]*set_valid_schedule_phase\([^\n]+after_operator_due/);
+  assert.match(scheduler, /reset_fixture\(926002[\s\S]*set_valid_schedule_phase\([^\n]+after_publish_due/);
+  assert.match(scheduler, /reset_fixture\(926003[\s\S]*set_valid_schedule_phase\([^\n]+after_operator_due/);
+  assert.match(scheduler, /run_scheduler_transition[\s\S]*set_valid_schedule_phase\(\(f->>'job'\)::uuid,'after_operator_due'/);
+  assert.match(scheduler, /run_scheduler_transition[\s\S]*set_valid_schedule_phase\(\(f->>'job'\)::uuid,'after_publish_due'/);
+  assert.match(scheduler, /reset_fixture\(926205[\s\S]*set_valid_schedule_phase\(\(f->>'job'\)::uuid,'after_publish_due'/);
+
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql', 'utf8');
+  assert.match(recovery, /in_claim_recovery_not_due_structured[\s\S]*set_valid_schedule_phase\([^\n]+after_publish_due[\s\S]*set_valid_schedule_phase\([^\n]+before_operator_due/);
+
+  const nonDriftSource = [postgres, authorization, scheduler, recovery].join('\n');
+  assert.doesNotMatch(nonDriftSource, /operator_due_at\s*=\s*clock_timestamp\(\)\s*-\s*interval '1 minute'[\s\S]{0,160}intended_publish_at\s*=\s*clock_timestamp\(\)\s*\+\s*interval '1 hour'/);
+  assert.doesNotMatch(nonDriftSource, /operator_due_at\s*=\s*clock_timestamp\(\)\s*-\s*interval '2 hours'[\s\S]{0,160}intended_publish_at\s*=\s*clock_timestamp\(\)\s*-\s*interval '1 minute'/);
+});
+
 test('prohibited Task 17B, Task 18, platform, and deployment work is absent', () => {
   assert.doesNotMatch(migration, /final_post_url\s*=|scheduled_on_platform\s*=|awaiting_post_confirmation\s*=/i);
   assert.doesNotMatch(migration, /fetch\(|playwright|puppeteer|onlyfans\.com/i);
