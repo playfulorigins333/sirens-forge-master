@@ -415,8 +415,40 @@ test('Task 17A cancellation concurrency runner escapes psql meta-commands in Jav
 test('Task 17A progress matrix scenarios invoke the real progress RPC or rejection helper', () => {
   const progress = readFileSync('backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql', 'utf8');
   assert.match(progress, /create or replace function task17a_test\.assert_progress_rejected[\s\S]*creator_publishing_update_onlyfans_operator_progress/);
+  assert.match(progress, /create or replace function task17a_test\.progress_preserved_snapshot[\s\S]*'status'[\s\S]*'claimed_by'[\s\S]*'claimed_at'[\s\S]*'claim_token'[\s\S]*'claim_expires_at'[\s\S]*'claim_attempt_count'[\s\S]*'assigned_operator_id'[\s\S]*'posted_by'[\s\S]*'posted_at'[\s\S]*'posted_confirmation'[\s\S]*'final_post_url'[\s\S]*'final_post_url_skip_reason'[\s\S]*'proof_screenshot_storage_key'[\s\S]*'skip_or_fail_reason'/);
+  assert.match(progress, /create or replace function task17a_test\.assert_progress_conflict_preserved[\s\S]*p_original_task_snapshot[\s\S]*p_original_job_snapshot[\s\S]*p_alternate_task_snapshot[\s\S]*p_alternate_job_snapshot[\s\S]*request_fingerprint[\s\S]*stored_result[\s\S]*created_at/);
   assert.match(progress, /TASK17A_SCENARIO_START: progress_valid_transition_sequence[\s\S]*operator_preparation_started[\s\S]*operator_package_prepared[\s\S]*operator_handoff_ready/);
   assert.match(progress, /TASK17A_SCENARIO_START: progress_exact_replay[\s\S]*idempotent/);
+  const blockFor = (label: string): string => {
+    const pattern = new RegExp(`\\\\echo TASK17A_SCENARIO_START: ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([\\s\\S]*?)(?=\\\\echo TASK17A_SCENARIO_START:|$)`);
+    const match = progress.match(pattern);
+    assert.ok(match, `${label} block must exist`);
+    return match[1];
+  };
+  const validBlock = blockFor('progress_valid_transition_sequence');
+  assert.match(validBlock, /progress_valid_preserved_baseline/);
+  assert.match(validBlock, /progress_preserved_snapshot\(id\)=\(:'progress_valid_preserved_baseline'\)::jsonb/g);
+  assert.match(validBlock, /operator_progress_state='preparing'[\s\S]*operator_progress_revision=1[\s\S]*operator_progress_updated_by=/);
+  assert.match(validBlock, /operator_progress_state='prepared'[\s\S]*operator_progress_revision=2[\s\S]*operator_progress_updated_by=/);
+  assert.match(validBlock, /operator_progress_state='handoff_ready'[\s\S]*operator_progress_revision=3[\s\S]*operator_progress_updated_by=/);
+  assert.match(validBlock, /idempotency_key='progseq01'[\s\S]*action='operator_preparation_started'[\s\S]*before_state->>'progress_state'='not_started'[\s\S]*before_state->>'progress_revision'\)::int=0[\s\S]*after_state->>'progress_state'='preparing'[\s\S]*after_state->>'progress_revision'\)::int=1/);
+  assert.match(validBlock, /idempotency_key='progseq02'[\s\S]*action='operator_package_prepared'[\s\S]*before_state->>'progress_state'='preparing'[\s\S]*before_state->>'progress_revision'\)::int=1[\s\S]*after_state->>'progress_state'='prepared'[\s\S]*after_state->>'progress_revision'\)::int=2/);
+  assert.match(validBlock, /idempotency_key='progseq03'[\s\S]*action='operator_handoff_ready'[\s\S]*before_state->>'progress_state'='prepared'[\s\S]*before_state->>'progress_revision'\)::int=2[\s\S]*after_state->>'progress_state'='handoff_ready'[\s\S]*after_state->>'progress_revision'\)::int=3/);
+  const replayBlock = blockFor('progress_exact_replay');
+  assert.match(replayBlock, /progress_replay_job_snapshot/);
+  assert.match(replayBlock, /progress_replay_idem_snapshot/);
+  assert.match(replayBlock, /request_fingerprint=\(:'progress_replay_idem_snapshot'\)::jsonb->>'request_fingerprint'/);
+  assert.match(replayBlock, /stored_result=\(:'progress_replay_idem_snapshot'\)::jsonb->'stored_result'/);
+  assert.match(replayBlock, /created_at=\(\(:'progress_replay_idem_snapshot'\)::jsonb->>'created_at'\)::timestamptz/);
+  assert.match(replayBlock, /stored_result = \(\(:'progress_replay_second'\)::jsonb - 'idempotent'\)/);
+  const conflictBlock = blockFor('progress_changed_task_idempotency_conflict');
+  assert.match(conflictBlock, /progress_conflict_original_queue_snapshot/);
+  assert.match(conflictBlock, /progress_conflict_original_job_snapshot/);
+  assert.match(conflictBlock, /progress_conflict_alternate_queue_snapshot/);
+  assert.match(conflictBlock, /progress_conflict_alternate_job_snapshot/);
+  assert.match(conflictBlock, /progress_conflict_idempotency_snapshot/);
+  assert.match(conflictBlock, /progress_conflict_success_audit_count/);
+  assert.match(conflictBlock, /assert_progress_conflict_preserved/);
   const blocks = progress.split(/\\echo TASK17A_SCENARIO_START:\s*/).slice(1);
   for (const block of blocks) {
     const label = block.split(/\r?\n/, 1)[0].trim();
