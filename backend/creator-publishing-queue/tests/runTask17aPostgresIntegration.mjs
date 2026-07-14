@@ -63,8 +63,8 @@ try {
   if (c.status !== 0) throw new Error(`task17a concurrency failed with status ${c.status}`)
   const cc = spawnSync(process.execPath, ['backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs'], { stdio: 'inherit', env: process.env })
   if (cc.status !== 0) throw new Error(`task17a cancellation concurrency failed with status ${cc.status}`)
-  console.log('TASK17A_BEHAVIORAL_COVERAGE_COMPLETE')
-  appendFileSync(logPath, `\nTASK17A_BEHAVIORAL_COVERAGE_COMPLETE\ncompleted_at=${new Date().toISOString()}\n`)
+  console.log('TASK17A_CURRENT_SCENARIOS_PASSED')
+  appendFileSync(logPath, `\nTASK17A_CURRENT_SCENARIOS_PASSED\ncompleted_at=${new Date().toISOString()}\n`)
 } catch (error) {
   appendFileSync(logPath, `\nFAILED: ${error?.stack || error}\n`)
   process.exit(1)
