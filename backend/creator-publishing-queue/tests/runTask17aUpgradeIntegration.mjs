@@ -114,11 +114,80 @@ function insertLegacy(url, shape) {
   const claimedAt = ['claimed_full','claimed_missing_by','nonclaimed_at','nonclaimed_both'].includes(shape)
   runPsql(url, `insert-legacy-${shape}`, `
     insert into auth.users(id,email) values('19000000-0000-4000-8000-000000000001','legacy@example.test'),('19000000-0000-4000-8000-000000000002','legacy-op@example.test') on conflict do nothing;
-    insert into public.creator_platform_accounts(id,creator_id,platform,platform_username,verification_status) values('19100000-0000-4000-8000-000000000001','19000000-0000-4000-8000-000000000001','onlyfans','legacy','pending');
-    insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,created_at,updated_at) values('19200000-0000-4000-8000-000000000001','19000000-0000-4000-8000-000000000001','19100000-0000-4000-8000-000000000001','onlyfans','legacy',clock_timestamp(),clock_timestamp());
+    do $$ begin
+      if not exists(select 1 from auth.users where id='19000000-0000-4000-8000-000000000001'::uuid) then raise exception 'TASK17A_ASSERT:legacy creator user missing'; end if;
+      if not exists(select 1 from auth.users where id='19000000-0000-4000-8000-000000000002'::uuid) then raise exception 'TASK17A_ASSERT:legacy operator user missing'; end if;
+    end $$;
+    insert into public.creator_platform_accounts(
+      id,creator_id,platform,platform_username,verification_status,verification_attested_at,
+      verification_reviewed_by,verification_reviewed_at,verification_evidence_reference,
+      verification_reason,verification_legacy_revoked
+    ) values(
+      '19100000-0000-4000-8000-000000000001','19000000-0000-4000-8000-000000000001','onlyfans','legacy','unattested',null,
+      null,null,null,null,false
+    );
+    do $$ begin
+      if not exists(
+        select 1 from public.creator_platform_accounts
+        where id='19100000-0000-4000-8000-000000000001'::uuid
+          and creator_id='19000000-0000-4000-8000-000000000001'::uuid
+          and platform='onlyfans'
+          and verification_status='unattested'
+          and verification_attested_at is null
+          and verification_reviewed_by is null
+          and verification_reviewed_at is null
+          and verification_evidence_reference is null
+          and verification_reason is null
+          and verification_legacy_revoked is false
+      ) then raise exception 'TASK17A_ASSERT:legacy account fixture invalid'; end if;
+    end $$;
+    insert into public.creator_publishing_content_packages(
+      id,creator_id,platform_account_id,target_platform,title,caption_body,
+      compliance_status,compliance_policy_version,creator_approval_status,
+      creator_approved_by,creator_approved_at,created_at,updated_at
+    ) values(
+      '19200000-0000-4000-8000-000000000001','19000000-0000-4000-8000-000000000001','19100000-0000-4000-8000-000000000001','onlyfans','Legacy Task 17A upgrade package','Legacy Task 17A upgrade fixture',
+      'pending','unassigned','pending',
+      null,null,clock_timestamp(),clock_timestamp()
+    );
+    do $$ begin
+      if not exists(
+        select 1 from public.creator_publishing_content_packages
+        where id='19200000-0000-4000-8000-000000000001'::uuid
+          and creator_id='19000000-0000-4000-8000-000000000001'::uuid
+          and platform_account_id='19100000-0000-4000-8000-000000000001'::uuid
+          and target_platform='onlyfans'
+          and btrim(title) <> ''
+          and btrim(caption_body) <> ''
+          and compliance_status='pending'
+          and compliance_policy_version='unassigned'
+          and creator_approval_status='pending'
+          and creator_approved_by is null
+          and creator_approved_at is null
+      ) then raise exception 'TASK17A_ASSERT:legacy package fixture invalid'; end if;
+    end $$;
     insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version) values('19500000-0000-4000-8000-000000000001','19000000-0000-4000-8000-000000000001','draft','legacy','1111111111111111111111111111111111111111111111111111111111111111','task14.20260711.001');
+    do $$ begin
+      if not exists(select 1 from public.creator_publishing_plans where id='19500000-0000-4000-8000-000000000001'::uuid and creator_id='19000000-0000-4000-8000-000000000001'::uuid and status='draft' and request_fingerprint ~ '^[a-f0-9]{64}$' and registry_version='task14.20260711.001') then raise exception 'TASK17A_ASSERT:legacy plan fixture invalid'; end if;
+    end $$;
     insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at) values('19600000-0000-4000-8000-000000000001','19500000-0000-4000-8000-000000000001','19000000-0000-4000-8000-000000000001','19200000-0000-4000-8000-000000000001','19100000-0000-4000-8000-000000000001','onlyfans','assisted','draft',clock_timestamp(),'2222222222222222222222222222222222222222222222222222222222222222','task14.20260711.001','3333333333333333333333333333333333333333333333333333333333333333',clock_timestamp(),clock_timestamp());
+    do $$ begin
+      if not exists(select 1 from public.creator_publishing_platform_jobs where id='19600000-0000-4000-8000-000000000001'::uuid and publishing_plan_id='19500000-0000-4000-8000-000000000001'::uuid and creator_id='19000000-0000-4000-8000-000000000001'::uuid and content_package_id='19200000-0000-4000-8000-000000000001'::uuid and platform_account_id='19100000-0000-4000-8000-000000000001'::uuid and target_platform='onlyfans' and publishing_mode='assisted' and job_state='draft' and source_package_fingerprint ~ '^[a-f0-9]{64}$' and original_request_fingerprint ~ '^[a-f0-9]{64}$' and schedule_revision is null and intended_publish_at is null and operator_due_at is null and schedule_timezone is null and scheduled_at is null and scheduled_by is null) then raise exception 'TASK17A_ASSERT:legacy job fixture invalid'; end if;
+    end $$;
     insert into public.creator_publishing_queue_tasks(id,content_package_id,creator_id,target_platform,platform_account_id,status,claimed_by,claimed_at,created_at,updated_at) values('19700000-0000-4000-8000-000000000001','19200000-0000-4000-8000-000000000001','19000000-0000-4000-8000-000000000001','onlyfans','19100000-0000-4000-8000-000000000001','${status}',${claimedBy ? `'19000000-0000-4000-8000-000000000002'` : 'null'},${claimedAt ? 'clock_timestamp()' : 'null'},clock_timestamp(),clock_timestamp());
+    do $$ begin
+      if not exists(
+        select 1 from public.creator_publishing_queue_tasks
+        where id='19700000-0000-4000-8000-000000000001'::uuid
+          and content_package_id='19200000-0000-4000-8000-000000000001'::uuid
+          and creator_id='19000000-0000-4000-8000-000000000001'::uuid
+          and target_platform='onlyfans'
+          and platform_account_id='19100000-0000-4000-8000-000000000001'::uuid
+          and status='${status}'
+          and (${claimedBy ? 'claimed_by is not null' : 'claimed_by is null'})
+          and (${claimedAt ? 'claimed_at is not null' : 'claimed_at is null'})
+      ) then raise exception 'TASK17A_ASSERT:legacy queue ownership fixture invalid for ${shape}'; end if;
+    end $$;
   `)
 }
 async function scenario(label, body) {
