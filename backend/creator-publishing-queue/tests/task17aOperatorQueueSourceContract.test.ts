@@ -229,7 +229,7 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
   ];
-  const helperPattern = /\b(reset_fixture|create_secondary_work|assert_claim_rejected|assert_claim_queue_status_rejected|assert_claim_job_state_rejected|assert_manual_result_field_blocks|run_scheduler_transition|assert_terminal_scheduler_superseded|assert_scheduler_claim_gate_cleanup)\s*\(\s*(\d{6})\b/g;
+  const helperPattern = /\b(reset_fixture|create_secondary_work|create_additional_work|assert_claim_rejected|assert_claim_queue_status_rejected|assert_claim_job_state_rejected|assert_manual_result_field_blocks|run_scheduler_transition|assert_terminal_scheduler_superseded|assert_scheduler_claim_gate_cleanup)\s*\(\s*(\d{6})\b/g;
   const reserved = new Map<number, string>();
   for (const file of scenarioFiles) {
     const source = readFileSync(file, 'utf8');
@@ -259,6 +259,22 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
   assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
 });
 
+
+
+test('Task 17A cancellation valid-work scenarios use schema-valid additional-work helper', () => {
+  const support = readFileSync('backend/creator-publishing-queue/tests/task17aTestSupport.sql', 'utf8');
+  assert.match(support, /create or replace function task17a_test\.create_additional_work/);
+  assert.match(support, /p_existing_plan_id is not null[\s\S]*existing plan belongs to creator/);
+  assert.match(support, /operator_due_at=intended_publish_at-interval '60 minutes'/);
+
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql', 'utf8');
+  assert.match(recovery, /cancel_job_changed_job_conflict[\s\S]*create_additional_work\(927204,[\s\S]*cancel_changed_a[\s\S]*null,'scheduled_internally','scheduled_internally',true/);
+  assert.match(recovery, /cancel_plan_multi_job_cleanup[\s\S]*create_additional_work\(927302,[\s\S]*cancel_plan_claimed[\s\S]*cancel_plan_claimed'::jsonb->>'plan'[\s\S]*'scheduled_internally','scheduled_internally',true/);
+  assert.match(recovery, /cancel_plan_multi_job_cleanup[\s\S]*create_additional_work\(927303,[\s\S]*cancel_plan_claimed[\s\S]*cancel_plan_claimed'::jsonb->>'plan'[\s\S]*'archived','archived',false/);
+  assert.match(recovery, /cancel_plan_changed_plan_conflict[\s\S]*create_additional_work\(927304,[\s\S]*cancel_plan_claimed[\s\S]*null,'scheduled_internally','scheduled_internally',true/);
+  assert.doesNotMatch(recovery, /update public\.creator_publishing_platform_jobs set creator_id=\(:'cancel_changed_a'/);
+  assert.doesNotMatch(recovery, /update public\.creator_publishing_platform_jobs set publishing_plan_id=\(:'cancel_plan_claimed'/);
+});
 
 test('valid scheduled Task 17A fixtures use the schedule-phase helper', () => {
   const support = readFileSync('backend/creator-publishing-queue/tests/task17aTestSupport.sql', 'utf8');

@@ -194,6 +194,87 @@ begin
   ), 'expired_claim_fixture_valid');
 end $$;
 
+
+create or replace function task17a_test.create_additional_work(
+  p_seed integer,
+  p_creator_id uuid,
+  p_existing_plan_id uuid default null,
+  p_queue_status text default 'ready_for_handoff',
+  p_job_state text default 'draft',
+  p_scheduled boolean default false
+) returns jsonb language plpgsql as $$
+declare
+  v_account uuid := task17a_test.uuid_for('18100000-0000-4000-8000-', p_seed);
+  v_package uuid := task17a_test.uuid_for('18200000-0000-4000-8000-', p_seed);
+  v_generation uuid := task17a_test.uuid_for('18300000-0000-4000-8000-', p_seed);
+  v_media uuid := task17a_test.uuid_for('18400000-0000-4000-8000-', p_seed);
+  v_plan uuid := coalesce(p_existing_plan_id, task17a_test.uuid_for('18500000-0000-4000-8000-', p_seed));
+  v_job uuid := task17a_test.uuid_for('18600000-0000-4000-8000-', p_seed);
+  v_task uuid := task17a_test.uuid_for('18700000-0000-4000-8000-', p_seed);
+  v_now timestamptz := clock_timestamp();
+  v_updated timestamptz;
+  v_fingerprint text;
+  v_reviewer uuid;
+begin
+  perform task17a_test.assert(p_creator_id is not null, 'additional work creator required');
+  perform task17a_test.assert(exists(select 1 from auth.users where id=p_creator_id), 'additional work creator exists');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_creator_verifications where creator_id=p_creator_id and status='verified'), 'additional work uses verified creator');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_ai_twin_consents where creator_id=p_creator_id and status='granted' and revoked_at is null), 'additional work uses current creator consent');
+  if p_existing_plan_id is not null then
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_plans where id=p_existing_plan_id and creator_id=p_creator_id), 'additional work existing plan belongs to creator');
+  end if;
+
+  delete from public.creator_publishing_operator_action_idempotency where queue_task_id=v_task or platform_job_id=v_job;
+  delete from public.creator_publishing_queue_tasks where id=v_task or content_package_id=v_package;
+  delete from public.creator_publishing_scheduler_events where platform_job_id=v_job;
+  delete from public.creator_publishing_platform_jobs where id=v_job or content_package_id=v_package;
+  if p_existing_plan_id is null then delete from public.creator_publishing_plans where id=v_plan; end if;
+  delete from public.creator_publishing_co_performer_records where content_package_id=v_package;
+  delete from public.creator_publishing_compliance_reviews where content_package_id=v_package;
+  delete from public.creator_publishing_media_assets where id=v_media or content_package_id=v_package;
+  delete from public.creator_publishing_content_packages where id=v_package;
+  delete from public.creator_platform_accounts where id=v_account;
+
+  select reviewer_id into v_reviewer from public.creator_publishing_trusted_reviewers where active is true order by created_at desc nulls last limit 1;
+  v_reviewer := coalesce(v_reviewer, p_creator_id);
+
+  insert into public.creator_platform_accounts(id,creator_id,platform,platform_username,verification_status,verification_attested_at,is_virtual_entity,verification_reviewed_by,verification_reviewed_at,verification_evidence_reference,verification_reason)
+  values(v_account,p_creator_id,'onlyfans','additional'||p_seed,'verified',v_now,false,v_reviewer,v_now,'additional account evidence','verified');
+
+  insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,forced_disclosure_text,ai_flag,ai_detail,compliance_status,compliance_policy_version,creator_approval_status,created_at,updated_at)
+  values(v_package,p_creator_id,v_account,'onlyfans','Task17A additional package '||p_seed,'additional caption','#AI','ai_generated','{}','pending','unassigned','pending',v_now,v_now);
+  insert into public.generations(id,user_id,status,r2_bucket,r2_key,metadata) values(v_generation,p_creator_id,'completed','bucket','task17a/additional/'||p_seed,'{}') on conflict (id) do nothing;
+  insert into public.creator_publishing_media_assets(id,content_package_id,storage_key,mime_type,sha256,source,ai_generation_metadata,created_at)
+  values(v_media,v_package,'media/task17a/additional/'||p_seed,'image/png','bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','ai_pipeline',jsonb_build_object('generation_id',v_generation::text),v_now);
+  insert into public.creator_publishing_compliance_reviews(content_package_id,reviewer_id,outcome,review_source,rule_hits,compliance_policy_version,created_at,review_metadata)
+  values(v_package,v_reviewer,'pass','automated','[]','policy-v1',v_now,'{}');
+  update public.creator_publishing_content_packages
+  set compliance_status='passed', compliance_policy_version='policy-v1', creator_approval_status='approved', creator_approved_at=v_now, creator_approved_by=p_creator_id
+  where id=v_package;
+  select updated_at, public.creator_publishing_autopost_source_fingerprint(v_package) into v_updated, v_fingerprint from public.creator_publishing_content_packages where id=v_package;
+
+  if p_existing_plan_id is null then
+    insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at)
+    values(v_plan,p_creator_id,'draft','task17a-additional-plan-'||p_seed,'4444444444444444444444444444444444444444444444444444444444444444','task14.20260711.001',v_now,v_now);
+  end if;
+
+  insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,created_at,updated_at,intended_publish_at,operator_due_at,schedule_timezone,schedule_revision,scheduled_at,scheduled_by)
+  values(v_job,v_plan,p_creator_id,v_package,v_account,'onlyfans','assisted',p_job_state,v_updated,v_fingerprint,'task14.20260711.001','5555555555555555555555555555555555555555555555555555555555555555',v_now,v_now,case when p_scheduled then v_now+interval '2 hours' else null end,case when p_scheduled then v_now+interval '1 hour' else null end,case when p_scheduled then 'UTC' else null end,case when p_scheduled then 1 else null end,case when p_scheduled then v_now else null end,case when p_scheduled then p_creator_id else null end);
+  insert into public.creator_publishing_queue_tasks(id,content_package_id,creator_id,target_platform,platform_account_id,status,due_at,created_at,updated_at,assigned_operator_id)
+  values(v_task,v_package,p_creator_id,'onlyfans',v_account,p_queue_status,null,v_now,v_now,null);
+
+  perform task17a_test.assert(exists(select 1 from public.creator_platform_accounts where id=v_account and creator_id=p_creator_id and platform='onlyfans'), 'additional work account identity valid');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_content_packages where id=v_package and creator_id=p_creator_id and platform_account_id=v_account and target_platform='onlyfans' and compliance_status='passed' and creator_approval_status='approved'), 'additional work package approved valid');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_plans where id=v_plan and creator_id=p_creator_id), 'additional work plan creator valid');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and publishing_plan_id=v_plan and creator_id=p_creator_id and content_package_id=v_package and platform_account_id=v_account and target_platform='onlyfans' and publishing_mode='assisted'), 'additional work job identity valid');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_platform_jobs j join public.creator_publishing_plans p on p.id=j.publishing_plan_id and p.creator_id=j.creator_id where j.id=v_job), 'additional work composite plan creator valid');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and source_package_updated_at=v_updated and source_package_fingerprint=public.creator_publishing_autopost_source_fingerprint(v_package)), 'additional work source fingerprint current');
+  perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks where id=v_task and content_package_id=v_package and creator_id=p_creator_id and target_platform='onlyfans' and platform_account_id=v_account and status=p_queue_status), 'additional work queue identity valid');
+  perform task17a_test.assert((not p_scheduled and exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and schedule_revision is null and intended_publish_at is null and operator_due_at is null and schedule_timezone is null and scheduled_at is null and scheduled_by is null)) or (p_scheduled and exists(select 1 from public.creator_publishing_platform_jobs where id=v_job and schedule_revision=1 and intended_publish_at is not null and operator_due_at is not null and operator_due_at=intended_publish_at-interval '60 minutes' and schedule_timezone='UTC' and scheduled_at is not null and scheduled_by=p_creator_id)), 'additional work scheduling tuple valid');
+
+  return jsonb_build_object('creator',p_creator_id,'account',v_account,'package',v_package,'plan',v_plan,'job',v_job,'task',v_task,'consent_version','creator-ai-twin-consent-v1','consent_hash','0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12');
+end $$;
+
 create or replace function task17a_test.create_secondary_work(seed integer)
 returns jsonb language plpgsql as $$
 begin
