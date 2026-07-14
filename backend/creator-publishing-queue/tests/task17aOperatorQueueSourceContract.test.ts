@@ -566,6 +566,11 @@ test('Task 17A release matrix scenarios invoke the real release RPC or release h
   assert.match(cancelled, /job_state='archived'[\s\S]*cancelled_at=:'release_cancelled_at'::timestamptz[\s\S]*cancelled_by=\(:'release_cancelled_fixture'::jsonb->>'creator'\)::uuid[\s\S]*cancellation_reason='Task 17A Release cancelled-job fixture'/);
   assert.match(cancelled, /length\(btrim\(cancellation_reason\)\) between 1 and 500/);
   assert.match(cancelled, /claimed queue preserved before release[\s\S]*assert_release_rejected\('release_cancelled_job','OPERATOR_TASK_INELIGIBLE'/);
+  const unscheduledDrift = byLabel.get('release_drift_unscheduled_job_with_schedule_fields') || '';
+  assert.match(unscheduledDrift, /claim_token as release_drift_unscheduled_fields_fixture_token/);
+  assert.match(unscheduledDrift, /:'release_drift_unscheduled_fields_fixture_token'::uuid=claim_token[\s\S]*assert_release_rejected\('release_drift_unscheduled_job_with_schedule_fields','OPERATOR_TASK_INELIGIBLE'[\s\S]*:'release_drift_unscheduled_fields_fixture_token'::uuid/);
+  assert.match(unscheduledDrift, /begin;[\s\S]*drop constraint creator_publishing_jobs_unscheduled_fields_null[\s\S]*rollback;[\s\S]*constraint restored after rollback/);
+  assert.doesNotMatch(unscheduledDrift, /release_drift_unscheduled_fields_token/);
   const scheduledDriftLabels = [
     'release_drift_missing_intended_publish_at',
     'release_drift_missing_operator_due_at',
@@ -583,6 +588,12 @@ test('Task 17A release matrix scenarios invoke the real release RPC or release h
   }
   assert.match(byLabel.get('release_revoked_authorization') || '', /status='revoked'[\s\S]*revoked_at=[\s\S]*updated_at=[\s\S]*creator_publishing_operator_is_authorized/);
   assert.match(release, /before_task->>'posted_by' is not distinct from after_task->>'posted_by'[\s\S]*before_task->>'skip_or_fail_reason' is not distinct from after_task->>'skip_or_fail_reason'/);
+  const releaseTokenAliases = new Set(Array.from(release.matchAll(/select\s+claim_token\s+as\s+(\w+)\b[^\n]*\\gset/g)).map((match) => match[1]));
+  for (const [label, body] of byLabel) {
+    for (const match of body.matchAll(/:'([^']*_token)'/g)) {
+      assert.ok(releaseTokenAliases.has(match[1]), `${label} references undefined claim-token alias ${match[1]}`);
+    }
+  }
   const releaseLines = release.split('\n');
   releaseLines.forEach((line, index) => {
     if (/update public\.creator_publishing_platform_jobs/.test(line) && /(cancelled_at|cancelled_by|cancellation_reason)/.test(line)) {
