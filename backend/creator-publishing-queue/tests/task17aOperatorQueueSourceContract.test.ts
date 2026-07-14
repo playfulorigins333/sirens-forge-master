@@ -561,6 +561,11 @@ test('Task 17A release matrix scenarios invoke the real release RPC or release h
   assert.match(byLabel.get('release_restore_after_publish_due') || '', /set_valid_schedule_phase[\s\S]*after_publish_due[\s\S]*creator_publishing_claim_onlyfans_operator_task[\s\S]*creator_publishing_update_onlyfans_operator_progress[\s\S]*creator_publishing_update_onlyfans_operator_progress/);
   assert.match(byLabel.get('release_exact_replay') || '', /stored_result=\(:'release_replay_idem_snapshot'\)::jsonb->'stored_result'[\s\S]*stored_result=\(\(:'release_replay_second'\)::jsonb - 'idempotent'\)/);
   assert.match(byLabel.get('release_changed_task_idempotency_conflict') || '', /release_conflict_original_queue_snapshot[\s\S]*release_conflict_alternate_queue_snapshot[\s\S]*release_conflict_idempotency_snapshot/);
+  const cancelled = byLabel.get('release_cancelled_job') || '';
+  assert.match(cancelled, /clock_timestamp\(\) as release_cancelled_at/);
+  assert.match(cancelled, /job_state='archived'[\s\S]*cancelled_at=:'release_cancelled_at'::timestamptz[\s\S]*cancelled_by=\(:'release_cancelled_fixture'::jsonb->>'creator'\)::uuid[\s\S]*cancellation_reason='Task 17A Release cancelled-job fixture'/);
+  assert.match(cancelled, /length\(btrim\(cancellation_reason\)\) between 1 and 500/);
+  assert.match(cancelled, /claimed queue preserved before release[\s\S]*assert_release_rejected\('release_cancelled_job','OPERATOR_TASK_INELIGIBLE'/);
   const scheduledDriftLabels = [
     'release_drift_missing_intended_publish_at',
     'release_drift_missing_operator_due_at',
@@ -579,6 +584,13 @@ test('Task 17A release matrix scenarios invoke the real release RPC or release h
   assert.match(byLabel.get('release_revoked_authorization') || '', /status='revoked'[\s\S]*revoked_at=[\s\S]*updated_at=[\s\S]*creator_publishing_operator_is_authorized/);
   assert.match(release, /before_task->>'posted_by' is not distinct from after_task->>'posted_by'[\s\S]*before_task->>'skip_or_fail_reason' is not distinct from after_task->>'skip_or_fail_reason'/);
   const releaseLines = release.split('\n');
+  releaseLines.forEach((line, index) => {
+    if (/update public\.creator_publishing_platform_jobs/.test(line) && /(cancelled_at|cancelled_by|cancellation_reason)/.test(line)) {
+      assert.match(line, /cancelled_at\s*=/, `cancellation metadata update at line ${index + 1} must include cancelled_at`);
+      assert.match(line, /cancelled_by\s*=/, `cancellation metadata update at line ${index + 1} must include cancelled_by`);
+      assert.match(line, /cancellation_reason\s*=/, `cancellation metadata update at line ${index + 1} must include cancellation_reason`);
+    }
+  });
   releaseLines.forEach((line, index) => {
     if (/alter table public\.creator_publishing_platform_jobs drop constraint/.test(line)) {
       const previous = releaseLines.slice(Math.max(0, index - 3), index).join('\n');
