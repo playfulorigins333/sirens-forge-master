@@ -555,10 +555,38 @@ test('Task 17A release matrix scenarios invoke the real release RPC or release h
       assert.match(body, /task17a_test\.(assert|expect_error|assert_release_success|assert_release_rejected|assert_release_conflict_preserved)/, `${label} must assert release behavior`);
     }
   }
-  assert.match(byLabel.get('release_restore_after_operator_due') || '', /creator_publishing_update_onlyfans_operator_progress/);
-  assert.match(byLabel.get('release_restore_after_publish_due') || '', /creator_publishing_update_onlyfans_operator_progress[\s\S]*creator_publishing_update_onlyfans_operator_progress/);
+  const beforeDue = byLabel.get('release_restore_before_operator_due') || '';
+  assert.match(beforeDue, /set_valid_schedule_phase[\s\S]*after_operator_due[\s\S]*creator_publishing_claim_onlyfans_operator_task[\s\S]*set_valid_schedule_phase[\s\S]*before_operator_due[\s\S]*assert_release_success/);
+  assert.match(byLabel.get('release_restore_after_operator_due') || '', /set_valid_schedule_phase[\s\S]*after_operator_due[\s\S]*creator_publishing_claim_onlyfans_operator_task[\s\S]*creator_publishing_update_onlyfans_operator_progress/);
+  assert.match(byLabel.get('release_restore_after_publish_due') || '', /set_valid_schedule_phase[\s\S]*after_publish_due[\s\S]*creator_publishing_claim_onlyfans_operator_task[\s\S]*creator_publishing_update_onlyfans_operator_progress[\s\S]*creator_publishing_update_onlyfans_operator_progress/);
   assert.match(byLabel.get('release_exact_replay') || '', /stored_result=\(:'release_replay_idem_snapshot'\)::jsonb->'stored_result'[\s\S]*stored_result=\(\(:'release_replay_second'\)::jsonb - 'idempotent'\)/);
   assert.match(byLabel.get('release_changed_task_idempotency_conflict') || '', /release_conflict_original_queue_snapshot[\s\S]*release_conflict_alternate_queue_snapshot[\s\S]*release_conflict_idempotency_snapshot/);
+  const scheduledDriftLabels = [
+    'release_drift_missing_intended_publish_at',
+    'release_drift_missing_operator_due_at',
+    'release_drift_missing_timezone',
+    'release_drift_blank_timezone',
+    'release_drift_missing_scheduled_at',
+    'release_drift_missing_scheduled_by',
+    'release_drift_zero_schedule_revision',
+    'release_drift_negative_schedule_revision',
+    'release_drift_operator_offset_not_60_minutes',
+    'release_drift_job_state_inconsistent_with_schedule',
+  ];
+  for (const label of scheduledDriftLabels) {
+    assert.match(byLabel.get(label) || '', /set_valid_schedule_phase[\s\S]*after_operator_due[\s\S]*assert_release_claimable_setup[\s\S]*creator_publishing_claim_onlyfans_operator_task[\s\S]*assert_release_claimed_setup/, `${label} must establish claimable scheduled setup before claim`);
+  }
+  assert.match(byLabel.get('release_revoked_authorization') || '', /status='revoked'[\s\S]*revoked_at=[\s\S]*updated_at=[\s\S]*creator_publishing_operator_is_authorized/);
+  assert.match(release, /before_task->>'posted_by' is not distinct from after_task->>'posted_by'[\s\S]*before_task->>'skip_or_fail_reason' is not distinct from after_task->>'skip_or_fail_reason'/);
+  const releaseLines = release.split('\n');
+  releaseLines.forEach((line, index) => {
+    if (/alter table public\.creator_publishing_platform_jobs drop constraint/.test(line)) {
+      const previous = releaseLines.slice(Math.max(0, index - 3), index).join('\n');
+      const following = releaseLines.slice(index, index + 10).join('\n');
+      assert.match(previous, /begin;/, `constraint drop at line ${index + 1} must be transaction-isolated`);
+      assert.match(following, /rollback;[\s\S]*constraint restored after rollback/, `constraint drop at line ${index + 1} must roll back and assert restoration`);
+    }
+  });
   assert.match(byLabel.get('release_complete_audit_idempotency_counts') || '', /select count\(\*\)[\s\S]*action_type='release'/);
   assert.match(byLabel.get('release_complete_no_mutation_assertions') || '', /task17a_release_rejections/);
   assert.doesNotMatch(release, /task17a_test\.assert\s*\(\s*true\b/i);
