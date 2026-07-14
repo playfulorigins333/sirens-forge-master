@@ -110,7 +110,7 @@ test('internal helpers are not executable by browser roles and action RPCs remai
 });
 
 
-test('Task 17A current Task 17A scenario labels are present and runner emits non-final marker', () => {
+test('Task 17A scenario labels are present and runner emits final behavioral marker', () => {
   const scenarioFiles = [
     'backend/creator-publishing-queue/tests/task17aPostgresIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aAuthorizationTimingIntegration.sql',
@@ -206,6 +206,92 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'claim_vs_job_cancel_concurrency',
     'claim_vs_plan_cancel_concurrency',
     'recovery_vs_job_cancel_concurrency',
+    'progress_missing_job',
+    'progress_missing_task',
+    'progress_task_job_mismatch',
+    'progress_unsupported_target_or_mode',
+    'progress_cancelled_job',
+    'progress_ineligible_job_state',
+    'progress_unauthorized_actor',
+    'progress_revoked_authorization',
+    'progress_wrong_owner',
+    'progress_wrong_token',
+    'progress_expired_token',
+    'progress_stale_expected_state',
+    'progress_stale_expected_revision',
+    'progress_invalid_transition',
+    'progress_creator_verification_drift',
+    'progress_account_verification_drift',
+    'progress_consent_drift',
+    'progress_compliance_drift',
+    'progress_source_fingerprint_drift',
+    'progress_exact_replay',
+    'progress_changed_task_idempotency_conflict',
+    'progress_changed_job_idempotency_conflict',
+    'progress_changed_token_idempotency_conflict',
+    'progress_changed_expected_state_idempotency_conflict',
+    'progress_changed_expected_revision_idempotency_conflict',
+    'progress_changed_target_state_idempotency_conflict',
+    'release_unscheduled_restores_ready_for_handoff',
+    'release_scheduled_before_due_restores_scheduled_internally',
+    'release_scheduled_after_operator_due_restores_awaiting_operator',
+    'release_scheduled_after_publish_due_restores_due_now',
+    'release_missing_job',
+    'release_missing_task',
+    'release_task_job_mismatch',
+    'release_unsupported_target_or_mode',
+    'release_cancelled_job',
+    'release_ineligible_job_state',
+    'release_unauthorized_actor',
+    'release_revoked_authorization',
+    'release_wrong_owner',
+    'release_wrong_token',
+    'release_expired_token',
+    'release_manual_result_evidence_rejected',
+    'release_changed_task_idempotency_conflict',
+    'release_changed_job_idempotency_conflict',
+    'release_changed_token_idempotency_conflict',
+    'release_drift_missing_intended_publish_at',
+    'release_drift_missing_operator_due_at',
+    'release_drift_missing_timezone',
+    'release_drift_blank_timezone',
+    'release_drift_missing_scheduled_at',
+    'release_drift_missing_scheduled_by',
+    'release_drift_zero_schedule_revision',
+    'release_drift_negative_schedule_revision',
+    'release_drift_operator_offset_not_60_minutes',
+    'release_drift_job_state_inconsistent_with_schedule',
+    'release_drift_unscheduled_job_with_schedule_fields',
+    'recovery_unscheduled_restores_ready_for_handoff',
+    'recovery_scheduled_before_due_restores_scheduled_internally',
+    'recovery_scheduled_after_operator_due_restores_awaiting_operator',
+    'recovery_scheduled_after_publish_due_restores_due_now',
+    'recovery_missing_job',
+    'recovery_missing_task',
+    'recovery_task_job_mismatch',
+    'recovery_unsupported_target_or_mode',
+    'recovery_cancelled_job',
+    'recovery_ineligible_job_state',
+    'recovery_unauthorized_actor',
+    'recovery_revoked_authorization',
+    'recovery_active_unexpired_claim',
+    'recovery_wrong_claim_shape',
+    'recovery_manual_result_evidence_rejected',
+    'recovery_changed_task_idempotency_conflict',
+    'recovery_changed_job_idempotency_conflict',
+    'recovery_drift_missing_intended_publish_at',
+    'recovery_drift_missing_operator_due_at',
+    'recovery_drift_missing_timezone',
+    'recovery_drift_blank_timezone',
+    'recovery_drift_missing_scheduled_at',
+    'recovery_drift_missing_scheduled_by',
+    'recovery_drift_zero_schedule_revision',
+    'recovery_drift_negative_schedule_revision',
+    'recovery_drift_operator_offset_not_60_minutes',
+    'recovery_drift_job_state_inconsistent_with_schedule',
+    'recovery_drift_unscheduled_job_with_schedule_fields',
+    'action_idempotency_counts_claim_progress_release_recovery',
+    'complete_no_mutation_assertions',
   ];
   for (const label of requiredLabels) {
     assert.match(scenarioSource, new RegExp(`TASK17A_SCENARIO_START: ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
@@ -215,7 +301,8 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   assert.match(runner, /task15 regression post-01400/);
   assert.match(runner, /runTask17aConcurrency\.mjs/);
   assert.match(runner, /runTask17aCancellationConcurrency\.mjs/);
-  assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
+  assert.match(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  assert.doesNotMatch(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
   const workflow = readFileSync('.github/workflows/task17a-operator-queue-postgres.yml', 'utf8');
   assert.match(workflow, /test:creator-publishing-task17a-upgrade/);
   assert.match(workflow, /test:creator-publishing-task17a-postgres/);
@@ -255,9 +342,10 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
   assert.match(idempotencyRecovery, /assert_manual_result_field_blocks\(924001/);
   assert.match(idempotencyRecovery, /seed \+ 1000/);
   const runner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
-  assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
+  assert.match(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  assert.doesNotMatch(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
   assert.match(runner, /runTask17aCancellationConcurrency\.mjs/);
-  assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  assert.doesNotMatch(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
 });
 
 
@@ -284,7 +372,7 @@ test('valid scheduled Task 17A fixtures use the schedule-phase helper', () => {
   assert.match(support, /operator_due_at = intended_publish_at - interval '60 minutes'/);
 
   const postgres = readFileSync('backend/creator-publishing-queue/tests/task17aPostgresIntegration.sql', 'utf8');
-  assert.match(postgres, /claim_audit_prior_status_matrix[\s\S]*set_valid_schedule_phase\([^\n]+after_operator_due/);
+  assert.match(postgres, /claim_audit_prior_status_matrix[\s\S]*auditready1[\s\S]*auditsched1[\s\S]*auditawait1[\s\S]*auditdue01/);
 
   const authorization = readFileSync('backend/creator-publishing-queue/tests/task17aAuthorizationTimingIntegration.sql', 'utf8');
   assert.match(authorization, /reset_fixture\(921009[\s\S]*set_valid_schedule_phase\([^\n]+after_operator_due/);
@@ -367,8 +455,35 @@ test('Task 17A cancellation concurrency runner escapes psql meta-commands in Jav
     assert.match(cancelRunner, new RegExp(`TASK17A_SCENARIO_START: ${label}`));
   }
   const integrationRunner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
-  assert.match(integrationRunner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
-  assert.doesNotMatch(integrationRunner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  assert.match(integrationRunner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  assert.doesNotMatch(integrationRunner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
+});
+
+
+test('Task 17A final behavioral marker and action matrix labels are enforced', () => {
+  const runner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
+  assert.match(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  assert.doesNotMatch(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql', 'utf8');
+  for (const label of [
+    'progress_missing_job',
+    'progress_exact_replay',
+    'progress_changed_target_state_idempotency_conflict',
+    'release_unscheduled_restores_ready_for_handoff',
+    'release_scheduled_before_due_restores_scheduled_internally',
+    'release_scheduled_after_operator_due_restores_awaiting_operator',
+    'release_scheduled_after_publish_due_restores_due_now',
+    'release_drift_operator_offset_not_60_minutes',
+    'recovery_unscheduled_restores_ready_for_handoff',
+    'recovery_scheduled_before_due_restores_scheduled_internally',
+    'recovery_scheduled_after_operator_due_restores_awaiting_operator',
+    'recovery_scheduled_after_publish_due_restores_due_now',
+    'recovery_drift_operator_offset_not_60_minutes',
+    'action_idempotency_counts_claim_progress_release_recovery',
+    'complete_no_mutation_assertions',
+  ]) {
+    assert.match(recovery, new RegExp(`TASK17A_SCENARIO_START: ${label}`));
+  }
 });
 
 test('prohibited Task 17B, Task 18, platform, and deployment work is absent', () => {
