@@ -599,7 +599,60 @@ select public.task15_assert((:'due_queue_result')::jsonb->>'status'='blocked' an
 select public.task15_assert(job_state='blocked' and job_state <> 'awaiting_operator', 'due queue conflict blocks job') from public.creator_publishing_platform_jobs where id='80000000-0000-4000-8000-000000000006';
 select public.task15_assert(status='blocked' and safe_error_code='ACTIVE_QUEUE_TASK_CONFLICT', 'due queue event blocked with safe code') from public.creator_publishing_scheduler_events where id=:'due_queue_event_id'::uuid;
 select public.task15_assert(status='superseded', 'due queue sibling publish_due superseded') from public.creator_publishing_scheduler_events where platform_job_id='80000000-0000-4000-8000-000000000006' and event_type='publish_due';
-select public.task15_assert((select status from public.creator_publishing_queue_tasks where id='60000000-0000-4000-8000-000000000003')='claimed', 'due queue task remains claimed');
+do $$
+declare
+  v_has_claim_token boolean := exists (select 1 from information_schema.columns where table_schema='public' and table_name='creator_publishing_queue_tasks' and column_name='claim_token');
+begin
+  if v_has_claim_token then
+    perform public.task15_assert(exists(
+      select 1
+      from public.creator_publishing_queue_tasks
+      where id='60000000-0000-4000-8000-000000000003'
+        and status='blocked'
+        and claimed_by is null
+        and claimed_at is null
+        and claim_token is null
+        and claim_expires_at is null
+        and claim_attempt_count=0
+        and operator_progress_state='not_started'
+        and operator_progress_revision=0
+        and operator_progress_updated_by is null
+        and operator_progress_updated_at is null
+        and assigned_operator_id is null
+        and posted_by is null
+        and posted_at is null
+        and posted_confirmation=false
+        and final_post_url is null
+        and final_post_url_skip_reason is null
+        and proof_screenshot_storage_key is null
+        and skip_or_fail_reason is null
+    ), 'due queue task blocked and unclaimed after Task 17A scheduler cleanup');
+    perform public.task15_assert((
+      select count(*)
+      from public.creator_publishing_audit_events
+      where action='operator_task_claim_cleared_by_scheduler_gate'
+        and entity_id='60000000-0000-4000-8000-000000000003'
+    )=1, 'due queue Task 17A cleanup audit written once');
+    perform public.task15_assert(exists(
+      select 1
+      from public.creator_publishing_audit_events
+      where action='operator_task_claim_cleared_by_scheduler_gate'
+        and entity_id='60000000-0000-4000-8000-000000000003'
+        and before_state->>'claimed_by'='00000000-0000-4000-8000-000000000002'
+        and before_state ? 'claimed_at'
+        and before_state ? 'claim_expires_at'
+        and before_state->>'progress_state'='not_started'
+        and before_state->>'progress_revision'='0'
+        and after_state->>'status'='blocked'
+        and after_state->>'safe_error_code'='ACTIVE_QUEUE_TASK_CONFLICT'
+        and after_state->>'platform_job_id'='80000000-0000-4000-8000-000000000006'
+        and not (before_state ? 'claim_token')
+        and not (after_state ? 'claim_token')
+    ), 'due queue Task 17A cleanup audit records safe ownership progress and omits claim token');
+  else
+    perform public.task15_assert((select status from public.creator_publishing_queue_tasks where id='60000000-0000-4000-8000-000000000003')='claimed', 'due queue task remains claimed');
+  end if;
+end $$;
 select public.task15_assert((select count(*) from public.creator_publishing_audit_events where action='creator_publishing_scheduler_gate_failed' and entity_id=:'due_queue_event_id'::uuid and after_state->>'safe_error_code'='ACTIVE_QUEUE_TASK_CONFLICT')=1, 'due queue audit records conflict');
 select public.task15_assert(not exists(select 1 from public.creator_publishing_audit_events where action='creator_publishing_scheduler_event_processed' and entity_id=:'due_queue_event_id'::uuid), 'due queue conflict writes no processed audit');
 
