@@ -2,7 +2,7 @@
 -- Forward-only. Does not deploy, call platforms, automate browsers, or store platform credentials.
 do $$
 begin
-  if exists (select 1 from public.creator_publishing_queue_tasks where status='claimed') then
+  if exists (select 1 from public.creator_publishing_queue_tasks where status='claimed' or claimed_by is not null or claimed_at is not null) then
     raise exception 'TASK17A_LEGACY_CLAIMED_ROWS_REQUIRE_REMEDIATION';
   end if;
 end $$;
@@ -662,6 +662,8 @@ declare
   v_now timestamptz := clock_timestamp();
   v_next_state text;
   v_gate_code text;
+  v_failed_job_state text;
+  v_claimed_task public.creator_publishing_queue_tasks%rowtype;
 begin
   if length(btrim(coalesce(p_current_ai_twin_consent_version,'')))=0 or coalesce(p_current_attestation_text_sha256,'') !~ '^[a-f0-9]{64}$' then raise exception 'SCHEDULER_INVALID_CONSENT_POLICY'; end if;
   select event_source.publishing_plan_id,event_source.platform_job_id,event_source.creator_id,event_source.schedule_revision into identity_rec from public.creator_publishing_scheduler_events as event_source where event_source.id=p_event_id;
@@ -807,9 +809,26 @@ begin
   end if;
 
   if v_gate_code is not null then
+    v_failed_job_state := case when v_gate_code in ('SOURCE_FINGERPRINT_STALE','AI_TWIN_CONSENT_MISSING','CREATOR_VERIFICATION_MISSING','SCHEDULER_STATE_TRANSITION_INVALID','CREATOR_APPROVAL_MISSING','COMPLIANCE_EVIDENCE_INVALID','CO_PERFORMER_RELEASE_MISSING') then 'needs_fix' else 'blocked' end;
     update public.creator_publishing_scheduler_events set status='blocked', processed_at=v_now, safe_error_code=v_gate_code, lock_token=null, locked_at=null, updated_at=v_now where id=event_rec.id and lock_token=p_lock_token;
     update public.creator_publishing_scheduler_events set status='superseded', superseded_at=v_now, lock_token=null, locked_at=null, updated_at=v_now where platform_job_id=job_rec.id and schedule_revision=event_rec.schedule_revision and id<>event_rec.id and status in ('pending','processing');
-    update public.creator_publishing_platform_jobs set job_state=case when v_gate_code in ('SOURCE_FINGERPRINT_STALE','AI_TWIN_CONSENT_MISSING','CREATOR_VERIFICATION_MISSING','SCHEDULER_STATE_TRANSITION_INVALID','CREATOR_APPROVAL_MISSING','COMPLIANCE_EVIDENCE_INVALID','CO_PERFORMER_RELEASE_MISSING') then 'needs_fix' else 'blocked' end, updated_at=v_now where id=job_rec.id;
+    update public.creator_publishing_platform_jobs set job_state=v_failed_job_state, updated_at=v_now where id=job_rec.id;
+    if job_rec.target_platform='onlyfans' and job_rec.publishing_mode='assisted' then
+      for v_claimed_task in
+        select * from public.creator_publishing_queue_tasks q
+        where q.content_package_id=job_rec.content_package_id
+          and q.creator_id=job_rec.creator_id
+          and q.target_platform=job_rec.target_platform
+          and q.platform_account_id=job_rec.platform_account_id
+          and q.status='claimed'
+        order by q.id
+        for update
+      loop
+        update public.creator_publishing_queue_tasks set status=v_failed_job_state, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, updated_at=v_now where id=v_claimed_task.id;
+        insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at)
+        values('creator_publishing_queue_task',v_claimed_task.id,null,'scheduler','operator_task_claim_cleared_by_scheduler_gate',jsonb_build_object('status',v_claimed_task.status,'claimed_by',v_claimed_task.claimed_by,'claimed_at',v_claimed_task.claimed_at,'claim_expires_at',v_claimed_task.claim_expires_at,'progress_state',v_claimed_task.operator_progress_state,'progress_revision',v_claimed_task.operator_progress_revision,'assigned_operator_id',v_claimed_task.assigned_operator_id),jsonb_build_object('status',v_failed_job_state,'safe_error_code',v_gate_code,'platform_job_id',job_rec.id),v_now);
+      end loop;
+    end if;
     update public.creator_publishing_plans set status=public.creator_publishing_aggregate_plan_status(plan_rec.id), updated_at=v_now where id=plan_rec.id;
     insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,created_at) values('creator_publishing_scheduler_event',event_rec.id,null,'scheduler','creator_publishing_scheduler_gate_failed',jsonb_build_object('status','processing','event_type',event_rec.event_type,'schedule_revision',event_rec.schedule_revision),jsonb_build_object('status','blocked','safe_error_code',v_gate_code),v_now);
     return jsonb_build_object('ok',true,'status','blocked','safe_error_code',v_gate_code);

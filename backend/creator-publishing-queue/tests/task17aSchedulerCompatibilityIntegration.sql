@@ -122,3 +122,60 @@ begin
   perform task17a_test.assert((select job_state='due_now' from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid),'active claim publish_due job due_now');
   perform task17a_test.assert((select status='claimed' and claimed_by=before_row.claimed_by and claimed_at=before_row.claimed_at and claim_token=before_row.claim_token and claim_expires_at=before_row.claim_expires_at and operator_progress_state=before_row.operator_progress_state and operator_progress_revision=before_row.operator_progress_revision and assigned_operator_id=before_row.assigned_operator_id and posted_by is null and posted_at is null and posted_confirmation=false and final_post_url is null and proof_screenshot_storage_key is null from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid),'active claim publish_due preserves claim progress assigned and Task18 fields');
 end $$;
+
+create or replace function task17a_test.assert_scheduler_claim_gate_cleanup(seed integer, event text, drift text, expected_job_state text, expected_code text, label text) returns void language plpgsql as $$
+declare
+  f jsonb;
+  v_event uuid := task17a_test.uuid_for('92640000-0000-4000-8000-', seed);
+  v_lock uuid := task17a_test.uuid_for('92641000-0000-4000-8000-', seed);
+  v_result jsonb;
+  before_row public.creator_publishing_queue_tasks%rowtype;
+  v_actor uuid;
+begin
+  f := task17a_test.reset_fixture(seed,'scheduled_internally','scheduled_internally',true);
+  if event='publish_due' then
+    perform task17a_test.set_valid_schedule_phase((f->>'job')::uuid,'after_publish_due');
+  else
+    perform task17a_test.set_valid_schedule_phase((f->>'job')::uuid,'after_operator_due');
+  end if;
+  v_actor := case when drift='authorization_revoked' then (f->>'operator_a')::uuid else (f->>'creator')::uuid end;
+  perform public.creator_publishing_claim_onlyfans_operator_task(v_actor,(f->>'task')::uuid,(f->>'job')::uuid,f->>'consent_version',f->>'consent_hash','schedgateclaim' || seed);
+  select * into before_row from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  if drift='authorization_revoked' then
+    update public.creator_publishing_operator_authorizations set status='revoked', revoked_at=clock_timestamp() where creator_id=(f->>'creator')::uuid and operator_id=(f->>'operator_a')::uuid;
+  elsif drift='claim_expired' then
+    perform task17a_test.expire_claim((f->>'task')::uuid);
+    select * into before_row from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  elsif drift='consent_revoked' then
+    update public.creator_publishing_ai_twin_consents set status='revoked', revoked_at=clock_timestamp() where creator_id=(f->>'creator')::uuid;
+  elsif drift='source_stale' then
+    update public.creator_publishing_platform_jobs set source_package_fingerprint='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' where id=(f->>'job')::uuid;
+  elsif drift='creator_verification_revoked' then
+    update public.creator_publishing_creator_verifications set status='revoked', reason='revoked' where creator_id=(f->>'creator')::uuid;
+  elsif drift='account_revoked' then
+    update public.creator_platform_accounts set verification_status='revoked', verification_reason='revoked' where id=(f->>'account')::uuid;
+  else
+    raise exception 'TASK17A_SCHEDULER_GATE_DRIFT_UNSUPPORTED';
+  end if;
+  insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,lock_token,locked_at)
+  values(v_event,(f->>'creator')::uuid,(f->>'plan')::uuid,(f->>'job')::uuid,event,'processing',clock_timestamp()-interval '1 minute',(select schedule_revision from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid),v_lock,clock_timestamp());
+  v_result := public.creator_publishing_process_scheduler_event(v_event,v_lock,f->>'consent_version',f->>'consent_hash');
+  perform task17a_test.assert(v_result->>'status'='blocked' and v_result->>'safe_error_code'=expected_code, label || ' result blocked with expected code');
+  perform task17a_test.assert((select job_state=expected_job_state from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid), label || ' job state mapped');
+  perform task17a_test.assert((select status=expected_job_state and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and claim_attempt_count=before_row.claim_attempt_count and operator_progress_state=before_row.operator_progress_state and assigned_operator_id is not distinct from before_row.assigned_operator_id from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), label || ' claimed queue cleared without stranding');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_task_claim_cleared_by_scheduler_gate' and entity_id=(f->>'task')::uuid)=1, label || ' writes one scheduler claim cleanup audit');
+  perform task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_claim_cleared_by_scheduler_gate' and entity_id=(f->>'task')::uuid and (before_state ? 'claim_token' or after_state ? 'claim_token')), label || ' cleanup audit omits claim token');
+end $$;
+
+\echo TASK17A_SCENARIO_START: scheduler_claim_cleanup_authorization_revoked
+select task17a_test.assert_scheduler_claim_gate_cleanup(926301,'operator_due','authorization_revoked','blocked','ACTIVE_QUEUE_TASK_CONFLICT','scheduler claimed authorization revoked cleanup');
+\echo TASK17A_SCENARIO_START: scheduler_claim_cleanup_claim_expired
+select task17a_test.assert_scheduler_claim_gate_cleanup(926302,'operator_due','claim_expired','blocked','ACTIVE_QUEUE_TASK_CONFLICT','scheduler claimed expired cleanup');
+\echo TASK17A_SCENARIO_START: scheduler_claim_cleanup_consent_revoked
+select task17a_test.assert_scheduler_claim_gate_cleanup(926303,'publish_due','consent_revoked','needs_fix','AI_TWIN_CONSENT_MISSING','scheduler claimed consent cleanup');
+\echo TASK17A_SCENARIO_START: scheduler_claim_cleanup_source_stale
+select task17a_test.assert_scheduler_claim_gate_cleanup(926304,'publish_due','source_stale','needs_fix','SOURCE_FINGERPRINT_STALE','scheduler claimed source cleanup');
+\echo TASK17A_SCENARIO_START: scheduler_claim_cleanup_creator_verification_revoked
+select task17a_test.assert_scheduler_claim_gate_cleanup(926305,'operator_due','creator_verification_revoked','needs_fix','CREATOR_VERIFICATION_MISSING','scheduler claimed creator verification cleanup');
+\echo TASK17A_SCENARIO_START: scheduler_claim_cleanup_account_revoked
+select task17a_test.assert_scheduler_claim_gate_cleanup(926306,'operator_due','account_revoked','blocked','DESTINATION_ACCOUNT_REVOKED','scheduler claimed account cleanup');

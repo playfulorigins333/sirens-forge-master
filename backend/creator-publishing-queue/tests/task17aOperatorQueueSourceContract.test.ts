@@ -29,6 +29,7 @@ test('migration 01400 fails fast on legacy claimed queue rows before DDL', () =>
   const firstDdl = migration.indexOf('create extension if not exists pgcrypto');
   assert.notEqual(preflight, -1);
   assert.ok(preflight < firstDdl);
+  assert.match(migration, /status='claimed' or claimed_by is not null or claimed_at is not null/);
 });
 
 test('extends existing queue task table without a second operator-task table', () => {
@@ -76,6 +77,7 @@ test('Task 15 compatibility is narrow and active claims are preserved', () => {
   assert.match(migration, /create or replace function public\.creator_publishing_cancel_plan_schedule/);
   assert.match(migration, /create or replace function public\.creator_publishing_cancel_job_schedule/);
   assert.match(migration, /creator_publishing_cancel_task17a_queue_claims/);
+  assert.match(migration, /operator_task_claim_cleared_by_scheduler_gate/);
   assert.doesNotMatch(migration, /create or replace function public\.creator_publishing_claim_due_scheduler_events/);
   assert.match(migration, /status='claimed'/);
   assert.match(migration, /claim_expires_at > v_now/);
@@ -141,6 +143,14 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'in_claim_recovery_not_due_structured',
     'in_claim_recovery_safety_drift_structured',
     'in_claim_recovery_duplicate_task_structured',
+    'cancel_job_active_claim_cleanup',
+    'cancel_job_terminal_no_false_cleanup',
+    'scheduler_claim_cleanup_authorization_revoked',
+    'scheduler_claim_cleanup_claim_expired',
+    'scheduler_claim_cleanup_consent_revoked',
+    'scheduler_claim_cleanup_source_stale',
+    'scheduler_claim_cleanup_creator_verification_revoked',
+    'scheduler_claim_cleanup_account_revoked',
     'safety_capability_unavailable',
     'duplicate_task_unique_index_boundary',
     'duplicate_task_rpc_ambiguity',
@@ -195,7 +205,7 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
   ];
-  const helperPattern = /\b(reset_fixture|create_secondary_work|assert_claim_rejected|assert_claim_queue_status_rejected|assert_claim_job_state_rejected|assert_manual_result_field_blocks|run_scheduler_transition|assert_terminal_scheduler_superseded)\s*\(\s*(\d{6})\b/g;
+  const helperPattern = /\b(reset_fixture|create_secondary_work|assert_claim_rejected|assert_claim_queue_status_rejected|assert_claim_job_state_rejected|assert_manual_result_field_blocks|run_scheduler_transition|assert_terminal_scheduler_superseded|assert_scheduler_claim_gate_cleanup)\s*\(\s*(\d{6})\b/g;
   const reserved = new Map<number, string>();
   for (const file of scenarioFiles) {
     const source = readFileSync(file, 'utf8');
