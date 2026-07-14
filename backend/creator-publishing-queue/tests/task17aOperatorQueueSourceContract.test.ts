@@ -117,6 +117,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
   ];
   const scenarioSource = scenarioFiles.map((file) => readFileSync(file, 'utf8')).join('\n') + '\n' + readFileSync('backend/creator-publishing-queue/tests/runTask17aUpgradeIntegration.mjs', 'utf8') + '\n' + readFileSync('backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs', 'utf8');
   const requiredLabels = [
@@ -206,6 +207,39 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'claim_vs_job_cancel_concurrency',
     'claim_vs_plan_cancel_concurrency',
     'recovery_vs_job_cancel_concurrency',
+    'progress_valid_transition_sequence',
+    'progress_exact_replay',
+    'progress_request_invalid',
+    'progress_missing_job',
+    'progress_missing_task',
+    'progress_task_job_mismatch',
+    'progress_unsupported_target_or_mode',
+    'progress_cancelled_job',
+    'progress_ineligible_job_state',
+    'progress_unauthorized_actor',
+    'progress_revoked_authorization',
+    'progress_wrong_owner',
+    'progress_wrong_token',
+    'progress_expired_token',
+    'progress_stale_expected_state',
+    'progress_stale_expected_revision',
+    'progress_invalid_transition',
+    'progress_creator_verification_drift',
+    'progress_account_verification_drift',
+    'progress_account_revoked_drift',
+    'progress_consent_drift',
+    'progress_compliance_drift',
+    'progress_source_fingerprint_drift',
+    'progress_changed_task_idempotency_conflict',
+    'progress_changed_job_idempotency_conflict',
+    'progress_changed_token_idempotency_conflict',
+    'progress_changed_expected_state_idempotency_conflict',
+    'progress_changed_expected_revision_idempotency_conflict',
+    'progress_changed_target_state_idempotency_conflict',
+    'progress_changed_consent_version_idempotency_conflict',
+    'progress_changed_consent_hash_idempotency_conflict',
+    'progress_complete_audit_idempotency_counts',
+    'progress_complete_no_mutation_assertions',
   ];
   for (const label of requiredLabels) {
     assert.match(scenarioSource, new RegExp(`TASK17A_SCENARIO_START: ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
@@ -214,6 +248,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   assert.match(runner, /ON_ERROR_STOP=1/);
   assert.match(runner, /task15 regression post-01400/);
   assert.match(runner, /runTask17aConcurrency\.mjs/);
+  assert.match(runner, /task17aProgressMatrixIntegration\.sql/);
   assert.match(runner, /runTask17aCancellationConcurrency\.mjs/);
   assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
   assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
@@ -230,6 +265,7 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
     'backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
   ];
   const helperPattern = /\b(reset_fixture|create_secondary_work|create_additional_work|assert_claim_rejected|assert_claim_queue_status_rejected|assert_claim_job_state_rejected|assert_manual_result_field_blocks|run_scheduler_transition|assert_terminal_scheduler_superseded|assert_scheduler_claim_gate_cleanup)\s*\(\s*(\d{6})\b/g;
   const reserved = new Map<number, string>();
@@ -258,6 +294,7 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
   const runner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
   assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
   assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  assert.match(runner, /task17aProgressMatrixIntegration\.sql/);
   assert.match(runner, /runTask17aCancellationConcurrency\.mjs/);
 });
 
@@ -374,6 +411,26 @@ test('Task 17A cancellation concurrency runner escapes psql meta-commands in Jav
 
 
 
+
+test('Task 17A progress matrix scenarios invoke the real progress RPC or rejection helper', () => {
+  const progress = readFileSync('backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql', 'utf8');
+  assert.match(progress, /create or replace function task17a_test\.assert_progress_rejected[\s\S]*creator_publishing_update_onlyfans_operator_progress/);
+  assert.match(progress, /TASK17A_SCENARIO_START: progress_valid_transition_sequence[\s\S]*operator_preparation_started[\s\S]*operator_package_prepared[\s\S]*operator_handoff_ready/);
+  assert.match(progress, /TASK17A_SCENARIO_START: progress_exact_replay[\s\S]*idempotent/);
+  const blocks = progress.split(/\\echo TASK17A_SCENARIO_START:\s*/).slice(1);
+  for (const block of blocks) {
+    const label = block.split(/\r?\n/, 1)[0].trim();
+    const body = block.replace(/^.*\r?\n/, '');
+    if (label.startsWith('progress_') && !label.startsWith('progress_complete_')) {
+      assert.match(body, /creator_publishing_update_onlyfans_operator_progress|assert_progress_rejected/, `${label} must invoke progress RPC or rejection helper`);
+      assert.match(body, /task17a_test\.(assert|expect_error|assert_progress_rejected)/, `${label} must assert progress behavior`);
+    }
+  }
+  assert.match(progress, /progress_complete_audit_idempotency_counts[\s\S]*select count\(\*\)[\s\S]*progress_update/);
+  assert.match(progress, /progress_complete_no_mutation_assertions[\s\S]*task17a_progress_rejections/);
+  assert.doesNotMatch(progress, /task17a_test\.assert\s*\(\s*true\b/i);
+});
+
 test('Task 17A scenarios reject placeholders and require substantive executable bodies', () => {
   const task17aFiles = [
     ...listFiles('backend/creator-publishing-queue/tests').filter((file) => (/task17a|Task17a/.test(file) || /runTask17a/.test(file)) && !file.endsWith('task17aOperatorQueueSourceContract.test.ts')),
@@ -392,6 +449,7 @@ test('Task 17A scenarios reject placeholders and require substantive executable 
     'backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
   ];
   const substantivePattern = /creator_publishing_|task17a_test\.(expect_error|assert_claim|assert_manual_result|run_scheduler|assert_terminal_scheduler|assert_scheduler_claim_gate_cleanup)|task17a_test\.assert\s*\(\s*(?!true\b)|select\s+count\s*\(|update\s+public\.|insert\s+into\s+public\.|psql\s*\(/i;
   for (const file of scenarioFiles) {
