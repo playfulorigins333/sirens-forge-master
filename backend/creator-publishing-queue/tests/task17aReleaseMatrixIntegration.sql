@@ -511,7 +511,8 @@ select task17a_test.assert(not exists(select 1 from public.creator_publishing_au
 select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='release' and idempotency_key in (select key from task17a_release_rejections)), 'release aggregate rejected keys wrote no idempotency');
 
 \echo TASK17A_SCENARIO_START: release_complete_no_mutation_assertions
-create temp table task17a_release_expected_rejections(label text primary key, key text unique) on commit drop;
+drop table if exists task17a_release_expected_rejections;
+create temp table task17a_release_expected_rejections(label text primary key, key text unique) on commit preserve rows;
 insert into task17a_release_expected_rejections(label,key) values
   ('release_request_invalid','relinvalid'),
   ('release_missing_job','relmissingjob'),

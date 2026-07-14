@@ -293,6 +293,21 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   const workflow = readFileSync('.github/workflows/task17a-operator-queue-postgres.yml', 'utf8');
   assert.match(workflow, /test:creator-publishing-task17a-upgrade/);
   assert.match(workflow, /test:creator-publishing-task17a-postgres/);
+  assert.match(runner, /const sqlTargets = \[/);
+  for (const target of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql','task17aProgressMatrixIntegration.sql','task17aReleaseMatrixIntegration.sql','claim-concurrency','cancellation-concurrency']) {
+    assert.ok(runner.includes(target));
+    assert.ok(workflow.includes(target));
+  }
+  assert.match(runner, /Unknown TASK17A_DIAGNOSTIC_TARGET/);
+  assert.match(runner, /task17a-postgres-diagnostics-\$\{sanitizedTarget\}\.log/);
+  assert.match(runner, /TASK17A_DIAGNOSTIC_TARGET_PASSED:\$\{diagnosticTarget\}/);
+  assert.match(runner, /if \(diagnosticTarget\)[\s\S]*TASK17A_DIAGNOSTIC_TARGET_PASSED[\s\S]*} else \{[\s\S]*for \(const f of sqlTargets\)[\s\S]*runTask17aConcurrency\.mjs[\s\S]*runTask17aCancellationConcurrency\.mjs[\s\S]*TASK17A_CURRENT_SCENARIOS_PASSED/);
+  assert.match(workflow, /diagnostics:[\s\S]*needs: postgres[\s\S]*if: \$\{\{ always\(\) && needs\.postgres\.result == 'failure' \}\}/);
+  assert.match(workflow, /diagnostics:[\s\S]*continue-on-error: true[\s\S]*fail-fast: false/);
+  assert.match(workflow, /diagnostics:[\s\S]*image: postgres:15/);
+  assert.match(workflow, /TASK17A_DIAGNOSTIC_TARGET: \$\{\{ matrix\.target \}\}/);
+  assert.match(workflow, /path: task17a-postgres-diagnostics-\*\.log/);
+  assert.match(workflow, /if: always\(\)[\s\S]*actions\/upload-artifact@v4/);
 });
 
 
@@ -613,6 +628,10 @@ test('Task 17A release matrix scenarios invoke the real release RPC or release h
   assert.match(byLabel.get('release_complete_audit_idempotency_counts') || '', /select count\(\*\)[\s\S]*action_type='release'/);
   const releaseNoMutation = byLabel.get('release_complete_no_mutation_assertions') || '';
   assert.match(releaseNoMutation, /create temp table task17a_release_expected_rejections/);
+  assert.match(releaseNoMutation, /drop table if exists task17a_release_expected_rejections/);
+  assert.match(releaseNoMutation, /create temp table task17a_release_expected_rejections[\s\S]*on commit preserve rows/);
+  assert.doesNotMatch(releaseNoMutation, /on commit drop/i);
+  assert.doesNotMatch(releaseNoMutation, /on commit delete rows/i);
   for (const label of ['release_request_invalid', 'release_missing_job', 'release_missing_task', 'release_task_job_mismatch', 'release_unsupported_target_or_mode', 'release_cancelled_job', 'release_ineligible_job_state', 'release_not_claimed', 'release_unauthorized_actor', 'release_revoked_authorization', 'release_wrong_owner', 'release_wrong_token', 'release_expired_token', 'release_manual_result_evidence_rejected', 'release_drift_missing_intended_publish_at', 'release_drift_missing_operator_due_at', 'release_drift_missing_timezone', 'release_drift_blank_timezone', 'release_drift_missing_scheduled_at', 'release_drift_missing_scheduled_by', 'release_drift_zero_schedule_revision', 'release_drift_negative_schedule_revision', 'release_drift_operator_offset_not_60_minutes', 'release_drift_job_state_inconsistent_with_schedule', 'release_drift_unscheduled_job_with_schedule_fields']) assert.match(releaseNoMutation, new RegExp(label));
   for (const key of ['relinvalid', 'relmissingjob', 'relmissingtask', 'relmismatch', 'relunsupported', 'relcancelled', 'relineligible', 'relnotclaimed', 'relunauth', 'relrevoked', 'relwrongowner', 'relwrongtoken', 'relexpired', 'relmanual', 'reldrift31', 'reldrift32', 'reldrift33', 'reldrift34', 'reldrift35', 'reldrift36', 'reldrift37', 'reldrift38', 'reldrift39', 'reldrift40', 'reldrift41']) assert.match(releaseNoMutation, new RegExp(key));
   assert.match(releaseNoMutation, /expected_rejections except select label,key from task17a_release_rejections/);

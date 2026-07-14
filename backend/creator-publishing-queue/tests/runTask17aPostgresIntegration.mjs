@@ -3,8 +3,25 @@ import { appendFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const logPath = 'task17a-postgres-diagnostics.log'
-writeFileSync(logPath, `Task 17A PostgreSQL diagnostics\nstarted_at=${new Date().toISOString()}\n`)
+const sqlTargets = [
+  'task17aPostgresIntegration.sql',
+  'task17aAuthorizationTimingIntegration.sql',
+  'task17aIdempotencyRecoveryIntegration.sql',
+  'task17aSafetyGatesIntegration.sql',
+  'task17aSchedulerCompatibilityIntegration.sql',
+  'task17aProgressMatrixIntegration.sql',
+  'task17aReleaseMatrixIntegration.sql'
+]
+const concurrencyTargets = new Set(['claim-concurrency', 'cancellation-concurrency'])
+const allowedTargets = new Set([...sqlTargets, ...concurrencyTargets])
+const diagnosticTarget = process.env.TASK17A_DIAGNOSTIC_TARGET || ''
+if (diagnosticTarget && !allowedTargets.has(diagnosticTarget)) {
+  throw new Error(`Unknown TASK17A_DIAGNOSTIC_TARGET: ${diagnosticTarget}`)
+}
+const sanitizedTarget = diagnosticTarget.replace(/[^A-Za-z0-9_-]/g, '_')
+const logPath = diagnosticTarget ? `task17a-postgres-diagnostics-${sanitizedTarget}.log` : 'task17a-postgres-diagnostics.log'
+const startedAt = new Date().toISOString()
+writeFileSync(logPath, `Task 17A PostgreSQL diagnostics\ntarget=${diagnosticTarget || 'strict'}\nstarted_at=${startedAt}\n`)
 const databaseUrl = process.env.TASK17A_DATABASE_URL || process.env.DATABASE_URL || 'postgres://postgres:postgres@127.0.0.1:5432/postgres'
 function runSql(label, sql) {
   appendFileSync(logPath, `\n## ${label}\n`)
@@ -24,7 +41,15 @@ function runFile(label, file) {
   if (res.error) appendFileSync(logPath, `spawn_error=${res.error.message}\n`)
   if (res.status !== 0) throw new Error(`${label} failed with status ${res.status}`)
 }
-try {
+function runNode(label, script) {
+  appendFileSync(logPath, `\n## ${label}: ${script}\n`)
+  const res = spawnSync(process.execPath, [script], { encoding: 'utf8', env: process.env })
+  appendFileSync(logPath, res.stdout || '')
+  appendFileSync(logPath, res.stderr || '')
+  if (res.error) appendFileSync(logPath, `spawn_error=${res.error.message}\n`)
+  if (res.status !== 0) throw new Error(`${label} failed with status ${res.status}`)
+}
+function applyBaseline() {
   runSql('bootstrap', `
     do $$ begin
       if not exists (select 1 from pg_roles where rolname='anon') then create role anon; end if;
@@ -56,16 +81,31 @@ try {
     'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql'
   ]
   for (const migration of migrations) runFile('migration', migration)
+  appendFileSync(logPath, `\nmigrations_applied=${migrations.length}\n`)
   runFile('task15 regression post-01400', 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql')
+  appendFileSync(logPath, `task15_result=passed\n`)
   runFile('task17a test support', 'backend/creator-publishing-queue/tests/task17aTestSupport.sql')
-  for (const f of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql','task17aProgressMatrixIntegration.sql','task17aReleaseMatrixIntegration.sql']) runFile(`task17a ${f}`, `backend/creator-publishing-queue/tests/${f}`)
-  const c = spawnSync(process.execPath, ['backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs'], { stdio: 'inherit', env: process.env })
-  if (c.status !== 0) throw new Error(`task17a concurrency failed with status ${c.status}`)
-  const cc = spawnSync(process.execPath, ['backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs'], { stdio: 'inherit', env: process.env })
-  if (cc.status !== 0) throw new Error(`task17a cancellation concurrency failed with status ${cc.status}`)
-  console.log('TASK17A_CURRENT_SCENARIOS_PASSED')
-  appendFileSync(logPath, `\nTASK17A_CURRENT_SCENARIOS_PASSED\ncompleted_at=${new Date().toISOString()}\n`)
+}
+try {
+  applyBaseline()
+  if (diagnosticTarget) {
+    if (sqlTargets.includes(diagnosticTarget)) {
+      runFile(`diagnostic ${diagnosticTarget}`, `backend/creator-publishing-queue/tests/${diagnosticTarget}`)
+    } else if (diagnosticTarget === 'claim-concurrency') {
+      runNode('diagnostic claim-concurrency', 'backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs')
+    } else if (diagnosticTarget === 'cancellation-concurrency') {
+      runNode('diagnostic cancellation-concurrency', 'backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs')
+    }
+    console.log(`TASK17A_DIAGNOSTIC_TARGET_PASSED:${diagnosticTarget}`)
+    appendFileSync(logPath, `\nTASK17A_DIAGNOSTIC_TARGET_PASSED:${diagnosticTarget}\ncompleted_at=${new Date().toISOString()}\n`)
+  } else {
+    for (const f of sqlTargets) runFile(`task17a ${f}`, `backend/creator-publishing-queue/tests/${f}`)
+    runNode('task17a concurrency', 'backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs')
+    runNode('task17a cancellation concurrency', 'backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs')
+    console.log('TASK17A_CURRENT_SCENARIOS_PASSED')
+    appendFileSync(logPath, `\nTASK17A_CURRENT_SCENARIOS_PASSED\ncompleted_at=${new Date().toISOString()}\n`)
+  }
 } catch (error) {
-  appendFileSync(logPath, `\nFAILED: ${error?.stack || error}\n`)
+  appendFileSync(logPath, `\nFAILED: ${error?.stack || error}\ncompleted_at=${new Date().toISOString()}\n`)
   process.exit(1)
 }
