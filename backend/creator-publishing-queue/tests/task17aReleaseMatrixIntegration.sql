@@ -511,7 +511,44 @@ select task17a_test.assert(not exists(select 1 from public.creator_publishing_au
 select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='release' and idempotency_key in (select key from task17a_release_rejections)), 'release aggregate rejected keys wrote no idempotency');
 
 \echo TASK17A_SCENARIO_START: release_complete_no_mutation_assertions
-select task17a_test.assert((select count(*) from task17a_release_rejections) >= 26, 'release no-mutation rejection registry populated');
+create temp table task17a_release_expected_rejections(label text primary key, key text unique) on commit drop;
+insert into task17a_release_expected_rejections(label,key) values
+  ('release_request_invalid','relinvalid'),
+  ('release_missing_job','relmissingjob'),
+  ('release_missing_task','relmissingtask'),
+  ('release_task_job_mismatch','relmismatch'),
+  ('release_unsupported_target_or_mode','relunsupported'),
+  ('release_cancelled_job','relcancelled'),
+  ('release_ineligible_job_state','relineligible'),
+  ('release_not_claimed','relnotclaimed'),
+  ('release_unauthorized_actor','relunauth'),
+  ('release_revoked_authorization','relrevoked'),
+  ('release_wrong_owner','relwrongowner'),
+  ('release_wrong_token','relwrongtoken'),
+  ('release_expired_token','relexpired'),
+  ('release_manual_result_evidence_rejected','relmanual'),
+  ('release_drift_missing_intended_publish_at','reldrift31'),
+  ('release_drift_missing_operator_due_at','reldrift32'),
+  ('release_drift_missing_timezone','reldrift33'),
+  ('release_drift_blank_timezone','reldrift34'),
+  ('release_drift_missing_scheduled_at','reldrift35'),
+  ('release_drift_missing_scheduled_by','reldrift36'),
+  ('release_drift_zero_schedule_revision','reldrift37'),
+  ('release_drift_negative_schedule_revision','reldrift38'),
+  ('release_drift_operator_offset_not_60_minutes','reldrift39'),
+  ('release_drift_job_state_inconsistent_with_schedule','reldrift40'),
+  ('release_drift_unscheduled_job_with_schedule_fields','reldrift41');
+select count(*) as release_rejection_actual_count from task17a_release_rejections;
+select jsonb_agg(jsonb_build_object('label',label,'key',key) order by label) as release_rejection_actual_rows from task17a_release_rejections;
+select jsonb_agg(jsonb_build_object('label',label,'key',key) order by label) as release_rejection_expected_rows from task17a_release_expected_rejections;
+select jsonb_agg(jsonb_build_object('label',label,'key',key) order by label) as release_rejection_missing_expected_rows from (select label,key from task17a_release_expected_rejections except select label,key from task17a_release_rejections) missing;
+select jsonb_agg(jsonb_build_object('label',label,'key',key) order by label) as release_rejection_unexpected_actual_rows from (select label,key from task17a_release_rejections except select label,key from task17a_release_expected_rejections) unexpected;
+select task17a_test.assert((select count(*) from task17a_release_rejections)=25, 'release no-mutation rejection registry exact count');
+select task17a_test.assert(not exists(select label,key from task17a_release_expected_rejections except select label,key from task17a_release_rejections), 'release no-mutation registry has every expected label key');
+select task17a_test.assert(not exists(select label,key from task17a_release_rejections except select label,key from task17a_release_expected_rejections), 'release no-mutation registry has no unexpected label key');
+select task17a_test.assert(not exists(select 1 from task17a_release_rejections group by label having count(*)<>1), 'release no-mutation registry labels unique');
+select task17a_test.assert(not exists(select 1 from task17a_release_rejections group by key having count(*)<>1), 'release no-mutation registry keys unique');
+select task17a_test.assert(not exists(select 1 from task17a_release_rejections where task_id is null or job_id is null), 'release no-mutation registry task and job identities present');
 select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='operator_task_released' and idempotency_key in (select key from task17a_release_rejections)), 'release rejected keys wrote no success audit');
 select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='release' and idempotency_key in (select key from task17a_release_rejections)), 'release rejected keys wrote no idempotency');
 select task17a_test.assert(not exists(select 1 from public.creator_publishing_queue_tasks where id in (select task_id from task17a_release_rejections where task_id is not null) and (posted_by is not null or posted_at is not null or posted_confirmation is true or final_post_url is not null or final_post_url_skip_reason is not null or proof_screenshot_storage_key is not null or skip_or_fail_reason is not null) and id not in ((:'release_manual_fixture'::jsonb->>'task')::uuid)), 'release rejected tasks wrote no new Task 18 fields except deliberate manual-result fixture');

@@ -611,7 +611,17 @@ test('Task 17A release matrix scenarios invoke the real release RPC or release h
     }
   });
   assert.match(byLabel.get('release_complete_audit_idempotency_counts') || '', /select count\(\*\)[\s\S]*action_type='release'/);
-  assert.match(byLabel.get('release_complete_no_mutation_assertions') || '', /task17a_release_rejections/);
+  const releaseNoMutation = byLabel.get('release_complete_no_mutation_assertions') || '';
+  assert.match(releaseNoMutation, /create temp table task17a_release_expected_rejections/);
+  for (const label of ['release_request_invalid', 'release_missing_job', 'release_missing_task', 'release_task_job_mismatch', 'release_unsupported_target_or_mode', 'release_cancelled_job', 'release_ineligible_job_state', 'release_not_claimed', 'release_unauthorized_actor', 'release_revoked_authorization', 'release_wrong_owner', 'release_wrong_token', 'release_expired_token', 'release_manual_result_evidence_rejected', 'release_drift_missing_intended_publish_at', 'release_drift_missing_operator_due_at', 'release_drift_missing_timezone', 'release_drift_blank_timezone', 'release_drift_missing_scheduled_at', 'release_drift_missing_scheduled_by', 'release_drift_zero_schedule_revision', 'release_drift_negative_schedule_revision', 'release_drift_operator_offset_not_60_minutes', 'release_drift_job_state_inconsistent_with_schedule', 'release_drift_unscheduled_job_with_schedule_fields']) assert.match(releaseNoMutation, new RegExp(label));
+  for (const key of ['relinvalid', 'relmissingjob', 'relmissingtask', 'relmismatch', 'relunsupported', 'relcancelled', 'relineligible', 'relnotclaimed', 'relunauth', 'relrevoked', 'relwrongowner', 'relwrongtoken', 'relexpired', 'relmanual', 'reldrift31', 'reldrift32', 'reldrift33', 'reldrift34', 'reldrift35', 'reldrift36', 'reldrift37', 'reldrift38', 'reldrift39', 'reldrift40', 'reldrift41']) assert.match(releaseNoMutation, new RegExp(key));
+  assert.match(releaseNoMutation, /expected_rejections except select label,key from task17a_release_rejections/);
+  assert.match(releaseNoMutation, /task17a_release_rejections except select label,key from task17a_release_expected_rejections/);
+  assert.match(releaseNoMutation, /group by label having count\(\*\)<>1/);
+  assert.match(releaseNoMutation, /group by key having count\(\*\)<>1/);
+  assert.match(releaseNoMutation, /release_rejection_actual_count[\s\S]*release_rejection_actual_rows[\s\S]*release_rejection_expected_rows[\s\S]*release_rejection_missing_expected_rows[\s\S]*release_rejection_unexpected_actual_rows/);
+  assert.doesNotMatch(releaseNoMutation, />=\s*26/);
+  assert.doesNotMatch(releaseNoMutation, /count\(\*\)\s*>?=\s*\d+[^\n]*(populated|threshold)/i);
   assert.doesNotMatch(release, /task17a_test\.assert\s*\(\s*true\b/i);
 });
 
