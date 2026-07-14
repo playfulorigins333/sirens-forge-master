@@ -118,6 +118,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aReleaseMatrixIntegration.sql',
   ];
   const scenarioSource = scenarioFiles.map((file) => readFileSync(file, 'utf8')).join('\n') + '\n' + readFileSync('backend/creator-publishing-queue/tests/runTask17aUpgradeIntegration.mjs', 'utf8') + '\n' + readFileSync('backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs', 'utf8');
   const requiredLabels = [
@@ -240,6 +241,41 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'progress_changed_consent_hash_idempotency_conflict',
     'progress_complete_audit_idempotency_counts',
     'progress_complete_no_mutation_assertions',
+    'release_restore_unscheduled_ready',
+    'release_restore_before_operator_due',
+    'release_restore_after_operator_due',
+    'release_restore_after_publish_due',
+    'release_exact_replay',
+    'release_request_invalid',
+    'release_missing_job',
+    'release_missing_task',
+    'release_task_job_mismatch',
+    'release_unsupported_target_or_mode',
+    'release_cancelled_job',
+    'release_ineligible_job_state',
+    'release_not_claimed',
+    'release_unauthorized_actor',
+    'release_revoked_authorization',
+    'release_wrong_owner',
+    'release_wrong_token',
+    'release_expired_token',
+    'release_manual_result_evidence_rejected',
+    'release_changed_task_idempotency_conflict',
+    'release_changed_job_idempotency_conflict',
+    'release_changed_token_idempotency_conflict',
+    'release_drift_missing_intended_publish_at',
+    'release_drift_missing_operator_due_at',
+    'release_drift_missing_timezone',
+    'release_drift_blank_timezone',
+    'release_drift_missing_scheduled_at',
+    'release_drift_missing_scheduled_by',
+    'release_drift_zero_schedule_revision',
+    'release_drift_negative_schedule_revision',
+    'release_drift_operator_offset_not_60_minutes',
+    'release_drift_job_state_inconsistent_with_schedule',
+    'release_drift_unscheduled_job_with_schedule_fields',
+    'release_complete_audit_idempotency_counts',
+    'release_complete_no_mutation_assertions',
   ];
   for (const label of requiredLabels) {
     assert.match(scenarioSource, new RegExp(`TASK17A_SCENARIO_START: ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
@@ -249,6 +285,8 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   assert.match(runner, /task15 regression post-01400/);
   assert.match(runner, /runTask17aConcurrency\.mjs/);
   assert.match(runner, /task17aProgressMatrixIntegration\.sql/);
+  assert.match(runner, /task17aReleaseMatrixIntegration\.sql/);
+  assert.match(runner, /task17aReleaseMatrixIntegration\.sql/);
   assert.match(runner, /runTask17aCancellationConcurrency\.mjs/);
   assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
   assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
@@ -266,6 +304,7 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aReleaseMatrixIntegration.sql',
   ];
   const helperPattern = /\b(reset_fixture|create_secondary_work|create_additional_work|assert_claim_rejected|assert_claim_queue_status_rejected|assert_claim_job_state_rejected|assert_manual_result_field_blocks|run_scheduler_transition|assert_terminal_scheduler_superseded|assert_scheduler_claim_gate_cleanup)\s*\(\s*(\d{6})\b/g;
   const reserved = new Map<number, string>();
@@ -463,6 +502,68 @@ test('Task 17A progress matrix scenarios invoke the real progress RPC or rejecti
   assert.doesNotMatch(progress, /task17a_test\.assert\s*\(\s*true\b/i);
 });
 
+test('Task 17A release matrix scenarios invoke the real release RPC or release helpers', () => {
+  const release = readFileSync('backend/creator-publishing-queue/tests/task17aReleaseMatrixIntegration.sql', 'utf8');
+  assert.match(release, /create or replace function task17a_test\.assert_release_rejected[\s\S]*creator_publishing_release_onlyfans_operator_task/);
+  assert.match(release, /create or replace function task17a_test\.assert_release_success[\s\S]*creator_publishing_release_onlyfans_operator_task/);
+  assert.match(release, /create or replace function task17a_test\.release_preserved_snapshot[\s\S]*'claim_attempt_count'[\s\S]*'operator_progress_state'[\s\S]*'operator_progress_revision'[\s\S]*'operator_progress_updated_by'[\s\S]*'operator_progress_updated_at'[\s\S]*'assigned_operator_id'[\s\S]*'posted_by'[\s\S]*'posted_at'[\s\S]*'posted_confirmation'[\s\S]*'final_post_url'[\s\S]*'proof_screenshot_storage_key'[\s\S]*'skip_or_fail_reason'/);
+  assert.match(release, /create or replace function task17a_test\.assert_release_conflict_preserved[\s\S]*p_original_task_snapshot[\s\S]*p_original_job_snapshot[\s\S]*p_alternate_task_snapshot[\s\S]*p_alternate_job_snapshot[\s\S]*request_fingerprint[\s\S]*stored_result[\s\S]*created_at/);
+  const requiredReleaseLabels = [
+    'release_restore_unscheduled_ready',
+    'release_restore_before_operator_due',
+    'release_restore_after_operator_due',
+    'release_restore_after_publish_due',
+    'release_exact_replay',
+    'release_request_invalid',
+    'release_missing_job',
+    'release_missing_task',
+    'release_task_job_mismatch',
+    'release_unsupported_target_or_mode',
+    'release_cancelled_job',
+    'release_ineligible_job_state',
+    'release_not_claimed',
+    'release_unauthorized_actor',
+    'release_revoked_authorization',
+    'release_wrong_owner',
+    'release_wrong_token',
+    'release_expired_token',
+    'release_manual_result_evidence_rejected',
+    'release_changed_task_idempotency_conflict',
+    'release_changed_job_idempotency_conflict',
+    'release_changed_token_idempotency_conflict',
+    'release_drift_missing_intended_publish_at',
+    'release_drift_missing_operator_due_at',
+    'release_drift_missing_timezone',
+    'release_drift_blank_timezone',
+    'release_drift_missing_scheduled_at',
+    'release_drift_missing_scheduled_by',
+    'release_drift_zero_schedule_revision',
+    'release_drift_negative_schedule_revision',
+    'release_drift_operator_offset_not_60_minutes',
+    'release_drift_job_state_inconsistent_with_schedule',
+    'release_drift_unscheduled_job_with_schedule_fields',
+    'release_complete_audit_idempotency_counts',
+    'release_complete_no_mutation_assertions',
+  ];
+  const blocks = release.split(/\\echo TASK17A_SCENARIO_START:\s*/).slice(1);
+  const byLabel = new Map(blocks.map((block) => [block.split(/\r?\n/, 1)[0].trim(), block.replace(/^.*\r?\n/, '')]));
+  for (const label of requiredReleaseLabels) {
+    assert.ok(byLabel.has(label), `${label} block must exist`);
+    const body = byLabel.get(label) || '';
+    if (!label.startsWith('release_complete_')) {
+      assert.match(body, /creator_publishing_release_onlyfans_operator_task|assert_release_(success|rejected|conflict_preserved)/, `${label} must invoke release RPC or helper`);
+      assert.match(body, /task17a_test\.(assert|expect_error|assert_release_success|assert_release_rejected|assert_release_conflict_preserved)/, `${label} must assert release behavior`);
+    }
+  }
+  assert.match(byLabel.get('release_restore_after_operator_due') || '', /creator_publishing_update_onlyfans_operator_progress/);
+  assert.match(byLabel.get('release_restore_after_publish_due') || '', /creator_publishing_update_onlyfans_operator_progress[\s\S]*creator_publishing_update_onlyfans_operator_progress/);
+  assert.match(byLabel.get('release_exact_replay') || '', /stored_result=\(:'release_replay_idem_snapshot'\)::jsonb->'stored_result'[\s\S]*stored_result=\(\(:'release_replay_second'\)::jsonb - 'idempotent'\)/);
+  assert.match(byLabel.get('release_changed_task_idempotency_conflict') || '', /release_conflict_original_queue_snapshot[\s\S]*release_conflict_alternate_queue_snapshot[\s\S]*release_conflict_idempotency_snapshot/);
+  assert.match(byLabel.get('release_complete_audit_idempotency_counts') || '', /select count\(\*\)[\s\S]*action_type='release'/);
+  assert.match(byLabel.get('release_complete_no_mutation_assertions') || '', /task17a_release_rejections/);
+  assert.doesNotMatch(release, /task17a_test\.assert\s*\(\s*true\b/i);
+});
+
 test('Task 17A scenarios reject placeholders and require substantive executable bodies', () => {
   const task17aFiles = [
     ...listFiles('backend/creator-publishing-queue/tests').filter((file) => (/task17a|Task17a/.test(file) || /runTask17a/.test(file)) && !file.endsWith('task17aOperatorQueueSourceContract.test.ts')),
@@ -482,8 +583,9 @@ test('Task 17A scenarios reject placeholders and require substantive executable 
     'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aReleaseMatrixIntegration.sql',
   ];
-  const substantivePattern = /creator_publishing_|task17a_test\.(expect_error|assert_claim|assert_manual_result|run_scheduler|assert_terminal_scheduler|assert_scheduler_claim_gate_cleanup)|task17a_test\.assert\s*\(\s*(?!true\b)|select\s+count\s*\(|update\s+public\.|insert\s+into\s+public\.|psql\s*\(/i;
+  const substantivePattern = /creator_publishing_|task17a_test\.(expect_error|assert_claim|assert_manual_result|run_scheduler|assert_terminal_scheduler|assert_scheduler_claim_gate_cleanup|assert_release_success|assert_release_rejected|assert_release_conflict_preserved)|task17a_test\.assert\s*\(\s*(?!true\b)|select\s+count\s*\(|update\s+public\.|insert\s+into\s+public\.|psql\s*\(/i;
   for (const file of scenarioFiles) {
     const source = readFileSync(file, 'utf8');
     const parts = source.split(/TASK17A_SCENARIO_START:\s*/).slice(1);
