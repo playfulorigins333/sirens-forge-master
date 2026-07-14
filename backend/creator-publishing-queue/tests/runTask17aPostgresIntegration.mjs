@@ -10,7 +10,8 @@ const sqlTargets = [
   'task17aSafetyGatesIntegration.sql',
   'task17aSchedulerCompatibilityIntegration.sql',
   'task17aProgressMatrixIntegration.sql',
-  'task17aReleaseMatrixIntegration.sql'
+  'task17aReleaseMatrixIntegration.sql',
+  'task17aRecoveryMatrixIntegration.sql'
 ]
 const concurrencyTargets = new Set(['claim-concurrency', 'cancellation-concurrency'])
 const allowedTargets = new Set([...sqlTargets, ...concurrencyTargets])

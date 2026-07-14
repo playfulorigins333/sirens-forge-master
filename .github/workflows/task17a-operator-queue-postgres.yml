@@ -63,6 +63,7 @@ jobs:
           - task17aSchedulerCompatibilityIntegration.sql
           - task17aProgressMatrixIntegration.sql
           - task17aReleaseMatrixIntegration.sql
+          - task17aRecoveryMatrixIntegration.sql
           - claim-concurrency
           - cancellation-concurrency
     services:

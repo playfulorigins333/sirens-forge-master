@@ -194,6 +194,86 @@ begin
   ), 'expired_claim_fixture_valid');
 end $$;
 
+create or replace function task17a_test.recovery_preserved_snapshot(p_task_id uuid)
+returns jsonb language sql stable as $$
+  select jsonb_build_object(
+    'claim_attempt_count', q.claim_attempt_count,
+    'operator_progress_state', q.operator_progress_state,
+    'operator_progress_revision', q.operator_progress_revision,
+    'operator_progress_updated_by', q.operator_progress_updated_by,
+    'operator_progress_updated_at', q.operator_progress_updated_at,
+    'assigned_operator_id', q.assigned_operator_id,
+    'posted_by', q.posted_by,
+    'posted_at', q.posted_at,
+    'posted_confirmation', q.posted_confirmation,
+    'final_post_url', q.final_post_url,
+    'final_post_url_skip_reason', q.final_post_url_skip_reason,
+    'proof_screenshot_storage_key', q.proof_screenshot_storage_key,
+    'skip_or_fail_reason', q.skip_or_fail_reason
+  ) from public.creator_publishing_queue_tasks q where q.id=p_task_id
+$$;
+
+create or replace function task17a_test.assert_recovery_claimed_expired(p_label text,p_task_id uuid,p_actor_id uuid,p_attempts_before integer default null)
+returns void language plpgsql as $$
+begin
+  perform task17a_test.assert((select status='claimed' and claimed_by=p_actor_id and claimed_at is not null and claim_token is not null and claim_expires_at is not null and claim_expires_at < clock_timestamp() and (p_attempts_before is null or claim_attempt_count=p_attempts_before+1) from public.creator_publishing_queue_tasks where id=p_task_id), p_label || ' expired claimed ownership tuple valid');
+end $$;
+
+create or replace function task17a_test.assert_recovery_rejected(p_label text,p_expected_error text,p_actor_id uuid,p_task_id uuid,p_job_id uuid,p_idempotency_key text)
+returns void language plpgsql as $$
+declare before_task jsonb; after_task jsonb; before_job jsonb; after_job jsonb; before_audits integer; after_audits integer; before_idem integer; after_idem integer;
+begin
+  select to_jsonb(q) into before_task from public.creator_publishing_queue_tasks q where id=p_task_id;
+  select to_jsonb(j) into before_job from public.creator_publishing_platform_jobs j where id=p_job_id;
+  select count(*) into before_audits from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key=p_idempotency_key;
+  select count(*) into before_idem from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key=p_idempotency_key;
+  begin
+    perform public.creator_publishing_recover_expired_onlyfans_operator_claim(p_actor_id,p_task_id,p_job_id,p_idempotency_key);
+    raise exception 'TASK17A_EXPECTED_RECOVERY_REJECTION_NOT_RAISED:%', p_label;
+  exception when others then
+    if sqlerrm not like '%' || p_expected_error || '%' then
+      raise exception 'TASK17A_UNEXPECTED_RECOVERY_ERROR:% expected:% actual:%', p_label, p_expected_error, sqlerrm;
+    end if;
+  end;
+  select to_jsonb(q) into after_task from public.creator_publishing_queue_tasks q where id=p_task_id;
+  select to_jsonb(j) into after_job from public.creator_publishing_platform_jobs j where id=p_job_id;
+  select count(*) into after_audits from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key=p_idempotency_key;
+  select count(*) into after_idem from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key=p_idempotency_key;
+  perform task17a_test.assert(before_task is not distinct from after_task, p_label || ' recovery rejected queue unchanged');
+  perform task17a_test.assert(before_job is not distinct from after_job, p_label || ' recovery rejected job unchanged');
+  perform task17a_test.assert(before_audits=after_audits, p_label || ' no recovery audit');
+  perform task17a_test.assert(before_idem=after_idem, p_label || ' no recovery idempotency');
+  if after_task is not null then
+    perform task17a_test.assert(
+      before_task->>'posted_by' is not distinct from after_task->>'posted_by'
+      and before_task->>'posted_at' is not distinct from after_task->>'posted_at'
+      and before_task->>'posted_confirmation' is not distinct from after_task->>'posted_confirmation'
+      and before_task->>'final_post_url' is not distinct from after_task->>'final_post_url'
+      and before_task->>'final_post_url_skip_reason' is not distinct from after_task->>'final_post_url_skip_reason'
+      and before_task->>'proof_screenshot_storage_key' is not distinct from after_task->>'proof_screenshot_storage_key'
+      and before_task->>'skip_or_fail_reason' is not distinct from after_task->>'skip_or_fail_reason',
+      p_label || ' manual-result fields unchanged'
+    );
+  end if;
+  insert into task17a_recovery_rejections(label,key,task_id,job_id) values(p_label,p_idempotency_key,p_task_id,p_job_id) on conflict (label) do update set key=excluded.key, task_id=excluded.task_id, job_id=excluded.job_id;
+end $$;
+
+create or replace function task17a_test.assert_recovery_success(p_label text,p_expected_status text,p_actor_id uuid,p_task_id uuid,p_job_id uuid,p_idempotency_key text,p_preserved_baseline jsonb,p_job_snapshot jsonb)
+returns jsonb language plpgsql as $$
+declare result jsonb; prior_task public.creator_publishing_queue_tasks%rowtype;
+begin
+  select * into prior_task from public.creator_publishing_queue_tasks where id=p_task_id;
+  result := public.creator_publishing_recover_expired_onlyfans_operator_claim(p_actor_id,p_task_id,p_job_id,p_idempotency_key);
+  perform task17a_test.assert(result->>'ok'='true' and result->>'action'='expired_claim_recovery' and (result->>'queue_task_id')::uuid=p_task_id and (result->>'platform_job_id')::uuid=p_job_id and result->>'status'=p_expected_status, p_label || ' recovery result');
+  perform task17a_test.assert((select status=p_expected_status and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and task17a_test.recovery_preserved_snapshot(id)=p_preserved_baseline from public.creator_publishing_queue_tasks where id=p_task_id), p_label || ' restored status cleared ownership and preserved baseline');
+  perform task17a_test.assert((select to_jsonb(j)=p_job_snapshot from public.creator_publishing_platform_jobs j where id=p_job_id), p_label || ' recovery job unchanged');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key=p_idempotency_key)=1, p_label || ' one recovery audit');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key=p_idempotency_key)=1, p_label || ' one recovery idempotency');
+  perform task17a_test.assert((select actor_id=p_actor_id and before_state->>'status'='claimed' and (before_state->>'claimed_by')::uuid=prior_task.claimed_by and (before_state->>'claimed_at')::timestamptz=prior_task.claimed_at and (before_state->>'claim_expires_at')::timestamptz=prior_task.claim_expires_at and (before_state->>'claim_attempt_count')::int=prior_task.claim_attempt_count and before_state->>'progress_state'=prior_task.operator_progress_state and (before_state->>'progress_revision')::int=prior_task.operator_progress_revision and (before_state->>'progress_updated_by')::uuid is not distinct from prior_task.operator_progress_updated_by and (before_state->>'assigned_operator_id')::uuid is not distinct from prior_task.assigned_operator_id and after_state->>'action'='expired_claim_recovery' and (after_state->>'queue_task_id')::uuid=p_task_id and (after_state->>'platform_job_id')::uuid=p_job_id and after_state->>'status'=p_expected_status and not (before_state ? 'claim_token') and not (after_state ? 'claim_token') from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key=p_idempotency_key), p_label || ' truthful recovery audit without token');
+  insert into task17a_recovery_successes(label,key,task_id,job_id) values(p_label,p_idempotency_key,p_task_id,p_job_id) on conflict (label) do update set key=excluded.key, task_id=excluded.task_id, job_id=excluded.job_id;
+  return result;
+end $$;
+
 
 create or replace function task17a_test.create_additional_work(
   p_seed integer,

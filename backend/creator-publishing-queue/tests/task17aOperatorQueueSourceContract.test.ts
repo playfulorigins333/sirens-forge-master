@@ -119,6 +119,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aReleaseMatrixIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql',
   ];
   const scenarioSource = scenarioFiles.map((file) => readFileSync(file, 'utf8')).join('\n') + '\n' + readFileSync('backend/creator-publishing-queue/tests/runTask17aUpgradeIntegration.mjs', 'utf8') + '\n' + readFileSync('backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs', 'utf8');
   const requiredLabels = [
@@ -276,6 +277,51 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'release_drift_unscheduled_job_with_schedule_fields',
     'release_complete_audit_idempotency_counts',
     'release_complete_no_mutation_assertions',
+    'recovery_restore_unscheduled_ready',
+    'recovery_restore_before_operator_due',
+    'recovery_restore_after_operator_due',
+    'recovery_restore_after_publish_due',
+    'recovery_creator_self',
+    'recovery_authorized_operator',
+    'recovery_creator_after_operator_revoked',
+    'recovery_exact_replay',
+    'recovery_request_invalid_actor',
+    'recovery_request_invalid_task',
+    'recovery_request_invalid_job',
+    'recovery_idempotency_key_invalid',
+    'recovery_missing_job',
+    'recovery_missing_task',
+    'recovery_task_job_mismatch',
+    'recovery_unsupported_target_or_mode',
+    'recovery_cancelled_job',
+    'recovery_ineligible_job_state',
+    'recovery_unauthorized_actor',
+    'recovery_revoked_authorization',
+    'recovery_active_unexpired_claim',
+    'recovery_unclaimed_task',
+    'recovery_manual_result_evidence_rejected',
+    'recovery_partial_ownership_defensive_boundary',
+    'recovery_cleanup_creator_verification_drift',
+    'recovery_cleanup_account_revoked_drift',
+    'recovery_cleanup_consent_revoked_drift',
+    'recovery_cleanup_compliance_drift',
+    'recovery_cleanup_source_fingerprint_drift',
+    'recovery_changed_task_idempotency_conflict',
+    'recovery_changed_job_idempotency_conflict',
+    'recovery_same_key_different_actor_namespace',
+    'recovery_drift_missing_intended_publish_at',
+    'recovery_drift_missing_operator_due_at',
+    'recovery_drift_missing_timezone',
+    'recovery_drift_blank_timezone',
+    'recovery_drift_missing_scheduled_at',
+    'recovery_drift_missing_scheduled_by',
+    'recovery_drift_zero_schedule_revision',
+    'recovery_drift_negative_schedule_revision',
+    'recovery_drift_operator_offset_not_60_minutes',
+    'recovery_drift_job_state_inconsistent_with_schedule',
+    'recovery_drift_unscheduled_job_with_schedule_fields',
+    'recovery_complete_audit_idempotency_counts',
+    'recovery_complete_no_mutation_assertions',
   ];
   for (const label of requiredLabels) {
     assert.match(scenarioSource, new RegExp(`TASK17A_SCENARIO_START: ${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
@@ -286,7 +332,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   assert.match(runner, /runTask17aConcurrency\.mjs/);
   assert.match(runner, /task17aProgressMatrixIntegration\.sql/);
   assert.match(runner, /task17aReleaseMatrixIntegration\.sql/);
-  assert.match(runner, /task17aReleaseMatrixIntegration\.sql/);
+  assert.match(runner, /task17aRecoveryMatrixIntegration\.sql/);
   assert.match(runner, /runTask17aCancellationConcurrency\.mjs/);
   assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
   assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
@@ -294,7 +340,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   assert.match(workflow, /test:creator-publishing-task17a-upgrade/);
   assert.match(workflow, /test:creator-publishing-task17a-postgres/);
   assert.match(runner, /const sqlTargets = \[/);
-  for (const target of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql','task17aProgressMatrixIntegration.sql','task17aReleaseMatrixIntegration.sql','claim-concurrency','cancellation-concurrency']) {
+  for (const target of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql','task17aProgressMatrixIntegration.sql','task17aReleaseMatrixIntegration.sql','task17aRecoveryMatrixIntegration.sql','claim-concurrency','cancellation-concurrency']) {
     assert.ok(runner.includes(target));
     assert.ok(workflow.includes(target));
   }
@@ -320,6 +366,7 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aReleaseMatrixIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql',
   ];
   const helperPattern = /\b(reset_fixture|create_secondary_work|create_additional_work|assert_claim_rejected|assert_claim_queue_status_rejected|assert_claim_job_state_rejected|assert_manual_result_field_blocks|run_scheduler_transition|assert_terminal_scheduler_superseded|assert_scheduler_claim_gate_cleanup)\s*\(\s*(\d{6})\b/g;
   const reserved = new Map<number, string>();
@@ -336,6 +383,21 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
         reserved.set(claimedSeed, current);
       }
     }
+  }
+  const recoveryMatrix = readFileSync('backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql', 'utf8');
+  for (const match of recoveryMatrix.matchAll(/run_recovery_(?:success|rejection)_case\s*\(\s*'[^']+'\s*,\s*(\d{6})/g)) {
+    const seed = Number(match[1]);
+    const current = `backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql:run_recovery_case(${seed})`;
+    const prior = reserved.get(seed);
+    assert.equal(prior, undefined, `duplicate Task 17A fixture seed ${seed}: first ${prior}, second ${current}`);
+    reserved.set(seed, current);
+  }
+  for (const match of recoveryMatrix.matchAll(/recovery_prepare_fixture\s*\(\s*'[^']+'\s*,\s*(\d{6})/g)) {
+    const seed = Number(match[1]);
+    const current = `backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql:recovery_prepare_fixture(${seed})`;
+    const prior = reserved.get(seed);
+    assert.equal(prior, undefined, `duplicate Task 17A fixture seed ${seed}: first ${prior}, second ${current}`);
+    reserved.set(seed, current);
   }
   const scheduler = readFileSync('backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql', 'utf8');
   assert.match(scheduler, /reset_fixture\(926001/);
@@ -675,8 +737,9 @@ test('Task 17A scenarios reject placeholders and require substantive executable 
     'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aProgressMatrixIntegration.sql',
     'backend/creator-publishing-queue/tests/task17aReleaseMatrixIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql',
   ];
-  const substantivePattern = /creator_publishing_|task17a_test\.(expect_error|assert_claim|assert_manual_result|run_scheduler|assert_terminal_scheduler|assert_scheduler_claim_gate_cleanup|assert_release_success|assert_release_rejected|assert_release_conflict_preserved)|task17a_test\.assert\s*\(\s*(?!true\b)|select\s+count\s*\(|update\s+public\.|insert\s+into\s+public\.|psql\s*\(/i;
+  const substantivePattern = /creator_publishing_|task17a_test\.(expect_error|assert_claim|assert_manual_result|run_scheduler|assert_terminal_scheduler|assert_scheduler_claim_gate_cleanup|assert_release_success|assert_release_rejected|assert_release_conflict_preserved|run_recovery_success_case|run_recovery_rejection_case|assert_recovery_success|assert_recovery_rejected)|task17a_test\.assert\s*\(\s*(?!true\b)|select\s+count\s*\(|update\s+public\.|insert\s+into\s+public\.|psql\s*\(/i;
   for (const file of scenarioFiles) {
     const source = readFileSync(file, 'utf8');
     const parts = source.split(/TASK17A_SCENARIO_START:\s*/).slice(1);
@@ -696,4 +759,34 @@ test('prohibited Task 17B, Task 18, platform, and deployment work is absent', ()
   assert.doesNotMatch(migration, /final_post_url\s*=|scheduled_on_platform\s*=|awaiting_post_confirmation\s*=/i);
   assert.doesNotMatch(migration, /fetch\(|playwright|puppeteer|onlyfans\.com/i);
   assert.doesNotMatch(appSource, /task17a[\s\S]*(operator.*loader|onlyfans.*download|\/api\/autopost\/run|vercel.*cron)/i);
+});
+
+
+test('Task 17A Recovery matrix is explicit, substantive, and wired into diagnostics', () => {
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql', 'utf8');
+  const support = readFileSync('backend/creator-publishing-queue/tests/task17aTestSupport.sql', 'utf8');
+  const runner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
+  const workflow = readFileSync('.github/workflows/task17a-operator-queue-postgres.yml', 'utf8');
+  assert.match(support, /create or replace function task17a_test\.recovery_preserved_snapshot/);
+  assert.match(support, /create or replace function task17a_test\.assert_recovery_rejected[\s\S]*creator_publishing_recover_expired_onlyfans_operator_claim/);
+  assert.match(support, /create or replace function task17a_test\.assert_recovery_success[\s\S]*creator_publishing_recover_expired_onlyfans_operator_claim/);
+  assert.match(recovery, /create temporary table task17a_recovery_successes[\s\S]*on commit preserve rows/);
+  assert.match(recovery, /create temporary table task17a_recovery_rejections[\s\S]*on commit preserve rows/);
+  assert.doesNotMatch(recovery, /count\(\*\)\s*>=\s*\d+/);
+  assert.doesNotMatch(recovery, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+  for (const part of recovery.split(/alter table/i).slice(1)) assert.match(part, /drop constraint[\s\S]*rollback;/i);
+  for (const label of [
+    'recovery_restore_unscheduled_ready','recovery_restore_before_operator_due','recovery_restore_after_operator_due','recovery_restore_after_publish_due','recovery_creator_self','recovery_authorized_operator','recovery_creator_after_operator_revoked','recovery_exact_replay','recovery_request_invalid_actor','recovery_request_invalid_task','recovery_request_invalid_job','recovery_idempotency_key_invalid','recovery_missing_job','recovery_missing_task','recovery_task_job_mismatch','recovery_unsupported_target_or_mode','recovery_cancelled_job','recovery_ineligible_job_state','recovery_unauthorized_actor','recovery_revoked_authorization','recovery_active_unexpired_claim','recovery_unclaimed_task','recovery_manual_result_evidence_rejected','recovery_partial_ownership_defensive_boundary','recovery_cleanup_creator_verification_drift','recovery_cleanup_account_revoked_drift','recovery_cleanup_consent_revoked_drift','recovery_cleanup_compliance_drift','recovery_cleanup_source_fingerprint_drift','recovery_changed_task_idempotency_conflict','recovery_changed_job_idempotency_conflict','recovery_same_key_different_actor_namespace','recovery_drift_missing_intended_publish_at','recovery_drift_missing_operator_due_at','recovery_drift_missing_timezone','recovery_drift_blank_timezone','recovery_drift_missing_scheduled_at','recovery_drift_missing_scheduled_by','recovery_drift_zero_schedule_revision','recovery_drift_negative_schedule_revision','recovery_drift_operator_offset_not_60_minutes','recovery_drift_job_state_inconsistent_with_schedule','recovery_drift_unscheduled_job_with_schedule_fields','recovery_complete_audit_idempotency_counts','recovery_complete_no_mutation_assertions'
+  ]) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(recovery, new RegExp(`TASK17A_SCENARIO_START: ${escaped}[\\s\\S]*(creator_publishing_recover_expired_onlyfans_operator_claim|assert_recovery_success|assert_recovery_rejected|run_recovery_success_case|run_recovery_rejection_case|expect_error|select .* from task17a_recovery_)`));
+  }
+  assert.match(recovery, /task17a_recovery_expected_successes[\s\S]*except select label,key from task17a_recovery_successes[\s\S]*task17a_recovery_successes except select label,key from task17a_recovery_expected_successes/);
+  assert.match(recovery, /task17a_recovery_expected_rejections[\s\S]*except select label,key from task17a_recovery_rejections[\s\S]*task17a_recovery_rejections except select label,key from task17a_recovery_expected_rejections/);
+  assert.match(recovery, /idempotency_key='recconflict'\)=1/);
+  assert.match(recovery, /recovery_same_key_different_actor_namespace[\s\S]*no cross-actor idempotency leakage/);
+  assert.match(support, /before_state->>'claim_attempt_count'[\s\S]*before_state->>'progress_updated_by'[\s\S]*before_state->>'assigned_operator_id'/);
+  assert.ok(runner.includes('task17aRecoveryMatrixIntegration.sql'));
+  assert.ok(workflow.includes('task17aRecoveryMatrixIntegration.sql'));
+  assert.match(runner, /task17aReleaseMatrixIntegration\.sql'[\s\S]*task17aRecoveryMatrixIntegration\.sql'[\s\S]*]/);
 });
