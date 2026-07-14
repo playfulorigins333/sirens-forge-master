@@ -197,6 +197,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'cancel_job_changed_job_conflict',
     'cancel_job_expired_claim_cleanup',
     'cancel_job_unclaimed_cleanup',
+    'cancel_job_after_expired_recovery_cleanup',
     'cancel_job_non_onlyfans_assisted_exclusion',
     'cancel_plan_multi_job_cleanup',
     'cancel_plan_replay',
@@ -306,6 +307,39 @@ test('valid scheduled Task 17A fixtures use the schedule-phase helper', () => {
 });
 
 
+
+test('Task 17A cancellation helper archives active queue work without counting unclaimed rows as cleared claims', () => {
+  assert.match(migration, /create or replace function public\.creator_publishing_cancel_task17a_queue_claims/);
+  for (const status of [
+    'draft',
+    'needs_compliance_review',
+    'needs_creator_approval',
+    'ready_for_handoff',
+    'scheduled_internally',
+    'awaiting_operator',
+    'due_now',
+    'claimed',
+    'needs_fix',
+  ]) {
+    assert.match(migration, new RegExp(`q\\.status in \\([\\s\\S]*'${status}'`));
+  }
+  assert.match(migration, /operator_task_claim_cancelled_by_schedule_cancellation/);
+  assert.match(migration, /operator_task_archived_by_schedule_cancellation/);
+  assert.match(migration, /v_claim_cleared := task_rec\.status='claimed'/);
+  assert.match(migration, /if v_claim_cleared then v_count := v_count \+ 1; end if/);
+  assert.match(migration, /before_state[\s\S]*claim_expires_at[\s\S]*claim_attempt_count[\s\S]*progress_state[\s\S]*assigned_operator_id/);
+  assert.match(migration, /after_state[\s\S]*queue_task_id[\s\S]*platform_job_id[\s\S]*claim_cleared/);
+  const cancelHelper = migration.slice(migration.indexOf('create or replace function public.creator_publishing_cancel_task17a_queue_claims'), migration.indexOf('revoke all on function public.creator_publishing_cancel_task17a_queue_claims'));
+  assert.doesNotMatch(cancelHelper, /before_state[\s\S]{0,500}claim_token/);
+  assert.doesNotMatch(cancelHelper, /after_state[\s\S]{0,500}claim_token/);
+
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql', 'utf8');
+  assert.match(recovery, /TASK17A_SCENARIO_START: cancel_job_after_expired_recovery_cleanup/);
+  assert.match(recovery, /cancel_job_after_expired_recovery_cleanup[\s\S]*operator_task_archived_by_schedule_cancellation/);
+  assert.match(recovery, /cancel_job_unclaimed_cleanup[\s\S]*operator_task_archived_by_schedule_cancellation/);
+  assert.match(recovery, /cancel_plan_multi_job_cleanup[\s\S]*operator_task_claim_cancelled_by_schedule_cancellation[\s\S]*operator_task_archived_by_schedule_cancellation/);
+});
+
 test('Task 17A cancellation concurrency runner escapes psql meta-commands in JavaScript templates', () => {
   const cancelRunner = readFileSync('backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs', 'utf8');
   const lines = cancelRunner.split('\n').map((line) => line.trim());
@@ -318,6 +352,11 @@ test('Task 17A cancellation concurrency runner escapes psql meta-commands in Jav
   assert.ok(lines.some((line) => line.includes(escapedGset)));
   assert.equal(lines.some((line) => line.includes(unescapedGset)), false);
   assert.ok(cancelRunner.indexOf(escapedInclude) < cancelRunner.indexOf('task17a_test.reset_fixture'));
+  assert.match(cancelRunner, /function parseSessionJson/);
+  assert.match(cancelRunner, /recovery-vs-job-cancel-order-specific-final/);
+  assert.match(cancelRunner, /operator_task_archived_by_schedule_cancellation/);
+  assert.match(cancelRunner, /operator_task_claim_cancelled_by_schedule_cancellation/);
+  assert.match(cancelRunner, /before_state \? 'claim_token' or after_state \? 'claim_token'/);
   for (const label of ['claim_vs_job_cancel_concurrency','claim_vs_plan_cancel_concurrency','recovery_vs_job_cancel_concurrency']) {
     assert.match(cancelRunner, new RegExp(`TASK17A_SCENARIO_START: ${label}`));
   }

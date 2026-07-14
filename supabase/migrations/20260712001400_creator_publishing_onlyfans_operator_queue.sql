@@ -344,10 +344,13 @@ create or replace function public.creator_publishing_cancel_task17a_queue_claims
 returns integer language plpgsql security definer set search_path=public,pg_temp as $$
 declare
   task_rec public.creator_publishing_queue_tasks%rowtype;
+  job_rec public.creator_publishing_platform_jobs%rowtype;
   v_count integer := 0;
+  v_claim_cleared boolean;
+  v_action text;
 begin
-  for task_rec in
-    select q.*
+  for task_rec, job_rec in
+    select q, j
     from public.creator_publishing_queue_tasks q
     join public.creator_publishing_platform_jobs j
       on j.content_package_id=q.content_package_id
@@ -357,18 +360,20 @@ begin
     where j.id=any(p_platform_job_ids)
       and j.target_platform='onlyfans'
       and j.publishing_mode='assisted'
-      and q.status='claimed'
+      and q.status in ('draft','needs_compliance_review','needs_creator_approval','ready_for_handoff','scheduled_internally','awaiting_operator','due_now','claimed','needs_fix')
     order by q.id
     for update of q
   loop
+    v_claim_cleared := task_rec.status='claimed';
+    v_action := case when v_claim_cleared then 'operator_task_claim_cancelled_by_schedule_cancellation' else 'operator_task_archived_by_schedule_cancellation' end;
     update public.creator_publishing_queue_tasks
     set status='archived', claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, updated_at=p_now
     where id=task_rec.id;
     insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at)
-    values('creator_publishing_queue_task',task_rec.id,p_actor_id,'creator','operator_task_claim_cancelled_by_schedule_cancellation',
-      jsonb_build_object('status',task_rec.status,'claimed_by',task_rec.claimed_by,'claimed_at',task_rec.claimed_at,'claim_expires_at',task_rec.claim_expires_at,'progress_state',task_rec.operator_progress_state,'progress_revision',task_rec.operator_progress_revision,'assigned_operator_id',task_rec.assigned_operator_id),
-      jsonb_build_object('status','archived','queue_task_id',task_rec.id),p_idempotency_key,p_now);
-    v_count := v_count + 1;
+    values('creator_publishing_queue_task',task_rec.id,p_actor_id,'creator',v_action,
+      jsonb_build_object('status',task_rec.status,'claimed_by',task_rec.claimed_by,'claimed_at',task_rec.claimed_at,'claim_expires_at',task_rec.claim_expires_at,'claim_attempt_count',task_rec.claim_attempt_count,'progress_state',task_rec.operator_progress_state,'progress_revision',task_rec.operator_progress_revision,'progress_updated_by',task_rec.operator_progress_updated_by,'progress_updated_at',task_rec.operator_progress_updated_at,'assigned_operator_id',task_rec.assigned_operator_id),
+      jsonb_build_object('status','archived','queue_task_id',task_rec.id,'platform_job_id',job_rec.id,'creator_id',job_rec.creator_id,'content_package_id',job_rec.content_package_id,'platform_account_id',job_rec.platform_account_id,'target_platform',job_rec.target_platform,'claim_cleared',v_claim_cleared),p_idempotency_key,p_now);
+    if v_claim_cleared then v_count := v_count + 1; end if;
   end loop;
   return v_count;
 end; $$;

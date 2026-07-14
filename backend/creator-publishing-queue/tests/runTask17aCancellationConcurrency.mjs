@@ -36,6 +36,15 @@ function setup(seed, mode) {
   if (!match) throw new Error(`could not parse ${mode} fixture`)
   return JSON.parse(match[0])
 }
+
+function parseSessionJson(session) {
+  const text = `${session.stdout || ''}
+${session.stderr || ''}`
+  const match = text.match(/\{[\s\S]*\}/)
+  if (!match) return { ok: false, parsed: null, text }
+  try { return { ok: true, parsed: JSON.parse(match[0]), text } } catch { return { ok: false, parsed: null, text } }
+}
+
 async function race(label, fixture, aSql, bSql) {
   console.log(`TASK17A_SCENARIO_START: ${label}`)
   appendFileSync(logPath, `\nTASK17A_SCENARIO_START: ${label}\n`)
@@ -53,17 +62,23 @@ async function race(label, fixture, aSql, bSql) {
     child.on('close', (code) => resolve({ name, code, stdout, stderr }))
   })
   const [a, b] = await Promise.all([runSession('A', aFile), runSession('B', bFile)])
+  const parsedA = parseSessionJson(a)
+  const parsedB = parseSessionJson(b)
   appendFileSync(logPath, `
 ## ${label} session A
 ${a.stdout || ''}${a.stderr || ''}
 ## ${label} session B
-${b.stdout || ''}${b.stderr || ''}`)
+${b.stdout || ''}${b.stderr || ''}
+## ${label} parsed
+${JSON.stringify({ A: parsedA.parsed, B: parsedB.parsed })}
+`)
   if (`${a.stdout}${a.stderr}${b.stdout}${b.stderr}`.match(/deadlock detected|canceling statement due to lock timeout/i)) throw new Error(`${label} deadlock or lock timeout`)
   psql(`${label}-final`, `
     do $$ begin
       if not exists(select 1 from public.creator_publishing_platform_jobs where id='${fixture.job}'::uuid and job_state='archived') then raise exception 'TASK17A_ASSERT:${label} job archived'; end if;
       if not exists(select 1 from public.creator_publishing_queue_tasks where id='${fixture.task}'::uuid and status='archived' and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and posted_by is null and posted_at is null and posted_confirmation is false and final_post_url is null and final_post_url_skip_reason is null and proof_screenshot_storage_key is null and skip_or_fail_reason is null) then raise exception 'TASK17A_ASSERT:${label} queue archived unclaimed no task18'; end if;
       if exists(select 1 from public.creator_publishing_queue_tasks where id='${fixture.task}'::uuid and ((claimed_by is null)<>(claimed_at is null) or (claimed_by is null)<>(claim_token is null) or (claimed_by is null)<>(claim_expires_at is null))) then raise exception 'TASK17A_ASSERT:${label} partial ownership tuple'; end if;
+      if (select count(*) from public.creator_publishing_audit_events where entity_id='${fixture.task}'::uuid and action in ('operator_task_claim_cancelled_by_schedule_cancellation','operator_task_archived_by_schedule_cancellation')) <> 1 then raise exception 'TASK17A_ASSERT:${label} exact one queue cancellation audit'; end if;
       if (select count(*) from public.creator_publishing_audit_events where entity_id='${fixture.task}'::uuid and action='operator_task_claim_cancelled_by_schedule_cancellation') > 1 then raise exception 'TASK17A_ASSERT:${label} duplicate cleanup audit'; end if;
       if exists(select 1 from public.creator_publishing_audit_events where entity_id='${fixture.task}'::uuid and (before_state ? 'claim_token' or after_state ? 'claim_token')) then raise exception 'TASK17A_ASSERT:${label} claim token in audit'; end if;
     end $$;
@@ -86,6 +101,26 @@ try {
   await race('recovery_vs_job_cancel_concurrency', recovery,
     `select public.creator_publishing_recover_expired_onlyfans_operator_claim('${recovery.creator}','${recovery.task}','${recovery.job}','racerecover1');`,
     `select public.creator_publishing_cancel_job_schedule('${recovery.creator}','${recovery.job}','Race recovery cancel','racereccancel');`)
+  psql('recovery-vs-job-cancel-order-specific-final', `
+    do $$
+    declare
+      recovery_count integer;
+      claim_cleanup_count integer;
+      archive_count integer;
+    begin
+      select count(*) into recovery_count from public.creator_publishing_audit_events where entity_id='${recovery.task}'::uuid and action='operator_expired_claim_recovered';
+      select count(*) into claim_cleanup_count from public.creator_publishing_audit_events where entity_id='${recovery.task}'::uuid and action='operator_task_claim_cancelled_by_schedule_cancellation';
+      select count(*) into archive_count from public.creator_publishing_audit_events where entity_id='${recovery.task}'::uuid and action='operator_task_archived_by_schedule_cancellation';
+      if recovery_count=1 then
+        if archive_count<>1 or claim_cleanup_count<>0 then raise exception 'TASK17A_ASSERT: recovery race recovery-wins audit shape'; end if;
+      elsif recovery_count=0 then
+        if claim_cleanup_count<>1 or archive_count<>0 then raise exception 'TASK17A_ASSERT: recovery race cancellation-wins audit shape'; end if;
+      else
+        raise exception 'TASK17A_ASSERT: recovery race duplicate recovery audit';
+      end if;
+      if (select count(*) from public.creator_publishing_operator_action_idempotency where queue_task_id='${recovery.task}'::uuid and action_type='expired_claim_recovery') > 1 then raise exception 'TASK17A_ASSERT: recovery race duplicate recovery idempotency'; end if;
+    end $$;
+  `)
 } catch (error) {
   appendFileSync(logPath, `\nCANCELLATION CONCURRENCY FAILED: ${error?.stack || error}\n`)
   process.exit(1)
