@@ -343,14 +343,29 @@ grant execute on function public.creator_publishing_recover_expired_onlyfans_ope
 create or replace function public.creator_publishing_cancel_task17a_queue_claims(p_platform_job_ids uuid[], p_actor_id uuid, p_idempotency_key text, p_now timestamptz)
 returns integer language plpgsql security definer set search_path=public,pg_temp as $$
 declare
-  task_rec public.creator_publishing_queue_tasks%rowtype;
-  job_rec public.creator_publishing_platform_jobs%rowtype;
+  queue_job_rec record;
   v_count integer := 0;
   v_claim_cleared boolean;
   v_action text;
 begin
-  for task_rec, job_rec in
-    select q, j
+  for queue_job_rec in
+    select
+      q.id as queue_task_id,
+      q.status as prior_status,
+      q.claimed_by as prior_claimed_by,
+      q.claimed_at as prior_claimed_at,
+      q.claim_expires_at as prior_claim_expires_at,
+      q.claim_attempt_count as prior_claim_attempt_count,
+      q.operator_progress_state as prior_progress_state,
+      q.operator_progress_revision as prior_progress_revision,
+      q.operator_progress_updated_by as prior_progress_updated_by,
+      q.operator_progress_updated_at as prior_progress_updated_at,
+      q.assigned_operator_id as prior_assigned_operator_id,
+      j.id as platform_job_id,
+      j.creator_id as job_creator_id,
+      j.content_package_id as job_content_package_id,
+      j.platform_account_id as job_platform_account_id,
+      j.target_platform as job_target_platform
     from public.creator_publishing_queue_tasks q
     join public.creator_publishing_platform_jobs j
       on j.content_package_id=q.content_package_id
@@ -364,15 +379,15 @@ begin
     order by q.id
     for update of q
   loop
-    v_claim_cleared := task_rec.status='claimed';
+    v_claim_cleared := queue_job_rec.prior_status='claimed';
     v_action := case when v_claim_cleared then 'operator_task_claim_cancelled_by_schedule_cancellation' else 'operator_task_archived_by_schedule_cancellation' end;
     update public.creator_publishing_queue_tasks
     set status='archived', claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null, updated_at=p_now
-    where id=task_rec.id;
+    where id=queue_job_rec.queue_task_id;
     insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at)
-    values('creator_publishing_queue_task',task_rec.id,p_actor_id,'creator',v_action,
-      jsonb_build_object('status',task_rec.status,'claimed_by',task_rec.claimed_by,'claimed_at',task_rec.claimed_at,'claim_expires_at',task_rec.claim_expires_at,'claim_attempt_count',task_rec.claim_attempt_count,'progress_state',task_rec.operator_progress_state,'progress_revision',task_rec.operator_progress_revision,'progress_updated_by',task_rec.operator_progress_updated_by,'progress_updated_at',task_rec.operator_progress_updated_at,'assigned_operator_id',task_rec.assigned_operator_id),
-      jsonb_build_object('status','archived','queue_task_id',task_rec.id,'platform_job_id',job_rec.id,'creator_id',job_rec.creator_id,'content_package_id',job_rec.content_package_id,'platform_account_id',job_rec.platform_account_id,'target_platform',job_rec.target_platform,'claim_cleared',v_claim_cleared),p_idempotency_key,p_now);
+    values('creator_publishing_queue_task',queue_job_rec.queue_task_id,p_actor_id,'creator',v_action,
+      jsonb_build_object('status',queue_job_rec.prior_status,'claimed_by',queue_job_rec.prior_claimed_by,'claimed_at',queue_job_rec.prior_claimed_at,'claim_expires_at',queue_job_rec.prior_claim_expires_at,'claim_attempt_count',queue_job_rec.prior_claim_attempt_count,'progress_state',queue_job_rec.prior_progress_state,'progress_revision',queue_job_rec.prior_progress_revision,'progress_updated_by',queue_job_rec.prior_progress_updated_by,'progress_updated_at',queue_job_rec.prior_progress_updated_at,'assigned_operator_id',queue_job_rec.prior_assigned_operator_id),
+      jsonb_build_object('status','archived','queue_task_id',queue_job_rec.queue_task_id,'platform_job_id',queue_job_rec.platform_job_id,'creator_id',queue_job_rec.job_creator_id,'content_package_id',queue_job_rec.job_content_package_id,'platform_account_id',queue_job_rec.job_platform_account_id,'target_platform',queue_job_rec.job_target_platform,'claim_cleared',v_claim_cleared),p_idempotency_key,p_now);
     if v_claim_cleared then v_count := v_count + 1; end if;
   end loop;
   return v_count;

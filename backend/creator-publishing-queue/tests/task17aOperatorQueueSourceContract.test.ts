@@ -325,7 +325,13 @@ test('Task 17A cancellation helper archives active queue work without counting u
   }
   assert.match(migration, /operator_task_claim_cancelled_by_schedule_cancellation/);
   assert.match(migration, /operator_task_archived_by_schedule_cancellation/);
-  assert.match(migration, /v_claim_cleared := task_rec\.status='claimed'/);
+  assert.doesNotMatch(migration, /for\s+task_rec\s*,\s*job_rec\s+in/);
+  assert.match(migration, /queue_job_rec record/);
+  assert.match(migration, /for queue_job_rec in/);
+  assert.match(migration, /q\.id as queue_task_id[\s\S]*q\.status as prior_status[\s\S]*j\.id as platform_job_id[\s\S]*j\.creator_id as job_creator_id/);
+  assert.match(migration, /j\.content_package_id as job_content_package_id[\s\S]*j\.platform_account_id as job_platform_account_id[\s\S]*j\.target_platform as job_target_platform/);
+  assert.match(migration, /for update of q/);
+  assert.match(migration, /v_claim_cleared := queue_job_rec\.prior_status='claimed'/);
   assert.match(migration, /if v_claim_cleared then v_count := v_count \+ 1; end if/);
   assert.match(migration, /before_state[\s\S]*claim_expires_at[\s\S]*claim_attempt_count[\s\S]*progress_state[\s\S]*assigned_operator_id/);
   assert.match(migration, /after_state[\s\S]*queue_task_id[\s\S]*platform_job_id[\s\S]*claim_cleared/);
