@@ -514,9 +514,9 @@ select task17a_test.assert(not exists(select 1 from public.creator_publishing_op
 drop table if exists task17a_release_expected_rejections;
 create temp table task17a_release_expected_rejections(label text primary key, key text unique) on commit preserve rows;
 insert into task17a_release_expected_rejections(label,key) values
-  ('release_request_invalid','relinvalid'),
-  ('release_missing_job','relmissingjob'),
-  ('release_missing_task','relmissingtask'),
+  ('release_request_invalid','relreqbad'),
+  ('release_missing_job','relmissjob'),
+  ('release_missing_task','relmisstask'),
   ('release_task_job_mismatch','relmismatch'),
   ('release_unsupported_target_or_mode','relunsupported'),
   ('release_cancelled_job','relcancelled'),

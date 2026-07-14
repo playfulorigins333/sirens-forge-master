@@ -633,7 +633,18 @@ test('Task 17A release matrix scenarios invoke the real release RPC or release h
   assert.doesNotMatch(releaseNoMutation, /on commit drop/i);
   assert.doesNotMatch(releaseNoMutation, /on commit delete rows/i);
   for (const label of ['release_request_invalid', 'release_missing_job', 'release_missing_task', 'release_task_job_mismatch', 'release_unsupported_target_or_mode', 'release_cancelled_job', 'release_ineligible_job_state', 'release_not_claimed', 'release_unauthorized_actor', 'release_revoked_authorization', 'release_wrong_owner', 'release_wrong_token', 'release_expired_token', 'release_manual_result_evidence_rejected', 'release_drift_missing_intended_publish_at', 'release_drift_missing_operator_due_at', 'release_drift_missing_timezone', 'release_drift_blank_timezone', 'release_drift_missing_scheduled_at', 'release_drift_missing_scheduled_by', 'release_drift_zero_schedule_revision', 'release_drift_negative_schedule_revision', 'release_drift_operator_offset_not_60_minutes', 'release_drift_job_state_inconsistent_with_schedule', 'release_drift_unscheduled_job_with_schedule_fields']) assert.match(releaseNoMutation, new RegExp(label));
-  for (const key of ['relinvalid', 'relmissingjob', 'relmissingtask', 'relmismatch', 'relunsupported', 'relcancelled', 'relineligible', 'relnotclaimed', 'relunauth', 'relrevoked', 'relwrongowner', 'relwrongtoken', 'relexpired', 'relmanual', 'reldrift31', 'reldrift32', 'reldrift33', 'reldrift34', 'reldrift35', 'reldrift36', 'reldrift37', 'reldrift38', 'reldrift39', 'reldrift40', 'reldrift41']) assert.match(releaseNoMutation, new RegExp(key));
+  for (const key of ['relreqbad', 'relmissjob', 'relmisstask', 'relmismatch', 'relunsupported', 'relcancelled', 'relineligible', 'relnotclaimed', 'relunauth', 'relrevoked', 'relwrongowner', 'relwrongtoken', 'relexpired', 'relmanual', 'reldrift31', 'reldrift32', 'reldrift33', 'reldrift34', 'reldrift35', 'reldrift36', 'reldrift37', 'reldrift38', 'reldrift39', 'reldrift40', 'reldrift41']) assert.match(releaseNoMutation, new RegExp(key));
+  const expectedReleaseRejections = new Map(Array.from(releaseNoMutation.matchAll(/\('([^']+)','([^']+)'\)/g)).map((match) => [match[1], match[2]]));
+  const executableReleaseRejections = new Map(release.split('\n').flatMap((line) => {
+    const match = line.match(/assert_release_rejected\('([^']+)'[^\n]*,'([^']+)'\);/);
+    return match ? [[match[1], match[2]]] : [];
+  }));
+  for (const [label, key] of expectedReleaseRejections) {
+    assert.equal(executableReleaseRejections.get(label), key, `${label} expected registry key must match executable release rejection key`);
+  }
+  assert.equal(executableReleaseRejections.get('release_request_invalid'), 'relreqbad');
+  assert.equal(executableReleaseRejections.get('release_missing_job'), 'relmissjob');
+  assert.equal(executableReleaseRejections.get('release_missing_task'), 'relmisstask');
   assert.match(releaseNoMutation, /expected_rejections except select label,key from task17a_release_rejections/);
   assert.match(releaseNoMutation, /task17a_release_rejections except select label,key from task17a_release_expected_rejections/);
   assert.match(releaseNoMutation, /group by label having count\(\*\)<>1/);
