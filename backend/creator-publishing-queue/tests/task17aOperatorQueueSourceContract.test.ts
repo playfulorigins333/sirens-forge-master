@@ -174,6 +174,44 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
 });
 
+
+test('Task 17A fixture seeds are unique and scheduler namespace is isolated', () => {
+  const scenarioFiles = [
+    'backend/creator-publishing-queue/tests/task17aPostgresIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aAuthorizationTimingIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aSafetyGatesIntegration.sql',
+    'backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql',
+  ];
+  const helperPattern = /\b(reset_fixture|create_secondary_work|assert_claim_rejected|assert_claim_queue_status_rejected|assert_claim_job_state_rejected|assert_manual_result_field_blocks|run_scheduler_transition|assert_terminal_scheduler_superseded)\s*\(\s*(\d{6})\b/g;
+  const reserved = new Map<number, string>();
+  for (const file of scenarioFiles) {
+    const source = readFileSync(file, 'utf8');
+    for (const match of source.matchAll(helperPattern)) {
+      const helper = match[1];
+      const seed = Number(match[2]);
+      const claimedSeeds = helper === 'assert_manual_result_field_blocks' ? [seed, seed + 1000] : [seed];
+      for (const claimedSeed of claimedSeeds) {
+        const current = `${file}:${helper}(${seed})`;
+        const prior = reserved.get(claimedSeed);
+        assert.equal(prior, undefined, `duplicate Task 17A fixture seed ${claimedSeed}: first ${prior}, second ${current}`);
+        reserved.set(claimedSeed, current);
+      }
+    }
+  }
+  const scheduler = readFileSync('backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql', 'utf8');
+  assert.match(scheduler, /reset_fixture\(926001/);
+  assert.match(scheduler, /run_scheduler_transition\(926101/);
+  assert.doesNotMatch(scheduler, /reset_fixture\(924/);
+  assert.doesNotMatch(scheduler, /924\d{2}00-0000-4000-8000-/);
+  const idempotencyRecovery = readFileSync('backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql', 'utf8');
+  assert.match(idempotencyRecovery, /assert_manual_result_field_blocks\(924001/);
+  assert.match(idempotencyRecovery, /seed \+ 1000/);
+  const runner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
+  assert.match(runner, /TASK17A_CURRENT_SCENARIOS_PASSED/);
+  assert.doesNotMatch(runner, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
+});
+
 test('prohibited Task 17B, Task 18, platform, and deployment work is absent', () => {
   assert.doesNotMatch(migration, /final_post_url\s*=|scheduled_on_platform\s*=|awaiting_post_confirmation\s*=/i);
   assert.doesNotMatch(migration, /fetch\(|playwright|puppeteer|onlyfans\.com/i);
