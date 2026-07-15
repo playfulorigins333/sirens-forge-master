@@ -14,6 +14,14 @@ export const canShowReleaseControl = (r: Pick<OnlyFansOperatorListRecord,"bucket
 export const getNextProgressState = (s: OnlyFansOperatorProgressState): OnlyFansOperatorProgressState | null => s === "not_started" ? "preparing" : s === "preparing" ? "prepared" : s === "prepared" ? "handoff_ready" : null
 export const canShowProgressControl = (r: Pick<OnlyFansOperatorListRecord,"bucket"|"progressState">) => r.bucket === "claimed_by_me" && getNextProgressState(r.progressState) !== null
 export const canShowRecoveryControl = (r: Pick<OnlyFansOperatorListRecord,"bucket"|"attentionReasons">) => r.bucket === "needs_attention" && r.attentionReasons.includes("expired_claim_recovery_available")
+
+export function isOperatorActionSubmissionDisabled(action: OperatorActionName, record: OnlyFansOperatorListRecord, successLocked: boolean): boolean {
+  if (successLocked) return true
+  if (action === "claim") return !canShowClaimControl(record)
+  if (action === "release") return !canShowReleaseControl(record) || record.readOnly === true
+  if (action === "progress") return !canShowProgressControl(record) || record.readOnly === true
+  return !canShowRecoveryControl(record)
+}
 export function buildAuthoritativeTaskVersion(r: Pick<OnlyFansOperatorListRecord,"platformJobId"|"queueStatus"|"progressState"|"progressRevision"|"claimExpiresAt"|"bucket"|"readOnly"|"attentionReasons">) { return JSON.stringify({platformJobId:r.platformJobId,queueStatus:r.queueStatus,progressState:r.progressState,progressRevision:r.progressRevision,claimExpiresAt:r.claimExpiresAt,bucket:r.bucket,readOnly:r.readOnly,attentionReasons:[...r.attentionReasons].sort()}) }
 export function deriveOperatorActionKeys(seed: string): OperatorActionKeys { return {claim:`${seed}-claim`,release:`${seed}-release`,progress:`${seed}-progress`,recovery:`${seed}-recovery`} }
 export const createOperatorLifecycle = (authoritativeTaskVersion: string, serverSeed: string): OperatorLifecycle => ({authoritativeTaskVersion,serverSeed,activeSeed:serverSeed,successLocked:false,actionState:"idle",keys:deriveOperatorActionKeys(serverSeed)})
