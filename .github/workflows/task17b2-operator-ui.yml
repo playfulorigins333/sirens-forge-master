@@ -1,0 +1,48 @@
+name: Task 17B-2 Operator Queue UI
+on:
+  pull_request:
+    paths:
+      - 'app/creator/publishing-queue/operator/page.tsx'
+      - 'app/creator/publishing-queue/operator/[platformJobId]/page.tsx'
+      - 'app/creator/publishing-queue/operator/actions.ts'
+      - 'app/creator/publishing-queue/operator/OperatorTaskControls.tsx'
+      - 'app/creator/publishing-queue/operator/presentation.ts'
+      - 'backend/creator-publishing-queue/tests/task17b2OperatorQueueUi.test.ts'
+      - 'backend/creator-publishing-queue/tests/task17b2OperatorQueueSourceContract.test.ts'
+      - '.github/workflows/task17b2-operator-ui.yml'
+      - 'app/creator/publishing-queue/page.tsx'
+      - 'lib/creator-publishing-queue/approval/types.ts'
+      - 'lib/creator-publishing-queue/ui/status.ts'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: 2dd26cd992c305d127e748fe8754aec2b4506431
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+      STRIPE_SECRET_KEY: sk_test_dummy
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      RESEND_API_KEY: re_dummy
+      R2_ACCOUNT_ID: dummy
+      R2_ACCESS_KEY_ID: dummy
+      R2_SECRET_ACCESS_KEY: dummy
+      R2_BUCKET: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: git cat-file -e "$BASE_SHA^{commit}" && git merge-base --is-ancestor "$BASE_SHA" HEAD
+      - run: |
+          allowed='^(app/creator/publishing-queue/operator/page\.tsx|app/creator/publishing-queue/operator/\[platformJobId\]/page\.tsx|app/creator/publishing-queue/operator/actions\.ts|app/creator/publishing-queue/operator/OperatorTaskControls\.tsx|app/creator/publishing-queue/operator/presentation\.ts|backend/creator-publishing-queue/tests/task17b2OperatorQueueUi\.test\.ts|backend/creator-publishing-queue/tests/task17b2OperatorQueueSourceContract\.test\.ts|\.github/workflows/task17b2-operator-ui\.yml|app/creator/publishing-queue/page\.tsx|lib/creator-publishing-queue/approval/types\.ts|lib/creator-publishing-queue/ui/status\.ts)$'
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
+          test -n "$changed"
+          echo "$changed" | while read f; do echo "$f" | grep -Eq "$allowed" || { echo "Unexpected path: $f"; exit 1; }; done
+      - run: test -z "$(git diff --name-only "$BASE_SHA"...HEAD -- supabase/migrations package.json package-lock.json .github/workflows/task17b1-operator-services.yml lib/creator-publishing-queue/operator-queue)"
+      - run: npm ci
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b2OperatorQueueUi.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b2OperatorQueueSourceContract.test.ts
+      - run: npm run test:creator-publishing-task17b1
+      - run: npm run test:creator-publishing-queue
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: git diff --check

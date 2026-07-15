@@ -4,7 +4,7 @@ import type { CreatorPublishingComplianceStatus } from "../review"
 export const creatorPublishingApprovalDecisions = ["approve", "reject"] as const
 export type CreatorPublishingApprovalDecision = (typeof creatorPublishingApprovalDecisions)[number]
 export type CreatorPublishingApprovalStatus = "pending" | "approved" | "rejected"
-export type CreatorPublishingQueueTaskStatus = "draft" | "needs_compliance_review" | "needs_creator_approval" | "ready_for_handoff" | "scheduled_internally" | "due_now" | "claimed" | "confirmed_posted_manual" | "skipped" | "failed_manual_upload" | "needs_fix" | "blocked" | "archived"
+export type CreatorPublishingQueueTaskStatus = "draft" | "needs_compliance_review" | "needs_creator_approval" | "ready_for_handoff" | "scheduled_internally" | "awaiting_operator" | "due_now" | "claimed" | "confirmed_posted_manual" | "skipped" | "failed_manual_upload" | "needs_fix" | "blocked" | "archived"
 
 export type CreatorPublishingApprovalErrorCode =
   | "APPROVAL_UNAUTHORIZED" | "APPROVAL_CREATOR_MISMATCH" | "APPROVAL_PACKAGE_NOT_FOUND" | "APPROVAL_INVALID_COMPLIANCE_STATUS"
