@@ -408,7 +408,27 @@ test('future reschedule clears active Task 17A claims and progress/reschedule co
   assert.match(progressReschedule, /creator_publishing_update_onlyfans_operator_progress[\s\S]*creator_publishing_schedule_plan/);
   assert.match(progressReschedule, /OPERATOR_CLAIM_TOKEN_MISMATCH/);
   assert.match(progressReschedule, /operator_task_claim_cleared_by_reschedule/);
+  assert.match(progressReschedule, /operator_preparation_started[\s\S]*idempotency_key='prsprog\$\{seed\}'/);
+  assert.match(progressReschedule, /action_type='progress_update'[\s\S]*idempotency_key='prsprog\$\{seed\}'/);
+  assert.doesNotMatch(progressReschedule, /action='operator_progress_updated'|action=\"operator_progress_updated\"/);
+  assert.match(progressReschedule, /queue baseline[\s\S]*claim_attempt_count[\s\S]*operator_progress_state[\s\S]*operator_progress_revision[\s\S]*operator_progress_updated_by[\s\S]*operator_progress_updated_at[\s\S]*assigned_operator_id/);
+  assert.match(progressReschedule, /posted_by[\s\S]*posted_at[\s\S]*posted_confirmation[\s\S]*final_post_url[\s\S]*final_post_url_skip_reason[\s\S]*proof_screenshot_storage_key[\s\S]*skip_or_fail_reason/);
+  assert.match(progressReschedule, /claim_attempt_count === queueBaseline\.claim_attempt_count/);
+  assert.match(progressReschedule, /sameField\(finalState, queueBaseline, 'assigned_operator_id'\)/);
+  assert.match(progressReschedule, /task18Fields = \['posted_by', 'posted_at', 'posted_confirmation', 'final_post_url', 'final_post_url_skip_reason', 'proof_screenshot_storage_key', 'skip_or_fail_reason'\]/);
+  assert.match(progressReschedule, /operator_due_exact_offset[\s\S]*j\.operator_due_at = j\.intended_publish_at - interval '60 minutes'/);
+  assert.match(progressReschedule, /runRace\(919001, 'progress_first_then_reschedule', 'progress-wins'\)/);
+  assert.match(progressReschedule, /runRace\(919002, 'reschedule_first_then_progress', 'reschedule-wins'\)/);
+  assert.match(progressReschedule, /runRace\(919003, 'simultaneous_progress_reschedule', 'either'\)/);
+  assert.match(progressReschedule, /expectedOrder[\s\S]*progressDelay[\s\S]*rescheduleDelay/);
+  assert.match(progressReschedule, /select pg_sleep\(0\.5\)/);
+  assert.match(progressReschedule, /observedOrder[\s\S]*expectedOrderOk/);
+  assert.match(progressReschedule, /parseLastJson\(progress\.out\)[\s\S]*progressResult\?\.ok === true[\s\S]*progressResult\?\.action === 'progress_update'/);
+  assert.match(progressReschedule, /parseLastJson\(reschedule\.out\)[\s\S]*operator_claim_cleanup[\s\S]*rescheduleResult\?\.ok === true/);
+  assert.match(progressReschedule, /beforeStaleQueue[\s\S]*afterStaleQueue[\s\S]*beforeStaleJob[\s\S]*afterStaleJob/);
+  assert.match(progressReschedule, /staleState[\s\S]*prsstale\$\{seed\}[\s\S]*audit_rows[\s\S]*idempotency_rows/);
   assert.match(progressReschedule, /deadlock[\s\S]*timeout/);
+  assert.match(progressReschedule, /TASK17A_PROGRESS_RESCHEDULE_CONCURRENCY_PASSED/);
 });
 
 test('Task 17A fixture seeds are unique and scheduler namespace is isolated', () => {
