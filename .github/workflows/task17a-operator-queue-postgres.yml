@@ -1,0 +1,118 @@
+name: Task 17A Operator Queue PostgreSQL
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql'
+      - 'backend/creator-publishing-queue/tests/task15PostgresIntegration.sql'
+      - 'backend/creator-publishing-queue/tests/task17a*'
+      - 'backend/creator-publishing-queue/tests/runTask17a*'
+      - '.github/workflows/task17a-operator-queue-postgres.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Source contract tests
+        run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
+      - name: Task 17A disposable 01300-to-01400 upgrade preflight
+        run: npm run test:creator-publishing-task17a-upgrade
+      - name: Task 17A PostgreSQL integration and concurrency
+        run: npm run test:creator-publishing-task17a-postgres
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task17a-postgres-diagnostics
+          path: task17a-postgres-diagnostics.log
+          if-no-files-found: ignore
+
+  diagnostics:
+    needs: postgres
+    if: ${{ always() && needs.postgres.result == 'failure' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - task17aPostgresIntegration.sql
+          - task17aAuthorizationTimingIntegration.sql
+          - task17aIdempotencyRecoveryIntegration.sql
+          - task17aSafetyGatesIntegration.sql
+          - task17aSchedulerCompatibilityIntegration.sql
+          - task17aProgressMatrixIntegration.sql
+          - task17aReleaseMatrixIntegration.sql
+          - task17aRecoveryMatrixIntegration.sql
+          - claim-concurrency
+          - cancellation-concurrency
+          - progress-reschedule-concurrency
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TASK17A_DIAGNOSTIC_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Task 17A targeted diagnostic
+        id: diagnostic
+        run: npm run test:creator-publishing-task17a-postgres
+      - name: Diagnostic summary
+        if: always()
+        shell: bash
+        run: |
+          safe_target="$(printf '%s' '${{ matrix.target }}' | sed -E 's/[^A-Za-z0-9_-]/_/g')"
+          log="task17a-postgres-diagnostics-${safe_target}.log"
+          artifact="task17a-diagnostic-${safe_target}-${{ github.run_attempt }}"
+          status="${{ steps.diagnostic.outcome }}"
+          {
+            echo "### Task 17A diagnostic target"
+            echo "- Target: \\`${{ matrix.target }}\\`"
+            echo "- Status: \\`${status}\\`"
+            echo "- Artifact: \\`${artifact}\\`"
+            echo ""
+            echo "#### Final 40 diagnostic log lines"
+            echo '```text'
+            if [ -f "$log" ]; then tail -n 40 "$log"; else echo "Diagnostic log not found: $log"; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload diagnostic target log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task17a-diagnostic-${{ matrix.target }}-${{ github.run_attempt }}
+          path: task17a-postgres-diagnostics-*.log
+          if-no-files-found: ignore

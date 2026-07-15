@@ -1,0 +1,333 @@
+\set ON_ERROR_STOP on
+\i backend/creator-publishing-queue/tests/task17aTestSupport.sql
+
+create temporary table if not exists task17a_progress_rejections(
+  label text primary key,
+  key text not null,
+  task_id uuid,
+  job_id uuid
+) on commit preserve rows;
+
+create or replace function task17a_test.progress_preserved_snapshot(p_task_id uuid)
+returns jsonb language sql stable as $$
+  select jsonb_build_object(
+    'status', q.status,
+    'claimed_by', q.claimed_by,
+    'claimed_at', q.claimed_at,
+    'claim_token', q.claim_token,
+    'claim_expires_at', q.claim_expires_at,
+    'claim_attempt_count', q.claim_attempt_count,
+    'assigned_operator_id', q.assigned_operator_id,
+    'posted_by', q.posted_by,
+    'posted_at', q.posted_at,
+    'posted_confirmation', q.posted_confirmation,
+    'final_post_url', q.final_post_url,
+    'final_post_url_skip_reason', q.final_post_url_skip_reason,
+    'proof_screenshot_storage_key', q.proof_screenshot_storage_key,
+    'skip_or_fail_reason', q.skip_or_fail_reason
+  )
+  from public.creator_publishing_queue_tasks q
+  where q.id=p_task_id
+$$;
+
+create or replace function task17a_test.assert_progress_conflict_preserved(
+  p_label text,
+  p_original_task_id uuid,
+  p_original_job_id uuid,
+  p_alternate_task_id uuid,
+  p_alternate_job_id uuid,
+  p_original_task_snapshot jsonb,
+  p_original_job_snapshot jsonb,
+  p_alternate_task_snapshot jsonb,
+  p_alternate_job_snapshot jsonb,
+  p_idempotency_snapshot jsonb,
+  p_success_audit_count integer
+) returns void language plpgsql as $$
+begin
+  perform task17a_test.assert((select to_jsonb(q)=p_original_task_snapshot from public.creator_publishing_queue_tasks q where id=p_original_task_id), p_label || ' original queue unchanged');
+  perform task17a_test.assert((select to_jsonb(j)=p_original_job_snapshot from public.creator_publishing_platform_jobs j where id=p_original_job_id), p_label || ' original job unchanged');
+  perform task17a_test.assert((select to_jsonb(q)=p_alternate_task_snapshot from public.creator_publishing_queue_tasks q where id=p_alternate_task_id), p_label || ' alternate queue unchanged');
+  perform task17a_test.assert((select to_jsonb(j)=p_alternate_job_snapshot from public.creator_publishing_platform_jobs j where id=p_alternate_job_id), p_label || ' alternate job unchanged');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_audit_events where idempotency_key='progconflict' and action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready'))=p_success_audit_count, p_label || ' successful audit count unchanged');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key='progconflict')=1, p_label || ' one progress idempotency row remains');
+  perform task17a_test.assert((select request_fingerprint=p_idempotency_snapshot->>'request_fingerprint' and stored_result=(p_idempotency_snapshot->'stored_result') and queue_task_id=(p_idempotency_snapshot->>'queue_task_id')::uuid and platform_job_id=(p_idempotency_snapshot->>'platform_job_id')::uuid and created_at=(p_idempotency_snapshot->>'created_at')::timestamptz from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key='progconflict'), p_label || ' stored idempotency row unchanged');
+  perform task17a_test.assert(not exists(select 1 from public.creator_publishing_queue_tasks where id in (p_original_task_id,p_alternate_task_id) and (posted_by is not null or posted_at is not null or posted_confirmation is true or final_post_url is not null or final_post_url_skip_reason is not null or proof_screenshot_storage_key is not null or skip_or_fail_reason is not null)), p_label || ' no Task 18 fields on either queue');
+end $$;
+
+create or replace function task17a_test.assert_progress_rejected(
+  p_label text,
+  p_expected_error text,
+  p_task_id uuid,
+  p_job_id uuid,
+  p_idempotency_key text,
+  p_call_sql text
+) returns void language plpgsql as $$
+declare
+  before_task jsonb;
+  after_task jsonb;
+  before_job jsonb;
+  after_job jsonb;
+  before_audits integer;
+  after_audits integer;
+  before_idem integer;
+  after_idem integer;
+begin
+  select to_jsonb(q) into before_task from public.creator_publishing_queue_tasks q where id=p_task_id;
+  select to_jsonb(j) into before_job from public.creator_publishing_platform_jobs j where id=p_job_id;
+  select count(*) into before_audits from public.creator_publishing_audit_events where action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready') and idempotency_key=p_idempotency_key;
+  select count(*) into before_idem from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key=p_idempotency_key;
+
+  begin
+    execute p_call_sql;
+    raise exception 'TASK17A_EXPECTED_PROGRESS_REJECTION_NOT_RAISED:%', p_label;
+  exception when others then
+    if sqlerrm not like '%' || p_expected_error || '%' then
+      raise exception 'TASK17A_UNEXPECTED_PROGRESS_ERROR:% expected:% actual:%', p_label, p_expected_error, sqlerrm;
+    end if;
+  end;
+
+  select to_jsonb(q) into after_task from public.creator_publishing_queue_tasks q where id=p_task_id;
+  select to_jsonb(j) into after_job from public.creator_publishing_platform_jobs j where id=p_job_id;
+  select count(*) into after_audits from public.creator_publishing_audit_events where action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready') and idempotency_key=p_idempotency_key;
+  select count(*) into after_idem from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key=p_idempotency_key;
+
+  perform task17a_test.assert(before_task is not distinct from after_task, p_label || ' queue row unchanged');
+  perform task17a_test.assert(before_job is not distinct from after_job, p_label || ' job row unchanged');
+  perform task17a_test.assert(before_audits=after_audits, p_label || ' no progress audit');
+  perform task17a_test.assert(before_idem=after_idem, p_label || ' no progress idempotency');
+  if after_task is not null then
+    perform task17a_test.assert(coalesce(after_task->>'posted_confirmation','false')='false' and after_task->>'posted_by' is null and after_task->>'posted_at' is null and after_task->>'final_post_url' is null and after_task->>'final_post_url_skip_reason' is null and after_task->>'proof_screenshot_storage_key' is null and after_task->>'skip_or_fail_reason' is null, p_label || ' no Task 18 fields');
+  end if;
+  insert into task17a_progress_rejections(label,key,task_id,job_id) values(p_label,p_idempotency_key,p_task_id,p_job_id) on conflict (label) do update set key=excluded.key, task_id=excluded.task_id, job_id=excluded.job_id;
+end $$;
+
+\echo TASK17A_SCENARIO_START: progress_valid_transition_sequence
+select task17a_test.reset_fixture(928001) as progress_valid_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_valid_fixture'::jsonb->>'creator')::uuid,(:'progress_valid_fixture'::jsonb->>'task')::uuid,(:'progress_valid_fixture'::jsonb->>'job')::uuid,:'progress_valid_fixture'::jsonb->>'consent_version',:'progress_valid_fixture'::jsonb->>'consent_hash','progclaim01') as progress_valid_claim \gset
+select task17a_test.progress_preserved_snapshot((:'progress_valid_fixture'::jsonb->>'task')::uuid) as progress_valid_preserved_baseline \gset
+select claim_token as progress_valid_token, operator_progress_updated_at as progress_valid_prior_updated_at from public.creator_publishing_queue_tasks where id=(:'progress_valid_fixture'::jsonb->>'task')::uuid \gset
+select to_jsonb(j) as progress_valid_job_before from public.creator_publishing_platform_jobs j where id=(:'progress_valid_fixture'::jsonb->>'job')::uuid \gset
+select public.creator_publishing_update_onlyfans_operator_progress((:'progress_valid_fixture'::jsonb->>'creator')::uuid,(:'progress_valid_fixture'::jsonb->>'task')::uuid,(:'progress_valid_fixture'::jsonb->>'job')::uuid,:'progress_valid_token'::uuid,'not_started',0,'preparing',:'progress_valid_fixture'::jsonb->>'consent_version',:'progress_valid_fixture'::jsonb->>'consent_hash','progseq01') as progseq01 \gset
+select task17a_test.assert((select operator_progress_state='preparing' and operator_progress_revision=1 and operator_progress_updated_by=(:'progress_valid_fixture'::jsonb->>'creator')::uuid and operator_progress_updated_at is not null and task17a_test.progress_preserved_snapshot(id)=(:'progress_valid_preserved_baseline')::jsonb from public.creator_publishing_queue_tasks where id=(:'progress_valid_fixture'::jsonb->>'task')::uuid), 'progress preparing preserves complete baseline and advances exactly once');
+select task17a_test.assert((select to_jsonb(j)=(:'progress_valid_job_before')::jsonb from public.creator_publishing_platform_jobs j where id=(:'progress_valid_fixture'::jsonb->>'job')::uuid), 'progress preparing leaves job unchanged');
+select operator_progress_updated_at as progress_valid_preparing_at from public.creator_publishing_queue_tasks where id=(:'progress_valid_fixture'::jsonb->>'task')::uuid \gset
+select public.creator_publishing_update_onlyfans_operator_progress((:'progress_valid_fixture'::jsonb->>'creator')::uuid,(:'progress_valid_fixture'::jsonb->>'task')::uuid,(:'progress_valid_fixture'::jsonb->>'job')::uuid,:'progress_valid_token'::uuid,'preparing',1,'prepared',:'progress_valid_fixture'::jsonb->>'consent_version',:'progress_valid_fixture'::jsonb->>'consent_hash','progseq02') as progseq02 \gset
+select task17a_test.assert((select operator_progress_state='prepared' and operator_progress_revision=2 and operator_progress_updated_by=(:'progress_valid_fixture'::jsonb->>'creator')::uuid and operator_progress_updated_at is not null and operator_progress_updated_at >= :'progress_valid_preparing_at'::timestamptz and task17a_test.progress_preserved_snapshot(id)=(:'progress_valid_preserved_baseline')::jsonb from public.creator_publishing_queue_tasks where id=(:'progress_valid_fixture'::jsonb->>'task')::uuid), 'progress prepared preserves complete baseline and advances exactly once');
+select task17a_test.assert((select to_jsonb(j)=(:'progress_valid_job_before')::jsonb from public.creator_publishing_platform_jobs j where id=(:'progress_valid_fixture'::jsonb->>'job')::uuid), 'progress prepared leaves job unchanged');
+select operator_progress_updated_at as progress_valid_prepared_at from public.creator_publishing_queue_tasks where id=(:'progress_valid_fixture'::jsonb->>'task')::uuid \gset
+select public.creator_publishing_update_onlyfans_operator_progress((:'progress_valid_fixture'::jsonb->>'creator')::uuid,(:'progress_valid_fixture'::jsonb->>'task')::uuid,(:'progress_valid_fixture'::jsonb->>'job')::uuid,:'progress_valid_token'::uuid,'prepared',2,'handoff_ready',:'progress_valid_fixture'::jsonb->>'consent_version',:'progress_valid_fixture'::jsonb->>'consent_hash','progseq03') as progseq03 \gset
+select task17a_test.assert((select operator_progress_state='handoff_ready' and operator_progress_revision=3 and operator_progress_updated_by=(:'progress_valid_fixture'::jsonb->>'creator')::uuid and operator_progress_updated_at is not null and operator_progress_updated_at >= :'progress_valid_prepared_at'::timestamptz and task17a_test.progress_preserved_snapshot(id)=(:'progress_valid_preserved_baseline')::jsonb from public.creator_publishing_queue_tasks where id=(:'progress_valid_fixture'::jsonb->>'task')::uuid), 'progress handoff preserves complete baseline and advances exactly once');
+select task17a_test.assert((select to_jsonb(j)=(:'progress_valid_job_before')::jsonb from public.creator_publishing_platform_jobs j where id=(:'progress_valid_fixture'::jsonb->>'job')::uuid), 'progress handoff leaves job unchanged');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where entity_id=(:'progress_valid_fixture'::jsonb->>'task')::uuid and action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready') and idempotency_key in ('progseq01','progseq02','progseq03'))=3, 'progress valid sequence one audit per transition');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where queue_task_id=(:'progress_valid_fixture'::jsonb->>'task')::uuid and action_type='progress_update' and idempotency_key in ('progseq01','progseq02','progseq03'))=3, 'progress valid sequence one idempotency per transition');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where entity_id=(:'progress_valid_fixture'::jsonb->>'task')::uuid and action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready') and (before_state ? 'claim_token' or after_state ? 'claim_token')), 'progress valid sequence audits omit claim token');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where idempotency_key='progseq01' and action='operator_preparation_started' and before_state->>'progress_state'='not_started' and (before_state->>'progress_revision')::int=0 and after_state->>'progress_state'='preparing' and (after_state->>'progress_revision')::int=1 and not (before_state ? 'claim_token') and not (after_state ? 'claim_token'))=1, 'progress preparing audit states and revisions');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where idempotency_key='progseq02' and action='operator_package_prepared' and before_state->>'progress_state'='preparing' and (before_state->>'progress_revision')::int=1 and after_state->>'progress_state'='prepared' and (after_state->>'progress_revision')::int=2 and not (before_state ? 'claim_token') and not (after_state ? 'claim_token'))=1, 'progress prepared audit states and revisions');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where idempotency_key='progseq03' and action='operator_handoff_ready' and before_state->>'progress_state'='prepared' and (before_state->>'progress_revision')::int=2 and after_state->>'progress_state'='handoff_ready' and (after_state->>'progress_revision')::int=3 and not (before_state ? 'claim_token') and not (after_state ? 'claim_token'))=1, 'progress handoff audit states and revisions');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key in ('progseq01','progseq02','progseq03'))=3, 'progress sequence exact idempotency rows');
+
+\echo TASK17A_SCENARIO_START: progress_exact_replay
+select task17a_test.reset_fixture(928002) as progress_replay_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_replay_fixture'::jsonb->>'creator')::uuid,(:'progress_replay_fixture'::jsonb->>'task')::uuid,(:'progress_replay_fixture'::jsonb->>'job')::uuid,:'progress_replay_fixture'::jsonb->>'consent_version',:'progress_replay_fixture'::jsonb->>'consent_hash','progreplayclaim') as progress_replay_claim \gset
+select claim_token as progress_replay_token from public.creator_publishing_queue_tasks where id=(:'progress_replay_fixture'::jsonb->>'task')::uuid \gset
+select public.creator_publishing_update_onlyfans_operator_progress((:'progress_replay_fixture'::jsonb->>'creator')::uuid,(:'progress_replay_fixture'::jsonb->>'task')::uuid,(:'progress_replay_fixture'::jsonb->>'job')::uuid,:'progress_replay_token'::uuid,'not_started',0,'preparing',:'progress_replay_fixture'::jsonb->>'consent_version',:'progress_replay_fixture'::jsonb->>'consent_hash','progreplay1') as progress_replay_first \gset
+select to_jsonb(q) as progress_replay_snapshot from public.creator_publishing_queue_tasks q where id=(:'progress_replay_fixture'::jsonb->>'task')::uuid \gset
+select to_jsonb(j) as progress_replay_job_snapshot from public.creator_publishing_platform_jobs j where id=(:'progress_replay_fixture'::jsonb->>'job')::uuid \gset
+select to_jsonb(i) as progress_replay_idem_snapshot from public.creator_publishing_operator_action_idempotency i where action_type='progress_update' and idempotency_key='progreplay1' \gset
+select public.creator_publishing_update_onlyfans_operator_progress((:'progress_replay_fixture'::jsonb->>'creator')::uuid,(:'progress_replay_fixture'::jsonb->>'task')::uuid,(:'progress_replay_fixture'::jsonb->>'job')::uuid,:'progress_replay_token'::uuid,'not_started',0,'preparing',:'progress_replay_fixture'::jsonb->>'consent_version',:'progress_replay_fixture'::jsonb->>'consent_hash','progreplay1') as progress_replay_second \gset
+select task17a_test.assert((:'progress_replay_second')::jsonb->>'idempotent'='true' and (select to_jsonb(q)=(:'progress_replay_snapshot')::jsonb from public.creator_publishing_queue_tasks q where id=(:'progress_replay_fixture'::jsonb->>'task')::uuid), 'progress exact replay returns stored result and queue unchanged');
+select task17a_test.assert((select to_jsonb(j)=(:'progress_replay_job_snapshot')::jsonb from public.creator_publishing_platform_jobs j where id=(:'progress_replay_fixture'::jsonb->>'job')::uuid), 'progress exact replay leaves job unchanged');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_preparation_started' and idempotency_key='progreplay1')=1, 'progress replay no duplicate audit');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key='progreplay1')=1, 'progress replay one idempotency row');
+select task17a_test.assert((select request_fingerprint=(:'progress_replay_idem_snapshot')::jsonb->>'request_fingerprint' and stored_result=(:'progress_replay_idem_snapshot')::jsonb->'stored_result' and created_at=((:'progress_replay_idem_snapshot')::jsonb->>'created_at')::timestamptz from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key='progreplay1'), 'progress replay idempotency fingerprint result and created_at unchanged');
+select task17a_test.assert((select stored_result = ((:'progress_replay_second')::jsonb - 'idempotent') from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key='progreplay1'), 'progress replay stored result equals replay without idempotent flag');
+\echo TASK17A_SCENARIO_START: progress_request_invalid
+select task17a_test.reset_fixture(928003) as progress_invalid_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_invalid_fixture'::jsonb->>'creator')::uuid,(:'progress_invalid_fixture'::jsonb->>'task')::uuid,(:'progress_invalid_fixture'::jsonb->>'job')::uuid,:'progress_invalid_fixture'::jsonb->>'consent_version',:'progress_invalid_fixture'::jsonb->>'consent_hash','proginvalidclaim') as progress_invalid_claim \gset
+select claim_token as progress_invalid_token from public.creator_publishing_queue_tasks where id=(:'progress_invalid_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_request_invalid','OPERATOR_REQUEST_INVALID',(:'progress_invalid_fixture'::jsonb->>'task')::uuid,(:'progress_invalid_fixture'::jsonb->>'job')::uuid,'progreqbad1',format('select public.creator_publishing_update_onlyfans_operator_progress(null,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_invalid_fixture'::jsonb->>'task'),(:'progress_invalid_fixture'::jsonb->>'job'),:'progress_invalid_token','not_started',0,'preparing',:'progress_invalid_fixture'::jsonb->>'consent_version',:'progress_invalid_fixture'::jsonb->>'consent_hash','progreqbad1'));
+
+\echo TASK17A_SCENARIO_START: progress_missing_job
+select task17a_test.reset_fixture(928004) as progress_missing_job_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_missing_job_fixture'::jsonb->>'creator')::uuid,(:'progress_missing_job_fixture'::jsonb->>'task')::uuid,(:'progress_missing_job_fixture'::jsonb->>'job')::uuid,:'progress_missing_job_fixture'::jsonb->>'consent_version',:'progress_missing_job_fixture'::jsonb->>'consent_hash','progmissjobclaim') as progress_missing_job_claim \gset
+select claim_token as progress_missing_job_token from public.creator_publishing_queue_tasks where id=(:'progress_missing_job_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_missing_job','OPERATOR_JOB_NOT_FOUND',(:'progress_missing_job_fixture'::jsonb->>'task')::uuid,'19900000-0000-4000-8000-000000928004'::uuid,'progmissjob1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_missing_job_fixture'::jsonb->>'creator'),(:'progress_missing_job_fixture'::jsonb->>'task'),'19900000-0000-4000-8000-000000928004',:'progress_missing_job_token','not_started',0,'preparing',:'progress_missing_job_fixture'::jsonb->>'consent_version',:'progress_missing_job_fixture'::jsonb->>'consent_hash','progmissjob1'));
+
+\echo TASK17A_SCENARIO_START: progress_missing_task
+select task17a_test.reset_fixture(928005) as progress_missing_task_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_missing_task_fixture'::jsonb->>'creator')::uuid,(:'progress_missing_task_fixture'::jsonb->>'task')::uuid,(:'progress_missing_task_fixture'::jsonb->>'job')::uuid,:'progress_missing_task_fixture'::jsonb->>'consent_version',:'progress_missing_task_fixture'::jsonb->>'consent_hash','progmisstaskclaim') as progress_missing_task_claim \gset
+select claim_token as progress_missing_task_token from public.creator_publishing_queue_tasks where id=(:'progress_missing_task_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_missing_task','OPERATOR_TASK_NOT_FOUND','19910000-0000-4000-8000-000000928005'::uuid,(:'progress_missing_task_fixture'::jsonb->>'job')::uuid,'progmisstask1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_missing_task_fixture'::jsonb->>'creator'),'19910000-0000-4000-8000-000000928005',(:'progress_missing_task_fixture'::jsonb->>'job'),:'progress_missing_task_token','not_started',0,'preparing',:'progress_missing_task_fixture'::jsonb->>'consent_version',:'progress_missing_task_fixture'::jsonb->>'consent_hash','progmisstask1'));
+
+\echo TASK17A_SCENARIO_START: progress_task_job_mismatch
+select task17a_test.reset_fixture(928006) as progress_mismatch_a \gset
+select task17a_test.create_additional_work(928906,(:'progress_mismatch_a'::jsonb->>'creator')::uuid,null,'ready_for_handoff','draft',false) as progress_mismatch_b \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_mismatch_a'::jsonb->>'creator')::uuid,(:'progress_mismatch_a'::jsonb->>'task')::uuid,(:'progress_mismatch_a'::jsonb->>'job')::uuid,:'progress_mismatch_a'::jsonb->>'consent_version',:'progress_mismatch_a'::jsonb->>'consent_hash','progmismatchclaim') as progress_mismatch_claim \gset
+select claim_token as progress_mismatch_token from public.creator_publishing_queue_tasks where id=(:'progress_mismatch_a'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_task_job_mismatch','OPERATOR_TASK_JOB_MISMATCH',(:'progress_mismatch_b'::jsonb->>'task')::uuid,(:'progress_mismatch_a'::jsonb->>'job')::uuid,'progmismatch1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_mismatch_a'::jsonb->>'creator'),(:'progress_mismatch_b'::jsonb->>'task'),(:'progress_mismatch_a'::jsonb->>'job'),:'progress_mismatch_token','not_started',0,'preparing',:'progress_mismatch_a'::jsonb->>'consent_version',:'progress_mismatch_a'::jsonb->>'consent_hash','progmismatch1'));
+
+\echo TASK17A_SCENARIO_START: progress_unsupported_target_or_mode
+select task17a_test.reset_fixture(928007) as progress_unsupported_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_unsupported_fixture'::jsonb->>'creator')::uuid,(:'progress_unsupported_fixture'::jsonb->>'task')::uuid,(:'progress_unsupported_fixture'::jsonb->>'job')::uuid,:'progress_unsupported_fixture'::jsonb->>'consent_version',:'progress_unsupported_fixture'::jsonb->>'consent_hash','progunsupclaim') as progress_unsupported_claim \gset
+select claim_token as progress_unsupported_token from public.creator_publishing_queue_tasks where id=(:'progress_unsupported_fixture'::jsonb->>'task')::uuid \gset
+update public.creator_publishing_platform_jobs set publishing_mode='direct' where id=(:'progress_unsupported_fixture'::jsonb->>'job')::uuid;
+select task17a_test.assert_progress_rejected('progress_unsupported_target_or_mode','OPERATOR_TARGET_NOT_SUPPORTED',(:'progress_unsupported_fixture'::jsonb->>'task')::uuid,(:'progress_unsupported_fixture'::jsonb->>'job')::uuid,'progunsup1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_unsupported_fixture'::jsonb->>'creator'),(:'progress_unsupported_fixture'::jsonb->>'task'),(:'progress_unsupported_fixture'::jsonb->>'job'),:'progress_unsupported_token','not_started',0,'preparing',:'progress_unsupported_fixture'::jsonb->>'consent_version',:'progress_unsupported_fixture'::jsonb->>'consent_hash','progunsup1'));
+
+\echo TASK17A_SCENARIO_START: progress_cancelled_job
+select task17a_test.reset_fixture(928008) as progress_cancelled_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_cancelled_fixture'::jsonb->>'creator')::uuid,(:'progress_cancelled_fixture'::jsonb->>'task')::uuid,(:'progress_cancelled_fixture'::jsonb->>'job')::uuid,:'progress_cancelled_fixture'::jsonb->>'consent_version',:'progress_cancelled_fixture'::jsonb->>'consent_hash','progcancelclaim') as progress_cancelled_claim \gset
+select claim_token as progress_cancelled_token from public.creator_publishing_queue_tasks where id=(:'progress_cancelled_fixture'::jsonb->>'task')::uuid \gset
+update public.creator_publishing_platform_jobs set cancelled_at=clock_timestamp(), cancelled_by=(:'progress_cancelled_fixture'::jsonb->>'creator')::uuid, cancellation_reason='progress cancelled fixture' where id=(:'progress_cancelled_fixture'::jsonb->>'job')::uuid;
+select task17a_test.assert_progress_rejected('progress_cancelled_job','OPERATOR_TASK_INELIGIBLE',(:'progress_cancelled_fixture'::jsonb->>'task')::uuid,(:'progress_cancelled_fixture'::jsonb->>'job')::uuid,'progcancel1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_cancelled_fixture'::jsonb->>'creator'),(:'progress_cancelled_fixture'::jsonb->>'task'),(:'progress_cancelled_fixture'::jsonb->>'job'),:'progress_cancelled_token','not_started',0,'preparing',:'progress_cancelled_fixture'::jsonb->>'consent_version',:'progress_cancelled_fixture'::jsonb->>'consent_hash','progcancel1'));
+
+\echo TASK17A_SCENARIO_START: progress_ineligible_job_state
+select task17a_test.reset_fixture(928009) as progress_ineligible_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_ineligible_fixture'::jsonb->>'creator')::uuid,(:'progress_ineligible_fixture'::jsonb->>'task')::uuid,(:'progress_ineligible_fixture'::jsonb->>'job')::uuid,:'progress_ineligible_fixture'::jsonb->>'consent_version',:'progress_ineligible_fixture'::jsonb->>'consent_hash','progineligclaim') as progress_ineligible_claim \gset
+select claim_token as progress_ineligible_token from public.creator_publishing_queue_tasks where id=(:'progress_ineligible_fixture'::jsonb->>'task')::uuid \gset
+update public.creator_publishing_platform_jobs set job_state='needs_fix' where id=(:'progress_ineligible_fixture'::jsonb->>'job')::uuid;
+select task17a_test.assert_progress_rejected('progress_ineligible_job_state','OPERATOR_TASK_INELIGIBLE',(:'progress_ineligible_fixture'::jsonb->>'task')::uuid,(:'progress_ineligible_fixture'::jsonb->>'job')::uuid,'proginelig1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_ineligible_fixture'::jsonb->>'creator'),(:'progress_ineligible_fixture'::jsonb->>'task'),(:'progress_ineligible_fixture'::jsonb->>'job'),:'progress_ineligible_token','not_started',0,'preparing',:'progress_ineligible_fixture'::jsonb->>'consent_version',:'progress_ineligible_fixture'::jsonb->>'consent_hash','proginelig1'));
+\echo TASK17A_SCENARIO_START: progress_unauthorized_actor
+select task17a_test.reset_fixture(928010) as progress_unauth_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_unauth_fixture'::jsonb->>'creator')::uuid,(:'progress_unauth_fixture'::jsonb->>'task')::uuid,(:'progress_unauth_fixture'::jsonb->>'job')::uuid,:'progress_unauth_fixture'::jsonb->>'consent_version',:'progress_unauth_fixture'::jsonb->>'consent_hash','progunauthclaim') as progress_unauth_claim \gset
+select claim_token as progress_unauth_token from public.creator_publishing_queue_tasks where id=(:'progress_unauth_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_unauthorized_actor','OPERATOR_NOT_AUTHORIZED',(:'progress_unauth_fixture'::jsonb->>'task')::uuid,(:'progress_unauth_fixture'::jsonb->>'job')::uuid,'progunauth1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_unauth_fixture'::jsonb->>'unauthorized'),(:'progress_unauth_fixture'::jsonb->>'task'),(:'progress_unauth_fixture'::jsonb->>'job'),:'progress_unauth_token','not_started',0,'preparing',:'progress_unauth_fixture'::jsonb->>'consent_version',:'progress_unauth_fixture'::jsonb->>'consent_hash','progunauth1'));
+
+\echo TASK17A_SCENARIO_START: progress_revoked_authorization
+select task17a_test.reset_fixture(928011) as progress_revoked_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_revoked_fixture'::jsonb->>'operator_a')::uuid,(:'progress_revoked_fixture'::jsonb->>'task')::uuid,(:'progress_revoked_fixture'::jsonb->>'job')::uuid,:'progress_revoked_fixture'::jsonb->>'consent_version',:'progress_revoked_fixture'::jsonb->>'consent_hash','progrevclaim') as progress_revoked_claim \gset
+select claim_token as progress_revoked_token from public.creator_publishing_queue_tasks where id=(:'progress_revoked_fixture'::jsonb->>'task')::uuid \gset
+update public.creator_publishing_operator_authorizations set status='revoked', revoked_at=clock_timestamp() where creator_id=(:'progress_revoked_fixture'::jsonb->>'creator')::uuid and operator_id=(:'progress_revoked_fixture'::jsonb->>'operator_a')::uuid;
+select task17a_test.assert_progress_rejected('progress_revoked_authorization','OPERATOR_NOT_AUTHORIZED',(:'progress_revoked_fixture'::jsonb->>'task')::uuid,(:'progress_revoked_fixture'::jsonb->>'job')::uuid,'progrevoked1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_revoked_fixture'::jsonb->>'operator_a'),(:'progress_revoked_fixture'::jsonb->>'task'),(:'progress_revoked_fixture'::jsonb->>'job'),:'progress_revoked_token','not_started',0,'preparing',:'progress_revoked_fixture'::jsonb->>'consent_version',:'progress_revoked_fixture'::jsonb->>'consent_hash','progrevoked1'));
+
+\echo TASK17A_SCENARIO_START: progress_wrong_owner
+select task17a_test.reset_fixture(928012) as progress_wrong_owner_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_wrong_owner_fixture'::jsonb->>'creator')::uuid,(:'progress_wrong_owner_fixture'::jsonb->>'task')::uuid,(:'progress_wrong_owner_fixture'::jsonb->>'job')::uuid,:'progress_wrong_owner_fixture'::jsonb->>'consent_version',:'progress_wrong_owner_fixture'::jsonb->>'consent_hash','progwrongownerclaim') as progress_wrong_owner_claim \gset
+select claim_token as progress_wrong_owner_token from public.creator_publishing_queue_tasks where id=(:'progress_wrong_owner_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_wrong_owner','OPERATOR_CLAIM_TOKEN_MISMATCH',(:'progress_wrong_owner_fixture'::jsonb->>'task')::uuid,(:'progress_wrong_owner_fixture'::jsonb->>'job')::uuid,'progwrongowner1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_wrong_owner_fixture'::jsonb->>'operator_a'),(:'progress_wrong_owner_fixture'::jsonb->>'task'),(:'progress_wrong_owner_fixture'::jsonb->>'job'),:'progress_wrong_owner_token','not_started',0,'preparing',:'progress_wrong_owner_fixture'::jsonb->>'consent_version',:'progress_wrong_owner_fixture'::jsonb->>'consent_hash','progwrongowner1'));
+
+\echo TASK17A_SCENARIO_START: progress_wrong_token
+select task17a_test.reset_fixture(928013) as progress_wrong_token_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_wrong_token_fixture'::jsonb->>'creator')::uuid,(:'progress_wrong_token_fixture'::jsonb->>'task')::uuid,(:'progress_wrong_token_fixture'::jsonb->>'job')::uuid,:'progress_wrong_token_fixture'::jsonb->>'consent_version',:'progress_wrong_token_fixture'::jsonb->>'consent_hash','progwrongtokclaim') as progress_wrong_token_claim \gset
+select task17a_test.assert_progress_rejected('progress_wrong_token','OPERATOR_CLAIM_TOKEN_MISMATCH',(:'progress_wrong_token_fixture'::jsonb->>'task')::uuid,(:'progress_wrong_token_fixture'::jsonb->>'job')::uuid,'progwrongtok1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_wrong_token_fixture'::jsonb->>'creator'),(:'progress_wrong_token_fixture'::jsonb->>'task'),(:'progress_wrong_token_fixture'::jsonb->>'job'),'19920000-0000-4000-8000-000000928013','not_started',0,'preparing',:'progress_wrong_token_fixture'::jsonb->>'consent_version',:'progress_wrong_token_fixture'::jsonb->>'consent_hash','progwrongtok1'));
+
+\echo TASK17A_SCENARIO_START: progress_expired_token
+select task17a_test.reset_fixture(928014) as progress_expired_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_expired_fixture'::jsonb->>'creator')::uuid,(:'progress_expired_fixture'::jsonb->>'task')::uuid,(:'progress_expired_fixture'::jsonb->>'job')::uuid,:'progress_expired_fixture'::jsonb->>'consent_version',:'progress_expired_fixture'::jsonb->>'consent_hash','progexpiredclaim') as progress_expired_claim \gset
+select claim_token as progress_expired_token from public.creator_publishing_queue_tasks where id=(:'progress_expired_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.expire_claim((:'progress_expired_fixture'::jsonb->>'task')::uuid);
+select task17a_test.assert_progress_rejected('progress_expired_token','OPERATOR_CLAIM_TOKEN_MISMATCH',(:'progress_expired_fixture'::jsonb->>'task')::uuid,(:'progress_expired_fixture'::jsonb->>'job')::uuid,'progexpired1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_expired_fixture'::jsonb->>'creator'),(:'progress_expired_fixture'::jsonb->>'task'),(:'progress_expired_fixture'::jsonb->>'job'),:'progress_expired_token','not_started',0,'preparing',:'progress_expired_fixture'::jsonb->>'consent_version',:'progress_expired_fixture'::jsonb->>'consent_hash','progexpired1'));
+
+\echo TASK17A_SCENARIO_START: progress_stale_expected_state
+select task17a_test.reset_fixture(928015) as progress_stale_state_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_stale_state_fixture'::jsonb->>'creator')::uuid,(:'progress_stale_state_fixture'::jsonb->>'task')::uuid,(:'progress_stale_state_fixture'::jsonb->>'job')::uuid,:'progress_stale_state_fixture'::jsonb->>'consent_version',:'progress_stale_state_fixture'::jsonb->>'consent_hash','progstalestateclaim') as progress_stale_state_claim \gset
+select claim_token as progress_stale_state_token from public.creator_publishing_queue_tasks where id=(:'progress_stale_state_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_stale_expected_state','OPERATOR_PROGRESS_STALE',(:'progress_stale_state_fixture'::jsonb->>'task')::uuid,(:'progress_stale_state_fixture'::jsonb->>'job')::uuid,'progstalestate1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_stale_state_fixture'::jsonb->>'creator'),(:'progress_stale_state_fixture'::jsonb->>'task'),(:'progress_stale_state_fixture'::jsonb->>'job'),:'progress_stale_state_token','preparing',0,'prepared',:'progress_stale_state_fixture'::jsonb->>'consent_version',:'progress_stale_state_fixture'::jsonb->>'consent_hash','progstalestate1'));
+
+\echo TASK17A_SCENARIO_START: progress_stale_expected_revision
+select task17a_test.reset_fixture(928016) as progress_stale_revision_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_stale_revision_fixture'::jsonb->>'creator')::uuid,(:'progress_stale_revision_fixture'::jsonb->>'task')::uuid,(:'progress_stale_revision_fixture'::jsonb->>'job')::uuid,:'progress_stale_revision_fixture'::jsonb->>'consent_version',:'progress_stale_revision_fixture'::jsonb->>'consent_hash','progstalerevclaim') as progress_stale_revision_claim \gset
+select claim_token as progress_stale_revision_token from public.creator_publishing_queue_tasks where id=(:'progress_stale_revision_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_stale_expected_revision','OPERATOR_PROGRESS_STALE',(:'progress_stale_revision_fixture'::jsonb->>'task')::uuid,(:'progress_stale_revision_fixture'::jsonb->>'job')::uuid,'progstalerev1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_stale_revision_fixture'::jsonb->>'creator'),(:'progress_stale_revision_fixture'::jsonb->>'task'),(:'progress_stale_revision_fixture'::jsonb->>'job'),:'progress_stale_revision_token','not_started',1,'preparing',:'progress_stale_revision_fixture'::jsonb->>'consent_version',:'progress_stale_revision_fixture'::jsonb->>'consent_hash','progstalerev1'));
+
+\echo TASK17A_SCENARIO_START: progress_invalid_transition
+select task17a_test.reset_fixture(928017) as progress_invalid_transition_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_invalid_transition_fixture'::jsonb->>'creator')::uuid,(:'progress_invalid_transition_fixture'::jsonb->>'task')::uuid,(:'progress_invalid_transition_fixture'::jsonb->>'job')::uuid,:'progress_invalid_transition_fixture'::jsonb->>'consent_version',:'progress_invalid_transition_fixture'::jsonb->>'consent_hash','proginvtransclaim') as progress_invalid_transition_claim \gset
+select claim_token as progress_invalid_transition_token from public.creator_publishing_queue_tasks where id=(:'progress_invalid_transition_fixture'::jsonb->>'task')::uuid \gset
+select task17a_test.assert_progress_rejected('progress_invalid_transition','OPERATOR_PROGRESS_INVALID_TRANSITION',(:'progress_invalid_transition_fixture'::jsonb->>'task')::uuid,(:'progress_invalid_transition_fixture'::jsonb->>'job')::uuid,'proginvtrans1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_invalid_transition_fixture'::jsonb->>'creator'),(:'progress_invalid_transition_fixture'::jsonb->>'task'),(:'progress_invalid_transition_fixture'::jsonb->>'job'),:'progress_invalid_transition_token','not_started',0,'handoff_ready',:'progress_invalid_transition_fixture'::jsonb->>'consent_version',:'progress_invalid_transition_fixture'::jsonb->>'consent_hash','proginvtrans1'));
+\echo TASK17A_SCENARIO_START: progress_creator_verification_drift
+select task17a_test.reset_fixture(928018) as progress_creator_drift_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_creator_drift_fixture'::jsonb->>'creator')::uuid,(:'progress_creator_drift_fixture'::jsonb->>'task')::uuid,(:'progress_creator_drift_fixture'::jsonb->>'job')::uuid,:'progress_creator_drift_fixture'::jsonb->>'consent_version',:'progress_creator_drift_fixture'::jsonb->>'consent_hash','progcreatordriftclaim') as progress_creator_drift_claim \gset
+select claim_token as progress_creator_drift_token from public.creator_publishing_queue_tasks where id=(:'progress_creator_drift_fixture'::jsonb->>'task')::uuid \gset
+delete from public.creator_publishing_creator_verifications where creator_id=(:'progress_creator_drift_fixture'::jsonb->>'creator')::uuid;
+select task17a_test.assert_progress_rejected('progress_creator_verification_drift','CREATOR_VERIFICATION_MISSING',(:'progress_creator_drift_fixture'::jsonb->>'task')::uuid,(:'progress_creator_drift_fixture'::jsonb->>'job')::uuid,'progcreatordrift1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_creator_drift_fixture'::jsonb->>'creator'),(:'progress_creator_drift_fixture'::jsonb->>'task'),(:'progress_creator_drift_fixture'::jsonb->>'job'),:'progress_creator_drift_token','not_started',0,'preparing',:'progress_creator_drift_fixture'::jsonb->>'consent_version',:'progress_creator_drift_fixture'::jsonb->>'consent_hash','progcreatordrift1'));
+
+\echo TASK17A_SCENARIO_START: progress_account_verification_drift
+select task17a_test.reset_fixture(928019) as progress_account_drift_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_account_drift_fixture'::jsonb->>'creator')::uuid,(:'progress_account_drift_fixture'::jsonb->>'task')::uuid,(:'progress_account_drift_fixture'::jsonb->>'job')::uuid,:'progress_account_drift_fixture'::jsonb->>'consent_version',:'progress_account_drift_fixture'::jsonb->>'consent_hash','progacctdriftclaim') as progress_account_drift_claim \gset
+select claim_token as progress_account_drift_token from public.creator_publishing_queue_tasks where id=(:'progress_account_drift_fixture'::jsonb->>'task')::uuid \gset
+update public.creator_platform_accounts set verification_status='creator_attested', verification_reviewed_by=null, verification_reviewed_at=null, verification_evidence_reference=null, verification_reason=null, verification_legacy_revoked=false where id=(:'progress_account_drift_fixture'::jsonb->>'account')::uuid;
+select task17a_test.assert_progress_rejected('progress_account_verification_drift','DESTINATION_ACCOUNT_NOT_VERIFIED',(:'progress_account_drift_fixture'::jsonb->>'task')::uuid,(:'progress_account_drift_fixture'::jsonb->>'job')::uuid,'progacctdrift1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_account_drift_fixture'::jsonb->>'creator'),(:'progress_account_drift_fixture'::jsonb->>'task'),(:'progress_account_drift_fixture'::jsonb->>'job'),:'progress_account_drift_token','not_started',0,'preparing',:'progress_account_drift_fixture'::jsonb->>'consent_version',:'progress_account_drift_fixture'::jsonb->>'consent_hash','progacctdrift1'));
+
+\echo TASK17A_SCENARIO_START: progress_account_revoked_drift
+select task17a_test.reset_fixture(928020) as progress_account_revoked_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_account_revoked_fixture'::jsonb->>'creator')::uuid,(:'progress_account_revoked_fixture'::jsonb->>'task')::uuid,(:'progress_account_revoked_fixture'::jsonb->>'job')::uuid,:'progress_account_revoked_fixture'::jsonb->>'consent_version',:'progress_account_revoked_fixture'::jsonb->>'consent_hash','progacctrevclaim') as progress_account_revoked_claim \gset
+select claim_token as progress_account_revoked_token from public.creator_publishing_queue_tasks where id=(:'progress_account_revoked_fixture'::jsonb->>'task')::uuid \gset
+update public.creator_platform_accounts set verification_status='revoked', verification_reason='revoked', verification_reviewed_by=(:'progress_account_revoked_fixture'::jsonb->>'global_only')::uuid, verification_reviewed_at=clock_timestamp() where id=(:'progress_account_revoked_fixture'::jsonb->>'account')::uuid;
+select task17a_test.assert_progress_rejected('progress_account_revoked_drift','DESTINATION_ACCOUNT_REVOKED',(:'progress_account_revoked_fixture'::jsonb->>'task')::uuid,(:'progress_account_revoked_fixture'::jsonb->>'job')::uuid,'progacctrev1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_account_revoked_fixture'::jsonb->>'creator'),(:'progress_account_revoked_fixture'::jsonb->>'task'),(:'progress_account_revoked_fixture'::jsonb->>'job'),:'progress_account_revoked_token','not_started',0,'preparing',:'progress_account_revoked_fixture'::jsonb->>'consent_version',:'progress_account_revoked_fixture'::jsonb->>'consent_hash','progacctrev1'));
+
+\echo TASK17A_SCENARIO_START: progress_consent_drift
+select task17a_test.reset_fixture(928021) as progress_consent_drift_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_consent_drift_fixture'::jsonb->>'creator')::uuid,(:'progress_consent_drift_fixture'::jsonb->>'task')::uuid,(:'progress_consent_drift_fixture'::jsonb->>'job')::uuid,:'progress_consent_drift_fixture'::jsonb->>'consent_version',:'progress_consent_drift_fixture'::jsonb->>'consent_hash','progconsentdriftclaim') as progress_consent_drift_claim \gset
+select claim_token as progress_consent_drift_token from public.creator_publishing_queue_tasks where id=(:'progress_consent_drift_fixture'::jsonb->>'task')::uuid \gset
+update public.creator_publishing_ai_twin_consents set status='revoked', revoked_at=clock_timestamp() where creator_id=(:'progress_consent_drift_fixture'::jsonb->>'creator')::uuid;
+select task17a_test.assert_progress_rejected('progress_consent_drift','AI_TWIN_CONSENT_MISSING',(:'progress_consent_drift_fixture'::jsonb->>'task')::uuid,(:'progress_consent_drift_fixture'::jsonb->>'job')::uuid,'progconsentdrift1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_consent_drift_fixture'::jsonb->>'creator'),(:'progress_consent_drift_fixture'::jsonb->>'task'),(:'progress_consent_drift_fixture'::jsonb->>'job'),:'progress_consent_drift_token','not_started',0,'preparing',:'progress_consent_drift_fixture'::jsonb->>'consent_version',:'progress_consent_drift_fixture'::jsonb->>'consent_hash','progconsentdrift1'));
+
+\echo TASK17A_SCENARIO_START: progress_compliance_drift
+select task17a_test.reset_fixture(928022) as progress_compliance_drift_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_compliance_drift_fixture'::jsonb->>'creator')::uuid,(:'progress_compliance_drift_fixture'::jsonb->>'task')::uuid,(:'progress_compliance_drift_fixture'::jsonb->>'job')::uuid,:'progress_compliance_drift_fixture'::jsonb->>'consent_version',:'progress_compliance_drift_fixture'::jsonb->>'consent_hash','progcompdriftclaim') as progress_compliance_drift_claim \gset
+select claim_token as progress_compliance_drift_token from public.creator_publishing_queue_tasks where id=(:'progress_compliance_drift_fixture'::jsonb->>'task')::uuid \gset
+delete from public.creator_publishing_compliance_reviews where content_package_id=(:'progress_compliance_drift_fixture'::jsonb->>'package')::uuid;
+select task17a_test.assert_progress_rejected('progress_compliance_drift','COMPLIANCE_EVIDENCE_INVALID',(:'progress_compliance_drift_fixture'::jsonb->>'task')::uuid,(:'progress_compliance_drift_fixture'::jsonb->>'job')::uuid,'progcompdrift1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_compliance_drift_fixture'::jsonb->>'creator'),(:'progress_compliance_drift_fixture'::jsonb->>'task'),(:'progress_compliance_drift_fixture'::jsonb->>'job'),:'progress_compliance_drift_token','not_started',0,'preparing',:'progress_compliance_drift_fixture'::jsonb->>'consent_version',:'progress_compliance_drift_fixture'::jsonb->>'consent_hash','progcompdrift1'));
+
+\echo TASK17A_SCENARIO_START: progress_source_fingerprint_drift
+select task17a_test.reset_fixture(928023) as progress_source_drift_fixture \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_source_drift_fixture'::jsonb->>'creator')::uuid,(:'progress_source_drift_fixture'::jsonb->>'task')::uuid,(:'progress_source_drift_fixture'::jsonb->>'job')::uuid,:'progress_source_drift_fixture'::jsonb->>'consent_version',:'progress_source_drift_fixture'::jsonb->>'consent_hash','progsourcedriftclaim') as progress_source_drift_claim \gset
+select claim_token as progress_source_drift_token from public.creator_publishing_queue_tasks where id=(:'progress_source_drift_fixture'::jsonb->>'task')::uuid \gset
+update public.creator_publishing_platform_jobs set source_package_fingerprint='ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff' where id=(:'progress_source_drift_fixture'::jsonb->>'job')::uuid;
+select task17a_test.assert_progress_rejected('progress_source_fingerprint_drift','SOURCE_FINGERPRINT_STALE',(:'progress_source_drift_fixture'::jsonb->>'task')::uuid,(:'progress_source_drift_fixture'::jsonb->>'job')::uuid,'progsourcedrift1',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_source_drift_fixture'::jsonb->>'creator'),(:'progress_source_drift_fixture'::jsonb->>'task'),(:'progress_source_drift_fixture'::jsonb->>'job'),:'progress_source_drift_token','not_started',0,'preparing',:'progress_source_drift_fixture'::jsonb->>'consent_version',:'progress_source_drift_fixture'::jsonb->>'consent_hash','progsourcedrift1'));
+\echo TASK17A_SCENARIO_START: progress_changed_task_idempotency_conflict
+select task17a_test.reset_fixture(928030) as progress_conflict_fixture \gset
+select task17a_test.create_additional_work(928930,(:'progress_conflict_fixture'::jsonb->>'creator')::uuid,null,'ready_for_handoff','draft',false) as progress_conflict_alt \gset
+select public.creator_publishing_claim_onlyfans_operator_task((:'progress_conflict_fixture'::jsonb->>'creator')::uuid,(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,:'progress_conflict_fixture'::jsonb->>'consent_version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconfclaim') as progress_conflict_claim \gset
+select claim_token as progress_conflict_token from public.creator_publishing_queue_tasks where id=(:'progress_conflict_fixture'::jsonb->>'task')::uuid \gset
+select public.creator_publishing_update_onlyfans_operator_progress((:'progress_conflict_fixture'::jsonb->>'creator')::uuid,(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,:'progress_conflict_token'::uuid,'not_started',0,'preparing',:'progress_conflict_fixture'::jsonb->>'consent_version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconflict') as progress_conflict_first \gset
+select to_jsonb(q) as progress_conflict_original_queue_snapshot from public.creator_publishing_queue_tasks q where id=(:'progress_conflict_fixture'::jsonb->>'task')::uuid \gset
+select to_jsonb(j) as progress_conflict_original_job_snapshot from public.creator_publishing_platform_jobs j where id=(:'progress_conflict_fixture'::jsonb->>'job')::uuid \gset
+select to_jsonb(q) as progress_conflict_alternate_queue_snapshot from public.creator_publishing_queue_tasks q where id=(:'progress_conflict_alt'::jsonb->>'task')::uuid \gset
+select to_jsonb(j) as progress_conflict_alternate_job_snapshot from public.creator_publishing_platform_jobs j where id=(:'progress_conflict_alt'::jsonb->>'job')::uuid \gset
+select to_jsonb(i) as progress_conflict_idempotency_snapshot from public.creator_publishing_operator_action_idempotency i where action_type='progress_update' and idempotency_key='progconflict' \gset
+select count(*) as progress_conflict_success_audit_count from public.creator_publishing_audit_events where idempotency_key='progconflict' and action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready') \gset
+select task17a_test.expect_error('progress changed task conflict','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_conflict_fixture'::jsonb->>'creator'),(:'progress_conflict_alt'::jsonb->>'task'),(:'progress_conflict_fixture'::jsonb->>'job'),:'progress_conflict_token','not_started',0,'preparing',:'progress_conflict_fixture'::jsonb->>'consent_version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconflict'));
+select task17a_test.assert_progress_conflict_preserved('progress changed task conflict',(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,(:'progress_conflict_alt'::jsonb->>'task')::uuid,(:'progress_conflict_alt'::jsonb->>'job')::uuid,(:'progress_conflict_original_queue_snapshot')::jsonb,(:'progress_conflict_original_job_snapshot')::jsonb,(:'progress_conflict_alternate_queue_snapshot')::jsonb,(:'progress_conflict_alternate_job_snapshot')::jsonb,(:'progress_conflict_idempotency_snapshot')::jsonb,:'progress_conflict_success_audit_count'::int);
+
+\echo TASK17A_SCENARIO_START: progress_changed_job_idempotency_conflict
+select task17a_test.expect_error('progress changed job conflict','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_conflict_fixture'::jsonb->>'creator'),(:'progress_conflict_fixture'::jsonb->>'task'),(:'progress_conflict_alt'::jsonb->>'job'),:'progress_conflict_token','not_started',0,'preparing',:'progress_conflict_fixture'::jsonb->>'consent_version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconflict'));
+select task17a_test.assert_progress_conflict_preserved('progress changed job conflict',(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,(:'progress_conflict_alt'::jsonb->>'task')::uuid,(:'progress_conflict_alt'::jsonb->>'job')::uuid,(:'progress_conflict_original_queue_snapshot')::jsonb,(:'progress_conflict_original_job_snapshot')::jsonb,(:'progress_conflict_alternate_queue_snapshot')::jsonb,(:'progress_conflict_alternate_job_snapshot')::jsonb,(:'progress_conflict_idempotency_snapshot')::jsonb,:'progress_conflict_success_audit_count'::int);
+
+\echo TASK17A_SCENARIO_START: progress_changed_token_idempotency_conflict
+select task17a_test.expect_error('progress changed token conflict','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_conflict_fixture'::jsonb->>'creator'),(:'progress_conflict_fixture'::jsonb->>'task'),(:'progress_conflict_fixture'::jsonb->>'job'),'19930000-0000-4000-8000-000000928030','not_started',0,'preparing',:'progress_conflict_fixture'::jsonb->>'consent_version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconflict'));
+select task17a_test.assert_progress_conflict_preserved('progress changed token conflict',(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,(:'progress_conflict_alt'::jsonb->>'task')::uuid,(:'progress_conflict_alt'::jsonb->>'job')::uuid,(:'progress_conflict_original_queue_snapshot')::jsonb,(:'progress_conflict_original_job_snapshot')::jsonb,(:'progress_conflict_alternate_queue_snapshot')::jsonb,(:'progress_conflict_alternate_job_snapshot')::jsonb,(:'progress_conflict_idempotency_snapshot')::jsonb,:'progress_conflict_success_audit_count'::int);
+
+\echo TASK17A_SCENARIO_START: progress_changed_expected_state_idempotency_conflict
+select task17a_test.expect_error('progress changed expected state conflict','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_conflict_fixture'::jsonb->>'creator'),(:'progress_conflict_fixture'::jsonb->>'task'),(:'progress_conflict_fixture'::jsonb->>'job'),:'progress_conflict_token','preparing',1,'prepared',:'progress_conflict_fixture'::jsonb->>'consent_version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconflict'));
+select task17a_test.assert_progress_conflict_preserved('progress changed expected state conflict',(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,(:'progress_conflict_alt'::jsonb->>'task')::uuid,(:'progress_conflict_alt'::jsonb->>'job')::uuid,(:'progress_conflict_original_queue_snapshot')::jsonb,(:'progress_conflict_original_job_snapshot')::jsonb,(:'progress_conflict_alternate_queue_snapshot')::jsonb,(:'progress_conflict_alternate_job_snapshot')::jsonb,(:'progress_conflict_idempotency_snapshot')::jsonb,:'progress_conflict_success_audit_count'::int);
+
+\echo TASK17A_SCENARIO_START: progress_changed_expected_revision_idempotency_conflict
+select task17a_test.expect_error('progress changed expected revision conflict','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_conflict_fixture'::jsonb->>'creator'),(:'progress_conflict_fixture'::jsonb->>'task'),(:'progress_conflict_fixture'::jsonb->>'job'),:'progress_conflict_token','not_started',1,'preparing',:'progress_conflict_fixture'::jsonb->>'consent_version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconflict'));
+select task17a_test.assert_progress_conflict_preserved('progress changed expected revision conflict',(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,(:'progress_conflict_alt'::jsonb->>'task')::uuid,(:'progress_conflict_alt'::jsonb->>'job')::uuid,(:'progress_conflict_original_queue_snapshot')::jsonb,(:'progress_conflict_original_job_snapshot')::jsonb,(:'progress_conflict_alternate_queue_snapshot')::jsonb,(:'progress_conflict_alternate_job_snapshot')::jsonb,(:'progress_conflict_idempotency_snapshot')::jsonb,:'progress_conflict_success_audit_count'::int);
+
+\echo TASK17A_SCENARIO_START: progress_changed_target_state_idempotency_conflict
+select task17a_test.expect_error('progress changed target state conflict','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_conflict_fixture'::jsonb->>'creator'),(:'progress_conflict_fixture'::jsonb->>'task'),(:'progress_conflict_fixture'::jsonb->>'job'),:'progress_conflict_token','not_started',0,'prepared',:'progress_conflict_fixture'::jsonb->>'consent_version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconflict'));
+select task17a_test.assert_progress_conflict_preserved('progress changed target state conflict',(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,(:'progress_conflict_alt'::jsonb->>'task')::uuid,(:'progress_conflict_alt'::jsonb->>'job')::uuid,(:'progress_conflict_original_queue_snapshot')::jsonb,(:'progress_conflict_original_job_snapshot')::jsonb,(:'progress_conflict_alternate_queue_snapshot')::jsonb,(:'progress_conflict_alternate_job_snapshot')::jsonb,(:'progress_conflict_idempotency_snapshot')::jsonb,:'progress_conflict_success_audit_count'::int);
+
+\echo TASK17A_SCENARIO_START: progress_changed_consent_version_idempotency_conflict
+select task17a_test.expect_error('progress changed consent version conflict','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_conflict_fixture'::jsonb->>'creator'),(:'progress_conflict_fixture'::jsonb->>'task'),(:'progress_conflict_fixture'::jsonb->>'job'),:'progress_conflict_token','not_started',0,'preparing','changed-version',:'progress_conflict_fixture'::jsonb->>'consent_hash','progconflict'));
+select task17a_test.assert_progress_conflict_preserved('progress changed consent version conflict',(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,(:'progress_conflict_alt'::jsonb->>'task')::uuid,(:'progress_conflict_alt'::jsonb->>'job')::uuid,(:'progress_conflict_original_queue_snapshot')::jsonb,(:'progress_conflict_original_job_snapshot')::jsonb,(:'progress_conflict_alternate_queue_snapshot')::jsonb,(:'progress_conflict_alternate_job_snapshot')::jsonb,(:'progress_conflict_idempotency_snapshot')::jsonb,:'progress_conflict_success_audit_count'::int);
+
+\echo TASK17A_SCENARIO_START: progress_changed_consent_hash_idempotency_conflict
+select task17a_test.expect_error('progress changed consent hash conflict','IDEMPOTENCY_CONFLICT',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',(:'progress_conflict_fixture'::jsonb->>'creator'),(:'progress_conflict_fixture'::jsonb->>'task'),(:'progress_conflict_fixture'::jsonb->>'job'),:'progress_conflict_token','not_started',0,'preparing',:'progress_conflict_fixture'::jsonb->>'consent_version','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','progconflict'));
+select task17a_test.assert_progress_conflict_preserved('progress changed consent hash conflict',(:'progress_conflict_fixture'::jsonb->>'task')::uuid,(:'progress_conflict_fixture'::jsonb->>'job')::uuid,(:'progress_conflict_alt'::jsonb->>'task')::uuid,(:'progress_conflict_alt'::jsonb->>'job')::uuid,(:'progress_conflict_original_queue_snapshot')::jsonb,(:'progress_conflict_original_job_snapshot')::jsonb,(:'progress_conflict_alternate_queue_snapshot')::jsonb,(:'progress_conflict_alternate_job_snapshot')::jsonb,(:'progress_conflict_idempotency_snapshot')::jsonb,:'progress_conflict_success_audit_count'::int);
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where idempotency_key='progconflict' and action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready'))=1, 'progress conflicts do not add successful audits');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key='progconflict')=1, 'progress conflicts keep one idempotency row');
+
+\echo TASK17A_SCENARIO_START: progress_complete_audit_idempotency_counts
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready') and idempotency_key in ('progseq01','progseq02','progseq03','progreplay1','progconflict'))=5, 'progress aggregate successful audit count');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key in ('progseq01','progseq02','progseq03','progreplay1','progconflict'))=5, 'progress aggregate successful idempotency count');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready') and (before_state ? 'claim_token' or after_state ? 'claim_token')), 'progress aggregate audits omit claim token');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key in (select key from task17a_progress_rejections)), 'progress aggregate rejected keys wrote no idempotency');
+
+\echo TASK17A_SCENARIO_START: progress_complete_no_mutation_assertions
+select task17a_test.assert((select count(*) from task17a_progress_rejections) >= 21, 'progress no-mutation rejection registry populated');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action in ('operator_preparation_started','operator_package_prepared','operator_handoff_ready') and idempotency_key in (select key from task17a_progress_rejections)), 'progress rejected keys wrote no success audit');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='progress_update' and idempotency_key in (select key from task17a_progress_rejections)), 'progress rejected keys wrote no idempotency');
+select task17a_test.assert(not exists(select 1 from public.creator_publishing_queue_tasks where id in (select task_id from task17a_progress_rejections where task_id is not null) and (posted_by is not null or posted_at is not null or posted_confirmation is true or final_post_url is not null or final_post_url_skip_reason is not null or proof_screenshot_storage_key is not null or skip_or_fail_reason is not null)), 'progress rejected tasks wrote no Task 18 fields');
