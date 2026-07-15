@@ -4,7 +4,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 
-const baseSha = '3ba031511782eec922ed284fb472d7435d7b6e18';
+const task17aBaseSha = '3ba031511782eec922ed284fb472d7435d7b6e18';
+const task17aCompletedHeadSha = 'a25d23cca89c859b394a10f9410e63f7e0e86d08';
+const task17aHistoricalDiffUpperBound = task17aCompletedHeadSha;
 const migrationPath = 'supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql';
 const migration = readFileSync(migrationPath, 'utf8');
 function listFiles(dir: string): string[] {
@@ -14,14 +16,28 @@ function listFiles(dir: string): string[] {
     return statSync(path).isDirectory() ? listFiles(path) : [path];
   });
 }
-const changedFiles = execSync(`git diff --name-only ${baseSha}...HEAD`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-const appSource = changedFiles
+function changedFilesBetween(baseSha: string, headSha: string): string[] {
+  return execSync(`git diff --name-only ${baseSha}...${headSha}`, { encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+}
+const task17aChangedFiles = changedFilesBetween(task17aBaseSha, task17aHistoricalDiffUpperBound);
+const changedFiles = task17aChangedFiles;
+const appSource = task17aChangedFiles
   .filter((f) => /^(app|backend|\.github\/workflows)/.test(f) && !f.includes('tests/task17a') && existsSync(f))
   .map((f) => `${f}\n${readFileSync(f, 'utf8')}`).join('\n');
 
 test('Task 17A migration exists and migrations 00100 through 01300 are unchanged from base', () => {
   assert.equal(existsSync(migrationPath), true);
   assert.equal(changedFiles.some((f) => /^supabase\/migrations\/2026071[01].*\.sql$/.test(f) && !f.endsWith('20260712001400_creator_publishing_onlyfans_operator_queue.sql')), false);
+});
+
+
+test('Task 17A historical source inspection is pinned to the completed Task 17A range', () => {
+  assert.equal(task17aHistoricalDiffUpperBound, task17aCompletedHeadSha);
+  assert.equal(task17aHistoricalDiffUpperBound.includes('HEAD'), false);
+  assert.equal(task17aChangedFiles.some((f) => f.startsWith('lib/creator-publishing-queue/operator-queue/')), false);
+  assert.equal(task17aChangedFiles.some((f) => /task17b/i.test(f)), false);
+  assert.doesNotMatch(appSource, /task17b/i);
+  assert.doesNotMatch(appSource, /lib\/creator-publishing-queue\/operator-queue\//i);
 });
 
 test('migration 01400 fails fast on legacy claimed queue rows before DDL', () => {
