@@ -394,6 +394,15 @@ test('future reschedule clears active Task 17A claims and progress/reschedule co
   assert.match(runner, /runTask17aProgressRescheduleConcurrency\.mjs[\s\S]*TASK17A_CURRENT_SCENARIOS_PASSED/);
   assert.match(workflow, /progress-reschedule-concurrency/);
   assert.match(pkg, /test:creator-publishing-task17a-progress-reschedule-concurrency/);
+  const lines = progressReschedule.split('\n').map((line) => line.trim());
+  const escapedInclude = String.raw`\\i backend/creator-publishing-queue/tests/task17aTestSupport.sql`;
+  const unescapedInclude = String.raw`\i backend/creator-publishing-queue/tests/task17aTestSupport.sql`;
+  assert.ok(lines.includes(`psqlSync('load support', ` + '`' + escapedInclude + '`' + `)`));
+  assert.equal(lines.some((line) => line.includes('`' + unescapedInclude + '`')), false);
+  assert.ok(progressReschedule.indexOf(escapedInclude) < progressReschedule.indexOf('await runRace('));
+  const runtimeBlock = progressReschedule.slice(progressReschedule.indexOf('try {'));
+  assert.ok(runtimeBlock.indexOf(escapedInclude) < runtimeBlock.indexOf('await runRace('));
+  assert.equal(runtimeBlock.includes('task17a_test.reset_fixture'), false);
   assert.match(progressReschedule, /clock_timestamp\(\) \+ interval '2 seconds'/);
   assert.match(progressReschedule, /lock_timeout='5s'[\s\S]*statement_timeout='20s'/);
   assert.match(progressReschedule, /creator_publishing_update_onlyfans_operator_progress[\s\S]*creator_publishing_schedule_plan/);

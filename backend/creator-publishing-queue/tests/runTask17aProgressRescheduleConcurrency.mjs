@@ -79,7 +79,7 @@ async function runRace(seed, raceName) {
 try {
   const probe = spawnSync(psql, ['--version'], { encoding: 'utf8' })
   if (probe.status !== 0) { console.error('[task17a-progress-reschedule-concurrency] psql unavailable; PostgreSQL 15 GitHub workflow is authoritative'); process.exit(127) }
-  psqlSync('load support', `\i backend/creator-publishing-queue/tests/task17aTestSupport.sql`)
+  psqlSync('load support', `\\i backend/creator-publishing-queue/tests/task17aTestSupport.sql`)
   const races = [await runRace(919001, 'progress-wins-or-reschedule-wins-a'), await runRace(919002, 'progress-wins-or-reschedule-wins-b')]
   console.log(JSON.stringify({ marker: 'TASK17A_PROGRESS_RESCHEDULE_CONCURRENCY_PASSED', synchronization: 'database clock_timestamp barrier', sessions: 2, races }, null, 2))
 } catch (error) {
