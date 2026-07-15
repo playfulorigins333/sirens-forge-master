@@ -33,9 +33,22 @@ jobs:
       - name: Enforce Task 17B-1 changed-file boundary
         run: |
           set -euo pipefail
-          allowed='^(lib/creator-publishing-queue/operator-queue/(types|validation|status|instructions|response|serviceCore|service|loaders|index)\.ts|backend/creator-publishing-queue/tests/task17b1OperatorQueue(Services|SourceContract)\.test\.ts|backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract\.test\.ts|\.github/workflows/task17b1-operator-services\.yml|package\.json)$'
+          allowed='^(lib/creator-publishing-queue/operator-queue/(types|validation|status|instructions|response|serviceCore|service|loaders|index)\.ts|backend/creator-publishing-queue/tests/task17b1OperatorQueue(Services|SourceContract)\.test\.ts|\.github/workflows/task17b1-operator-services\.yml|package\.json)$'
+          authorized_task17a_path='backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts'
+          authorized_task17a_hash='7dcdee3f39796049d265753ce0218a8bd2f416d4'
           git diff --name-only "$BASE_SHA"...HEAD | tee /tmp/changed.txt
-          if grep -Ev "$allowed" /tmp/changed.txt; then echo "Changed path outside Task 17B-1 boundary" >&2; exit 1; fi
+          while IFS= read -r file; do
+            if [[ "$file" == "$authorized_task17a_path" ]]; then
+              actual_hash=$(git hash-object "$file")
+              if [[ "$actual_hash" != "$authorized_task17a_hash" ]]; then
+                echo "Authorized Task 17A source-contract correction has unexpected content hash: $actual_hash" >&2
+                exit 1
+              fi
+            elif ! [[ "$file" =~ $allowed ]]; then
+              echo "Changed path outside Task 17B-1 boundary: $file" >&2
+              exit 1
+            fi
+          done < /tmp/changed.txt
       - name: Verify migrations unchanged
         run: test -z "$(git diff --name-only "$BASE_SHA"...HEAD -- supabase/migrations)"
       - uses: actions/setup-node@v4
