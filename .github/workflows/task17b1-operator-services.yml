@@ -1,0 +1,58 @@
+name: Task 17B-1 Operator Queue Services
+on:
+  pull_request:
+    paths:
+      - 'lib/creator-publishing-queue/operator-queue/**'
+      - 'backend/creator-publishing-queue/tests/task17b1OperatorQueueServices.test.ts'
+      - 'backend/creator-publishing-queue/tests/task17b1OperatorQueueSourceContract.test.ts'
+      - '.github/workflows/task17b1-operator-services.yml'
+      - 'package.json'
+jobs:
+  task17b1:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: a25d23cca89c859b394a10f9410e63f7e0e86d08
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+      STRIPE_SECRET_KEY: sk_test_dummy
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      RESEND_API_KEY: re_dummy
+      R2_ACCOUNT_ID: dummy
+      R2_ACCESS_KEY_ID: dummy
+      R2_SECRET_ACCESS_KEY: dummy
+      R2_BUCKET: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify approved baseline is present
+        run: git cat-file -e "$BASE_SHA^{commit}"
+      - name: Verify branch contains approved baseline
+        run: git merge-base --is-ancestor "$BASE_SHA" HEAD
+      - name: Enforce Task 17B-1 changed-file boundary
+        run: |
+          set -euo pipefail
+          allowed='^(lib/creator-publishing-queue/operator-queue/(types|validation|status|instructions|response|serviceCore|service|loaders|index)\.ts|backend/creator-publishing-queue/tests/task17b1OperatorQueue(Services|SourceContract)\.test\.ts|\.github/workflows/task17b1-operator-services\.yml|package\.json)$'
+          git diff --name-only "$BASE_SHA"...HEAD | tee /tmp/changed.txt
+          if grep -Ev "$allowed" /tmp/changed.txt; then echo "Changed path outside Task 17B-1 boundary" >&2; exit 1; fi
+      - name: Verify migrations unchanged
+        run: test -z "$(git diff --name-only "$BASE_SHA"...HEAD -- supabase/migrations)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run Task 17B-1 service tests
+        run: npm run test:creator-publishing-task17b1-services
+      - name: Run Task 17B-1 source-contract tests
+        run: npm run test:creator-publishing-task17b1-source-contract
+      - name: Run existing Creator Publishing Queue tests
+        run: npm run test:creator-publishing-queue
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Production build
+        run: npm run build
+      - name: Whitespace check
+        run: git diff --check
