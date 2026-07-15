@@ -387,14 +387,46 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
     }
   }
   const recoveryMatrix = readFileSync('backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql', 'utf8');
-  for (const match of recoveryMatrix.matchAll(/run_recovery_(?:success|rejection)_case\s*\(\s*'[^']+'\s*,\s*(\d{6})/g)) {
+  for (const match of recoveryMatrix.matchAll(/run_recovery_(?:success|rejection)_case\s*\(\s*'[^']+'\s*,\s*(\d{6})\b/g)) {
     const seed = Number(match[1]);
     const current = `backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql:run_recovery_case(${seed})`;
     const prior = reserved.get(seed);
     assert.equal(prior, undefined, `duplicate Task 17A fixture seed ${seed}: first ${prior}, second ${current}`);
     reserved.set(seed, current);
   }
-  for (const match of recoveryMatrix.matchAll(/recovery_prepare_fixture\s*\(\s*'[^']+'\s*,\s*(\d{6})/g)) {
+  assert.doesNotMatch(recoveryMatrix, /create_secondary_work\s*\(\s*p_seed\s*[+-]\s*\d+/);
+  assert.doesNotMatch(recoveryMatrix, /create_secondary_work\s*\(\s*p_seed\s*[+-]/);
+  assert.match(recoveryMatrix, /run_recovery_rejection_case\(p_label text,p_seed integer,p_key text,p_expected_error text,p_kind text,p_aux_seed integer default null\)/);
+  assert.match(recoveryMatrix, /p_kind='mismatch'[\s\S]*p_aux_seed is not null[\s\S]*p_aux_seed <> p_seed[\s\S]*create_secondary_work\(p_aux_seed\)/);
+  const recoveryPrimarySeeds = new Map<number, string>();
+  const recoveryAuxSeeds = new Map<number, string>();
+  const rejectionCallPattern = /run_recovery_rejection_case\(\s*'([^']+)'\s*,\s*(\d{6})\s*,[\s\S]*?,'([^']+)'\s*(?:,\s*(\d{6}))?\s*\)/g;
+  for (const match of recoveryMatrix.matchAll(rejectionCallPattern)) {
+    const label = match[1];
+    const primary = Number(match[2]);
+    const kind = match[3];
+    const aux = match[4] ? Number(match[4]) : null;
+    const priorPrimary = recoveryPrimarySeeds.get(primary);
+    assert.equal(priorPrimary, undefined, `duplicate Recovery primary seed ${primary}: first ${priorPrimary}, second ${label}`);
+    recoveryPrimarySeeds.set(primary, label);
+    if (kind === 'mismatch') {
+      assert.equal(label, 'recovery_task_job_mismatch');
+      assert.equal(aux, 941107, 'mismatch Recovery scenario must use the verified explicit auxiliary seed');
+    } else {
+      assert.equal(aux, null, `${label} must not supply an unnecessary auxiliary seed`);
+    }
+    if (aux !== null) {
+      assert.notEqual(aux, primary, `${label} auxiliary seed must differ from primary seed`);
+      const priorAux = recoveryAuxSeeds.get(aux);
+      assert.equal(priorAux, undefined, `duplicate Recovery auxiliary seed ${aux}: first ${priorAux}, second ${label}`);
+      recoveryAuxSeeds.set(aux, label);
+      assert.equal(recoveryPrimarySeeds.get(aux), undefined, `${label} auxiliary seed ${aux} collides with a Recovery primary seed`);
+      const priorReserved = reserved.get(aux);
+      assert.equal(priorReserved, undefined, `Recovery auxiliary seed ${aux} collides with reserved fixture seed ${priorReserved}`);
+      reserved.set(aux, `backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql:${label}:aux(${aux})`);
+    }
+  }
+  for (const match of recoveryMatrix.matchAll(/recovery_prepare_fixture\s*\(\s*'[^']+'\s*,\s*(\d{6})\b/g)) {
     const seed = Number(match[1]);
     const current = `backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql:recovery_prepare_fixture(${seed})`;
     const prior = reserved.get(seed);

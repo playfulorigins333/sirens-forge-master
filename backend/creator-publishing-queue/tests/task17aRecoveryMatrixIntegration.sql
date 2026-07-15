@@ -105,9 +105,9 @@ begin
   end if;
 end $$;
 
-create or replace function task17a_test.run_recovery_rejection_case(p_label text,p_seed integer,p_key text,p_expected_error text,p_kind text)
+create or replace function task17a_test.run_recovery_rejection_case(p_label text,p_seed integer,p_key text,p_expected_error text,p_kind text,p_aux_seed integer default null)
 returns void language plpgsql as $$
-declare f jsonb; actor uuid; task_id uuid; job_id uuid; ts timestamptz; other jsonb; setup_claim_key text := 'recsetup' || p_seed::text;
+declare f jsonb; actor uuid; task_id uuid; job_id uuid; ts timestamptz; other jsonb; setup_claim_key text := 'recsetup' || p_seed::text; primary_job_id uuid; alt_task_id uuid; alt_job_id uuid; primary_job_before jsonb; primary_job_after jsonb; alt_task_before jsonb; alt_task_after jsonb;
 begin
   if p_kind='unclaimed' then
     f := task17a_test.reset_fixture(p_seed);
@@ -133,7 +133,22 @@ begin
   elsif p_kind='null_job' then job_id := null;
   elsif p_kind='missing_job' then job_id := task17a_test.uuid_for('19990000-0000-4000-8000-', p_seed);
   elsif p_kind='missing_task' then task_id := task17a_test.uuid_for('19980000-0000-4000-8000-', p_seed);
-  elsif p_kind='mismatch' then other := task17a_test.create_secondary_work(p_seed+1); job_id := (other->>'job')::uuid;
+  elsif p_kind='mismatch' then
+    perform task17a_test.assert(p_aux_seed is not null and p_aux_seed <> p_seed, p_label || ' explicit auxiliary seed is present and distinct');
+    other := task17a_test.create_secondary_work(p_aux_seed);
+    primary_job_id := job_id;
+    alt_task_id := (other->>'task')::uuid;
+    alt_job_id := (other->>'job')::uuid;
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks where id=task_id), p_label || ' primary task exists');
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_platform_jobs where id=primary_job_id), p_label || ' primary job exists');
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks where id=alt_task_id), p_label || ' alternate task exists');
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_platform_jobs where id=alt_job_id), p_label || ' alternate job exists');
+    perform task17a_test.assert(task_id <> alt_task_id and primary_job_id <> alt_job_id and (f->>'package')::uuid <> (other->>'package')::uuid, p_label || ' primary and alternate identities differ');
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks qt join public.creator_publishing_platform_jobs pj on pj.id=qt.platform_job_id join public.creator_publishing_content_packages cp on cp.id=pj.content_package_id join public.creator_publishing_schedule_plans sp on sp.id=pj.plan_id where qt.id=task_id and pj.id=primary_job_id and cp.creator_id=sp.creator_id), p_label || ' primary graph is schema-valid');
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks qt join public.creator_publishing_platform_jobs pj on pj.id=qt.platform_job_id join public.creator_publishing_content_packages cp on cp.id=pj.content_package_id join public.creator_publishing_schedule_plans sp on sp.id=pj.plan_id where qt.id=alt_task_id and pj.id=alt_job_id and cp.creator_id=sp.creator_id), p_label || ' alternate graph is schema-valid');
+    select to_jsonb(j) into primary_job_before from (select * from public.creator_publishing_platform_jobs where id=primary_job_id) j;
+    select to_jsonb(q) into alt_task_before from (select * from public.creator_publishing_queue_tasks where id=alt_task_id) q;
+    job_id := alt_job_id;
   elsif p_kind='unsupported' then update public.creator_publishing_platform_jobs set publishing_mode='direct' where id=job_id;
   elsif p_kind='cancelled' then select clock_timestamp() into ts; update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=ts, cancelled_by=(f->>'creator')::uuid, cancellation_reason='Task 17A Recovery cancelled-job fixture', updated_at=ts where id=job_id;
   elsif p_kind='ineligible' then update public.creator_publishing_platform_jobs set job_state='blocked' where id=job_id;
@@ -141,6 +156,12 @@ begin
   elsif p_kind='manual' then update public.creator_publishing_queue_tasks set posted_confirmation=true where id=task_id;
   end if;
   perform task17a_test.assert_recovery_rejected(p_label,p_expected_error,actor,task_id,job_id,p_key);
+  if p_kind='mismatch' then
+    select to_jsonb(j) into primary_job_after from (select * from public.creator_publishing_platform_jobs where id=primary_job_id) j;
+    select to_jsonb(q) into alt_task_after from (select * from public.creator_publishing_queue_tasks where id=alt_task_id) q;
+    perform task17a_test.assert(primary_job_after = primary_job_before, p_label || ' primary job unchanged after mismatch rejection');
+    perform task17a_test.assert(alt_task_after = alt_task_before, p_label || ' alternate queue unchanged after mismatch rejection');
+  end if;
 end $$;
 
 \echo TASK17A_SCENARIO_START: recovery_restore_unscheduled_ready
@@ -211,7 +232,7 @@ select task17a_test.run_recovery_rejection_case('recovery_missing_job',931105,'r
 select task17a_test.run_recovery_rejection_case('recovery_missing_task',931106,'recmissingtask','OPERATOR_TASK_NOT_FOUND','missing_task');
 
 \echo TASK17A_SCENARIO_START: recovery_task_job_mismatch
-select task17a_test.run_recovery_rejection_case('recovery_task_job_mismatch',931107,'recmismatch','OPERATOR_TASK_JOB_MISMATCH','mismatch');
+select task17a_test.run_recovery_rejection_case('recovery_task_job_mismatch',931107,'recmismatch','OPERATOR_TASK_JOB_MISMATCH','mismatch',941107);
 
 \echo TASK17A_SCENARIO_START: recovery_unsupported_target_or_mode
 select task17a_test.run_recovery_rejection_case('recovery_unsupported_target_or_mode',931108,'recunsupported','OPERATOR_TARGET_NOT_SUPPORTED','unsupported');
