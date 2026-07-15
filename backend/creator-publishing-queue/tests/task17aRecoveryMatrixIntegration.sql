@@ -107,19 +107,25 @@ end $$;
 
 create or replace function task17a_test.run_recovery_rejection_case(p_label text,p_seed integer,p_key text,p_expected_error text,p_kind text)
 returns void language plpgsql as $$
-declare f jsonb; actor uuid; task_id uuid; job_id uuid; ts timestamptz; other jsonb;
+declare f jsonb; actor uuid; task_id uuid; job_id uuid; ts timestamptz; other jsonb; setup_claim_key text := 'recsetup' || p_seed::text;
 begin
   if p_kind='unclaimed' then
     f := task17a_test.reset_fixture(p_seed);
   elsif p_kind='active' then
     f := task17a_test.reset_fixture(p_seed);
-    perform public.creator_publishing_claim_onlyfans_operator_task((f->>'creator')::uuid,(f->>'task')::uuid,(f->>'job')::uuid,f->>'consent_version',f->>'consent_hash',p_key || '-claim');
+    perform public.creator_publishing_claim_onlyfans_operator_task((f->>'creator')::uuid,(f->>'task')::uuid,(f->>'job')::uuid,f->>'consent_version',f->>'consent_hash',setup_claim_key);
     perform task17a_test.assert((select status='claimed' and claim_expires_at > clock_timestamp() from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), p_label || ' active claim remains unexpired');
   else
-    f := task17a_test.recovery_prepare_fixture(p_label,p_seed,false,null,case when p_kind='revoked' then 'operator_a' else 'creator' end,p_key || '-claim',0,false);
+    f := task17a_test.recovery_prepare_fixture(p_label,p_seed,false,null,case when p_kind='revoked' then 'operator_a' else 'creator' end,setup_claim_key,0,false);
   end if;
   actor := case when p_kind='unauthorized' then (f->>'unauthorized')::uuid when p_kind='revoked' then (f->>'operator_a')::uuid else (f->>'creator')::uuid end;
   task_id := (f->>'task')::uuid; job_id := (f->>'job')::uuid;
+  if p_kind <> 'unclaimed' then
+    raise notice 'TASK17A_RECOVERY_REJECTION_SETUP_KEY:% seed:% setup:% recovery:% distinct:% valid:%', p_label, p_seed, setup_claim_key, p_key, setup_claim_key <> p_key, setup_claim_key ~ '^[A-Za-z0-9_-]{8,128}$';
+    perform task17a_test.assert(setup_claim_key <> p_key and setup_claim_key ~ '^[A-Za-z0-9_-]{8,128}$', p_label || ' setup claim key is valid and distinct from tested recovery key');
+    perform task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='claim' and idempotency_key=setup_claim_key)=1, p_label || ' exactly one setup claim idempotency row');
+    perform task17a_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and actor_id is not distinct from actor and queue_task_id is not distinct from task_id and platform_job_id is not distinct from job_id), p_label || ' no recovery idempotency before tested recovery call');
+  end if;
   if p_kind='noop' then
     null;
   elsif p_kind='null_actor' then actor := null;

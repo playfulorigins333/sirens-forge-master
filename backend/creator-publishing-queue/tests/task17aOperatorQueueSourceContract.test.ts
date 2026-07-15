@@ -349,7 +349,9 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
   assert.match(runner, /TASK17A_DIAGNOSTIC_TARGET_PASSED:\$\{diagnosticTarget\}/);
   assert.match(runner, /if \(diagnosticTarget\)[\s\S]*TASK17A_DIAGNOSTIC_TARGET_PASSED[\s\S]*} else \{[\s\S]*for \(const f of sqlTargets\)[\s\S]*runTask17aConcurrency\.mjs[\s\S]*runTask17aCancellationConcurrency\.mjs[\s\S]*TASK17A_CURRENT_SCENARIOS_PASSED/);
   assert.match(workflow, /diagnostics:[\s\S]*needs: postgres[\s\S]*if: \$\{\{ always\(\) && needs\.postgres\.result == 'failure' \}\}/);
-  assert.match(workflow, /diagnostics:[\s\S]*continue-on-error: true[\s\S]*fail-fast: false/);
+  assert.match(workflow, /diagnostics:[\s\S]*fail-fast: false/);
+  const diagnosticsJob = workflow.match(/\n  diagnostics:[\s\S]*?(?=\n  [a-zA-Z_-]+:|\n?$)/)?.[0] || '';
+  assert.doesNotMatch(diagnosticsJob, /continue-on-error:\s*true/);
   assert.match(workflow, /diagnostics:[\s\S]*image: postgres:15/);
   assert.match(workflow, /TASK17A_DIAGNOSTIC_TARGET: \$\{\{ matrix\.target \}\}/);
   assert.match(workflow, /path: task17a-postgres-diagnostics-\*\.log/);
@@ -824,4 +826,38 @@ test('operator expired-claim recovery audits include complete safe prior state a
   assert.match(recovery, /TASK17A_RECOVERY_AUDIT_BEFORE/);
   assert.match(recovery, /TASK17A_RECOVERY_AUDIT_AFTER/);
   assert.match(recovery, /audit_before->>'claim_attempt_count'[\s\S]*audit_before->>'progress_updated_by'[\s\S]*audit_before->>'progress_updated_at'[\s\S]*audit_before->>'assigned_operator_id'/);
+});
+
+
+test('Recovery rejection setup uses valid setup keys distinct from tested Recovery keys and diagnostics fail truthfully', () => {
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql', 'utf8');
+  const helper = recovery.match(/create or replace function task17a_test\.run_recovery_rejection_case[\s\S]*?end \$\$;/)?.[0] || '';
+  assert.match(helper, /setup_claim_key text := 'recsetup' \|\| p_seed::text/);
+  assert.match(helper, /setup_claim_key ~ '\^\[A-Za-z0-9_-\]\{8,128\}\$'/);
+  assert.match(helper, /setup_claim_key <> p_key/);
+  assert.match(helper, /action_type='claim'[\s\S]*idempotency_key=setup_claim_key/);
+  assert.match(helper, /action_type='expired_claim_recovery'[\s\S]*no recovery idempotency before tested recovery call/);
+  assert.match(helper, /creator_publishing_claim_onlyfans_operator_task[\s\S]*setup_claim_key/);
+  assert.match(helper, /recovery_prepare_fixture[\s\S]*setup_claim_key/);
+  assert.match(helper, /assert_recovery_rejected\(p_label,p_expected_error,actor,task_id,job_id,p_key\)/);
+  assert.doesNotMatch(helper, /p_key \|\| '-claim'/);
+  const recoveryClaimCalls = [...helper.matchAll(/creator_publishing_claim_onlyfans_operator_task\(([^;]*)\)/g)];
+  assert.ok(recoveryClaimCalls.length > 0, 'rejection helper must perform real setup Claim calls');
+  for (const [, args] of recoveryClaimCalls) {
+    assert.match(args, /setup_claim_key/, 'setup Claim call must use the dedicated setup key');
+    assert.doesNotMatch(args, /\bp_key\b|p_key\s*\|\|\s*'-claim'/, 'setup Claim call must not use the tested Recovery key');
+  }
+  assert.match(recovery, /recovery_idempotency_key_invalid[\s\S]*'bad key'[\s\S]*OPERATOR_IDEMPOTENCY_KEY_INVALID/);
+
+  const workflow = readFileSync('.github/workflows/task17a-operator-queue-postgres.yml', 'utf8');
+  const diagnosticsJob = workflow.match(/\n  diagnostics:[\s\S]*?(?=\n  [a-zA-Z_-]+:|\n?$)/)?.[0] || '';
+  assert.match(diagnosticsJob, /needs: postgres[\s\S]*if: \$\{\{ always\(\) && needs\.postgres\.result == 'failure' \}\}/);
+  assert.match(diagnosticsJob, /fail-fast: false/);
+  assert.doesNotMatch(diagnosticsJob, /continue-on-error:\s*true/);
+  assert.match(diagnosticsJob, /Task 17A targeted diagnostic[\s\S]*run: npm run test:creator-publishing-task17a-postgres/);
+  assert.match(diagnosticsJob, /Diagnostic summary[\s\S]*if: always\(\)/);
+  assert.match(diagnosticsJob, /Upload diagnostic target log[\s\S]*if: always\(\)/);
+  for (const target of ['task17aPostgresIntegration.sql','task17aAuthorizationTimingIntegration.sql','task17aIdempotencyRecoveryIntegration.sql','task17aSafetyGatesIntegration.sql','task17aSchedulerCompatibilityIntegration.sql','task17aProgressMatrixIntegration.sql','task17aReleaseMatrixIntegration.sql','task17aRecoveryMatrixIntegration.sql','claim-concurrency','cancellation-concurrency']) {
+    assert.ok(diagnosticsJob.includes(target), `missing diagnostic target ${target}`);
+  }
 });

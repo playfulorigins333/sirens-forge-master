@@ -50,7 +50,6 @@ jobs:
   diagnostics:
     needs: postgres
     if: ${{ always() && needs.postgres.result == 'failure' }}
-    continue-on-error: true
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -89,7 +88,6 @@ jobs:
       - run: npm ci
       - name: Task 17A targeted diagnostic
         id: diagnostic
-        continue-on-error: true
         run: npm run test:creator-publishing-task17a-postgres
       - name: Diagnostic summary
         if: always()
