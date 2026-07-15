@@ -835,6 +835,43 @@ test('Task 17A Recovery matrix is explicit, substantive, and wired into diagnost
 });
 
 
+test('Recovery SQL psql gset aliases are bounded and fully defined', () => {
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql', 'utf8');
+  const aliasDefinitions: Array<{ alias: string; line: number }> = [];
+  for (const match of recovery.matchAll(/select\s+([\s\S]*?)\s+\\gset/gim)) {
+    const statement = match[1];
+    for (const aliasMatch of statement.matchAll(/\bas\s+([A-Za-z_][A-Za-z0-9_]*)/g)) {
+      const offset = (match.index || 0) + aliasMatch.index!;
+      aliasDefinitions.push({ alias: aliasMatch[1], line: recovery.slice(0, offset).split('\n').length });
+    }
+  }
+  assert.ok(aliasDefinitions.length > 0, 'Recovery matrix must define psql aliases through gset');
+  const aliases = aliasDefinitions.map(({ alias }) => alias);
+  for (const { alias, line } of aliasDefinitions) {
+    assert.ok(alias.length <= 63, `${alias} at line ${line} exceeds PostgreSQL identifier limit: ${alias.length}`);
+    assert.ok(alias.length <= 55, `${alias} at line ${line} exceeds Task 17A safe alias limit: ${alias.length}`);
+  }
+  const duplicateAliases = aliases.filter((alias, index) => aliases.indexOf(alias) !== index);
+  assert.deepEqual(duplicateAliases, [], `duplicate Recovery gset aliases: ${duplicateAliases.join(', ')}`);
+  const truncated = new Map<string, string>();
+  for (const alias of aliases) {
+    const key = alias.slice(0, 63);
+    const prior = truncated.get(key);
+    assert.ok(!prior || prior === alias, `Recovery gset aliases collide after PostgreSQL truncation: ${prior} and ${alias}`);
+    truncated.set(key, alias);
+  }
+  const aliasSet = new Set(aliases);
+  const refs = [...recovery.matchAll(/:[\'\"]([A-Za-z_][A-Za-z0-9_]*)[\'\"]/g)].map((match) => match[1]);
+  const undefinedRefs = [...new Set(refs.filter((ref) => !aliasSet.has(ref)))];
+  assert.deepEqual(undefinedRefs, [], `undefined Recovery psql variable references: ${undefinedRefs.join(', ')}`);
+  for (const alias of ['recdrift40_f','recdrift40_q0','recdrift40_j0','recdrift41_f','recdrift41_q0','recdrift41_j0']) {
+    assert.ok(aliasSet.has(alias), `missing short Recovery drift alias ${alias}`);
+  }
+  assert.doesNotMatch(recovery, /recovery_drift_job_state_inconsistent_with_schedule_pre_tx_queue/);
+  assert.doesNotMatch(recovery, /recovery_drift_unscheduled_job_with_schedule_fields_pre_tx_queue/);
+});
+
+
 test('explicit Recovery rejects incomplete expired-claim ownership shapes', () => {
   const migration = readFileSync('supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql', 'utf8');
   const recoveryFunction = migration.match(/create or replace function public\.creator_publishing_recover_expired_onlyfans_operator_claim[\s\S]*?end; \$\$;/)?.[0] || '';
