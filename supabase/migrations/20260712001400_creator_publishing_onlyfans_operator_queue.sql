@@ -697,7 +697,7 @@ begin
       insert into public.creator_publishing_scheduler_events(creator_id,publishing_plan_id,platform_job_id,event_type,due_at,schedule_revision,created_at,updated_at)
       values (p_creator_id,p_publishing_plan_id,job_rec.id,'publish_due',p_intended_publish_at,v_new_revision,v_now,v_now);
       v_operator_claim_cleanup := jsonb_build_object('performed',false);
-      if v_action='reschedule'
+      if v_action in ('schedule','reschedule')
          and job_rec.target_platform='onlyfans'
          and job_rec.publishing_mode='assisted'
          and (p_intended_publish_at - interval '60 minutes') > v_now then
@@ -738,11 +738,11 @@ begin
             'queue_task_id',queue_rec.id,
             'previous_status',queue_rec.status,
             'resulting_status','scheduled_internally',
-            'reason','rescheduled_before_operator_due'
+            'reason',case when v_action='schedule' then 'scheduled_before_operator_due' else 'rescheduled_before_operator_due' end
           );
           insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at)
           values(
-            'creator_publishing_queue_task',queue_rec.id,p_creator_id,'creator','operator_task_claim_cleared_by_reschedule',
+            'creator_publishing_queue_task',queue_rec.id,p_creator_id,'creator',case when v_action='schedule' then 'operator_task_claim_cleared_by_schedule' else 'operator_task_claim_cleared_by_reschedule' end,
             jsonb_build_object(
               'queue_task_id',queue_rec.id,
               'platform_job_id',job_rec.id,
@@ -763,7 +763,7 @@ begin
               'resulting_status','scheduled_internally',
               'schedule_revision',v_new_revision,
               'operator_due_at',p_intended_publish_at - interval '60 minutes',
-              'reason','rescheduled_before_operator_due'
+              'reason',case when v_action='schedule' then 'scheduled_before_operator_due' else 'rescheduled_before_operator_due' end
             ),
             p_idempotency_key,v_now
           );

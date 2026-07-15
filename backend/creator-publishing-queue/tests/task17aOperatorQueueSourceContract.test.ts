@@ -155,6 +155,7 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
     'scheduler_claim_cleanup_creator_verification_revoked',
     'scheduler_claim_cleanup_account_revoked',
     'reschedule_active_claim_to_future_clears_claim',
+    'initial_schedule_active_claim_to_future_clears_claim',
     'safety_capability_unavailable',
     'duplicate_task_unique_index_boundary',
     'duplicate_task_rpc_ambiguity',
@@ -364,27 +365,39 @@ test('Task 17A current Task 17A scenario labels are present and runner emits non
 
 test('future reschedule clears active Task 17A claims and progress/reschedule concurrency is wired', () => {
   const schedulePlan = migration.match(/create or replace function public\.creator_publishing_schedule_plan[\s\S]*?\n\$\$;/)?.[0] || '';
-  assert.match(schedulePlan, /v_action='reschedule'[\s\S]*job_rec\.target_platform='onlyfans'[\s\S]*job_rec\.publishing_mode='assisted'[\s\S]*p_intended_publish_at - interval '60 minutes'[\s\S]*> v_now/);
+  assert.match(schedulePlan, /v_action in \('schedule','reschedule'\)[\s\S]*job_rec\.target_platform='onlyfans'[\s\S]*job_rec\.publishing_mode='assisted'[\s\S]*p_intended_publish_at - interval '60 minutes'[\s\S]*> v_now/);
+  assert.doesNotMatch(schedulePlan, /if v_action='reschedule'\s+and job_rec\.target_platform='onlyfans'/);
   assert.match(schedulePlan, /queue_source\.status='claimed'[\s\S]*queue_source\.claimed_by is not null[\s\S]*queue_source\.claimed_at is not null[\s\S]*queue_source\.claim_token is not null[\s\S]*queue_source\.claim_expires_at is not null[\s\S]*queue_source\.claim_expires_at > v_now/);
   assert.match(schedulePlan, /set status='scheduled_internally',[\s\S]*claimed_by=null,[\s\S]*claimed_at=null,[\s\S]*claim_token=null,[\s\S]*claim_expires_at=null/);
   assert.doesNotMatch(schedulePlan, /set[\s\S]*claim_attempt_count\s*=/i);
   assert.doesNotMatch(schedulePlan, /set[\s\S]*operator_progress_state\s*=/i);
   assert.doesNotMatch(schedulePlan, /set[\s\S]*assigned_operator_id\s*=/i);
+  assert.match(schedulePlan, /operator_task_claim_cleared_by_schedule/);
   assert.match(schedulePlan, /operator_task_claim_cleared_by_reschedule/);
+  assert.match(schedulePlan, /scheduled_before_operator_due/);
+  assert.match(schedulePlan, /rescheduled_before_operator_due/);
   assert.match(schedulePlan, /claim_attempt_count[\s\S]*operator_progress_state[\s\S]*operator_progress_revision[\s\S]*operator_progress_updated_by[\s\S]*operator_progress_updated_at[\s\S]*assigned_operator_id/);
-  assert.match(schedulePlan, /operator_claim_cleanup[\s\S]*performed[\s\S]*queue_task_id[\s\S]*previous_status[\s\S]*resulting_status[\s\S]*rescheduled_before_operator_due/);
-  const cleanupAudit = schedulePlan.match(/operator_task_claim_cleared_by_reschedule[\s\S]*?p_idempotency_key,v_now/)?.[0] || '';
+  assert.match(schedulePlan, /operator_claim_cleanup[\s\S]*performed[\s\S]*queue_task_id[\s\S]*previous_status[\s\S]*resulting_status[\s\S]*scheduled_before_operator_due[\s\S]*rescheduled_before_operator_due/);
+  const cleanupAudit = schedulePlan.match(/operator_task_claim_cleared_by_schedule[\s\S]*?p_idempotency_key,v_now/)?.[0] || '';
+  assert.match(cleanupAudit, /claim_attempt_count[\s\S]*operator_progress_state[\s\S]*operator_progress_revision[\s\S]*operator_progress_updated_by[\s\S]*operator_progress_updated_at[\s\S]*assigned_operator_id/);
   assert.doesNotMatch(cleanupAudit, /claim_token/);
 
   const scheduler = readFileSync('backend/creator-publishing-queue/tests/task17aSchedulerCompatibilityIntegration.sql', 'utf8');
   assert.match(scheduler, /TASK17A_SCENARIO_START: reschedule_active_claim_to_future_clears_claim/);
+  assert.match(scheduler, /TASK17A_SCENARIO_START: initial_schedule_active_claim_to_future_clears_claim/);
   assert.match(scheduler, /creator_publishing_claim_onlyfans_operator_task[\s\S]*creator_publishing_update_onlyfans_operator_progress[\s\S]*creator_publishing_schedule_plan/);
   assert.match(scheduler, /OPERATOR_CLAIM_TOKEN_MISMATCH/);
   assert.match(scheduler, /OPERATOR_NOT_DUE/);
+  assert.match(scheduler, /operator_task_claim_cleared_by_schedule/);
+  assert.match(scheduler, /scheduled_before_operator_due/);
   assert.match(scheduler, /operator_task_claim_cleared_by_reschedule/);
   assert.match(scheduler, /claimed_by is null[\s\S]*claimed_at is null[\s\S]*claim_token is null[\s\S]*claim_expires_at is null/);
   assert.match(scheduler, /operator_progress_state=before_queue\.operator_progress_state[\s\S]*operator_progress_revision=before_queue\.operator_progress_revision[\s\S]*assigned_operator_id is not distinct from before_queue\.assigned_operator_id/);
-  assert.match(scheduler, /posted_by is not distinct from before_queue\.posted_by[\s\S]*proof_screenshot_storage_key is not distinct from before_queue\.proof_screenshot_storage_key/);
+  assert.match(scheduler, /posted_by is not distinct from before_queue\.posted_by[\s\S]*final_post_url_skip_reason is not distinct from before_queue\.final_post_url_skip_reason[\s\S]*proof_screenshot_storage_key is not distinct from before_queue\.proof_screenshot_storage_key/);
+  assert.match(scheduler, /initial schedule replay returns stored cleanup result/);
+  assert.match(scheduler, /former token progress after initial schedule[\s\S]*OPERATOR_CLAIM_TOKEN_MISMATCH/);
+  assert.match(scheduler, /before due claim after initial schedule[\s\S]*OPERATOR_NOT_DUE/);
+  assert.match(scheduler, /after due reclaim after initial schedule succeeds/);
 
   const runner = readFileSync('backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs', 'utf8');
   const progressReschedule = readFileSync('backend/creator-publishing-queue/tests/runTask17aProgressRescheduleConcurrency.mjs', 'utf8');
@@ -420,6 +433,10 @@ test('future reschedule clears active Task 17A claims and progress/reschedule co
   assert.match(progressReschedule, /runRace\(919001, 'progress_first_then_reschedule', 'progress-wins'\)/);
   assert.match(progressReschedule, /runRace\(919002, 'reschedule_first_then_progress', 'reschedule-wins'\)/);
   assert.match(progressReschedule, /runRace\(919003, 'simultaneous_progress_reschedule', 'either'\)/);
+  assert.match(progressReschedule, /runRace\(919004, 'simultaneous_progress_initial_schedule', 'either', 'schedule'\)/);
+  assert.match(progressReschedule, /ready_for_handoff', 'draft', false/);
+  assert.match(progressReschedule, /operator_task_claim_cleared_by_schedule/);
+  assert.match(progressReschedule, /scheduled_before_operator_due/);
   assert.match(progressReschedule, /expectedOrder[\s\S]*progressDelay[\s\S]*rescheduleDelay/);
   assert.match(progressReschedule, /select pg_sleep\(0\.5\)/);
   assert.match(progressReschedule, /observedOrder[\s\S]*expectedOrderOk/);
