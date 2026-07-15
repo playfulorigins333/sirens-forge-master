@@ -15,7 +15,10 @@
     "test:creator-publishing-task17a-concurrency": "node backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs",
     "test:creator-publishing-task17a-upgrade": "node backend/creator-publishing-queue/tests/runTask17aUpgradeIntegration.mjs",
     "test:creator-publishing-task17a-cancellation-concurrency": "node backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs",
-    "test:creator-publishing-task17a-progress-reschedule-concurrency": "node backend/creator-publishing-queue/tests/runTask17aProgressRescheduleConcurrency.mjs"
+    "test:creator-publishing-task17a-progress-reschedule-concurrency": "node backend/creator-publishing-queue/tests/runTask17aProgressRescheduleConcurrency.mjs",
+    "test:creator-publishing-task17b1-services": "tsx backend/creator-publishing-queue/tests/task17b1OperatorQueueServices.test.ts",
+    "test:creator-publishing-task17b1-source-contract": "tsx backend/creator-publishing-queue/tests/task17b1OperatorQueueSourceContract.test.ts",
+    "test:creator-publishing-task17b1": "npm run test:creator-publishing-task17b1-services && npm run test:creator-publishing-task17b1-source-contract"
   },
   "repository": {
     "type": "git",
