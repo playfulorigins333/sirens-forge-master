@@ -171,6 +171,26 @@ begin
   end if;
 end $$;
 
+create or replace function task17a_test.run_recovery_partial_ownership_case(p_label text,p_fixture jsonb,p_missing_field text,p_key text)
+returns void language plpgsql as $$
+declare task_id uuid := (p_fixture->>'task')::uuid; job_id uuid := (p_fixture->>'job')::uuid; actor uuid := (p_fixture->>'creator')::uuid;
+begin
+  execute 'alter table public.creator_publishing_queue_tasks drop constraint creator_publishing_queue_claim_all_or_none';
+  if p_missing_field='claimed_by' then
+    update public.creator_publishing_queue_tasks set claimed_by=null where id=task_id;
+  elsif p_missing_field='claimed_at' then
+    update public.creator_publishing_queue_tasks set claimed_at=null where id=task_id;
+  elsif p_missing_field='claim_token' then
+    update public.creator_publishing_queue_tasks set claim_token=null where id=task_id;
+  elsif p_missing_field='claim_expires_at' then
+    update public.creator_publishing_queue_tasks set claim_expires_at=null where id=task_id;
+  else
+    raise exception 'TASK17A_UNKNOWN_OWNERSHIP_FIELD:%', p_missing_field;
+  end if;
+  perform task17a_test.assert((select status='claimed' and (claimed_by is not null or p_missing_field='claimed_by') and (claimed_by is null or p_missing_field<>'claimed_by') and (claimed_at is not null or p_missing_field='claimed_at') and (claimed_at is null or p_missing_field<>'claimed_at') and (claim_token is not null or p_missing_field='claim_token') and (claim_token is null or p_missing_field<>'claim_token') and ((claim_expires_at is not null and claim_expires_at <= clock_timestamp()) or p_missing_field='claim_expires_at') and (claim_expires_at is null or p_missing_field<>'claim_expires_at') from public.creator_publishing_queue_tasks where id=task_id), p_label || ' malformed expired ownership shape is present');
+  perform task17a_test.assert_recovery_rejected(p_label,'OPERATOR_CLAIM_NOT_EXPIRED',actor,task_id,job_id,p_key);
+end $$;
+
 \echo TASK17A_SCENARIO_START: recovery_restore_unscheduled_ready
 select task17a_test.run_recovery_success_case('recovery_restore_unscheduled_ready',931001,'recrestore01','ready_for_handoff',false,null,null,'creator','creator',0,false,'none');
 
@@ -270,9 +290,7 @@ select task17a_test.recovery_prepare_fixture('recovery_partial_ownership_defensi
 select to_jsonb(q) as recovery_partial_pre_tx_queue from public.creator_publishing_queue_tasks q where id=(:'recovery_partial_fixture'::jsonb->>'task')::uuid \gset
 select to_jsonb(j) as recovery_partial_pre_tx_job from public.creator_publishing_platform_jobs j where id=(:'recovery_partial_fixture'::jsonb->>'job')::uuid \gset
 begin;
-alter table public.creator_publishing_queue_tasks drop constraint creator_publishing_queue_claim_all_or_none;
-update public.creator_publishing_queue_tasks set claim_token=null where id=(:'recovery_partial_fixture'::jsonb->>'task')::uuid;
-select task17a_test.assert_recovery_rejected('recovery_partial_ownership_defensive_boundary','OPERATOR_CLAIM_NOT_EXPIRED',(:'recovery_partial_fixture'::jsonb->>'creator')::uuid,(:'recovery_partial_fixture'::jsonb->>'task')::uuid,(:'recovery_partial_fixture'::jsonb->>'job')::uuid,'recpartial');
+select task17a_test.run_recovery_partial_ownership_case('recovery_partial_ownership_defensive_boundary',(:'recovery_partial_fixture')::jsonb,'claim_token','recpartial');
 rollback;
 select task17a_test.assert(exists(select 1 from pg_constraint where conrelid='public.creator_publishing_queue_tasks'::regclass and conname='creator_publishing_queue_claim_all_or_none'), 'recovery_partial_ownership_defensive_boundary ownership constraint restored after rollback');
 select task17a_test.assert((select to_jsonb(q)=(:'recovery_partial_pre_tx_queue')::jsonb from public.creator_publishing_queue_tasks q where id=(:'recovery_partial_fixture'::jsonb->>'task')::uuid), 'recovery_partial_ownership_defensive_boundary queue restored after rollback');
@@ -280,6 +298,48 @@ select task17a_test.assert((select to_jsonb(j)=(:'recovery_partial_pre_tx_job'):
 select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key='recpartial')=0, 'recovery_partial_ownership_defensive_boundary no recovery audit escaped rollback');
 select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key='recpartial')=0, 'recovery_partial_ownership_defensive_boundary no recovery idempotency escaped rollback');
 insert into task17a_recovery_rejections(label,key,task_id,job_id) values('recovery_partial_ownership_defensive_boundary','recpartial',(:'recovery_partial_fixture'::jsonb->>'task')::uuid,(:'recovery_partial_fixture'::jsonb->>'job')::uuid) on conflict (label) do update set key=excluded.key, task_id=excluded.task_id, job_id=excluded.job_id;
+
+\echo TASK17A_SCENARIO_START: recovery_partial_ownership_missing_claimed_by
+select task17a_test.recovery_prepare_fixture('recovery_partial_ownership_missing_claimed_by',931122,false,null,'creator','recpartialbyclaim',0,false) as recovery_partial_by_fixture \gset
+select to_jsonb(q) as recovery_partial_by_pre_tx_queue from public.creator_publishing_queue_tasks q where id=(:'recovery_partial_by_fixture'::jsonb->>'task')::uuid \gset
+select to_jsonb(j) as recovery_partial_by_pre_tx_job from public.creator_publishing_platform_jobs j where id=(:'recovery_partial_by_fixture'::jsonb->>'job')::uuid \gset
+begin;
+select task17a_test.run_recovery_partial_ownership_case('recovery_partial_ownership_missing_claimed_by',(:'recovery_partial_by_fixture')::jsonb,'claimed_by','recpartialby');
+rollback;
+select task17a_test.assert(exists(select 1 from pg_constraint where conrelid='public.creator_publishing_queue_tasks'::regclass and conname='creator_publishing_queue_claim_all_or_none'), 'recovery_partial_ownership_missing_claimed_by ownership constraint restored after rollback');
+select task17a_test.assert((select to_jsonb(q)=(:'recovery_partial_by_pre_tx_queue')::jsonb from public.creator_publishing_queue_tasks q where id=(:'recovery_partial_by_fixture'::jsonb->>'task')::uuid), 'recovery_partial_ownership_missing_claimed_by queue restored after rollback');
+select task17a_test.assert((select to_jsonb(j)=(:'recovery_partial_by_pre_tx_job')::jsonb from public.creator_publishing_platform_jobs j where id=(:'recovery_partial_by_fixture'::jsonb->>'job')::uuid), 'recovery_partial_ownership_missing_claimed_by job restored after rollback');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key='recpartialby')=0, 'recovery_partial_ownership_missing_claimed_by no recovery audit escaped rollback');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key='recpartialby')=0, 'recovery_partial_ownership_missing_claimed_by no recovery idempotency escaped rollback');
+insert into task17a_recovery_rejections(label,key,task_id,job_id) values('recovery_partial_ownership_missing_claimed_by','recpartialby',(:'recovery_partial_by_fixture'::jsonb->>'task')::uuid,(:'recovery_partial_by_fixture'::jsonb->>'job')::uuid) on conflict (label) do update set key=excluded.key, task_id=excluded.task_id, job_id=excluded.job_id;
+
+\echo TASK17A_SCENARIO_START: recovery_partial_ownership_missing_claimed_at
+select task17a_test.recovery_prepare_fixture('recovery_partial_ownership_missing_claimed_at',931123,false,null,'creator','recpartialatclaim',0,false) as recovery_partial_at_fixture \gset
+select to_jsonb(q) as recovery_partial_at_pre_tx_queue from public.creator_publishing_queue_tasks q where id=(:'recovery_partial_at_fixture'::jsonb->>'task')::uuid \gset
+select to_jsonb(j) as recovery_partial_at_pre_tx_job from public.creator_publishing_platform_jobs j where id=(:'recovery_partial_at_fixture'::jsonb->>'job')::uuid \gset
+begin;
+select task17a_test.run_recovery_partial_ownership_case('recovery_partial_ownership_missing_claimed_at',(:'recovery_partial_at_fixture')::jsonb,'claimed_at','recpartialat');
+rollback;
+select task17a_test.assert(exists(select 1 from pg_constraint where conrelid='public.creator_publishing_queue_tasks'::regclass and conname='creator_publishing_queue_claim_all_or_none'), 'recovery_partial_ownership_missing_claimed_at ownership constraint restored after rollback');
+select task17a_test.assert((select to_jsonb(q)=(:'recovery_partial_at_pre_tx_queue')::jsonb from public.creator_publishing_queue_tasks q where id=(:'recovery_partial_at_fixture'::jsonb->>'task')::uuid), 'recovery_partial_ownership_missing_claimed_at queue restored after rollback');
+select task17a_test.assert((select to_jsonb(j)=(:'recovery_partial_at_pre_tx_job')::jsonb from public.creator_publishing_platform_jobs j where id=(:'recovery_partial_at_fixture'::jsonb->>'job')::uuid), 'recovery_partial_ownership_missing_claimed_at job restored after rollback');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key='recpartialat')=0, 'recovery_partial_ownership_missing_claimed_at no recovery audit escaped rollback');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key='recpartialat')=0, 'recovery_partial_ownership_missing_claimed_at no recovery idempotency escaped rollback');
+insert into task17a_recovery_rejections(label,key,task_id,job_id) values('recovery_partial_ownership_missing_claimed_at','recpartialat',(:'recovery_partial_at_fixture'::jsonb->>'task')::uuid,(:'recovery_partial_at_fixture'::jsonb->>'job')::uuid) on conflict (label) do update set key=excluded.key, task_id=excluded.task_id, job_id=excluded.job_id;
+
+\echo TASK17A_SCENARIO_START: recovery_partial_ownership_missing_claim_expires_at
+select task17a_test.recovery_prepare_fixture('recovery_partial_ownership_missing_claim_expires_at',931124,false,null,'creator','recpartialexpiresclaim',0,false) as recovery_partial_expires_fixture \gset
+select to_jsonb(q) as recovery_partial_expires_pre_tx_queue from public.creator_publishing_queue_tasks q where id=(:'recovery_partial_expires_fixture'::jsonb->>'task')::uuid \gset
+select to_jsonb(j) as recovery_partial_expires_pre_tx_job from public.creator_publishing_platform_jobs j where id=(:'recovery_partial_expires_fixture'::jsonb->>'job')::uuid \gset
+begin;
+select task17a_test.run_recovery_partial_ownership_case('recovery_partial_ownership_missing_claim_expires_at',(:'recovery_partial_expires_fixture')::jsonb,'claim_expires_at','recpartialexpires');
+rollback;
+select task17a_test.assert(exists(select 1 from pg_constraint where conrelid='public.creator_publishing_queue_tasks'::regclass and conname='creator_publishing_queue_claim_all_or_none'), 'recovery_partial_ownership_missing_claim_expires_at ownership constraint restored after rollback');
+select task17a_test.assert((select to_jsonb(q)=(:'recovery_partial_expires_pre_tx_queue')::jsonb from public.creator_publishing_queue_tasks q where id=(:'recovery_partial_expires_fixture'::jsonb->>'task')::uuid), 'recovery_partial_ownership_missing_claim_expires_at queue restored after rollback');
+select task17a_test.assert((select to_jsonb(j)=(:'recovery_partial_expires_pre_tx_job')::jsonb from public.creator_publishing_platform_jobs j where id=(:'recovery_partial_expires_fixture'::jsonb->>'job')::uuid), 'recovery_partial_ownership_missing_claim_expires_at job restored after rollback');
+select task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key='recpartialexpires')=0, 'recovery_partial_ownership_missing_claim_expires_at no recovery audit escaped rollback');
+select task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key='recpartialexpires')=0, 'recovery_partial_ownership_missing_claim_expires_at no recovery idempotency escaped rollback');
+insert into task17a_recovery_rejections(label,key,task_id,job_id) values('recovery_partial_ownership_missing_claim_expires_at','recpartialexpires',(:'recovery_partial_expires_fixture'::jsonb->>'task')::uuid,(:'recovery_partial_expires_fixture'::jsonb->>'job')::uuid) on conflict (label) do update set key=excluded.key, task_id=excluded.task_id, job_id=excluded.job_id;
 
 \echo TASK17A_SCENARIO_START: recovery_changed_task_idempotency_conflict
 select task17a_test.run_recovery_success_case('recovery_changed_task_idempotency_conflict_base',931117,'recconflict','ready_for_handoff',false,null,null,'creator','creator',0,false,'none');
@@ -527,6 +587,9 @@ insert into task17a_recovery_expected_rejections(label,key) values
   ('recovery_unclaimed_task','recunclaimed'),
   ('recovery_manual_result_evidence_rejected','recmanual'),
   ('recovery_partial_ownership_defensive_boundary','recpartial'),
+  ('recovery_partial_ownership_missing_claimed_by','recpartialby'),
+  ('recovery_partial_ownership_missing_claimed_at','recpartialat'),
+  ('recovery_partial_ownership_missing_claim_expires_at','recpartialexpires'),
   ('recovery_drift_missing_intended_publish_at','recdrift31'),
   ('recovery_drift_missing_operator_due_at','recdrift32'),
   ('recovery_drift_missing_timezone','recdrift33'),

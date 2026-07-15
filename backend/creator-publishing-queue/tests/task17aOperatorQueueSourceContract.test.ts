@@ -819,7 +819,7 @@ test('Task 17A Recovery matrix is explicit, substantive, and wired into diagnost
   assert.doesNotMatch(recovery, /TASK17A_BEHAVIORAL_COVERAGE_COMPLETE/);
   for (const part of recovery.split(/alter table/i).slice(1)) assert.match(part, /drop constraint[\s\S]*rollback;/i);
   for (const label of [
-    'recovery_restore_unscheduled_ready','recovery_restore_before_operator_due','recovery_restore_after_operator_due','recovery_restore_after_publish_due','recovery_creator_self','recovery_authorized_operator','recovery_creator_after_operator_revoked','recovery_exact_replay','recovery_request_invalid_actor','recovery_request_invalid_task','recovery_request_invalid_job','recovery_idempotency_key_invalid','recovery_missing_job','recovery_missing_task','recovery_task_job_mismatch','recovery_unsupported_target_or_mode','recovery_cancelled_job','recovery_ineligible_job_state','recovery_unauthorized_actor','recovery_revoked_authorization','recovery_active_unexpired_claim','recovery_unclaimed_task','recovery_manual_result_evidence_rejected','recovery_partial_ownership_defensive_boundary','recovery_cleanup_creator_verification_drift','recovery_cleanup_account_revoked_drift','recovery_cleanup_consent_revoked_drift','recovery_cleanup_compliance_drift','recovery_cleanup_source_fingerprint_drift','recovery_changed_task_idempotency_conflict','recovery_changed_job_idempotency_conflict','recovery_same_key_different_actor_namespace','recovery_drift_missing_intended_publish_at','recovery_drift_missing_operator_due_at','recovery_drift_missing_timezone','recovery_drift_blank_timezone','recovery_drift_missing_scheduled_at','recovery_drift_missing_scheduled_by','recovery_drift_zero_schedule_revision','recovery_drift_negative_schedule_revision','recovery_drift_operator_offset_not_60_minutes','recovery_drift_job_state_inconsistent_with_schedule','recovery_drift_unscheduled_job_with_schedule_fields','recovery_complete_audit_idempotency_counts','recovery_complete_no_mutation_assertions'
+    'recovery_restore_unscheduled_ready','recovery_restore_before_operator_due','recovery_restore_after_operator_due','recovery_restore_after_publish_due','recovery_creator_self','recovery_authorized_operator','recovery_creator_after_operator_revoked','recovery_exact_replay','recovery_request_invalid_actor','recovery_request_invalid_task','recovery_request_invalid_job','recovery_idempotency_key_invalid','recovery_missing_job','recovery_missing_task','recovery_task_job_mismatch','recovery_unsupported_target_or_mode','recovery_cancelled_job','recovery_ineligible_job_state','recovery_unauthorized_actor','recovery_revoked_authorization','recovery_active_unexpired_claim','recovery_unclaimed_task','recovery_manual_result_evidence_rejected','recovery_partial_ownership_defensive_boundary','recovery_partial_ownership_missing_claimed_by','recovery_partial_ownership_missing_claimed_at','recovery_partial_ownership_missing_claim_expires_at','recovery_cleanup_creator_verification_drift','recovery_cleanup_account_revoked_drift','recovery_cleanup_consent_revoked_drift','recovery_cleanup_compliance_drift','recovery_cleanup_source_fingerprint_drift','recovery_changed_task_idempotency_conflict','recovery_changed_job_idempotency_conflict','recovery_same_key_different_actor_namespace','recovery_drift_missing_intended_publish_at','recovery_drift_missing_operator_due_at','recovery_drift_missing_timezone','recovery_drift_blank_timezone','recovery_drift_missing_scheduled_at','recovery_drift_missing_scheduled_by','recovery_drift_zero_schedule_revision','recovery_drift_negative_schedule_revision','recovery_drift_operator_offset_not_60_minutes','recovery_drift_job_state_inconsistent_with_schedule','recovery_drift_unscheduled_job_with_schedule_fields','recovery_complete_audit_idempotency_counts','recovery_complete_no_mutation_assertions'
   ]) {
     const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     assert.match(recovery, new RegExp(`TASK17A_SCENARIO_START: ${escaped}[\\s\\S]*(creator_publishing_recover_expired_onlyfans_operator_claim|assert_recovery_success|assert_recovery_rejected|run_recovery_success_case|run_recovery_rejection_case|expect_error|select .* from task17a_recovery_)`));
@@ -832,6 +832,30 @@ test('Task 17A Recovery matrix is explicit, substantive, and wired into diagnost
   assert.ok(runner.includes('task17aRecoveryMatrixIntegration.sql'));
   assert.ok(workflow.includes('task17aRecoveryMatrixIntegration.sql'));
   assert.match(runner, /task17aReleaseMatrixIntegration\.sql'[\s\S]*task17aRecoveryMatrixIntegration\.sql'[\s\S]*]/);
+});
+
+
+test('explicit Recovery rejects incomplete expired-claim ownership shapes', () => {
+  const migration = readFileSync('supabase/migrations/20260712001400_creator_publishing_onlyfans_operator_queue.sql', 'utf8');
+  const recoveryFunction = migration.match(/create or replace function public\.creator_publishing_recover_expired_onlyfans_operator_claim[\s\S]*?end; \$\$;/)?.[0] || '';
+  assert.match(recoveryFunction, /task\.status<>'claimed'[\s\S]*task\.claimed_by is null[\s\S]*task\.claimed_at is null[\s\S]*task\.claim_token is null[\s\S]*task\.claim_expires_at is null[\s\S]*task\.claim_expires_at>v_now[\s\S]*OPERATOR_CLAIM_NOT_EXPIRED/);
+  assert.doesNotMatch(recoveryFunction, /if task\.status<>'claimed' or task\.claim_expires_at>v_now then raise exception 'OPERATOR_CLAIM_NOT_EXPIRED'; end if;/);
+  assert.doesNotMatch(recoveryFunction, /claim_token=null[\s\S]*OPERATOR_CLAIM_NOT_EXPIRED/);
+
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql', 'utf8');
+  assert.match(recovery, /create or replace function task17a_test\.run_recovery_partial_ownership_case[\s\S]*alter table public\.creator_publishing_queue_tasks drop constraint creator_publishing_queue_claim_all_or_none[\s\S]*assert_recovery_rejected[\s\S]*OPERATOR_CLAIM_NOT_EXPIRED/);
+  for (const [label, field] of [
+    ['recovery_partial_ownership_missing_claimed_by', 'claimed_by'],
+    ['recovery_partial_ownership_missing_claimed_at', 'claimed_at'],
+    ['recovery_partial_ownership_defensive_boundary', 'claim_token'],
+    ['recovery_partial_ownership_missing_claim_expires_at', 'claim_expires_at'],
+  ] as const) {
+    const block = recovery.match(new RegExp(`TASK17A_SCENARIO_START: ${label}[\\s\\S]*?insert into task17a_recovery_rejections[^;]+;`))?.[0] || '';
+    assert.match(block, new RegExp(`run_recovery_partial_ownership_case[\\s\\S]*'${field}'[\\s\\S]*rollback;`), `${label} must corrupt only ${field} inside a rollback boundary`);
+    assert.match(block, /ownership constraint restored after rollback[\s\S]*queue restored after rollback[\s\S]*job restored after rollback/);
+    assert.match(block, /no recovery audit escaped rollback[\s\S]*no recovery idempotency escaped rollback/);
+  }
+  assert.doesNotMatch(recovery, /alter table public\.creator_publishing_queue_tasks drop constraint creator_publishing_queue_claim_all_or_none;(?![\s\S]*?rollback;)/);
 });
 
 

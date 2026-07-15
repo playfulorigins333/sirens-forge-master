@@ -352,7 +352,7 @@ begin
  if job.cancelled_at is not null or job.job_state not in ('draft','scheduled_internally','awaiting_operator','due_now') then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if;
  if not public.creator_publishing_operator_is_authorized(job.creator_id,p_actor_id,'onlyfans') then raise exception 'OPERATOR_NOT_AUTHORIZED'; end if;
  if not public.creator_publishing_operator_queue_is_clean(task) then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if;
- if task.status<>'claimed' or task.claim_expires_at>v_now then raise exception 'OPERATOR_CLAIM_NOT_EXPIRED'; end if;
+ if task.status<>'claimed' or task.claimed_by is null or task.claimed_at is null or task.claim_token is null or task.claim_expires_at is null or task.claim_expires_at>v_now then raise exception 'OPERATOR_CLAIM_NOT_EXPIRED'; end if;
  prior_task := task;
  restore:=public.creator_publishing_operator_restore_queue_status(job,v_now); if restore is null then raise exception 'OPERATOR_TASK_INELIGIBLE'; end if;
  update public.creator_publishing_queue_tasks set status=restore, claimed_by=null, claimed_at=null, claim_token=null, claim_expires_at=null where id=task.id returning * into task;
