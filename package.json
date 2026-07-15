@@ -14,7 +14,8 @@
     "test:creator-publishing-task17a-postgres": "node backend/creator-publishing-queue/tests/runTask17aPostgresIntegration.mjs",
     "test:creator-publishing-task17a-concurrency": "node backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs",
     "test:creator-publishing-task17a-upgrade": "node backend/creator-publishing-queue/tests/runTask17aUpgradeIntegration.mjs",
-    "test:creator-publishing-task17a-cancellation-concurrency": "node backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs"
+    "test:creator-publishing-task17a-cancellation-concurrency": "node backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs",
+    "test:creator-publishing-task17a-progress-reschedule-concurrency": "node backend/creator-publishing-queue/tests/runTask17aProgressRescheduleConcurrency.mjs"
   },
   "repository": {
     "type": "git",

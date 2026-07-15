@@ -13,7 +13,7 @@ const sqlTargets = [
   'task17aReleaseMatrixIntegration.sql',
   'task17aRecoveryMatrixIntegration.sql'
 ]
-const concurrencyTargets = new Set(['claim-concurrency', 'cancellation-concurrency'])
+const concurrencyTargets = new Set(['claim-concurrency', 'cancellation-concurrency', 'progress-reschedule-concurrency'])
 const allowedTargets = new Set([...sqlTargets, ...concurrencyTargets])
 const diagnosticTarget = process.env.TASK17A_DIAGNOSTIC_TARGET || ''
 if (diagnosticTarget && !allowedTargets.has(diagnosticTarget)) {
@@ -96,6 +96,8 @@ try {
       runNode('diagnostic claim-concurrency', 'backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs')
     } else if (diagnosticTarget === 'cancellation-concurrency') {
       runNode('diagnostic cancellation-concurrency', 'backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs')
+    } else if (diagnosticTarget === 'progress-reschedule-concurrency') {
+      runNode('diagnostic progress-reschedule-concurrency', 'backend/creator-publishing-queue/tests/runTask17aProgressRescheduleConcurrency.mjs')
     }
     console.log(`TASK17A_DIAGNOSTIC_TARGET_PASSED:${diagnosticTarget}`)
     appendFileSync(logPath, `\nTASK17A_DIAGNOSTIC_TARGET_PASSED:${diagnosticTarget}\ncompleted_at=${new Date().toISOString()}\n`)
@@ -103,6 +105,7 @@ try {
     for (const f of sqlTargets) runFile(`task17a ${f}`, `backend/creator-publishing-queue/tests/${f}`)
     runNode('task17a concurrency', 'backend/creator-publishing-queue/tests/runTask17aConcurrency.mjs')
     runNode('task17a cancellation concurrency', 'backend/creator-publishing-queue/tests/runTask17aCancellationConcurrency.mjs')
+    runNode('task17a progress/reschedule concurrency', 'backend/creator-publishing-queue/tests/runTask17aProgressRescheduleConcurrency.mjs')
     console.log('TASK17A_CURRENT_SCENARIOS_PASSED')
     appendFileSync(logPath, `\nTASK17A_CURRENT_SCENARIOS_PASSED\ncompleted_at=${new Date().toISOString()}\n`)
   }

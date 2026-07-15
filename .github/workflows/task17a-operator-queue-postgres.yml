@@ -65,6 +65,7 @@ jobs:
           - task17aRecoveryMatrixIntegration.sql
           - claim-concurrency
           - cancellation-concurrency
+          - progress-reschedule-concurrency
     services:
       postgres:
         image: postgres:15

@@ -304,6 +304,7 @@ declare
   result jsonb;
   action text;
   v_gate_code text;
+  v_operator_claim_cleanup jsonb;
 begin
   if p_actor_id is null or p_queue_task_id is null or p_platform_job_id is null or p_claim_token is null or length(btrim(coalesce(p_expected_progress_state,'')))=0 or p_expected_progress_revision is null or p_expected_progress_revision < 0 or length(btrim(coalesce(p_next_progress_state,'')))=0 or length(btrim(coalesce(p_expected_ai_twin_consent_version,'')))=0 or coalesce(p_expected_attestation_text_sha256,'') !~ '^[a-f0-9]{64}$' then
     raise exception 'OPERATOR_REQUEST_INVALID';
@@ -525,6 +526,7 @@ as $$
 declare
   plan_rec public.creator_publishing_plans%rowtype;
   job_rec public.creator_publishing_platform_jobs%rowtype;
+  queue_rec public.creator_publishing_queue_tasks%rowtype;
   capability_rec public.creator_publishing_platform_capabilities%rowtype;
   idempotency_rec public.creator_publishing_scheduler_idempotency%rowtype;
   v_now timestamptz := clock_timestamp();
@@ -542,6 +544,7 @@ declare
   v_operator_due_at timestamptz;
   v_queue_count integer;
   v_gate_code text;
+  v_operator_claim_cleanup jsonb;
 begin
   if p_creator_id is null then raise exception 'UNAUTHENTICATED'; end if;
   if v_action not in ('schedule','reschedule') then raise exception 'SCHEDULER_INVALID_ACTION'; end if;
@@ -670,7 +673,7 @@ begin
 
     if v_gate_code is not null then
       v_failure_count := v_failure_count + 1;
-      v_jobs := v_jobs || jsonb_build_object('job_id',job_rec.id,'status','failed','safe_error_code',v_gate_code,'mutated',false);
+      v_jobs := v_jobs || jsonb_build_object('job_id',job_rec.id,'status','failed','safe_error_code',v_gate_code,'mutated',false,'operator_claim_cleanup',jsonb_build_object('performed',false));
     else
       v_new_revision := case when v_action='schedule' then 1 else job_rec.schedule_revision + 1 end;
       if v_action='reschedule' then
@@ -693,8 +696,81 @@ begin
       end if;
       insert into public.creator_publishing_scheduler_events(creator_id,publishing_plan_id,platform_job_id,event_type,due_at,schedule_revision,created_at,updated_at)
       values (p_creator_id,p_publishing_plan_id,job_rec.id,'publish_due',p_intended_publish_at,v_new_revision,v_now,v_now);
+      v_operator_claim_cleanup := jsonb_build_object('performed',false);
+      if v_action='reschedule'
+         and job_rec.target_platform='onlyfans'
+         and job_rec.publishing_mode='assisted'
+         and (p_intended_publish_at - interval '60 minutes') > v_now then
+        select * into queue_rec
+        from public.creator_publishing_queue_tasks as queue_source
+        where queue_source.content_package_id=job_rec.content_package_id
+          and queue_source.creator_id=job_rec.creator_id
+          and queue_source.target_platform='onlyfans'
+          and queue_source.platform_account_id=job_rec.platform_account_id
+          and queue_source.status='claimed'
+          and queue_source.claimed_by is not null
+          and queue_source.claimed_at is not null
+          and queue_source.claim_token is not null
+          and queue_source.claim_expires_at is not null
+          and queue_source.claim_expires_at > v_now
+          and public.creator_publishing_operator_is_authorized(job_rec.creator_id,queue_source.claimed_by,'onlyfans')
+          and queue_source.posted_by is null
+          and queue_source.posted_at is null
+          and queue_source.posted_confirmation is false
+          and queue_source.final_post_url is null
+          and queue_source.final_post_url_skip_reason is null
+          and queue_source.proof_screenshot_storage_key is null
+          and queue_source.skip_or_fail_reason is null
+        order by queue_source.id
+        limit 1
+        for update of queue_source;
+        if found then
+          update public.creator_publishing_queue_tasks
+          set status='scheduled_internally',
+              claimed_by=null,
+              claimed_at=null,
+              claim_token=null,
+              claim_expires_at=null,
+              updated_at=v_now
+          where id=queue_rec.id;
+          v_operator_claim_cleanup := jsonb_build_object(
+            'performed',true,
+            'queue_task_id',queue_rec.id,
+            'previous_status',queue_rec.status,
+            'resulting_status','scheduled_internally',
+            'reason','rescheduled_before_operator_due'
+          );
+          insert into public.creator_publishing_audit_events(entity_type,entity_id,actor_id,actor_role,action,before_state,after_state,idempotency_key,created_at)
+          values(
+            'creator_publishing_queue_task',queue_rec.id,p_creator_id,'creator','operator_task_claim_cleared_by_reschedule',
+            jsonb_build_object(
+              'queue_task_id',queue_rec.id,
+              'platform_job_id',job_rec.id,
+              'status',queue_rec.status,
+              'claimed_by',queue_rec.claimed_by,
+              'claimed_at',queue_rec.claimed_at,
+              'claim_expires_at',queue_rec.claim_expires_at,
+              'claim_attempt_count',queue_rec.claim_attempt_count,
+              'operator_progress_state',queue_rec.operator_progress_state,
+              'operator_progress_revision',queue_rec.operator_progress_revision,
+              'operator_progress_updated_by',queue_rec.operator_progress_updated_by,
+              'operator_progress_updated_at',queue_rec.operator_progress_updated_at,
+              'assigned_operator_id',queue_rec.assigned_operator_id
+            ),
+            jsonb_build_object(
+              'queue_task_id',queue_rec.id,
+              'platform_job_id',job_rec.id,
+              'resulting_status','scheduled_internally',
+              'schedule_revision',v_new_revision,
+              'operator_due_at',p_intended_publish_at - interval '60 minutes',
+              'reason','rescheduled_before_operator_due'
+            ),
+            p_idempotency_key,v_now
+          );
+        end if;
+      end if;
       v_success_count := v_success_count + 1;
-      v_jobs := v_jobs || jsonb_build_object('job_id',job_rec.id,'status','scheduled','schedule_revision',v_new_revision,'mutated',true);
+      v_jobs := v_jobs || jsonb_build_object('job_id',job_rec.id,'status','scheduled','schedule_revision',v_new_revision,'mutated',true,'operator_claim_cleanup',v_operator_claim_cleanup);
     end if;
   end loop;
 

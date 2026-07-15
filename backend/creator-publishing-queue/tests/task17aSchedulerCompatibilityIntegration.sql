@@ -179,3 +179,70 @@ select task17a_test.assert_scheduler_claim_gate_cleanup(926304,'publish_due','so
 select task17a_test.assert_scheduler_claim_gate_cleanup(926305,'operator_due','creator_verification_revoked','needs_fix','CREATOR_VERIFICATION_MISSING','scheduler claimed creator verification cleanup');
 \echo TASK17A_SCENARIO_START: scheduler_claim_cleanup_account_revoked
 select task17a_test.assert_scheduler_claim_gate_cleanup(926306,'operator_due','account_revoked','blocked','DESTINATION_ACCOUNT_REVOKED','scheduler claimed account cleanup');
+
+\echo TASK17A_SCENARIO_START: reschedule_active_claim_to_future_clears_claim
+do $$
+declare
+  f jsonb;
+  claim_result jsonb;
+  reschedule_result jsonb;
+  replay_result jsonb;
+  reclaim_result jsonb;
+  before_queue public.creator_publishing_queue_tasks%rowtype;
+  before_job public.creator_publishing_platform_jobs%rowtype;
+  after_queue public.creator_publishing_queue_tasks%rowtype;
+  after_job public.creator_publishing_platform_jobs%rowtype;
+  replay_queue public.creator_publishing_queue_tasks%rowtype;
+  replay_job public.creator_publishing_platform_jobs%rowtype;
+  final_queue public.creator_publishing_queue_tasks%rowtype;
+  former_token uuid;
+  new_intended timestamptz := clock_timestamp() + interval '4 hours';
+  progress_audits_before integer;
+  progress_idempotency_before integer;
+  v_audit public.creator_publishing_audit_events%rowtype;
+  cleanup jsonb;
+begin
+  f := task17a_test.reset_fixture(926401,'scheduled_internally','scheduled_internally',true);
+  perform task17a_test.set_valid_schedule_phase((f->>'job')::uuid,'after_operator_due');
+  claim_result := public.creator_publishing_claim_onlyfans_operator_task((f->>'creator')::uuid,(f->>'task')::uuid,(f->>'job')::uuid,f->>'consent_version',f->>'consent_hash','reschedclaim01');
+  perform task17a_test.assert((claim_result->>'ok')::boolean is true, 'reschedule active claim setup claim succeeds');
+  select claim_token into former_token from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  perform public.creator_publishing_update_onlyfans_operator_progress((f->>'creator')::uuid,(f->>'task')::uuid,(f->>'job')::uuid,former_token,'not_started',0,'preparing',f->>'consent_version',f->>'consent_hash','reschedprog01');
+  perform public.creator_publishing_update_onlyfans_operator_progress((f->>'creator')::uuid,(f->>'task')::uuid,(f->>'job')::uuid,former_token,'preparing',1,'prepared',f->>'consent_version',f->>'consent_hash','reschedprog02');
+  update public.creator_publishing_queue_tasks set assigned_operator_id=(f->>'operator_b')::uuid where id=(f->>'task')::uuid;
+  select * into before_queue from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  select * into before_job from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid;
+  progress_audits_before := (select count(*) from public.creator_publishing_audit_events where action='operator_progress_updated' and entity_id=(f->>'task')::uuid);
+  progress_idempotency_before := (select count(*) from public.creator_publishing_operator_action_idempotency where action_type='progress' and queue_task_id=(f->>'task')::uuid);
+  reschedule_result := public.creator_publishing_schedule_plan((f->>'creator')::uuid,(f->>'plan')::uuid,new_intended,'UTC','reschedfuture01',f->>'consent_version',f->>'consent_hash',array[(f->>'job')::uuid],jsonb_build_object(f->>'job',before_job.schedule_revision),'reschedule');
+  cleanup := reschedule_result->'jobs'->0->'operator_claim_cleanup';
+  select * into after_queue from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  select * into after_job from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid;
+  perform task17a_test.assert((cleanup->>'performed')::boolean is true and cleanup->>'queue_task_id'=f->>'task' and cleanup->>'previous_status'='claimed' and cleanup->>'resulting_status'='scheduled_internally' and cleanup->>'reason'='rescheduled_before_operator_due','reschedule result reports operator claim cleanup');
+  perform task17a_test.assert(reschedule_result::text not like '%claim_token%', 'reschedule cleanup result omits claim_token');
+  perform task17a_test.assert(after_job.job_state='scheduled_internally' and after_job.schedule_revision=before_job.schedule_revision+1 and after_job.operator_due_at > clock_timestamp() and after_job.operator_due_at = after_job.intended_publish_at - interval '60 minutes', 'future reschedule updates schedule exactly once');
+  perform task17a_test.assert(after_queue.status='scheduled_internally' and after_queue.claimed_by is null and after_queue.claimed_at is null and after_queue.claim_token is null and after_queue.claim_expires_at is null, 'future reschedule clears complete claim tuple');
+  perform task17a_test.assert(after_queue.claim_attempt_count=before_queue.claim_attempt_count and after_queue.operator_progress_state=before_queue.operator_progress_state and after_queue.operator_progress_revision=before_queue.operator_progress_revision and after_queue.operator_progress_updated_by is not distinct from before_queue.operator_progress_updated_by and after_queue.operator_progress_updated_at is not distinct from before_queue.operator_progress_updated_at and after_queue.assigned_operator_id is not distinct from before_queue.assigned_operator_id, 'future reschedule preserves attempts progress and assignment');
+  perform task17a_test.assert(after_queue.posted_by is not distinct from before_queue.posted_by and after_queue.posted_at is not distinct from before_queue.posted_at and after_queue.posted_confirmation is not distinct from before_queue.posted_confirmation and after_queue.final_post_url is not distinct from before_queue.final_post_url and after_queue.final_post_url_skip_reason is not distinct from before_queue.final_post_url_skip_reason and after_queue.proof_screenshot_storage_key is not distinct from before_queue.proof_screenshot_storage_key and after_queue.skip_or_fail_reason is not distinct from before_queue.skip_or_fail_reason, 'future reschedule preserves Task18 manual-result fields');
+  select * into v_audit from public.creator_publishing_audit_events where action='operator_task_claim_cleared_by_reschedule' and entity_id=(f->>'task')::uuid and idempotency_key='reschedfuture01';
+  perform task17a_test.assert(found and (select count(*) from public.creator_publishing_audit_events where action='operator_task_claim_cleared_by_reschedule' and entity_id=(f->>'task')::uuid and idempotency_key='reschedfuture01')=1, 'one reschedule claim cleanup audit');
+  perform task17a_test.assert(v_audit.before_state->>'status'='claimed' and (v_audit.before_state->>'claimed_by')::uuid=before_queue.claimed_by and (v_audit.before_state->>'claimed_at')::timestamptz=before_queue.claimed_at and (v_audit.before_state->>'claim_expires_at')::timestamptz=before_queue.claim_expires_at and (v_audit.before_state->>'claim_attempt_count')::integer=before_queue.claim_attempt_count and v_audit.before_state->>'operator_progress_state'=before_queue.operator_progress_state and (v_audit.before_state->>'operator_progress_revision')::integer=before_queue.operator_progress_revision and (v_audit.before_state->>'operator_progress_updated_by')::uuid=before_queue.operator_progress_updated_by and (v_audit.before_state->>'operator_progress_updated_at')::timestamptz=before_queue.operator_progress_updated_at and (v_audit.before_state->>'assigned_operator_id')::uuid=before_queue.assigned_operator_id, 'cleanup audit before_state preserves safe prior claim progress assignment');
+  perform task17a_test.assert(v_audit.after_state->>'resulting_status'='scheduled_internally' and (v_audit.after_state->>'schedule_revision')::integer=after_job.schedule_revision and (v_audit.after_state->>'operator_due_at')::timestamptz=after_job.operator_due_at and v_audit.after_state->>'reason'='rescheduled_before_operator_due', 'cleanup audit after_state records schedule result');
+  perform task17a_test.assert(not (v_audit.before_state ? 'claim_token') and not (v_audit.after_state ? 'claim_token'), 'cleanup audit omits claim_token');
+  replay_result := public.creator_publishing_schedule_plan((f->>'creator')::uuid,(f->>'plan')::uuid,new_intended,'UTC','reschedfuture01',f->>'consent_version',f->>'consent_hash',array[(f->>'job')::uuid],jsonb_build_object(f->>'job',before_job.schedule_revision),'reschedule');
+  select * into replay_queue from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  select * into replay_job from public.creator_publishing_platform_jobs where id=(f->>'job')::uuid;
+  perform task17a_test.assert((replay_result->>'idempotent')::boolean is true and (replay_result - 'idempotent')=(reschedule_result - 'idempotent'), 'exact reschedule replay returns stored cleanup result');
+  perform task17a_test.assert(replay_job.schedule_revision=after_job.schedule_revision and replay_job.operator_due_at=after_job.operator_due_at and replay_queue.status='scheduled_internally' and replay_queue.claimed_by is null and (select count(*) from public.creator_publishing_audit_events where action='operator_task_claim_cleared_by_reschedule' and entity_id=(f->>'task')::uuid and idempotency_key='reschedfuture01')=1, 'exact reschedule replay does not repeat mutation or audit');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_scheduler_idempotency where creator_id=(f->>'creator')::uuid and action_type='reschedule' and idempotency_key='reschedfuture01')=1, 'one reschedule idempotency row');
+  perform task17a_test.expect_error('former token progress after future reschedule','OPERATOR_CLAIM_TOKEN_MISMATCH',format('select public.creator_publishing_update_onlyfans_operator_progress(%L,%L,%L,%L,%L,%s,%L,%L,%L,%L)',f->>'creator',f->>'task',f->>'job',former_token::text,'prepared',2,'handoff_ready',f->>'consent_version',f->>'consent_hash','reschedstaletok01'));
+  perform task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_progress_updated' and entity_id=(f->>'task')::uuid)=progress_audits_before and (select count(*) from public.creator_publishing_operator_action_idempotency where action_type='progress' and queue_task_id=(f->>'task')::uuid)=progress_idempotency_before, 'former token progress writes no success audit or idempotency');
+  perform task17a_test.expect_error('before due claim after future reschedule','OPERATOR_NOT_DUE',format('select public.creator_publishing_claim_onlyfans_operator_task(%L,%L,%L,%L,%L,%L)',f->>'creator',f->>'task',f->>'job',f->>'consent_version',f->>'consent_hash','reschedclaimbefore01'));
+  perform task17a_test.assert((select claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and claim_attempt_count=after_queue.claim_attempt_count from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid), 'before due rejected claim leaves ownership empty and attempts unchanged');
+  perform task17a_test.set_valid_schedule_phase((f->>'job')::uuid,'after_operator_due',after_job.schedule_revision);
+  reclaim_result := public.creator_publishing_claim_onlyfans_operator_task((f->>'creator')::uuid,(f->>'task')::uuid,(f->>'job')::uuid,f->>'consent_version',f->>'consent_hash','reschedclaim02');
+  select * into final_queue from public.creator_publishing_queue_tasks where id=(f->>'task')::uuid;
+  perform task17a_test.assert((reclaim_result->>'ok')::boolean is true and final_queue.claim_token is not null and final_queue.claim_token <> former_token and final_queue.claimed_by=(f->>'creator')::uuid and final_queue.claimed_at is not null and final_queue.claim_expires_at is not null, 'after due reclaim succeeds with new ownership tuple');
+  perform task17a_test.assert(final_queue.operator_progress_state=before_queue.operator_progress_state and final_queue.operator_progress_revision=before_queue.operator_progress_revision and final_queue.assigned_operator_id is not distinct from before_queue.assigned_operator_id, 'reclaim preserves preparation progress and assignment');
+  perform task17a_test.assert(final_queue.posted_by is not distinct from before_queue.posted_by and final_queue.posted_at is not distinct from before_queue.posted_at and final_queue.posted_confirmation is not distinct from before_queue.posted_confirmation and final_queue.final_post_url is not distinct from before_queue.final_post_url and final_queue.proof_screenshot_storage_key is not distinct from before_queue.proof_screenshot_storage_key and final_queue.skip_or_fail_reason is not distinct from before_queue.skip_or_fail_reason, 'reclaim preserves Task18 manual-result fields');
+end $$;
