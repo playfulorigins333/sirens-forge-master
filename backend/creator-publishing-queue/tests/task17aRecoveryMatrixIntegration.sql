@@ -107,7 +107,7 @@ end $$;
 
 create or replace function task17a_test.run_recovery_rejection_case(p_label text,p_seed integer,p_key text,p_expected_error text,p_kind text,p_aux_seed integer default null)
 returns void language plpgsql as $$
-declare f jsonb; actor uuid; task_id uuid; job_id uuid; ts timestamptz; other jsonb; setup_claim_key text := 'recsetup' || p_seed::text; primary_job_id uuid; alt_task_id uuid; alt_job_id uuid; primary_job_before jsonb; primary_job_after jsonb; alt_task_before jsonb; alt_task_after jsonb;
+declare f jsonb; actor uuid; task_id uuid; job_id uuid; ts timestamptz; other jsonb; setup_claim_key text := 'recsetup' || p_seed::text; primary_job_id uuid; alt_task_id uuid; alt_job_id uuid; primary_task_before jsonb; primary_task_after jsonb; primary_job_before jsonb; primary_job_after jsonb; alt_task_before jsonb; alt_task_after jsonb; alt_job_before jsonb; alt_job_after jsonb;
 begin
   if p_kind='unclaimed' then
     f := task17a_test.reset_fixture(p_seed);
@@ -144,10 +144,12 @@ begin
     perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks where id=alt_task_id), p_label || ' alternate task exists');
     perform task17a_test.assert(exists(select 1 from public.creator_publishing_platform_jobs where id=alt_job_id), p_label || ' alternate job exists');
     perform task17a_test.assert(task_id <> alt_task_id and primary_job_id <> alt_job_id and (f->>'package')::uuid <> (other->>'package')::uuid, p_label || ' primary and alternate identities differ');
-    perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks qt join public.creator_publishing_platform_jobs pj on pj.id=qt.platform_job_id join public.creator_publishing_content_packages cp on cp.id=pj.content_package_id join public.creator_publishing_schedule_plans sp on sp.id=pj.plan_id where qt.id=task_id and pj.id=primary_job_id and cp.creator_id=sp.creator_id), p_label || ' primary graph is schema-valid');
-    perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks qt join public.creator_publishing_platform_jobs pj on pj.id=qt.platform_job_id join public.creator_publishing_content_packages cp on cp.id=pj.content_package_id join public.creator_publishing_schedule_plans sp on sp.id=pj.plan_id where qt.id=alt_task_id and pj.id=alt_job_id and cp.creator_id=sp.creator_id), p_label || ' alternate graph is schema-valid');
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks qt join public.creator_publishing_platform_jobs pj on pj.content_package_id=qt.content_package_id join public.creator_publishing_content_packages cp on cp.id=qt.content_package_id join public.creator_publishing_plans p on p.id=pj.publishing_plan_id where qt.id=task_id and pj.id=primary_job_id and qt.content_package_id=pj.content_package_id and cp.id=pj.content_package_id and cp.creator_id=pj.creator_id and cp.platform_account_id=pj.platform_account_id and cp.target_platform=pj.target_platform and p.creator_id=pj.creator_id), p_label || ' primary graph is schema-valid');
+    perform task17a_test.assert(exists(select 1 from public.creator_publishing_queue_tasks qt join public.creator_publishing_platform_jobs pj on pj.content_package_id=qt.content_package_id join public.creator_publishing_content_packages cp on cp.id=qt.content_package_id join public.creator_publishing_plans p on p.id=pj.publishing_plan_id where qt.id=alt_task_id and pj.id=alt_job_id and qt.content_package_id=pj.content_package_id and cp.id=pj.content_package_id and cp.creator_id=pj.creator_id and cp.platform_account_id=pj.platform_account_id and cp.target_platform=pj.target_platform and p.creator_id=pj.creator_id), p_label || ' alternate graph is schema-valid');
+    select to_jsonb(q) into primary_task_before from (select * from public.creator_publishing_queue_tasks where id=task_id) q;
     select to_jsonb(j) into primary_job_before from (select * from public.creator_publishing_platform_jobs where id=primary_job_id) j;
     select to_jsonb(q) into alt_task_before from (select * from public.creator_publishing_queue_tasks where id=alt_task_id) q;
+    select to_jsonb(j) into alt_job_before from (select * from public.creator_publishing_platform_jobs where id=alt_job_id) j;
     job_id := alt_job_id;
   elsif p_kind='unsupported' then update public.creator_publishing_platform_jobs set publishing_mode='direct' where id=job_id;
   elsif p_kind='cancelled' then select clock_timestamp() into ts; update public.creator_publishing_platform_jobs set job_state='archived', cancelled_at=ts, cancelled_by=(f->>'creator')::uuid, cancellation_reason='Task 17A Recovery cancelled-job fixture', updated_at=ts where id=job_id;
@@ -157,10 +159,15 @@ begin
   end if;
   perform task17a_test.assert_recovery_rejected(p_label,p_expected_error,actor,task_id,job_id,p_key);
   if p_kind='mismatch' then
+    select to_jsonb(q) into primary_task_after from (select * from public.creator_publishing_queue_tasks where id=task_id) q;
     select to_jsonb(j) into primary_job_after from (select * from public.creator_publishing_platform_jobs where id=primary_job_id) j;
     select to_jsonb(q) into alt_task_after from (select * from public.creator_publishing_queue_tasks where id=alt_task_id) q;
+    select to_jsonb(j) into alt_job_after from (select * from public.creator_publishing_platform_jobs where id=alt_job_id) j;
+    perform task17a_test.assert(primary_task_after = primary_task_before, p_label || ' primary queue unchanged after mismatch rejection');
     perform task17a_test.assert(primary_job_after = primary_job_before, p_label || ' primary job unchanged after mismatch rejection');
     perform task17a_test.assert(alt_task_after = alt_task_before, p_label || ' alternate queue unchanged after mismatch rejection');
+    perform task17a_test.assert(alt_job_after = alt_job_before, p_label || ' alternate job unchanged after mismatch rejection');
+    perform task17a_test.assert(primary_task_after->>'posted_by' is not distinct from primary_task_before->>'posted_by' and primary_task_after->>'posted_at' is not distinct from primary_task_before->>'posted_at' and primary_task_after->>'posted_confirmation' is not distinct from primary_task_before->>'posted_confirmation' and primary_task_after->>'final_post_url' is not distinct from primary_task_before->>'final_post_url' and primary_task_after->>'proof_screenshot_storage_key' is not distinct from primary_task_before->>'proof_screenshot_storage_key' and alt_task_after->>'posted_by' is not distinct from alt_task_before->>'posted_by' and alt_task_after->>'posted_at' is not distinct from alt_task_before->>'posted_at' and alt_task_after->>'posted_confirmation' is not distinct from alt_task_before->>'posted_confirmation' and alt_task_after->>'final_post_url' is not distinct from alt_task_before->>'final_post_url' and alt_task_after->>'proof_screenshot_storage_key' is not distinct from alt_task_before->>'proof_screenshot_storage_key', p_label || ' manual-result fields unchanged on both mismatch queues');
   end if;
 end $$;
 

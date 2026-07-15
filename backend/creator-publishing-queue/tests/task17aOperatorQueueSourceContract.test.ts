@@ -396,8 +396,17 @@ test('Task 17A fixture seeds are unique and scheduler namespace is isolated', ()
   }
   assert.doesNotMatch(recoveryMatrix, /create_secondary_work\s*\(\s*p_seed\s*[+-]\s*\d+/);
   assert.doesNotMatch(recoveryMatrix, /create_secondary_work\s*\(\s*p_seed\s*[+-]/);
+  assert.doesNotMatch(recoveryMatrix, /qt\.platform_job_id|pj\.plan_id|creator_publishing_schedule_plans/);
   assert.match(recoveryMatrix, /run_recovery_rejection_case\(p_label text,p_seed integer,p_key text,p_expected_error text,p_kind text,p_aux_seed integer default null\)/);
   assert.match(recoveryMatrix, /p_kind='mismatch'[\s\S]*p_aux_seed is not null[\s\S]*p_aux_seed <> p_seed[\s\S]*create_secondary_work\(p_aux_seed\)/);
+  const recoveryMismatchBlock = recoveryMatrix.match(/elsif p_kind='mismatch'[\s\S]*?elsif p_kind='unsupported'/)?.[0] || '';
+  assert.match(recoveryMismatchBlock, /pj\.content_package_id=qt\.content_package_id[\s\S]*pj\.publishing_plan_id[\s\S]*public\.creator_publishing_plans/);
+  assert.match(recoveryMismatchBlock, /cp\.creator_id=pj\.creator_id[\s\S]*cp\.platform_account_id=pj\.platform_account_id[\s\S]*cp\.target_platform=pj\.target_platform[\s\S]*p\.creator_id=pj\.creator_id/);
+  assert.match(recoveryMismatchBlock, /primary_task_before[\s\S]*primary_job_before[\s\S]*alt_task_before[\s\S]*alt_job_before/);
+  const recoveryMismatchAfter = recoveryMatrix.match(/if p_kind='mismatch' then[\s\S]*?end if;\nend \$\$;/)?.[0] || '';
+  assert.match(recoveryMismatchAfter, /primary_task_after = primary_task_before[\s\S]*primary_job_after = primary_job_before[\s\S]*alt_task_after = alt_task_before[\s\S]*alt_job_after = alt_job_before/);
+  assert.match(recoveryMismatchAfter, /manual-result fields unchanged on both mismatch queues/);
+  assert.match(recoveryMatrix, /recovery_task_job_mismatch[\s\S]*OPERATOR_TASK_JOB_MISMATCH[\s\S]*recmismatch/);
   const recoveryPrimarySeeds = new Map<number, string>();
   const recoveryAuxSeeds = new Map<number, string>();
   const rejectionCallPattern = /run_recovery_rejection_case\(\s*'([^']+)'\s*,\s*(\d{6})\s*,[\s\S]*?,'([^']+)'\s*(?:,\s*(\d{6}))?\s*\)/g;
