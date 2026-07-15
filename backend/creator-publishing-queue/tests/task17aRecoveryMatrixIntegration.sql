@@ -53,6 +53,41 @@ begin
   end if;
 end $$;
 
+
+create or replace function task17a_test.assert_recovery_success(p_label text,p_expected_status text,p_actor_id uuid,p_task_id uuid,p_job_id uuid,p_idempotency_key text,p_preserved_baseline jsonb,p_job_snapshot jsonb)
+returns jsonb language plpgsql as $$
+declare result jsonb; prior_task public.creator_publishing_queue_tasks%rowtype; audit_before jsonb; audit_after jsonb;
+begin
+  select * into prior_task from public.creator_publishing_queue_tasks where id=p_task_id;
+  result := public.creator_publishing_recover_expired_onlyfans_operator_claim(p_actor_id,p_task_id,p_job_id,p_idempotency_key);
+  select before_state, after_state into audit_before, audit_after from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key=p_idempotency_key;
+  raise notice 'TASK17A_RECOVERY_AUDIT_BEFORE:%', audit_before;
+  raise notice 'TASK17A_RECOVERY_AUDIT_AFTER:%', audit_after;
+  perform task17a_test.assert(result->>'ok'='true' and result->>'action'='expired_claim_recovery' and (result->>'queue_task_id')::uuid=p_task_id and (result->>'platform_job_id')::uuid=p_job_id and result->>'status'=p_expected_status, p_label || ' recovery result');
+  perform task17a_test.assert((select status=p_expected_status and claimed_by is null and claimed_at is null and claim_token is null and claim_expires_at is null and task17a_test.recovery_preserved_snapshot(id)=p_preserved_baseline from public.creator_publishing_queue_tasks where id=p_task_id), p_label || ' restored status cleared ownership and preserved baseline');
+  perform task17a_test.assert((select to_jsonb(j)=p_job_snapshot from public.creator_publishing_platform_jobs j where id=p_job_id), p_label || ' recovery job unchanged');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_audit_events where action='operator_expired_claim_recovered' and idempotency_key=p_idempotency_key)=1, p_label || ' one recovery audit');
+  perform task17a_test.assert((select count(*) from public.creator_publishing_operator_action_idempotency where action_type='expired_claim_recovery' and idempotency_key=p_idempotency_key)=1, p_label || ' one recovery idempotency');
+  perform task17a_test.assert(audit_before->>'status'='claimed'
+    and (audit_before->>'claimed_by')::uuid=prior_task.claimed_by
+    and (audit_before->>'claimed_at')::timestamptz=prior_task.claimed_at
+    and (audit_before->>'claim_expires_at')::timestamptz=prior_task.claim_expires_at
+    and (audit_before->>'claim_attempt_count')::int=prior_task.claim_attempt_count
+    and audit_before->>'progress_state'=prior_task.operator_progress_state
+    and (audit_before->>'progress_revision')::int=prior_task.operator_progress_revision
+    and (audit_before->>'progress_updated_by')::uuid is not distinct from prior_task.operator_progress_updated_by
+    and (audit_before->>'progress_updated_at')::timestamptz is not distinct from prior_task.operator_progress_updated_at
+    and (audit_before->>'assigned_operator_id')::uuid is not distinct from prior_task.assigned_operator_id
+    and audit_after->>'action'='expired_claim_recovery'
+    and (audit_after->>'queue_task_id')::uuid=p_task_id
+    and (audit_after->>'platform_job_id')::uuid=p_job_id
+    and audit_after->>'status'=p_expected_status
+    and not (audit_before ? 'claim_token')
+    and not (audit_after ? 'claim_token'), p_label || ' truthful recovery audit without token');
+  insert into task17a_recovery_successes(label,key,task_id,job_id) values(p_label,p_idempotency_key,p_task_id,p_job_id) on conflict (label) do update set key=excluded.key, task_id=excluded.task_id, job_id=excluded.job_id;
+  return result;
+end $$;
+
 create or replace function task17a_test.run_recovery_success_case(p_label text,p_seed integer,p_key text,p_expected_status text,p_scheduled boolean,p_phase_before_claim text,p_phase_after_claim text,p_claim_actor text,p_recover_actor text,p_progress_steps integer,p_assign_operator boolean,p_drift text)
 returns void language plpgsql as $$
 declare f jsonb; baseline jsonb; job_snapshot jsonb; recover_actor uuid; result jsonb;

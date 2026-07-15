@@ -785,8 +785,43 @@ test('Task 17A Recovery matrix is explicit, substantive, and wired into diagnost
   assert.match(recovery, /task17a_recovery_expected_rejections[\s\S]*except select label,key from task17a_recovery_rejections[\s\S]*task17a_recovery_rejections except select label,key from task17a_recovery_expected_rejections/);
   assert.match(recovery, /idempotency_key='recconflict'\)=1/);
   assert.match(recovery, /recovery_same_key_different_actor_namespace[\s\S]*no cross-actor idempotency leakage/);
-  assert.match(support, /before_state->>'claim_attempt_count'[\s\S]*before_state->>'progress_updated_by'[\s\S]*before_state->>'assigned_operator_id'/);
+  assert.match(support + recovery, /(?:before_state|audit_before)->>'claim_attempt_count'[\s\S]*(?:before_state|audit_before)->>'progress_updated_by'[\s\S]*(?:before_state|audit_before)->>'progress_updated_at'[\s\S]*(?:before_state|audit_before)->>'assigned_operator_id'/);
   assert.ok(runner.includes('task17aRecoveryMatrixIntegration.sql'));
   assert.ok(workflow.includes('task17aRecoveryMatrixIntegration.sql'));
   assert.match(runner, /task17aReleaseMatrixIntegration\.sql'[\s\S]*task17aRecoveryMatrixIntegration\.sql'[\s\S]*]/);
+});
+
+
+test('operator expired-claim recovery audits include complete safe prior state at both write sites', () => {
+  const recoveryAuditInserts = [...migration.matchAll(/operator_expired_claim_recovered',[\s\S]*?jsonb_build_object\(([^;]*?)\),[^;]*?p_idempotency_key/g)];
+  assert.equal(recoveryAuditInserts.length, 2, 'claim-path and explicit Recovery audit write sites are both present');
+  for (const match of recoveryAuditInserts) {
+    const beforeState = match[1];
+    for (const field of [
+      'status',
+      'claimed_by',
+      'claimed_at',
+      'claim_expires_at',
+      'claim_attempt_count',
+      'progress_state',
+      'progress_revision',
+      'progress_updated_by',
+      'progress_updated_at',
+      'assigned_operator_id',
+    ]) {
+      assert.match(beforeState, new RegExp(`'${field}'`));
+    }
+    assert.match(beforeState, /prior_task\.claim_attempt_count/);
+    assert.match(beforeState, /prior_task\.operator_progress_updated_by/);
+    assert.match(beforeState, /prior_task\.operator_progress_updated_at/);
+    assert.match(beforeState, /prior_task\.assigned_operator_id/);
+    assert.doesNotMatch(beforeState, /claim_token/);
+    assert.doesNotMatch(beforeState, /[^_]task\.claim_attempt_count|[^_]task\.operator_progress_updated_by|[^_]task\.operator_progress_updated_at|[^_]task\.assigned_operator_id/);
+  }
+  const inClaim = readFileSync('backend/creator-publishing-queue/tests/task17aIdempotencyRecoveryIntegration.sql', 'utf8');
+  assert.match(inClaim, /in_claim_recovery_replacement_success[\s\S]*creator_publishing_update_onlyfans_operator_progress[\s\S]*in_claim_success_prior_snapshot[\s\S]*before_state->>'claim_attempt_count'[\s\S]*before_state->>'progress_updated_by'[\s\S]*before_state->>'progress_updated_at'[\s\S]*before_state->>'assigned_operator_id'/);
+  const recovery = readFileSync('backend/creator-publishing-queue/tests/task17aRecoveryMatrixIntegration.sql', 'utf8');
+  assert.match(recovery, /TASK17A_RECOVERY_AUDIT_BEFORE/);
+  assert.match(recovery, /TASK17A_RECOVERY_AUDIT_AFTER/);
+  assert.match(recovery, /audit_before->>'claim_attempt_count'[\s\S]*audit_before->>'progress_updated_by'[\s\S]*audit_before->>'progress_updated_at'[\s\S]*audit_before->>'assigned_operator_id'/);
 });
