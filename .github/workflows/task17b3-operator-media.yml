@@ -1,0 +1,50 @@
+name: Task 17B-3 Operator Media Access
+on:
+  pull_request:
+    paths:
+      - 'lib/creator-publishing-queue/operator-media/types.ts'
+      - 'lib/creator-publishing-queue/operator-media/serviceCore.ts'
+      - 'lib/creator-publishing-queue/operator-media/service.ts'
+      - 'lib/creator-publishing-queue/operator-media/index.ts'
+      - 'app/api/creator-publishing-queue/operator/[platformJobId]/media/[mediaAssetId]/signed-url/route.ts'
+      - 'app/creator/publishing-queue/operator/OperatorTaskMedia.tsx'
+      - 'backend/creator-publishing-queue/tests/task17b3OperatorMediaAccess.test.ts'
+      - 'backend/creator-publishing-queue/tests/task17b3OperatorMediaSourceContract.test.ts'
+      - '.github/workflows/task17b3-operator-media.yml'
+      - 'app/creator/publishing-queue/operator/[platformJobId]/page.tsx'
+      - '.github/workflows/task17b2-operator-ui.yml'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      BASE_SHA: 5ead1e4f6c2da955322d9c1630177f2bc8b3c6f4
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+      STRIPE_SECRET_KEY: sk_test_dummy
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      RESEND_API_KEY: re_dummy
+      R2_ACCOUNT_ID: dummy
+      R2_ACCESS_KEY_ID: dummy
+      R2_SECRET_ACCESS_KEY: dummy
+      R2_BUCKET: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: git cat-file -e "$BASE_SHA^{commit}" && git merge-base --is-ancestor "$BASE_SHA" HEAD
+      - run: |
+          allowed='^(lib/creator-publishing-queue/operator-media/types\.ts|lib/creator-publishing-queue/operator-media/serviceCore\.ts|lib/creator-publishing-queue/operator-media/service\.ts|lib/creator-publishing-queue/operator-media/index\.ts|app/api/creator-publishing-queue/operator/\[platformJobId\]/media/\[mediaAssetId\]/signed-url/route\.ts|app/creator/publishing-queue/operator/OperatorTaskMedia\.tsx|backend/creator-publishing-queue/tests/task17b3OperatorMediaAccess\.test\.ts|backend/creator-publishing-queue/tests/task17b3OperatorMediaSourceContract\.test\.ts|\.github/workflows/task17b3-operator-media\.yml|app/creator/publishing-queue/operator/\[platformJobId\]/page\.tsx|\.github/workflows/task17b2-operator-ui\.yml)$'
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
+          test "$(echo "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" = "11"
+          echo "$changed" | while read f; do echo "$f" | grep -Eq "$allowed" || { echo "Unexpected path: $f"; exit 1; }; done
+      - run: test -z "$(git diff --name-only "$BASE_SHA"...HEAD -- package.json package-lock.json supabase/migrations .github/workflows/task17b1-operator-services.yml lib/creator-publishing-queue/operator-queue lib/creator-publishing-queue/media app/api/creator-publishing-queue/media/[mediaAssetId]/signed-url/route.ts backend/creator-publishing-queue/tests/mediaAccess.test.ts app/creator/publishing-queue/operator/OperatorTaskControls.tsx app/creator/publishing-queue/operator/actions.ts app/creator/publishing-queue/operator/presentation.ts app/creator/publishing-queue/operator/page.tsx backend/creator-publishing-queue/tests/task17b2OperatorQueueUi.test.ts backend/creator-publishing-queue/tests/task17b2OperatorQueueSourceContract.test.ts)"
+      - run: npm ci
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b3OperatorMediaAccess.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b3OperatorMediaSourceContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b2OperatorQueueUi.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b2OperatorQueueSourceContract.test.ts
+      - run: npm run test:creator-publishing-task17b1
+      - run: npm run test:creator-publishing-queue
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: git diff --check
