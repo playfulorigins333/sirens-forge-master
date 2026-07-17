@@ -1,0 +1,14 @@
+import "server-only"
+import { getSupabaseAdmin } from "../../supabaseAdmin"
+import { supabaseServer } from "../../supabaseServer"
+import { validateCompletionForm } from "./validation"
+import { completeOnlyFansManualPostCore, createCompletionEvidenceUploadIntentCore, verifyCompletionEvidenceIntentCore } from "./serviceCore"
+import type { CompletionRequest, UploadIntentRequest, VerifyIntentRequest } from "./types"
+async function actorId(){ const supabase = await supabaseServer(); const { data, error } = await supabase.auth.getUser(); if (error || !data.user?.id) return null; return data.user.id }
+function admin(){ return getSupabaseAdmin() as any }
+function trustedRemoveObject(a:any){ return async(bucket:string,path:string)=>{ const removed=await a.storage.from(bucket).remove([path]); if(removed.error) throw removed.error } }
+function trustedDownloadObject(a:any){ return async(bucket:string,path:string)=>{ const d=await a.storage.from(bucket).download(path); if(d.error||!d.data) throw d.error||new Error("download failed"); return { body:d.data, contentType:d.data.type } } }
+export async function createCompletionEvidenceUploadIntent(input: UploadIntentRequest){ const actor=await actorId(); if(!actor) return { ok:false as const, code:"sign_in_required" as const, message:"Sign in required." }; const a=admin(); return createCompletionEvidenceUploadIntentCore(input, actor, { admin:a, removeObject:trustedRemoveObject(a), signUpload:async(bucket,path)=>{ const s=await a.storage.from(bucket).createSignedUploadUrl(path,{upsert:false}); if(s.error||!s.data?.token) throw s.error||new Error("signing failed"); return { token:s.data.token } } }) }
+export async function verifyCompletionEvidenceIntent(input: VerifyIntentRequest){ const actor=await actorId(); if(!actor) return { ok:false as const, code:"sign_in_required" as const, message:"Sign in required." }; const a=admin(); return verifyCompletionEvidenceIntentCore(input, actor, { admin:a, removeObject:trustedRemoveObject(a), download:trustedDownloadObject(a) }) }
+export async function completeOnlyFansManualPost(input: CompletionRequest){ const actor=await actorId(); if(!actor) return { ok:false as const, code:"sign_in_required" as const, message:"Sign in required." }; const a=admin(); return completeOnlyFansManualPostCore(input, actor, { admin:a, removeObject:trustedRemoveObject(a), download:trustedDownloadObject(a) }) }
+export async function completeOnlyFansManualPostFromFormData(formData: FormData){ const fields:Record<string,FormDataEntryValue>={}; for(const [k,v] of formData.entries()) if(!k.startsWith("$ACTION_")) fields[k]=v; return completeOnlyFansManualPost(validateCompletionForm(fields)) }

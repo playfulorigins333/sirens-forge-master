@@ -1,0 +1,13 @@
+export const ONLYFANS_COMPLETION_APPROVED_REASONS = ["platform_did_not_expose_stable_url","post_completed_without_shareable_url","account_owner_declined_url_capture"] as const
+export const ONLYFANS_COMPLETION_ALLOWED_MIME_TYPES = ["image/jpeg","image/png","image/webp"] as const
+export const ONLYFANS_COMPLETION_MAX_BYTES = 10485760
+export type OnlyFansCompletionApprovedReason = typeof ONLYFANS_COMPLETION_APPROVED_REASONS[number]
+export type CompletionSafeErrorCode = "invalid_request"|"sign_in_required"|"service_unavailable"|"idempotency_conflict"|"current_claim_required"|"evidence_replacement_limit_reached"|"evidence_not_verified"|"completion_rejected"
+export type CompletionResult<T> = { ok:true; data:T } | { ok:false; code:CompletionSafeErrorCode; message:string; retryable?:boolean }
+export type UploadIntentOperation = "create"|"replace"
+export type UploadIntentRequest = { platformJobId:string; operation:UploadIntentOperation; mimeType:string; sizeBytes:number; requestKey:string; replacesUploadIntentId?:string }
+export type UploadIntentSafeResponse = { uploadIntentId:string; bucket:string; path:string; token:string|null; intentExpiresAt:string; credentialUseBy:string|null; status:"pending"|"verified"|"expired" }
+export type VerifyIntentRequest = { platformJobId:string; uploadIntentId:string }
+export type VerifyIntentSafeResponse = { uploadIntentId:string; status:"verified"; normalizedMimeType:string; actualSizeBytes:number }
+export type CompletionRequest = { platformJobId:string; uploadIntentId:string; finalPostUrl?:string|null; noUrlReason?:OnlyFansCompletionApprovedReason|null; idempotencyKey:string }
+export type CompletionSuccess = { platformJobId:string; status:"confirmed_posted_manual"; finalPostUrl:string|null; finalPostUrlSkipReason:OnlyFansCompletionApprovedReason|null; idempotent:boolean }

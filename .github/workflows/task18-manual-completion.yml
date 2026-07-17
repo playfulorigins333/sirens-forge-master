@@ -1,0 +1,128 @@
+name: Task 18 Manual Completion
+on:
+  pull_request:
+    paths:
+      - supabase/migrations/20260716001500_creator_publishing_onlyfans_manual_completion.sql
+      - lib/creator-publishing-queue/operator-completion/**
+      - app/api/creator-publishing-queue/operator/**/completion-evidence/**
+      - app/creator/publishing-queue/operator/completionActions.ts
+      - app/creator/publishing-queue/operator/OperatorTaskCompletion.tsx
+      - app/creator/publishing-queue/operator/[platformJobId]/page.tsx
+      - backend/creator-publishing-queue/tests/task18ManualCompletionPostgresIntegration.sql
+      - backend/creator-publishing-queue/tests/runTask18ManualCompletionPostgresIntegration.mjs
+      - backend/creator-publishing-queue/tests/runTask18ManualCompletionConcurrency.mjs
+      - backend/creator-publishing-queue/tests/task18ManualCompletionServices.test.ts
+      - backend/creator-publishing-queue/tests/task18ManualCompletionSourceContract.test.ts
+      - .github/workflows/task18-manual-completion.yml
+      - .github/workflows/task17b3-operator-media.yml
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TASK18_BASE_SHA: 30d2ce8796904223b68e1a0e9097c140cfc746eb
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TASK17A_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task17a_ci
+      TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task15_ci
+      TASK18_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task18_ci
+      TASK17B3_BASE_SHA: 5ead1e4f6c2da955322d9c1630177f2bc8b3c6f4
+      TASK17B3_COMPLETE_SHA: 30d2ce8796904223b68e1a0e9097c140cfc746eb
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+      STRIPE_SECRET_KEY: sk_test_dummy
+      NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_dummy
+      RESEND_API_KEY: re_dummy
+      R2_ACCOUNT_ID: dummy
+      R2_ACCESS_KEY_ID: dummy
+      R2_SECRET_ACCESS_KEY: dummy
+      R2_BUCKET: dummy
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: |
+          git cat-file -e "$TASK18_BASE_SHA^{commit}"
+          allowed='^(supabase/migrations/20260716001500_creator_publishing_onlyfans_manual_completion\.sql|lib/creator-publishing-queue/operator-completion/(types|validation|response|serviceCore|service|index)\.ts|app/api/creator-publishing-queue/operator/\[platformJobId\]/completion-evidence/upload-intent/route\.ts|app/api/creator-publishing-queue/operator/\[platformJobId\]/completion-evidence/\[uploadIntentId\]/verify/route\.ts|app/creator/publishing-queue/operator/completionActions\.ts|app/creator/publishing-queue/operator/OperatorTaskCompletion\.tsx|backend/creator-publishing-queue/tests/task18ManualCompletionPostgresIntegration\.sql|backend/creator-publishing-queue/tests/runTask18ManualCompletionPostgresIntegration\.mjs|backend/creator-publishing-queue/tests/runTask18ManualCompletionConcurrency\.mjs|backend/creator-publishing-queue/tests/task18ManualCompletionServices\.test\.ts|backend/creator-publishing-queue/tests/task18ManualCompletionSourceContract\.test\.ts|\.github/workflows/task18-manual-completion\.yml|app/creator/publishing-queue/operator/\[platformJobId\]/page\.tsx|\.github/workflows/task17b3-operator-media\.yml)$'
+          if [ "${{ github.event.pull_request.base.sha }}" = "$TASK18_BASE_SHA" ]; then
+            echo "TASK18_ENFORCE_INITIAL_SCOPE=true" >> "$GITHUB_ENV"
+            changed=$(git diff --name-only "$TASK18_BASE_SHA"...HEAD)
+            test "$(echo "$changed" | sed '/^$/d' | wc -l | tr -d ' ')" = "19"
+            echo "$changed" | while read f; do echo "$f" | grep -Eq "$allowed" || { echo "Unexpected path: $f"; exit 1; }; done
+            test "$(echo "$changed" | grep -c '^supabase/migrations/20260716001500_creator_publishing_onlyfans_manual_completion.sql$')" = "1"
+            test -z "$(git diff --name-only "$TASK18_BASE_SHA"...HEAD -- package.json package-lock.json 'supabase/migrations/*' ':!supabase/migrations/20260716001500_creator_publishing_onlyfans_manual_completion.sql' lib/creator-publishing-queue/operator-media lib/creator-publishing-queue/operator-queue app/creator/publishing-queue/operator/page.tsx)"
+          else
+            echo "TASK18_ENFORCE_INITIAL_SCOPE=false" >> "$GITHUB_ENV"
+            echo "Skipping exact Task 18 initial 19-file scope check for future PR base ${{ github.event.pull_request.base.sha }}"
+          fi
+      - run: npm ci
+      - name: Create isolated test databases
+        shell: bash
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          drop database if exists task18_ci with (force);
+          drop database if exists task17a_ci with (force);
+          drop database if exists task15_ci with (force);
+
+          create database task18_ci;
+          create database task17a_ci;
+          create database task15_ci;
+          SQL
+      - run: node backend/creator-publishing-queue/tests/runTask18ManualCompletionPostgresIntegration.mjs
+      - run: node backend/creator-publishing-queue/tests/runTask18ManualCompletionConcurrency.mjs
+      - run: npx tsx backend/creator-publishing-queue/tests/task18ManualCompletionServices.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task18ManualCompletionSourceContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b3OperatorMediaAccess.test.ts
+      - name: Run immutable Task 17B-3 source contract
+        shell: bash
+        run: |
+          temp_dir="$(mktemp -d)"
+          cleanup() {
+            git worktree remove --force "$temp_dir" >/dev/null 2>&1 || true
+            rm -rf "$temp_dir"
+          }
+          trap cleanup EXIT
+
+          git worktree add --detach "$temp_dir" "$TASK17B3_COMPLETE_SHA"
+
+          (
+            cd "$temp_dir"
+            "$GITHUB_WORKSPACE/node_modules/.bin/tsx" \
+              backend/creator-publishing-queue/tests/task17b3OperatorMediaSourceContract.test.ts
+          )
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b2OperatorQueueUi.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task17b2OperatorQueueSourceContract.test.ts
+      - run: npm run test:creator-publishing-task17b1
+      - run: npm run test:creator-publishing-task17a-postgres
+      - run: npm run test:creator-publishing-task17a-upgrade
+      - run: npm run test:creator-publishing-task15-postgres
+      - run: npm run test:creator-publishing-queue
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: git diff --check
+      - name: Upload Task 18 diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task18-diagnostics
+          if-no-files-found: ignore
+          path: |
+            task18-postgres-diagnostics.log
+            task18-concurrency-diagnostics.log
+            task17a-postgres-diagnostics.log
+            task17a-postgres-diagnostics-*.log
+            task15-postgres-diagnostics.log
