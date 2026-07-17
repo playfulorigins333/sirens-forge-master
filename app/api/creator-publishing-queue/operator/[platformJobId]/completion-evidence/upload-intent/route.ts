@@ -1,0 +1,4 @@
+import { createCompletionEvidenceUploadIntent } from "@/lib/creator-publishing-queue/operator-completion"
+import { jsonResponse } from "@/lib/creator-publishing-queue/operator-completion/response"
+import { assertSameOrigin, readStrictJson, validateUploadIntent } from "@/lib/creator-publishing-queue/operator-completion/validation"
+export async function POST(request: Request, { params }: { params: Promise<{ platformJobId:string }> | { platformJobId:string } }) { try { assertSameOrigin(request); const { platformJobId } = await params; const body=await readStrictJson(request,["operation","mimeType","sizeBytes","requestKey","replacesUploadIntentId"]); const result=await createCompletionEvidenceUploadIntent(validateUploadIntent(platformJobId,body)); return jsonResponse(result,result.ok?200:400) } catch { return jsonResponse({ ok:false, code:"invalid_request", message:"Invalid upload intent request." },400) } }

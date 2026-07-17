@@ -1,0 +1,4 @@
+import { verifyCompletionEvidenceIntent } from "@/lib/creator-publishing-queue/operator-completion"
+import { jsonResponse } from "@/lib/creator-publishing-queue/operator-completion/response"
+import { assertSameOrigin } from "@/lib/creator-publishing-queue/operator-completion/validation"
+export async function POST(request: Request, { params }: { params: Promise<{ platformJobId:string; uploadIntentId:string }> | { platformJobId:string; uploadIntentId:string } }) { try { assertSameOrigin(request); const body=await request.text(); if (body.length>0) return jsonResponse({ ok:false, code:"invalid_request", message:"Request body is not accepted." },400); const { platformJobId, uploadIntentId }=await params; const result=await verifyCompletionEvidenceIntent({ platformJobId, uploadIntentId }); return jsonResponse(result,result.ok?200:400) } catch { return jsonResponse({ ok:false, code:"invalid_request", message:"Invalid verification request." },400) } }
