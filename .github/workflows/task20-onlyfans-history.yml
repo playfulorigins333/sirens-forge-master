@@ -17,6 +17,7 @@ on:
       - 'backend/creator-publishing-queue/tests/task17b2OperatorQueueSourceContract.test.ts'
       - 'backend/creator-publishing-queue/tests/task18ManualCompletionServices.test.ts'
       - 'backend/creator-publishing-queue/tests/task18ManualCompletionSourceContract.test.ts'
+      - 'docs/creator-publishing/task20-onlyfans-history.md'
       - '.github/workflows/task20-onlyfans-history.yml'
 
 jobs:
@@ -77,6 +78,8 @@ jobs:
         run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistoryResolution.test.ts
       - name: Task 20 completion and creator-attempt truthfulness tests
         run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistoryTruthfulness.test.ts
+      - name: Task 20 persisted catalog, schedule, controls, and immutable-reference tests
+        run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistoryExit.test.ts
       - name: Task 20 source-contract tests
         run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistorySourceContract.test.ts
       - name: Task 20 isolated PostgreSQL migration and integration
