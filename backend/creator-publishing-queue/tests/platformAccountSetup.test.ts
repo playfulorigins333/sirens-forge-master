@@ -41,9 +41,10 @@ test("migration source removes direct browser writes and adds service-role-only 
   assert.match(migration, /grant execute .* to service_role/i)
 })
 
-test("validation accepts only OnlyFans and Fansly and normalizes usernames", () => {
+test("validation accepts new OnlyFans creation, rejects new Fansly, and preserves legacy Fansly updates", () => {
   assert.equal(normalizeAccountInput({ operation: "create", platform: "onlyfans", platformUsername: " creator ", idempotencyKey: "abc12345" }).platformUsername, "creator")
-  assert.equal(normalizeAccountInput({ operation: "create", platform: "fansly", platformUsername: "creator", idempotencyKey: "abc12345" }).platform, "fansly")
+  assert.throws(() => normalizeAccountInput({ operation: "create", platform: "fansly", platformUsername: "creator", idempotencyKey: "abc12345" }), /OnlyFans is available/)
+  assert.equal(normalizeAccountInput({ operation: "update", accountId: "00000000-0000-0000-0000-000000000000", platform: "fansly", platformUsername: "creator", idempotencyKey: "abc12345" }).platform, "fansly")
   assert.throws(() => normalizeAccountInput({ operation: "create", platform: "fanvue", platformUsername: "creator", idempotencyKey: "abc12345" }), /Fanvue/)
   assert.throws(() => normalizeUsername("   "), /required/)
   assert.throws(() => normalizeUsername("a".repeat(81)), /too long/)
@@ -72,6 +73,7 @@ test("service derives creator id, calls RPC, maps safe errors, and rejects brows
   assert.equal(calls[0].args.p_platform_username, "me")
   assert.equal(JSON.stringify(created).includes("service_role"), false)
   assert.equal(JSON.stringify(calls).includes("password"), false)
+  assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "create", platform: "fansly", platformUsername: "me", idempotencyKey: "idem_12345" }, deps as any)).ok, false)
   assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "update", accountId: "00000000-0000-0000-0000-000000000000", platform: "fansly", platformUsername: "me", idempotencyKey: "idem_update" }, deps as any)).ok, true)
   assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "create", platform: "fanvue", platformUsername: "me", idempotencyKey: "idem_12345" }, deps as any)).ok, false)
   assert.equal((await saveCreatorPlatformAccountWithDeps({ operation: "create", platform: "onlyfans", platformUsername: "me", password: "x" as any, idempotencyKey: "idem_12345" }, deps as any)).ok, false)
@@ -112,6 +114,9 @@ test("action and UI source assertions enforce safe fields and copy", () => {
   const actions = fs.readFileSync("app/creator/publishing-queue/accounts/actions.ts", "utf8")
   const queue = fs.readFileSync("app/creator/publishing-queue/page.tsx", "utf8")
   assert.match(form, /OnlyFans/); assert.match(form, /Fansly/); assert.doesNotMatch(form, /Fanvue/)
+  assert.match(form, /value="onlyfans"/); assert.doesNotMatch(form, /<select[\s\S]*name="platform"/); assert.doesNotMatch(form, /<option[\s\S]*fansly/)
+  assert.match(form + page, /Platform account/)
+  assert.match(page, /No OnlyFans account references yet\./); assert.doesNotMatch(page, /No OnlyFans or Fansly account references yet/)
   assert.match(form, /readOnly/); assert.match(form, /platformUsername/); assert.match(form, /profileUrl/); assert.match(form, /isVirtualEntity/); assert.match(form, /creatorAttested/)
   assert.doesNotMatch(form + page, /type="password"|name="token"|name="cookie"|Connect account|Login connected|Test connection|Platform verified|Automatically verified/i)
   assert.match(form + page, /does not store your password, tokens, cookies, or login session/)
