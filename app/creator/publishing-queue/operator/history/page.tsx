@@ -18,7 +18,7 @@ export default async function OnlyFansOperatorTerminalHistoryPage({ searchParams
       <Link href="/creator/publishing-queue/operator" className="text-sm text-fuchsia-200 underline">Back to operator queue</Link>
       <p className="mt-6 text-sm uppercase tracking-[0.3em] text-cyan-200">OnlyFans assisted operator</p>
       <h1 className="mt-3 text-4xl font-bold">Completed and terminal history</h1>
-      {!result.ok ? <p className="mt-6 rounded-2xl border border-amber-300/40 bg-amber-950/30 p-5 text-amber-100">{result.message}</p> : result.jobs.length===0 ? <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-zinc-400"><p>No authorized terminal OnlyFans jobs were found on this page.</p>{result.hasPreviousPage ? <Link href="/creator/publishing-queue/operator/history" className="mt-4 inline-block text-cyan-200 underline">Return to newest records</Link> : null}</div> : <>
+      {"message" in result ? <p className="mt-6 rounded-2xl border border-amber-300/40 bg-amber-950/30 p-5 text-amber-100">{result.message}</p> : result.jobs.length===0 ? <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-5 text-zinc-400"><p>No authorized terminal OnlyFans jobs were found on this page.</p>{result.hasPreviousPage ? <Link href="/creator/publishing-queue/operator/history" className="mt-4 inline-block text-cyan-200 underline">Return to newest records</Link> : null}</div> : <>
         <ol className="mt-6 space-y-3">
           {result.jobs.map(job=><li key={job.platformJobId} className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
             <article className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
