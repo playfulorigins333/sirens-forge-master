@@ -23,8 +23,10 @@ type PlatformRegistrySeed = Omit<
   env_var?: string
 }
 
-const COMING_SOON_MESSAGE = "Coming soon — not available for scheduled Autopost yet."
-const NOT_CONFIGURED_MESSAGE = "Not configured — posting integration is not enabled."
+const COMING_SOON_MESSAGE = "Assisted launch workflow only — scheduled Autopost is not enabled."
+const NOT_CONFIGURED_MESSAGE = "Assisted launch workflow only — no direct posting integration is enabled."
+
+const CREATOR_LAUNCH_PLATFORM_IDS = new Set<PlatformId>(["fanvue", "onlyfans", "x", "reddit"])
 
 const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
   {
@@ -33,7 +35,7 @@ const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
     external_url: "https://www.fanvue.com/",
     env_var: "AUTOPOST_WEBHOOK_FANVUE",
     supports_assisted_workflow: true,
-    reason: "Real scheduled Fanvue posting is not proven in this repo yet.",
+    reason: "Fanvue remains frozen for safety; native posting, scheduling, media upload, and dispatch are not enabled.",
   },
   {
     id: "onlyfans",
@@ -41,7 +43,7 @@ const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
     external_url: "https://onlyfans.com/",
     env_var: "AUTOPOST_WEBHOOK_ONLYFANS",
     supports_assisted_workflow: true,
-    reason: "Real scheduled OnlyFans posting is not proven in this repo yet.",
+    reason: "OnlyFans uses assisted/manual publishing through the internal queue; Sirens Forge does not post directly.",
   },
   {
     id: "fansly",
@@ -73,7 +75,7 @@ const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
     external_url: "https://x.com/",
     env_var: "AUTOPOST_WEBHOOK_X",
     supports_assisted_workflow: true,
-    reason: "Real scheduled X posting is not proven in this repo yet.",
+    reason: "Use X as a traffic and discovery channel. Draft preparation is available where supported; scheduled posting is not enabled.",
   },
   {
     id: "reddit",
@@ -81,7 +83,7 @@ const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
     external_url: "https://www.reddit.com/",
     env_var: "AUTOPOST_WEBHOOK_REDDIT",
     supports_assisted_workflow: true,
-    reason: "Real scheduled Reddit posting is not proven in this repo yet.",
+    reason: "Use Reddit as a traffic and discovery channel. Direct scheduled posting is not enabled.",
   },
 ]
 
@@ -101,7 +103,7 @@ export function getAutopostPlatformRegistry(): AutopostPlatformRegistryEntry[] {
 }
 
 export function getPublicAutopostPlatforms() {
-  return getAutopostPlatformRegistry().map((platform) => ({
+  return getAutopostPlatformRegistry().filter((platform) => CREATOR_LAUNCH_PLATFORM_IDS.has(platform.id)).map((platform) => ({
     id: platform.id,
     name: platform.name,
     label: platform.name,

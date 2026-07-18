@@ -3,20 +3,12 @@ import { NextResponse } from "next/server"
 type PlatformId =
   | "fanvue"
   | "onlyfans"
-  | "fansly"
-  | "loyalfans"
-  | "justforfans"
-  | "jff"
   | "x"
   | "reddit"
 
 const PLATFORM_URLS: Record<PlatformId, string> = {
   fanvue: "https://www.fanvue.com/",
   onlyfans: "https://onlyfans.com/",
-  fansly: "https://fansly.com/",
-  loyalfans: "https://www.loyalfans.com/",
-  justforfans: "https://justfor.fans/",
-  jff: "https://justfor.fans/",
   x: "https://x.com/",
   reddit: "https://www.reddit.com/",
 }
