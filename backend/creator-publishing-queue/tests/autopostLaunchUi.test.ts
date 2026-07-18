@@ -5,6 +5,7 @@ import { getPublicAutopostPlatforms, normalizeKnownPlatformIds } from "../../../
 
 const client = () => readFileSync("app/autopost/AutopostPageClient.tsx", "utf8")
 const orchestration = () => readFileSync("app/autopost/Task14AutopostOrchestration.tsx", "utf8")
+const page = () => readFileSync("app/autopost/page.tsx", "utf8")
 
 test("creator-facing launch catalog is exactly X, Reddit, OnlyFans, and Fanvue", () => {
   const platforms = getPublicAutopostPlatforms()
@@ -70,4 +71,19 @@ test("publishing-plan section is readable and creator-facing instead of task-num
   assert.match(src, /disabled:bg-slate-700/)
   assert.doesNotMatch(src, /Task 14 Creator Publishing Orchestration/)
   assert.doesNotMatch(src, /\["onlyfans","fansly","fanvue"\]/)
+})
+
+
+test("creator publishing workflow is stacked above the Autopost cursor background", () => {
+  const client = readFileSync("app/autopost/AutopostPageClient.tsx", "utf8")
+  const workflow = orchestration()
+  const serverPage = page()
+
+  assert.match(client, /fixed inset-0 z-0/)
+  assert.match(client, /radial-gradient\(600px circle at \$\{mousePosition\.x\}px \$\{mousePosition\.y\}px/)
+  assert.match(client, /<main className="relative z-10/)
+  assert.match(workflow, /<section className="relative z-10 mx-auto mt-8 max-w-6xl/)
+  assert.match(serverPage, /<section className="relative z-10 mx-auto mt-8 max-w-6xl rounded-3xl/)
+  assert.match(workflow, /fetch\("\/api\/creator-publishing-queue\/autopost\/plans"/)
+  assert.match(workflow, /body:JSON\.stringify\(\{contentPackageIds:selected,idempotencyKey:key\}\)/)
 })
