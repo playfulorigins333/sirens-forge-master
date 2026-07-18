@@ -33,6 +33,15 @@ test("autopost launch UI filters fallback, cards, new selections, and messaging 
   assert.match(platformTab, /ids: \["x", "reddit"\]/)
   assert.match(platformTab, /ids: \["onlyfans", "fanvue"\]/)
   assert.match(platformTab, /Open OnlyFans Publishing Queue/)
+  assert.match(src, /return "TRAFFIC CHANNEL"/)
+  assert.match(src, /return "ASSISTED PUBLISHING"/)
+  assert.match(src, /return "FROZEN"/)
+  assert.match(src, /Promote your paid content and direct followers to OnlyFans or Fanvue\./)
+  assert.match(src, /Reach relevant communities and direct interested audiences to your paid page\./)
+  assert.match(src, /Prepare and complete posts through the assisted Creator Publishing Queue\./)
+  assert.match(src, /Paid-content publishing remains unavailable while safety restrictions are in place\./)
+  assert.doesNotMatch(platformTab, /section\.title[\s\S]*rounded-full border border-cyan-300\/30 bg-cyan-300\/10 px-3 py-1/)
+  assert.doesNotMatch(platformTab, /platformUnavailableMessage\(p\)/)
   assert.match(platformTab, /href="\/creator\/publishing-queue"/)
   assert.doesNotMatch(platformTab, /href="\/creator\/publishing-queue"[^>]+target=/)
   assert.match(platformTab, /target="_blank" rel="noopener noreferrer"/)
@@ -42,7 +51,6 @@ test("autopost launch UI filters fallback, cards, new selections, and messaging 
   assert.match(src, /return "Open Fanvue"/)
   assert.doesNotMatch(platformTab, /Open platform/)
   assert.match(src, /assisted\/manual publishing/)
-  assert.match(src, /traffic channel, not a paywall destination/)
 })
 
 test("legacy platform ids remain displayable while not entering new creator launch UI", () => {

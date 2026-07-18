@@ -255,11 +255,19 @@ function externalButtonLabel(platform: Platform) {
 }
 
 function platformPurpose(platform: Platform) {
-  if (platform.id === "x") return "Promote content and drive traffic to your OnlyFans or Fanvue paid destination. Draft preparation may be available; scheduled posting is not claimed here."
-  if (platform.id === "reddit") return "Promote content and direct communities to your paid page. Reddit is a traffic channel, not a paywall destination."
-  if (platform.id === "onlyfans") return "Paid-content destination with assisted/manual publishing through the Creator Publishing Queue. No direct API posting or browser automation."
-  if (platform.id === "fanvue") return "Paid-content destination currently held behind safety restrictions; native posting, scheduling, media upload, and dispatch are not enabled."
+  if (platform.id === "x") return "Promote your paid content and direct followers to OnlyFans or Fanvue."
+  if (platform.id === "reddit") return "Reach relevant communities and direct interested audiences to your paid page."
+  if (platform.id === "onlyfans") return "Prepare and complete posts through the assisted Creator Publishing Queue."
+  if (platform.id === "fanvue") return "Paid-content publishing remains unavailable while safety restrictions are in place."
   return platform.reason ?? platformUnavailableMessage(platform)
+}
+
+function platformStatusBadge(platform: Platform) {
+  if (platform.id === "x") return "TRAFFIC CHANNEL"
+  if (platform.id === "reddit") return "TRAFFIC CHANNEL"
+  if (platform.id === "onlyfans") return "ASSISTED PUBLISHING"
+  if (platform.id === "fanvue") return "FROZEN"
+  return String(platform.launch_status ?? "Unavailable").replace("_", " ").toUpperCase()
 }
 
 function badgeForState(state: string) {
@@ -2000,25 +2008,19 @@ export default function AutopostPage() {
                           {sectionPlatforms.map(p => {
                             const url = p.external_url ?? platformUrl(p.id)
                             return (
-                              <article key={p.id} className="flex min-h-[260px] flex-col justify-between rounded-2xl border border-white/10 bg-white/[0.04] p-5 shadow-lg shadow-black/20">
+                              <article key={p.id} className="flex flex-col justify-between rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-lg shadow-black/20">
                                 <div>
                                   <div className="flex items-start justify-between gap-3">
-                                    <div>
-                                      <div className="text-xl font-semibold text-white">{p.id === "x" ? "X" : p.name}</div>
-                                      <div className="mt-2 inline-flex rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-100">
-                                        {section.title}
-                                      </div>
-                                    </div>
-                                    <div className="rounded-full border border-gray-700 bg-gray-950 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-300">
-                                      {String(p.launch_status ?? "coming_soon").replace("_", " ")}
+                                    <div className="text-xl font-semibold text-white">{p.id === "x" ? "X" : p.name}</div>
+                                    <div className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-100">
+                                      {platformStatusBadge(p)}
                                     </div>
                                   </div>
-                                  <p className="mt-4 text-sm leading-6 text-gray-200">{platformPurpose(p)}</p>
-                                  <p className="mt-3 text-xs leading-5 text-gray-400">{platformUnavailableMessage(p)}</p>
+                                  <p className="mt-3 text-sm leading-6 text-gray-200">{platformPurpose(p)}</p>
                                 </div>
                                 <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                   {p.id === "onlyfans" && (
-                                    <Button asChild className="bg-fuchsia-600 hover:bg-fuchsia-500">
+                                    <Button asChild size="sm" className="bg-fuchsia-600 hover:bg-fuchsia-500">
                                       <a href="/creator/publishing-queue">
                                         <List className="w-4 h-4 mr-2" />
                                         Open OnlyFans Publishing Queue
@@ -2026,7 +2028,7 @@ export default function AutopostPage() {
                                     </Button>
                                   )}
                                   {url ? (
-                                    <Button asChild variant="outline" className="border-gray-700 bg-transparent text-gray-100 hover:bg-gray-900">
+                                    <Button asChild variant="outline" size="sm" className="border-gray-700 bg-transparent text-gray-100 hover:bg-gray-900">
                                       <a href={url} target="_blank" rel="noopener noreferrer">
                                         <ExternalLink className="w-4 h-4 mr-2" />
                                         {externalButtonLabel(p)}
