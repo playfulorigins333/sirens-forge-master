@@ -102,6 +102,29 @@ export function chooseHistoryQueueTask(job: any, candidates: any[], rows: Histor
   return active.length === 1 ? active[0] : null
 }
 
+function stateReferencesPlatformJob(state:any, platformJobId:string) {
+  if (!state || typeof state !== "object") return false
+  if (state.platform_job_id === platformJobId || state.platformJobId === platformJobId) return true
+  if (Array.isArray(state.jobs) && state.jobs.some((job:any)=>job?.platform_job_id===platformJobId || job?.platformJobId===platformJobId || job?.id===platformJobId)) return true
+  return false
+}
+
+export function scopeHistoryAuditEvents(events:any[], platformJobId:string, queueTaskId:string|null|undefined, schedulerEventIds:string[]) {
+  const schedulerIds=new Set(schedulerEventIds)
+  const directlyScoped=(event:any)=>
+    (event?.entity_type==="creator_publishing_platform_job" && event?.entity_id===platformJobId) ||
+    (Boolean(queueTaskId) && event?.entity_type==="creator_publishing_queue_task" && event?.entity_id===queueTaskId) ||
+    (event?.entity_type==="creator_publishing_scheduler_event" && schedulerIds.has(event?.entity_id))
+  const scopedKeys=new Set((events??[]).filter(directlyScoped).map(event=>event?.idempotency_key).filter((key):key is string=>typeof key==="string"&&key.length>0))
+  return (events??[]).filter(event=>
+    directlyScoped(event) ||
+    event?.action==="creator_publishing_plan_created" ||
+    stateReferencesPlatformJob(event?.before_state,platformJobId) ||
+    stateReferencesPlatformJob(event?.after_state,platformJobId) ||
+    (typeof event?.idempotency_key==="string" && scopedKeys.has(event.idempotency_key)),
+  )
+}
+
 export function historyJobIsTerminal(jobState: unknown) {
   return typeof jobState === "string" && terminalJobStates.has(jobState)
 }

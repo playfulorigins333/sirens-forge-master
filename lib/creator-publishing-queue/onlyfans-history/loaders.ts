@@ -1,14 +1,16 @@
 import "server-only"
 import { getSupabaseAdmin } from "../../supabaseAdmin"
 import { supabaseServer } from "../../supabaseServer"
+import { loadCreatorOnlyFansPackageHistoryCore } from "./creator-package"
 import { normalizeOnlyFansHistory } from "./core"
 import {
   chooseHistoryQueueTask,
   historyJobIsTerminal,
   resolveQueueTaskIdFromJobLinks,
+  scopeHistoryAuditEvents,
   type HistoryTaskLinkRows,
 } from "./resolution"
-import type { OnlyFansHistoryRows, OnlyFansHistoryView } from "./types"
+import type { OnlyFansCreatorPackageHistoryView, OnlyFansHistoryRows, OnlyFansHistoryView } from "./types"
 
 const taskSelect = "id,content_package_id,creator_id,platform_account_id,target_platform,status,operator_progress_state,posted_by,posted_at,posted_confirmation,final_post_url,final_post_url_skip_reason,proof_screenshot_storage_key,created_at,updated_at"
 const jobSelect = "id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,schedule_timezone,created_at,updated_at,intended_publish_at,operator_due_at,scheduled_at,cancelled_at"
@@ -139,38 +141,38 @@ export async function collectOnlyFansHistoryRows(admin: any, job: any): Promise<
       .eq("creator_id", job.creator_id),
   )
 
-  return { plan, job, task, schedulerEvents, auditEvents, evidenceIntents, idempotencyRows }
+  const scopedAuditEvents=scopeHistoryAuditEvents(auditEvents,job.id,task?.id,schedulerIds)
+  return { plan, job, task, schedulerEvents, auditEvents:scopedAuditEvents, evidenceIntents, idempotencyRows }
 }
 
-export async function loadCreatorOnlyFansHistory(contentPackageId: string): Promise<OnlyFansHistoryView> {
+export async function loadCreatorOnlyFansHistory(contentPackageId: string): Promise<OnlyFansCreatorPackageHistoryView> {
   const actor = await actorId()
   if (!actor) return { ok: false, code: "sign_in_required", message: "Sign in to view publishing history." }
   const admin = getSupabaseAdmin()
 
   try {
-    const pkg = await one(
-      admin
-        .from("creator_publishing_content_packages")
-        .select("id,creator_id,target_platform")
-        .eq("id", contentPackageId)
-        .eq("creator_id", actor)
-        .eq("target_platform", "onlyfans"),
-    )
-    if (!pkg) return { ok: false, code: "not_found", message: "Publishing history is unavailable." }
-
-    const job = await one(
-      admin
-        .from("creator_publishing_platform_jobs")
-        .select(jobSelect)
-        .eq("content_package_id", pkg.id)
-        .eq("creator_id", actor)
-        .eq("target_platform", "onlyfans")
-        .order("created_at", { ascending: false })
-        .limit(1),
-    )
-    if (!job) return { ok: true, timezone: "UTC", timezoneLabel: "UTC", entries: [] }
-
-    return normalizeOnlyFansHistory(await collectOnlyFansHistoryRows(admin, job), "creator")
+    return await loadCreatorOnlyFansPackageHistoryCore(contentPackageId,actor,{
+      loadPackage:async (packageId,creatorId)=>one(
+        admin
+          .from("creator_publishing_content_packages")
+          .select("id,creator_id,target_platform")
+          .eq("id", packageId)
+          .eq("creator_id", creatorId)
+          .eq("target_platform", "onlyfans"),
+      ),
+      loadJobs:async (packageId,creatorId)=>many(
+        admin
+          .from("creator_publishing_platform_jobs")
+          .select(jobSelect)
+          .eq("content_package_id", packageId)
+          .eq("creator_id", creatorId)
+          .eq("target_platform", "onlyfans")
+          .eq("publishing_mode", "assisted")
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false }),
+      ),
+      collectJobRows:(job)=>collectOnlyFansHistoryRows(admin,job),
+    })
   } catch {
     return { ok: false, code: "service_unavailable", message: "Publishing history could not be loaded." }
   }
