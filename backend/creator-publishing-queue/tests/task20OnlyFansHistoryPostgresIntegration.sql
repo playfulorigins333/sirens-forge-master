@@ -26,28 +26,24 @@ select task20_test.assert(not exists(select 1 from public.creator_publishing_aud
 select public.creator_publishing_complete_onlyfans_manual_post_audited('replay_probe',(:'f1'::jsonb->>'actor')::uuid,(:'f1'::jsonb->>'job')::uuid,'task20-success-0001',(:'f1'::jsonb->>'evidence')::uuid,'https://www.onlyfans.com/12345/trusteduser',null,null,null,null,null) as successful_probe \gset
 select task20_test.assert((:'successful_probe'::jsonb->>'replayed')::boolean=true,'successful replay probe returns the stored success');
 select task20_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id=(:'f1'::jsonb->>'job')::uuid and action='operator_onlyfans_manual_completion_proof_recorded' and idempotency_key='task20-success-0001'),'successful replay probe creates no duplicate proof event');
-
 select public.creator_publishing_complete_onlyfans_manual_post_audited('complete',(:'f1'::jsonb->>'actor')::uuid,(:'f1'::jsonb->>'job')::uuid,'task20-success-0001',(:'f1'::jsonb->>'evidence')::uuid,'https://www.onlyfans.com/12345/trusteduser',null,:'f1'::jsonb->>'digest',8,'image/jpeg',null) as successful_replay \gset
 select task20_test.assert((:'successful_replay'::jsonb->>'replayed')::boolean=true,'sequential success replay returns stored success');
 select task20_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id=(:'f1'::jsonb->>'job')::uuid and action='operator_onlyfans_manual_completion_proof_recorded' and idempotency_key='task20-success-0001'),'sequential success replay creates no duplicate proof event');
-
 select public.creator_publishing_complete_onlyfans_manual_post_audited('complete',(:'f1'::jsonb->>'actor')::uuid,(:'f1'::jsonb->>'job')::uuid,'task20-success-0001',(:'f1'::jsonb->>'evidence')::uuid,'https://www.onlyfans.com/54321/trusteduser',null,:'f1'::jsonb->>'digest',8,'image/jpeg',null) as success_conflict \gset
 select task20_test.assert(:'success_conflict'::jsonb->>'code'='idempotency_conflict','materially different reuse after success is a conflict');
 select task20_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id=(:'f1'::jsonb->>'job')::uuid and action='operator_onlyfans_manual_completion_rejected' and idempotency_key='task20-success-0001' and after_state->>'rejection_code'='idempotency_conflict'),'success-key conflict creates one sanitized rejection event');
 
 select task20_test.create_fixture(2) as f2 \gset
-select public.creator_publishing_complete_onlyfans_manual_post_audited('complete',(:'f2'::jsonb->>'actor')::uuid,(:'f2'::jsonb->>'job')::uuid,'task20-reject-0002',(:'f2'::jsonb->>'evidence')::uuid,'https://www.onlyfans.com/12345/trusteduser',null,:'f2'::jsonb->>'digest',8,'image/jpeg','99999999-0000-4000-8000-000000000002'::uuid) as rejected \gset
+select public.creator_publishing_complete_onlyfans_manual_post_audited('complete',(:'f2'::jsonb->>'actor')::uuid,(:'f2'::jsonb->>'job')::uuid,'task20-reject-0002',(:'f2'::jsonb->>'evidence')::uuid,null,'invalid_reason',:'f2'::jsonb->>'digest',8,'image/jpeg',(:'f2'::jsonb->>'token')::uuid) as rejected \gset
 select task20_test.assert(:'rejected'::jsonb->>'status'='completion_rejected','known rejection returns a structured safe failure');
-select task20_test.assert(:'rejected'::jsonb->>'code'='current_claim_required','known rejection uses finite database code');
-select task20_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id=(:'f2'::jsonb->>'job')::uuid and actor_id=(:'f2'::jsonb->>'actor')::uuid and action='operator_onlyfans_manual_completion_rejected' and idempotency_key='task20-reject-0002' and after_state->>'rejection_code'='current_claim_required'),'one approved rejection creates exactly one sanitized event');
+select task20_test.assert(:'rejected'::jsonb->>'code'='url_or_reason_required','known rejection uses finite database code');
+select task20_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id=(:'f2'::jsonb->>'job')::uuid and actor_id=(:'f2'::jsonb->>'actor')::uuid and action='operator_onlyfans_manual_completion_rejected' and idempotency_key='task20-reject-0002' and after_state->>'rejection_code'='url_or_reason_required'),'one approved rejection creates exactly one sanitized event');
 select task20_test.assert((select count(*)=1 from public.creator_publishing_operator_action_idempotency where actor_id=(:'f2'::jsonb->>'actor')::uuid and action_type='manual_completion_rejection' and idempotency_key='task20-reject-0002'),'approved rejection has a database idempotency record');
-
-select public.creator_publishing_complete_onlyfans_manual_post_audited('complete',(:'f2'::jsonb->>'actor')::uuid,(:'f2'::jsonb->>'job')::uuid,'task20-reject-0002',(:'f2'::jsonb->>'evidence')::uuid,'https://www.onlyfans.com/12345/trusteduser',null,:'f2'::jsonb->>'digest',8,'image/jpeg','99999999-0000-4000-8000-000000000002'::uuid) as rejected_replay \gset
+select public.creator_publishing_complete_onlyfans_manual_post_audited('complete',(:'f2'::jsonb->>'actor')::uuid,(:'f2'::jsonb->>'job')::uuid,'task20-reject-0002',(:'f2'::jsonb->>'evidence')::uuid,null,'invalid_reason',:'f2'::jsonb->>'digest',8,'image/jpeg',(:'f2'::jsonb->>'token')::uuid) as rejected_replay \gset
 select task20_test.assert((:'rejected_replay'::jsonb->>'replayed')::boolean=true,'rejected replay is deterministic');
-select task20_test.assert(:'rejected_replay'::jsonb->>'code'='current_claim_required','rejected replay returns the matching safe result');
+select task20_test.assert(:'rejected_replay'::jsonb->>'code'='url_or_reason_required','rejected replay returns the matching safe result');
 select task20_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id=(:'f2'::jsonb->>'job')::uuid and action='operator_onlyfans_manual_completion_rejected' and idempotency_key='task20-reject-0002'),'rejected replay creates no duplicate event');
-
-select public.creator_publishing_complete_onlyfans_manual_post_audited('complete',(:'f2'::jsonb->>'actor')::uuid,(:'f2'::jsonb->>'job')::uuid,'task20-reject-0002',(:'f2'::jsonb->>'evidence')::uuid,'https://www.onlyfans.com/54321/trusteduser',null,:'f2'::jsonb->>'digest',8,'image/jpeg','99999999-0000-4000-8000-000000000002'::uuid) as rejected_conflict \gset
+select public.creator_publishing_complete_onlyfans_manual_post_audited('complete',(:'f2'::jsonb->>'actor')::uuid,(:'f2'::jsonb->>'job')::uuid,'task20-reject-0002',(:'f2'::jsonb->>'evidence')::uuid,null,'different_invalid_reason',:'f2'::jsonb->>'digest',8,'image/jpeg',(:'f2'::jsonb->>'token')::uuid) as rejected_conflict \gset
 select task20_test.assert(:'rejected_conflict'::jsonb->>'code'='idempotency_conflict','materially different rejected request remains a conflict');
 select task20_test.assert((:'rejected_conflict'::jsonb->>'replayed')::boolean=false,'different request does not replay an unrelated rejection');
 select task20_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id=(:'f2'::jsonb->>'job')::uuid and action='operator_onlyfans_manual_completion_rejected' and idempotency_key='task20-reject-0002'),'different rejected request does not create duplicate event');
@@ -65,5 +61,4 @@ drop trigger task20_unknown_completion_fault_trg on public.creator_publishing_qu
 drop function task20_test.raise_unknown_completion_fault();
 select task20_test.assert(not exists(select 1 from public.creator_publishing_audit_events where entity_id=(:'f4'::jsonb->>'job')::uuid and action in ('operator_onlyfans_manual_completion_proof_recorded','operator_onlyfans_manual_completion_rejected')),'unknown database error creates no Task 20 event');
 select task20_test.assert(not exists(select 1 from public.creator_publishing_operator_action_idempotency where actor_id=(:'f4'::jsonb->>'actor')::uuid and idempotency_key='task20-unknown-0004'),'unknown database error creates no idempotency record');
-
 select 'TASK20_POSTGRES_INTEGRATION_PASSED' as result;
