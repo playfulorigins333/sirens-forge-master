@@ -15,7 +15,10 @@ const migrationPath =
   "supabase/migrations/20260717001600_remove_broad_lora_storage_upload_policy.sql";
 const assertionsPath =
   "backend/creator-publishing-queue/tests/task19StoragePolicyRemediationPostgresIntegration.sql";
-const logPath = join(tempDirectory, "task19-storage-policy-postgres-diagnostics.log");
+const logPath = join(
+  tempDirectory,
+  "task19-storage-policy-postgres-diagnostics.log",
+);
 
 writeFileSync(
   logPath,
@@ -85,6 +88,12 @@ begin
   ) then
     create role authenticated;
   end if;
+
+  if not exists (
+    select 1 from pg_roles where rolname = 'service_role'
+  ) then
+    create role service_role;
+  end if;
 end
 $$;
 
@@ -98,24 +107,51 @@ as $$
   select nullif(current_setting('request.jwt.claim.role', true), '')
 $$;
 
+create or replace function auth.uid()
+returns uuid
+language sql
+stable
+as $$
+  select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
+$$;
+
+grant usage on schema auth to anon, authenticated, service_role;
+
 drop schema if exists storage cascade;
 create schema storage;
 
 create table storage.buckets (
   id text primary key,
-  name text not null
+  name text not null,
+  public boolean not null default false
 );
 
 create table storage.objects (
   id uuid primary key,
   bucket_id text not null references storage.buckets(id),
-  name text not null
+  name text not null,
+  owner uuid
 );
 
 alter table storage.objects enable row level security;
 
-grant usage on schema storage to authenticated;
-grant insert on storage.objects to authenticated;
+grant usage on schema storage to anon, authenticated, service_role;
+grant select, insert, update on storage.objects to anon, authenticated;
+grant all on storage.objects to service_role;
+
+create policy
+  "allow anon uploads to lora-datasets"
+on storage.objects
+for insert
+to anon
+with check ((bucket_id = 'lora-datasets'::text));
+
+create policy
+  "allow authenticated uploads to lora-datasets"
+on storage.objects
+for insert
+to authenticated
+with check ((bucket_id = 'lora-datasets'::text));
 
 create policy
   "authenticated users can upload lora datasets lk1r3q_0"
@@ -124,23 +160,137 @@ for insert
 to authenticated
 with check ((auth.role() = 'authenticated'::text));
 
-create policy "task19 unrelated storage select policy"
+create policy
+  "sf_lora_datasets_insert_public"
+on storage.objects
+for insert
+to public
+with check (
+  (
+    (bucket_id = 'lora-datasets'::text)
+    and (name like 'lora_datasets/%'::text)
+    and ((owner is null) or (owner = auth.uid()))
+  )
+);
+
+create policy
+  "sf_lora_datasets_update_public"
+on storage.objects
+for update
+to public
+using (
+  (
+    (bucket_id = 'lora-datasets'::text)
+    and (name like 'lora_datasets/%'::text)
+    and ((owner is null) or (owner = auth.uid()))
+  )
+)
+with check (
+  (
+    (bucket_id = 'lora-datasets'::text)
+    and (name like 'lora_datasets/%'::text)
+    and ((owner is null) or (owner = auth.uid()))
+  )
+);
+
+create policy
+  "service role can read lora datasets"
 on storage.objects
 for select
-using (false);
-
-insert into storage.buckets(id, name)
-values ('task19-sentinel-bucket', 'task19-sentinel-bucket');
-
-insert into storage.objects(id, bucket_id, name)
-values (
-  '00000000-0000-4000-8000-000000000019',
-  'task19-sentinel-bucket',
-  'task19/sentinel.jpg'
+to service_role
+using (
+  (
+    (bucket_id = 'lora-datasets'::text)
+    and (name like 'lora_datasets/%'::text)
+  )
 );
+
+create policy
+  "service role can upload lora datasets"
+on storage.objects
+for insert
+to service_role
+with check (
+  (
+    (bucket_id = 'lora-datasets'::text)
+    and (name like 'lora_datasets/%'::text)
+  )
+);
+
+create policy
+  "service role full access to jobs"
+on storage.objects
+for all
+to service_role
+using ((bucket_id = 'jobs'::text))
+with check ((bucket_id = 'jobs'::text));
+
+create policy
+  "users can read own job outputs"
+on storage.objects
+for select
+to authenticated
+using (
+  (
+    (bucket_id = 'jobs'::text)
+    and (name like (auth.uid() || '/%'::text))
+  )
+);
+
+insert into storage.buckets(id, name, public)
+values
+  ('lora-datasets', 'lora-datasets', false),
+  ('jobs', 'jobs', false);
+
+insert into storage.objects(id, bucket_id, name, owner)
+values
+  (
+    '00000000-0000-4000-8000-000000000019',
+    'lora-datasets',
+    'lora_datasets/legacy-owner-null.jpg',
+    null
+  ),
+  (
+    '00000000-0000-4000-8000-000000000020',
+    'lora-datasets',
+    'lora_datasets/owned.jpg',
+    '00000000-0000-4000-8000-000000000001'
+  ),
+  (
+    '00000000-0000-4000-8000-000000000021',
+    'jobs',
+    '00000000-0000-4000-8000-000000000001/output.png',
+    '00000000-0000-4000-8000-000000000001'
+  );
+
+create temporary table task19_buckets_before as
+select *
+from storage.buckets;
+
+create temporary table task19_objects_before as
+select *
+from storage.objects;
+
+create temporary table task19_objects_acl_before as
+select c.relacl
+from pg_catalog.pg_class c
+join pg_catalog.pg_namespace n
+  on n.oid = c.relnamespace
+where n.nspname = 'storage'
+  and c.relname = 'objects';
 
 do $$
 begin
+  if (
+    select count(*)
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+  ) <> 9 then
+    raise exception
+      'TASK19_ASSERT: expected nine-policy fixture is incomplete';
+  end if;
+
   if not exists (
     select 1
     from pg_catalog.pg_policies
@@ -149,10 +299,75 @@ begin
       and policyname =
         'authenticated users can upload lora datasets lk1r3q_0'
       and cmd = 'INSERT'
-      and roles @> array['authenticated']::name[]
+      and roles = array['authenticated']::name[]
+      and qual is null
+      and with_check = '(auth.role() = ''authenticated''::text)'
   ) then
     raise exception
-      'TASK19_ASSERT: expected broad policy fixture is missing before migration';
+      'TASK19_ASSERT: authenticated role policy fixture differs from production';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'allow anon uploads to lora-datasets'
+      and cmd = 'INSERT'
+      and roles = array['anon']::name[]
+      and qual is null
+      and with_check = '(bucket_id = ''lora-datasets''::text)'
+  ) then
+    raise exception
+      'TASK19_ASSERT: anonymous bucket policy fixture differs from production';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'allow authenticated uploads to lora-datasets'
+      and cmd = 'INSERT'
+      and roles = array['authenticated']::name[]
+      and qual is null
+      and with_check = '(bucket_id = ''lora-datasets''::text)'
+  ) then
+    raise exception
+      'TASK19_ASSERT: authenticated bucket policy fixture differs from production';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'sf_lora_datasets_insert_public'
+      and cmd = 'INSERT'
+      and roles = array['public']::name[]
+      and qual is null
+      and with_check =
+        '((bucket_id = ''lora-datasets''::text) AND (name ~~ ''lora_datasets/%''::text) AND ((owner IS NULL) OR (owner = auth.uid())))'
+  ) then
+    raise exception
+      'TASK19_ASSERT: PUBLIC insert policy fixture differs from production';
+  end if;
+
+  if not exists (
+    select 1
+    from pg_catalog.pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'sf_lora_datasets_update_public'
+      and cmd = 'UPDATE'
+      and roles = array['public']::name[]
+      and qual =
+        '((bucket_id = ''lora-datasets''::text) AND (name ~~ ''lora_datasets/%''::text) AND ((owner IS NULL) OR (owner = auth.uid())))'
+      and with_check =
+        '((bucket_id = ''lora-datasets''::text) AND (name ~~ ''lora_datasets/%''::text) AND ((owner IS NULL) OR (owner = auth.uid())))'
+  ) then
+    raise exception
+      'TASK19_ASSERT: PUBLIC update policy fixture differs from production';
   end if;
 end
 $$;
