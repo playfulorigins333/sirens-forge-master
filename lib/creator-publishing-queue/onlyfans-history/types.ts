@@ -11,3 +11,7 @@ export type OnlyFansHistoryView = OnlyFansHistorySuccessView | OnlyFansHistoryEr
 export type OnlyFansCreatorHistoryAttempt = { platformJobId:string; jobState:string; createdAt:string; taskLinkState:"exact"|"limited"; history:OnlyFansHistorySuccessView }
 export type OnlyFansCreatorPackageHistoryView = { ok:true; attempts:OnlyFansCreatorHistoryAttempt[] } | OnlyFansHistoryErrorView
 export type OnlyFansHistoryRows = { plan?:any|null; job?:any|null; task?:any|null; schedulerEvents?:any[]; auditEvents?:any[]; evidenceIntents?:any[]; idempotencyRows?:any[] }
+
+export type OnlyFansTerminalHistoryJob = { platformJobId:string; creatorId:string; contentPackageId:string; status:string; statusLabel:string; updatedAt:string; timezone:string }
+export type OnlyFansTerminalHistorySuccessView = { ok:true; jobs:OnlyFansTerminalHistoryJob[]; nextCursor:string|null; hasPreviousPage:boolean }
+export type OnlyFansTerminalHistoryView = OnlyFansTerminalHistorySuccessView | OnlyFansHistoryErrorView
