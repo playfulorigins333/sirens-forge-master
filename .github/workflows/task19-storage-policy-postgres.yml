@@ -1,0 +1,74 @@
+name: Task 19 Storage Policy PostgreSQL Integration
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - supabase/migrations/20260717001600_remove_broad_lora_storage_upload_policy.sql
+      - backend/creator-publishing-queue/tests/task19StoragePolicyRemediationSourceContract.test.ts
+      - backend/creator-publishing-queue/tests/task19StoragePolicyRemediationPostgresIntegration.sql
+      - backend/creator-publishing-queue/tests/runTask19StoragePolicyRemediationPostgresIntegration.mjs
+      - .github/workflows/task19-storage-policy-postgres.yml
+
+permissions:
+  contents: read
+
+jobs:
+  task19-storage-policy-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      TASK19_STORAGE_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task19_storage_policy_test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create isolated Task 19 database
+        run: >-
+          psql
+          "postgres://postgres:postgres@127.0.0.1:5432/postgres"
+          -v ON_ERROR_STOP=1
+          -c "create database task19_storage_policy_test;"
+
+      - name: Run Task 19 source-contract tests
+        run: >-
+          npx tsx
+          backend/creator-publishing-queue/tests/task19StoragePolicyRemediationSourceContract.test.ts
+
+      - name: Run Task 19 PostgreSQL integration
+        run: >-
+          node
+          backend/creator-publishing-queue/tests/runTask19StoragePolicyRemediationPostgresIntegration.mjs
+
+      - name: Upload Task 19 diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task19-storage-policy-postgres-diagnostics
+          if-no-files-found: ignore
+          path: /tmp/task19-storage-policy-sql-*/task19-storage-policy-postgres-diagnostics.log
