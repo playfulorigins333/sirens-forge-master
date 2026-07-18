@@ -12,6 +12,7 @@ export const ONLYFANS_HISTORY_ACTIONS: Record<string,{label:string;creator:strin
   operator_onlyfans_manual_completion_proof_recorded:{label:"Completion proof recorded",creator:"Verified proof was recorded for the manual OnlyFans completion.",operator:"Task 20 completion proof audit event was recorded."},
   operator_onlyfans_manual_completion_rejected:{label:"Completion rejected",creator:"The trusted database rejected the completion attempt.",operator:"Audited finite database rejection for manual completion."},
 }
+
 export const rejectionWording: Record<string,{creator:string;operator:string}> = {
   current_claim_required:{creator:"Completion could not be confirmed because the operator hold was no longer current.",operator:"current_claim_required"},
   work_not_completable:{creator:"Completion could not be confirmed because the work was no longer eligible.",operator:"work_not_completable"},
@@ -23,6 +24,30 @@ export const rejectionWording: Record<string,{creator:string;operator:string}> =
   url_or_reason_required:{creator:"Completion could not be confirmed because a final URL or approved no-URL reason was required.",operator:"url_or_reason_required"},
   idempotency_conflict:{creator:"Completion could not be confirmed because the retry key was reused for different completion details.",operator:"idempotency_conflict"},
 }
-export function actionCopy(action:string,audience:"creator"|"operator"){ const m=ONLYFANS_HISTORY_ACTIONS[action]; return m ?? {label:action.replaceAll("_"," "), creator:"A publishing lifecycle event was recorded.", operator:`Audit action: ${action}`}; }
-export function evidenceStatusLabel(status:string){ return ({pending:"Evidence upload reserved",verified:"Evidence verified",invalidated:"Evidence superseded",consumed:"Evidence consumed",failed:"Evidence failed",expired:"Evidence expired"} as Record<string,string>)[status] ?? "Evidence state recorded" }
-export function noUrlReasonLabel(reason:string){ return ({platform_did_not_expose_stable_url:"OnlyFans did not expose a stable post URL.",post_completed_without_shareable_url:"The post was completed without a shareable URL.",account_owner_declined_url_capture:"The account owner declined URL capture."} as Record<string,string>)[reason] ?? "Approved no-URL reason recorded." }
+
+const evidenceLifecycleWording: Record<string,{label:string;creator:string;operator:string}> = {
+  evidence_reserved:{label:"Evidence upload reserved",creator:"A proof upload was reserved for this publication.",operator:"A completion-evidence upload intent was reserved."},
+  evidence_verified:{label:"Evidence verified",creator:"Uploaded completion proof was verified.",operator:"The evidence intent passed trusted MIME, size, and digest verification."},
+  evidence_superseded:{label:"Evidence superseded",creator:"Earlier completion proof was superseded by replacement evidence.",operator:"The evidence intent was invalidated because replacement evidence superseded it."},
+  evidence_failed:{label:"Evidence failed",creator:"A proof upload could not be verified and was closed.",operator:"The evidence intent entered a terminal failed state."},
+  evidence_expired:{label:"Evidence expired",creator:"A proof reservation expired before it was used.",operator:"The evidence intent expired before completion."},
+  evidence_consumed:{label:"Evidence consumed",creator:"Verified proof was used to confirm the manual publication.",operator:"The verified evidence intent was consumed by manual completion."},
+}
+
+export function actionCopy(action:string,audience:"creator"|"operator"){
+  const match=ONLYFANS_HISTORY_ACTIONS[action]
+  return match ?? {label:action.replaceAll("_"," "), creator:"A publishing lifecycle event was recorded.", operator:`Audit action: ${action}`}
+}
+
+export function evidenceLifecycleCopy(action:string,audience:"creator"|"operator"){
+  const match=evidenceLifecycleWording[action]
+  return match ?? {label:"Evidence state recorded",creator:"A completion-proof state was recorded.",operator:`Evidence lifecycle action: ${action}`}
+}
+
+export function evidenceStatusLabel(status:string){
+  return ({reserved:"Evidence upload reserved",pending:"Evidence upload reserved",verified:"Evidence verified",superseded:"Evidence superseded",invalidated:"Evidence superseded",consumed:"Evidence consumed",failed:"Evidence failed",expired:"Evidence expired"} as Record<string,string>)[status] ?? "Evidence state recorded"
+}
+
+export function noUrlReasonLabel(reason:string){
+  return ({platform_did_not_expose_stable_url:"OnlyFans did not expose a stable post URL.",post_completed_without_shareable_url:"The post was completed without a shareable URL.",account_owner_declined_url_capture:"The account owner declined URL capture."} as Record<string,string>)[reason] ?? "Approved no-URL reason recorded."
+}
