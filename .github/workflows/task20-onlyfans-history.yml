@@ -101,7 +101,10 @@ jobs:
       - name: Affected Task 18 source contract
         run: npx tsx backend/creator-publishing-queue/tests/task18ManualCompletionSourceContract.test.ts
       - name: TypeScript
-        run: npx tsc --noEmit
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tsc --noEmit 2>&1 | tee task20-typescript-diagnostics.log
       - name: Production build
         run: npm run build
       - name: Whitespace and patch validation
@@ -113,6 +116,7 @@ jobs:
           name: task20-diagnostics
           if-no-files-found: ignore
           path: |
+            task20-typescript-diagnostics.log
             task20-postgres-diagnostics.log
             task20-concurrency-diagnostics.log
             task18-postgres-diagnostics.log
