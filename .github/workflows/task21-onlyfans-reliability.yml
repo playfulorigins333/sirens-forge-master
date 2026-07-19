@@ -1,0 +1,58 @@
+name: Task 21 OnlyFans Reliability Gate 21A
+
+on:
+  pull_request:
+    paths:
+      - app/api/creator-publishing-queue/scheduler/run/route.ts
+      - lib/creator-publishing-queue/scheduler-runner/**
+      - backend/creator-publishing-queue/tests/task21SchedulerRunner*.test.ts
+      - docs/creator-publishing/task21-onlyfans-reliability-operations.md
+      - .github/workflows/task21-onlyfans-reliability.yml
+  workflow_dispatch:
+
+jobs:
+  gate21a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Changed-file scope guard
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.sha }}"
+          git diff --name-only "$base"...HEAD | tee changed-files.txt
+          if grep -Ev '^(app/api/creator-publishing-queue/scheduler/run/route\.ts|lib/creator-publishing-queue/scheduler-runner/.*|backend/creator-publishing-queue/tests/task21SchedulerRunner.*\.test\.ts|docs/creator-publishing/task21-onlyfans-reliability-operations\.md|\.github/workflows/task21-onlyfans-reliability\.yml)$' changed-files.txt; then
+            echo "Unauthorized Gate 21A path changed" >&2
+            exit 1
+          fi
+          if grep -E '^(vercel\.json|supabase/migrations/|app/api/autopost/|lib/autopost/|backend/autopost/|docs/autopost/)' changed-files.txt; then
+            echo "Forbidden Gate 21A path changed" >&2
+            exit 1
+          fi
+      - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerServices.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts
+      - run: npx tsc --noEmit
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+          SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+          CRON_SECRET: dummy-cron-secret
+          OPENAI_API_KEY: dummy-openai-key
+          STRIPE_SECRET_KEY: dummy-stripe-key
+      - run: git diff --check
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: task21-gate21a-diagnostics
+          path: |
+            changed-files.txt
+            .next/trace
+          if-no-files-found: ignore
