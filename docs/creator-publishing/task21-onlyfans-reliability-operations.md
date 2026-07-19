@@ -1,34 +1,72 @@
-# Task 21 Gate 21B-3A — Creator Publishing Scheduler Runner Operations
+# Task 21 Creator Publishing Scheduler Reliability Operations
 
-Gate 21B-3A prepares manual-first scheduler activation without adding a cron. It keeps the dedicated server-only endpoint at `/api/creator-publishing-queue/scheduler/run` environment-gated while enabling the code build lock. Merging Gate 21B-3A does not by itself invoke the Creator Publishing scheduler.
+## Current production state
 
-## Gate 21A historical state
+Gate 21B-4A is complete, verified, and closed. Exactly one manual scheduler invocation returned `SCHEDULER_RUN_COMPLETED` with all aggregate counts equal to zero. The accepted Mode C postflight found no scheduler audit activity, no active scheduler events, no logical claimable events, no fresh processing locks, no blocking conditions, `safe_existing_rpc_path = true`, and `database_scoped_path_required = false`.
 
-Gate 21A introduced the dedicated server-only route at `/api/creator-publishing-queue/scheduler/run` for a future Creator Publishing scheduler runner. In Gate 21A, `CREATOR_PUBLISHING_SCHEDULER_BUILD_ENABLED` was literal `false`, `CREATOR_PUBLISHING_SCHEDULER_CLAIM_LIMIT` was `25`, and `CREATOR_PUBLISHING_SCHEDULER_LOCK_MINUTES` was `15`. Gate 21A added no cron and performed no production activation.
+`CREATOR_PUBLISHING_SCHEDULER_ENABLED` is absent in Production. The shutdown deployment is green. No Creator Publishing cron is registered and recurring execution is disabled.
 
-## Gate 21B-2 production preflight result
+## Gate 21B-3B1 scope
 
-The separately approved Gate 21B-2 read-only production preflight completed successfully. The audit input was valid, no scheduler audit activity existed, no active or logical claimable scheduler events existed, blocking_conditions was empty, safe_existing_rpc_path was true, and database_scoped_path_required was false.
+Gate 21B-3B1 adds sanitized route telemetry and `maxDuration = 60` only. It does not change `vercel.json`, register a cron, change an environment value, invoke the scheduler, create a migration, or modify scheduler service or core business logic.
 
-## Current Gate 21B-3A state
+No cron is registered by Gate 21B-3B1. A future `*/15 * * * *` cadence remains a design proposal only and requires the later controlled gates described below.
 
-Execution requires the code build lock `CREATOR_PUBLISHING_SCHEDULER_BUILD_ENABLED` to be literal `true` in Gate 21B-3A, while CREATOR_PUBLISHING_SCHEDULER_ENABLED remains disabled until a separately approved production environment change. `CREATOR_PUBLISHING_SCHEDULER_CLAIM_LIMIT` is one, and `CREATOR_PUBLISHING_SCHEDULER_LOCK_MINUTES` remains exactly 15 minutes.
+## Four-gate recurring-activation structure
 
-Gate 21B-3A does not add a cron, does not change a migration, performs no new production access, and does not invoke the scheduler. This prepares Gate 21B-4A only. Gate 21B-4A requires a separately approved production environment change and permits exactly one separately authorized manual invocation. recurring execution is not authorized.
+1. **Gate 21B-3B1 — telemetry and duration hardening.** Add safe route telemetry and a 60-second route limit without cron or environment changes.
+2. **Gate 21B-4B1 — manual Production proof.** After 3B1 is merged and deployed, temporarily enable the environment only for separately approved manual requests, verify telemetry, disable and redeploy, and complete read-only postflights. A legitimate nonzero canary is deferred until the normal application workflow can create one.
+3. **Gate 21B-3B2 — cron registration.** Only after the legitimate nonzero canary is accepted, add the exact Creator Publishing cron while keeping Production runtime activation absent through PR review.
+4. **Gate 21B-4B2 — recurring Production activation.** Require a fresh preflight, explicit merge and environment approvals, deployment and cron verification, and observation of the first four scheduled invocations.
 
-The required order remains cron-secret authentication, build-lock check, environment activation check, lazy service-role client creation, claim RPC, then sequential event processing.
+Approval of one gate does not authorize any later gate.
 
-## Authentication
+## Authentication and execution order
 
-The only accepted authentication headers are `Authorization: Bearer <configured secret>` and `x-vercel-cron-secret`. With one approved header, that supplied candidate must be well-formed and match the configured server-side cron secret. With both approved headers, both candidates must independently be well-formed and match the same configured secret. URL secrets, request bodies, cookies, creator sessions, and operator sessions are not accepted.
+The only accepted authentication headers remain `Authorization: Bearer <configured secret>` and `x-vercel-cron-secret`. URL secrets, request bodies, cookies, creator sessions, and operator sessions are not accepted.
 
-## Lazy admin initialization and authorized RPCs
+The required execution order remains:
 
-The service-role admin client is initialized only after authentication and both activation gates pass. The runner may call only `creator_publishing_claim_due_scheduler_events` with fixed `p_limit: 1` and `p_lock_minutes: 15`, and `creator_publishing_process_scheduler_event` with the claimed event id, claimed lock token, current AI-twin consent version, and current attestation text hash. The existing claim RPC is generic; it is not OnlyFans-scoped and is not publishing-mode-scoped.
+1. cron-secret authentication;
+2. build-lock check;
+3. environment activation check;
+4. lazy service-role client creation;
+5. `creator_publishing_claim_due_scheduler_events`;
+6. sequential `creator_publishing_process_scheduler_event` processing.
 
-## Batch, stop, and recovery policy
+The runner remains limited to one claimed row with a 15-minute lock TTL. It makes no external-platform request and performs no direct OnlyFans publishing.
 
-Processing is bounded to 1 claimed row and is strictly sequential. Valid processed, blocked, and superseded results complete the single claimed event. Claim transport failure, malformed claim data, process transport failure, malformed process data, unknown safe-error code, stale lock token, missing event, and identity mismatch stop the run immediately. Remaining due events are not reset, locks are not cleared directly, and the existing database lock-expiry behavior remains authoritative for crash and stale-worker recovery.
+## Telemetry contract
+
+Every route invocation emits exactly one sanitized telemetry record from a `finally` block. The record contains only:
+
+- `event`;
+- `trigger`;
+- `ok`;
+- `code`;
+- `httpStatus`;
+- `claimedCount`;
+- `attemptedCount`;
+- `processedCount`;
+- `blockedCount`;
+- `supersededCount`;
+- `durationMs`.
+
+The fixed event name is `creator_publishing_scheduler_run`.
+
+The trigger is `vercel_cron` only when the request user-agent is exactly `vercel-cron/1.0` and the handled runner result code is neither `UNAUTHORIZED` nor `CRON_SECRET_NOT_CONFIGURED`. Otherwise the trigger is `manual_or_unknown`. An unexpected thrown error always remains `manual_or_unknown`.
+
+The user-agent is telemetry-only. It never replaces cron-secret authentication, enables execution, bypasses the build gate, bypasses the environment gate, changes RPC selection, or affects scheduler state. Its value is never logged.
+
+Handled count fields are finite nonnegative integers when present and otherwise `null`. `durationMs` is always a finite nonnegative integer.
+
+The fallback record for an unexpected thrown error contains only the fixed event name, `trigger = manual_or_unknown`, `ok = false`, `code = UNHANDLED_EXCEPTION`, `httpStatus = 500`, null count fields, and finite `durationMs`. The route does not catch or transform the thrown error, so existing HTTP error behavior is preserved.
+
+Telemetry must never include request-header objects, authorization values, `x-vercel-cron-secret`, user-agent values, cookies, secrets, event IDs, lock tokens, creator/user/account identifiers, raw errors, exception objects or messages, stack traces, RPC arguments, database payloads, or media/content details.
+
+## Batch, overlap, and recovery policy
+
+Processing remains bounded to one claimed row and is strictly sequential. The database claim path uses row locking and lock tokens, but it is not a global scheduler-run lease. Overlapping invocations can therefore claim different events. Direct external publishing remains prohibited.
 
 The exact stale-lock eligibility rule is:
 
@@ -36,18 +74,37 @@ The exact stale-lock eligibility rule is:
 locked_at < db_now - lock_ttl
 ```
 
-With a possible future 15-minute cron cadence and a 15-minute lock TTL, a failed claim might not be eligible at the immediately following run. Recovery can therefore take approximately 15–30 minutes and is not guaranteed at exactly 15 minutes.
+With a possible future 15-minute cadence and the existing 15-minute lock TTL, a failed claim might not be eligible at the immediately following run. Recovery can therefore take approximately 15–30 minutes and is not guaranteed at exactly 15 minutes. Locks are not cleared directly; database lock expiry remains authoritative.
 
-## Response and platform boundaries
+## Zero-event proof limitation and legitimate canary requirement
 
-Responses are finite aggregate JSON and do not expose secrets, credentials, lock tokens, event IDs, user IDs, creator IDs, operator IDs, raw database errors, exception messages, or stack traces. Gate 21B-3A performs no direct table mutation and makes no external-platform calls. It does not connect to OnlyFans, Fanvue, Reddit, X, or any other platform.
+Gate 21B-4A proved Production route reachability, authentication, build and environment gates, admin-client initialization, the claim RPC, empty-claim parsing, a successful aggregate response, shutdown, and a clean read-only postflight. It did not prove a real event claim or processing transition.
 
-## Gate 21B blocker retained
+The scheduling RPC verifies creator and destination-account state before inserting scheduler events. An unverified destination account returns a failed scheduling result with `mutated:false` and creates no scheduler event.
 
-The completed Gate 21B-2 read-only production preflight found no active or logical claimable scheduler events. Before any future scheduled or recurring production activation beyond the separately authorized Gate 21B-4A manual invocation, another separately approved production review must confirm the activation scope remains safe. Any non-OnlyFans-assisted claimable work blocks activation and requires a separately approved database-owned scope boundary.
+No fake, fixture, placeholder, fabricated, or direct-database Production event is authorized. The nonzero canary must wait until one legitimate event can be created through the complete approved application workflow. Recurring activation remains blocked until that canary and its read-only postflight are accepted.
 
-Gate 21B-3A performs no new production access and relies on the already completed Gate 21B-2 read-only production preflight.
+## Platform boundaries
 
-## Rollback while manually gated
+OnlyFans remains assisted/manual. Human publishing remains required. The connector cannot upload media, schedule directly, or publish immediately. Fanvue remains frozen, and disabled or unassigned platforms remain ineligible for recurring activation.
 
-Because no cron is added and environment activation is not changed, rollback remains a normal code rollback of the runner build-lock and single-claim-limit change. No environment value or database migration is changed by Gate 21B-3A.
+No scheduler reliability gate authorizes credentials, browser automation, unofficial APIs, platform sessions, direct posting, AutoPost coupling, or external-platform verification.
+
+## Correct normal rollback order for a future recurring activation
+
+A future normal rollback must fail closed before cron removal:
+
+1. remove or disable `CREATOR_PUBLISHING_SCHEDULER_ENABLED`;
+2. redeploy Production;
+3. verify the route returns `SCHEDULER_ENV_DISABLED`;
+4. remove only the Creator Publishing cron from `vercel.json`;
+5. deploy the cron-removal commit;
+6. verify the Creator Publishing cron is absent;
+7. verify the existing AutoPost cron is unchanged;
+8. run the separately approved read-only shutdown postflight.
+
+Project-wide cron disabling is emergency-only because it also affects AutoPost.
+
+## Current authorization boundary
+
+Gate 21B-3B1 does not authorize Production environment changes, scheduler invocations, cron registration, migrations, merge, Gate 21B-4B1, a Production canary, or recurring execution. Those remain separately approved gates.
