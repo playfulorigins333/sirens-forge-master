@@ -102,16 +102,14 @@ type AutopostRule = {
 // -----------------------------
 // Fallback platforms
 // -----------------------------
-const FALLBACK_PLATFORM_STATUS = "Coming soon — not available for scheduled Autopost yet."
+const FALLBACK_PLATFORM_STATUS = "Assisted launch workflow only — scheduled Autopost is not enabled."
+const LAUNCH_PLATFORM_IDS = ["x", "reddit", "onlyfans", "fanvue"] as const
 
 const FALLBACK_PLATFORMS: Platform[] = [
-  { id: "fanvue", name: "Fanvue", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
-  { id: "onlyfans", name: "OnlyFans", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
-  { id: "fansly", name: "Fansly", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
-  { id: "loyalfans", name: "LoyalFans", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
-  { id: "justforfans", name: "JustForFans", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
-  { id: "x", name: "X (Twitter)", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
-  { id: "reddit", name: "Reddit", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS },
+  { id: "x", name: "X", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS, reason: "Traffic & Discovery: promote content and drive audiences to a paid destination." },
+  { id: "reddit", name: "Reddit", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS, reason: "Traffic & Discovery: promote content and drive audiences to a paid destination." },
+  { id: "onlyfans", name: "OnlyFans", launch_status: "coming_soon", public_selectable: false, status_message: "Assisted/manual publishing destination. Use the internal queue to complete OnlyFans posts safely.", reason: "Paid Content: assisted/manual publishing only; no direct API posting or browser automation." },
+  { id: "fanvue", name: "Fanvue", launch_status: "coming_soon", public_selectable: false, status_message: "Paid-content destination remains frozen by safety restrictions.", reason: "Paid Content: native posting, scheduling, media upload, and dispatch are not enabled." },
 ]
 
 const AUTOPOST_PACK_PREFILL_STORAGE_KEY = "sirensforge:autopost_pack_prefill"
@@ -137,8 +135,8 @@ function isPlatformSelectable(platform: Platform) {
 
 function platformUnavailableMessage(platform: Platform) {
   if (platform.status_message) return platform.status_message
-  if (platform.launch_status === "not_configured") return "Not configured — posting integration is not enabled."
-  return "Coming soon — not available for scheduled Autopost yet."
+  if (platform.launch_status === "not_configured") return "Assisted launch workflow only — no direct posting integration is enabled."
+  return "Assisted launch workflow only — scheduled Autopost is not enabled."
 }
 
 type PackCaptionDraft = {
@@ -241,6 +239,35 @@ function prettyPlatform(p?: PlatformId | null) {
     reddit: "Reddit",
   }
   return map[p] ?? String(p)
+}
+
+function launchPlatformsFrom(platforms: Platform[]) {
+  const byId = new Map(platforms.map((platform) => [String(platform.id), platform]))
+  return LAUNCH_PLATFORM_IDS.map((id) => byId.get(id) ?? FALLBACK_PLATFORMS.find((platform) => platform.id === id)).filter(Boolean) as Platform[]
+}
+
+function externalButtonLabel(platform: Platform) {
+  if (platform.id === "x") return "Open X"
+  if (platform.id === "reddit") return "Open Reddit"
+  if (platform.id === "onlyfans") return "Open OnlyFans"
+  if (platform.id === "fanvue") return "Open Fanvue"
+  return `Open ${platform.name}`
+}
+
+function platformPurpose(platform: Platform) {
+  if (platform.id === "x") return "Promote your paid content and direct followers to OnlyFans or Fanvue."
+  if (platform.id === "reddit") return "Reach relevant communities and direct interested audiences to your paid page."
+  if (platform.id === "onlyfans") return "Prepare and complete posts through the assisted Creator Publishing Queue."
+  if (platform.id === "fanvue") return "Paid-content publishing remains unavailable while safety restrictions are in place."
+  return platform.reason ?? platformUnavailableMessage(platform)
+}
+
+function platformStatusBadge(platform: Platform) {
+  if (platform.id === "x") return "TRAFFIC CHANNEL"
+  if (platform.id === "reddit") return "TRAFFIC CHANNEL"
+  if (platform.id === "onlyfans") return "ASSISTED PUBLISHING"
+  if (platform.id === "fanvue") return "FROZEN"
+  return String(platform.launch_status ?? "Unavailable").replace("_", " ").toUpperCase()
 }
 
 function badgeForState(state: string) {
@@ -470,7 +497,7 @@ export default function AutopostPage() {
     if (!mounted) return
     ;(async () => {
       const [p, statuses] = await Promise.all([fetchPlatforms(), fetchUserPlatformStatuses()])
-      if (p && p.length) setPlatforms(p)
+      if (p && p.length) setPlatforms(launchPlatformsFrom(p))
       setUserPlatformStatuses(statuses ?? [])
     })()
   }, [mounted])
@@ -1770,7 +1797,7 @@ export default function AutopostPage() {
                   <div className="space-y-2">
                     <Label className="text-gray-200">Platforms</Label>
                     <div className="flex flex-wrap gap-2">
-                      {platforms.map(p => {
+                      {launchPlatformsFrom(platforms).map(p => {
                         const active = selectedPlatforms.includes(p.id)
                         const selectable = isPlatformSelectable(p)
                         return (
@@ -1952,56 +1979,75 @@ export default function AutopostPage() {
               transition={{ duration: 0.2 }}
               className="space-y-4"
             >
-              <Card className="bg-gray-900/40 border-gray-800">
+              <Card className="bg-gray-950/80 border-cyan-400/20 shadow-2xl shadow-cyan-950/20">
                 <CardHeader>
                   <CardTitle className="text-white flex items-center gap-2">
                     <ExternalLink className="w-5 h-5 text-cyan-300" />
-                    Open Creator Platforms
+                    Launch Platforms
                   </CardTitle>
-                  <CardDescription className="text-gray-400">
-                    Use these links to open your creator platforms and complete posting.
+                  <CardDescription className="text-gray-300">
+                    Use X and Reddit to drive traffic to your paid content on OnlyFans or Fanvue.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 p-3 text-xs leading-5 text-cyan-100">
-                    Launch mode: Scheduled Autopost platform availability is gated by server status. External links open platform websites only; they do not indicate account connection.
+                <CardContent className="space-y-6">
+                  <div className="rounded-2xl border border-cyan-300/30 bg-cyan-400/10 p-4 text-sm leading-6 text-cyan-50">
+                    Launch mode: these cards show the four creator-facing launch platforms only. External links open platform websites and do not indicate account connection or automated posting capability.
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {platforms.map(p => {
-                      const url = p.external_url ?? platformUrl(p.id)
-                      const selectable = isPlatformSelectable(p)
-
-                      return (
-                        <div key={p.id} className="rounded-2xl border border-gray-800 bg-black/30 p-4">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-white font-semibold">{p.name}</div>
-                              <div className="mt-1 text-xs text-gray-400">
-                                {selectable ? "Available for Scheduled Autopost." : platformUnavailableMessage(p)}
-                              </div>
-                              {p.reason && <div className="text-xs text-gray-500 mt-1">{p.reason}</div>}
-                              <div className="mt-2 inline-flex rounded-full border border-gray-700 bg-gray-950 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-gray-300">
-                                {String(p.launch_status ?? "coming_soon").replace("_", " ")}
-                              </div>
-                            </div>
-                            {url ? (
-                              <Button asChild className="bg-cyan-600 hover:bg-cyan-500">
-                                <a href={url} target="_blank" rel="noopener noreferrer">
-                                  <ExternalLink className="w-4 h-4 mr-2" />
-                                  Open platform
-                                </a>
-                              </Button>
-                            ) : (
-                              <Button disabled className="bg-gray-800 text-gray-300 disabled:opacity-60">
-                                <ExternalLink className="w-4 h-4 mr-2" />
-                                Unavailable
-                              </Button>
-                            )}
-                          </div>
+                  {[
+                    { title: "Traffic & Discovery", description: "Promote content and direct audiences to your paid page.", ids: ["x", "reddit"] },
+                    { title: "Paid Content", description: "Destinations where creators publish paid content with current safety limits respected.", ids: ["onlyfans", "fanvue"] },
+                  ].map(section => {
+                    const sectionPlatforms = launchPlatformsFrom(platforms).filter(platform => section.ids.includes(String(platform.id)))
+                    return (
+                      <section key={section.title} className="space-y-3">
+                        <div>
+                          <h3 className="text-lg font-semibold text-white">{section.title}</h3>
+                          <p className="text-sm text-gray-300">{section.description}</p>
                         </div>
-                      )
-                    })}
-                  </div>
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                          {sectionPlatforms.map(p => {
+                            const url = p.external_url ?? platformUrl(p.id)
+                            return (
+                              <article key={p.id} className="flex flex-col justify-between rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-lg shadow-black/20">
+                                <div>
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="text-xl font-semibold text-white">{p.id === "x" ? "X" : p.name}</div>
+                                    <div className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-cyan-100">
+                                      {platformStatusBadge(p)}
+                                    </div>
+                                  </div>
+                                  <p className="mt-3 text-sm leading-6 text-gray-200">{platformPurpose(p)}</p>
+                                </div>
+                                <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                                  {p.id === "onlyfans" && (
+                                    <Button asChild size="sm" className="bg-fuchsia-600 hover:bg-fuchsia-500">
+                                      <a href="/creator/publishing-queue">
+                                        <List className="w-4 h-4 mr-2" />
+                                        Open OnlyFans Publishing Queue
+                                      </a>
+                                    </Button>
+                                  )}
+                                  {url ? (
+                                    <Button asChild variant="outline" size="sm" className="border-gray-700 bg-transparent text-gray-100 hover:bg-gray-900">
+                                      <a href={url} target="_blank" rel="noopener noreferrer">
+                                        <ExternalLink className="w-4 h-4 mr-2" />
+                                        {externalButtonLabel(p)}
+                                      </a>
+                                    </Button>
+                                  ) : (
+                                    <Button disabled className="bg-gray-800 text-gray-300 disabled:opacity-60">
+                                      <ExternalLink className="w-4 h-4 mr-2" />
+                                      Unavailable
+                                    </Button>
+                                  )}
+                                </div>
+                              </article>
+                            )
+                          })}
+                        </div>
+                      </section>
+                    )
+                  })}
                 </CardContent>
               </Card>
             </motion.div>
