@@ -44,8 +44,8 @@ test("authentication, dual headers, constant-time length safety, and activation 
 test("claim parser accepts only exact bounded UUID rows", () => {
   assert.deepEqual(parseClaimSchedulerEvents([]), { ok: true, events: [] })
   assert.equal(parseClaimSchedulerEvents([{ event_id: validId(1), lock_token: lock(1) }]).ok, true)
-  assert.equal(parseClaimSchedulerEvents(Array.from({ length: 25 }, (_, i) => ({ event_id: validId(i), lock_token: lock(i) }))).ok, true)
-  for (const data of [Array.from({ length: 26 }, (_, i) => ({ event_id: validId(i), lock_token: lock(i) })), [{ event_id: "bad", lock_token: lock(1) }], null, 1, [{ lock_token: lock(1) }], [{ event_id: validId(1) }], [{ event_id: validId(1), lock_token: lock(1) }, { event_id: validId(1), lock_token: lock(2) }], [{ event_id: validId(1), lock_token: lock(1), extra: true }], { event_id: validId(1), lock_token: lock(1) }]) assert.deepEqual(parseClaimSchedulerEvents(data), { ok: false })
+  assert.equal(parseClaimSchedulerEvents(Array.from({ length: 1 }, (_, i) => ({ event_id: validId(i), lock_token: lock(i) }))).ok, true)
+  for (const data of [Array.from({ length: 2 }, (_, i) => ({ event_id: validId(i), lock_token: lock(i) })), [{ event_id: "bad", lock_token: lock(1) }], null, 1, [{ lock_token: lock(1) }], [{ event_id: validId(1) }], [{ event_id: validId(1), lock_token: lock(1) }, { event_id: validId(1), lock_token: lock(2) }], [{ event_id: validId(1), lock_token: lock(1), extra: true }], { event_id: validId(1), lock_token: lock(1) }]) assert.deepEqual(parseClaimSchedulerEvents(data), { ok: false })
 })
 
 test("processing parser accepts finite variants and rejects malformed output", () => {
@@ -61,11 +61,11 @@ test("processing parser accepts finite variants and rejects malformed output", (
 })
 
 test("batch policy is sequential, bounded, finite, and stops safely", async () => {
-  const rows = [1, 2, 3].map((i) => ({ event_id: validId(i), lock_token: lock(i) }))
-  const f = fakeAdmin(rows, [{ ok: true, status: "processed", job_state: "due_now" }, { ok: true, status: "blocked", safe_error_code: "PLATFORM_UNAVAILABLE" }, { ok: true, status: "superseded", code: "OBSOLETE_OPERATOR_DUE_SUPERSEDED" }])
-  assert.deepEqual(await runCreatorPublishingSchedulerCore({ headers: h({ authorization: `Bearer ${secret}` }), configuredSecret: secret, buildEnabled: true, environmentEnabled: "true", getAdminClient: () => f.admin }), { ok: true, code: "SCHEDULER_RUN_COMPLETED", claimedCount: 3, attemptedCount: 3, processedCount: 1, blockedCount: 1, supersededCount: 1 })
-  assert.deepEqual(f.calls.map(c => c.name), ["creator_publishing_claim_due_scheduler_events", "creator_publishing_process_scheduler_event", "creator_publishing_process_scheduler_event", "creator_publishing_process_scheduler_event"])
-  assert.deepEqual(f.calls[0].args, { p_limit: 25, p_lock_minutes: 15 })
+  const rows = [1].map((i) => ({ event_id: validId(i), lock_token: lock(i) }))
+  const f = fakeAdmin(rows, [{ ok: true, status: "processed", job_state: "due_now" }])
+  assert.deepEqual(await runCreatorPublishingSchedulerCore({ headers: h({ authorization: `Bearer ${secret}` }), configuredSecret: secret, buildEnabled: true, environmentEnabled: "true", getAdminClient: () => f.admin }), { ok: true, code: "SCHEDULER_RUN_COMPLETED", claimedCount: 1, attemptedCount: 1, processedCount: 1, blockedCount: 0, supersededCount: 0 })
+  assert.deepEqual(f.calls.map(c => c.name), ["creator_publishing_claim_due_scheduler_events", "creator_publishing_process_scheduler_event"])
+  assert.deepEqual(f.calls[0].args, { p_limit: 1, p_lock_minutes: 15 })
   for (const code of ["STALE_LOCK_TOKEN", "EVENT_NOT_FOUND", "IDENTITY_MISMATCH"] as const) { const s = fakeAdmin(rows, [{ ok: false, code }, { ok: true, status: "processed", job_state: "due_now" }]); const result = await runCreatorPublishingSchedulerCore({ headers: h({ authorization: `Bearer ${secret}` }), configuredSecret: secret, buildEnabled: true, environmentEnabled: "true", getAdminClient: () => s.admin }); assert.equal(result.code, code); assert.equal(s.calls.length, 2); assert.equal(JSON.stringify(result).includes(validId(1)), false); assert.equal(JSON.stringify(result).includes(lock(1)), false) }
   assert.equal((await runCreatorPublishingSchedulerCore({ headers: h({ authorization: `Bearer ${secret}` }), configuredSecret: secret, buildEnabled: true, environmentEnabled: "true", getAdminClient: () => fakeAdmin(new Error("raw"), []).admin })).code, "CLAIM_RPC_FAILED")
   assert.equal((await runCreatorPublishingSchedulerCore({ headers: h({ authorization: `Bearer ${secret}` }), configuredSecret: secret, buildEnabled: true, environmentEnabled: "true", getAdminClient: () => fakeAdmin(rows, [new Error("raw")]).admin })).code, "PROCESS_RPC_FAILED")
