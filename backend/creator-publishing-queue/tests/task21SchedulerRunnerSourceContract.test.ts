@@ -3,14 +3,14 @@ import test from "node:test"
 import { existsSync, readFileSync } from "node:fs"
 import { execSync } from "node:child_process"
 
-const base = "97f82b12d22133a6e6561d02b7d36605d6416bdf"
+const base = "06fdc9fcbcba670301ff96047e9a2fd27ecf09f4"
 const routePath = "app/api/creator-publishing-queue/scheduler/run/route.ts"
 const corePath = "lib/creator-publishing-queue/scheduler-runner/serviceCore.ts"
 const servicePath = "lib/creator-publishing-queue/scheduler-runner/service.ts"
 const docsPath = "docs/creator-publishing/task21-onlyfans-reliability-operations.md"
 const all = () => [routePath, corePath, servicePath].map((p) => readFileSync(p, "utf8")).join("\n")
 
-test("dedicated route remains hard-disabled, GET-only, dynamic node, and no-store", () => {
+test("dedicated route remains manually gated, GET-only, dynamic node, and no-store", () => {
   assert.equal(existsSync(routePath), true)
   const route = readFileSync(routePath, "utf8")
   const core = readFileSync(corePath, "utf8")
@@ -20,7 +20,7 @@ test("dedicated route remains hard-disabled, GET-only, dynamic node, and no-stor
   assert.match(route, /export async function GET\(/)
   assert.doesNotMatch(route, /export async function (POST|PUT|PATCH|DELETE|OPTIONS)\(/)
   assert.match(route, /private, no-store/); assert.match(route, /no-cache/); assert.match(route, /nosniff/)
-  assert.match(core, /export const CREATOR_PUBLISHING_SCHEDULER_BUILD_ENABLED = false as const/)
+  assert.match(core, /export const CREATOR_PUBLISHING_SCHEDULER_BUILD_ENABLED = true as const/)
   assert.match(service, /buildEnabled: CREATOR_PUBLISHING_SCHEDULER_BUILD_ENABLED/)
 })
 
@@ -40,14 +40,25 @@ test("runner source has only authorized RPCs and no scheduling, table, autopost,
   for (const forbidden of ["/api/autopost/run", "autopost_rules", "autopost_jobs", "autopost_job_logs", "onlyfans.com", "fansly.com", "fanvue.com", "api.onlyfans", "fetch(", ".from(", ".insert(", ".upsert(", ".delete(", "due_at", "operator_due_at", "intended_publish_at", "timezone", "publication", "Intl.DateTimeFormat", "Date.parse", "setTimeout", "setInterval", "Promise.all"]) assert.equal(src.includes(forbidden), false, forbidden)
 })
 
-test("docs include Gate 21B blocker and changed files stay in authorized boundary", () => {
+test("docs include Gate 21B-3A manual-first activation notes and changed files stay in authorized boundary", () => {
   const docs = readFileSync(docsPath, "utf8")
-  assert.match(docs, /Gate 21A is hard-disabled and unscheduled\./)
-  assert.match(docs, /Merging Gate 21A does not activate the Creator Publishing scheduler\./)
-  assert.match(docs, /read-only production preflight must prove that all claimable pending and expired-processing scheduler events are OnlyFans assisted-mode work/)
-  assert.match(docs, /non-OnlyFans-assisted claimable work blocks activation/)
+  assert.match(docs, /Gate 21B-3A prepares manual-first scheduler activation without adding a cron\./)
+  assert.match(docs, /Merging Gate 21B-3A does not by itself invoke the Creator Publishing scheduler\./)
+  assert.match(docs, /Gate 21B-2 read-only production preflight completed successfully/)
+  assert.match(docs, /audit input was valid/)
+  assert.match(docs, /no scheduler audit activity existed/)
+  assert.match(docs, /no active or logical claimable scheduler events existed/)
+  assert.match(docs, /blocking_conditions was empty/)
+  assert.match(docs, /safe_existing_rpc_path was true/)
+  assert.match(docs, /database_scoped_path_required was false/)
+  assert.match(docs, /CREATOR_PUBLISHING_SCHEDULER_ENABLED remains disabled/)
+  assert.match(docs, /Gate 21B-4A/)
+  assert.match(docs, /exactly one separately authorized manual invocation/)
+  assert.match(docs, /recurring execution is not authorized/)
+  assert.match(docs, /locked_at < db_now - lock_ttl/)
+  assert.match(docs, /approximately 15–30 minutes/)
   const changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split(/\n/).filter(Boolean)
-  const allowed = [/^app\/api\/creator-publishing-queue\/scheduler\/run\/route\.ts$/, /^lib\/creator-publishing-queue\/scheduler-runner\//, /^backend\/creator-publishing-queue\/tests\/task21SchedulerRunner.*\.test\.ts$/, /^docs\/creator-publishing\/task21-onlyfans-reliability-operations\.md$/, /^\.github\/workflows\/task21-onlyfans-reliability\.yml$/]
-  for (const file of changed) assert(allowed.some((r) => r.test(file)), `${file} is outside Gate 21A boundary`)
-  assert(!changed.includes("vercel.json")); assert(!changed.some((f) => f.startsWith("supabase/migrations/") || f.includes("autopost") || f.includes("fanvue") || f.includes("reddit") || f.includes("/x")))
+  const allowed = [/^lib\/creator-publishing-queue\/scheduler-runner\/serviceCore\.ts$/, /^backend\/creator-publishing-queue\/tests\/task21SchedulerRunnerServices\.test\.ts$/, /^backend\/creator-publishing-queue\/tests\/task21SchedulerRunnerSourceContract\.test\.ts$/, /^docs\/creator-publishing\/task21-onlyfans-reliability-operations\.md$/]
+  for (const file of changed) assert(allowed.some((r) => r.test(file)), `${file} is outside Gate 21B-3A boundary`)
+  assert(!changed.includes("vercel.json")); assert(!changed.some((f) => f.startsWith("supabase/migrations/") || f.startsWith(".github/workflows/") || f.includes("autopost") || f.includes("fanvue") || f.includes("reddit") || f.includes("/x")))
 })

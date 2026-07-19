@@ -2,8 +2,8 @@ import { createHash, timingSafeEqual } from "node:crypto"
 import { AI_TWIN_CONSENT_VERSION } from "../consent/copy"
 import { getAiTwinConsentTextSha256 } from "../consent/hash"
 
-export const CREATOR_PUBLISHING_SCHEDULER_BUILD_ENABLED = false as const
-export const CREATOR_PUBLISHING_SCHEDULER_CLAIM_LIMIT = 25 as const
+export const CREATOR_PUBLISHING_SCHEDULER_BUILD_ENABLED = true as const
+export const CREATOR_PUBLISHING_SCHEDULER_CLAIM_LIMIT = 1 as const
 export const CREATOR_PUBLISHING_SCHEDULER_LOCK_MINUTES = 15 as const
 
 type HeaderMap = { get(name: string): string | null }
