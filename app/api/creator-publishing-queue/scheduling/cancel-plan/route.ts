@@ -1,0 +1,4 @@
+import { NextResponse } from "next/server"
+import { ensureActiveSubscription } from "@/lib/subscription-checker"
+import { cancelCreatorPublishingPlanSchedule, httpStatusForScheduling } from "@/lib/creator-publishing-queue/scheduling/service"
+export async function POST(req:Request){ const auth=await ensureActiveSubscription(); if(!auth.ok) return NextResponse.json({ok:false,error:auth.error??"SUBSCRIPTION_REQUIRED",message:"Active subscription required."},{status:auth.status??403}); let body; try{body=await req.json()}catch{return NextResponse.json({ok:false,error:"SCHEDULING_INVALID_REQUEST",message:"Invalid JSON."},{status:400})} const result=await cancelCreatorPublishingPlanSchedule(body); if(!result.ok) return NextResponse.json({ok:false,error:result.code,message:result.message},{status:httpStatusForScheduling(result.code)}); return NextResponse.json(result,{status:200}) }

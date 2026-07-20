@@ -1,0 +1,9 @@
+export type LocalDateTimeInput={date:string;time:string;utcOffsetMinutes?:number}
+export type SchedulePlanRequest={publishingPlanId:string;platformJobId:string;localDateTime:LocalDateTimeInput;scheduleTimezone:string;idempotencyKey:string}
+export type CancelPlanRequest={publishingPlanId:string;cancellationReason:string;idempotencyKey:string}
+export type ResolvedScheduleTime={localDate:string;localTime:string;scheduleTimezone:string;utcOffsetMinutes:number;intendedPublishAt:string;operatorDueLocalDate:string;operatorDueLocalTime:string;operatorDueAt:string;occurrences:{utcOffsetMinutes:number;intendedPublishAt:string;label:string}[]}
+export type SafeSchedulingCode="UNAUTHENTICATED"|"SCHEDULING_INVALID_REQUEST"|"SCHEDULING_INELIGIBLE"|"SCHEDULING_CONFLICT"|"SCHEDULING_SERVICE_UNAVAILABLE"|"SCHEDULING_TRUSTED_RESPONSE_INVALID"|"SCHEDULED"|"SCHEDULED_IDEMPOTENT"|"CANCELLED"|"CANCELLED_IDEMPOTENT"
+export type SafeSchedulePlan={publishingPlanId:string;platformJobId?:string;title:string;status:string;eligible:boolean;reason?:string;targetPlatform?:string;publishingMode?:string;intendedPublishAt?:string|null;scheduleTimezone?:string|null;operatorDueAt?:string|null}
+export type SafeCancelledPlanReconciliation={publishingPlanId:string;status:"cancelled";cancelledAt:string|null;normalizedCancellationReason:string;trustedTotalPlanJobCount:number;allPlanJobsBelongToCreator:boolean;planJobRelationshipConsistent:boolean}
+export type SafeSchedulingView={draftPlans:SafeSchedulePlan[];activePlans:SafeSchedulePlan[];cancelledReconciliationPlans:SafeCancelledPlanReconciliation[]}
+export type SafeMutationResult={ok:true;code:SafeSchedulingCode;idempotent:boolean;message:string;publishingPlanId:string;platformJobId?:string;intendedPublishAt?:string;operatorDueAt?:string;operatorClaimsCleared?:number}|{ok:false;code:SafeSchedulingCode;message:string}

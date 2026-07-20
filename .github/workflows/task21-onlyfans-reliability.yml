@@ -3,11 +3,16 @@ name: Task 21 Creator Publishing Reliability
 on:
   pull_request:
     paths:
-      - app/api/creator-publishing-queue/scheduler/run/route.ts
-      - backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract.test.ts
-      - backend/creator-publishing-queue/tests/task21SchedulerRunnerTelemetryContract.test.ts
-      - docs/creator-publishing/task21-onlyfans-reliability-operations.md
-      - .github/workflows/task21-onlyfans-reliability.yml
+      - 'lib/creator-publishing-queue/scheduling/**'
+      - 'app/api/creator-publishing-queue/scheduling/**'
+      - 'app/autopost/Task15PlanScheduling.tsx'
+      - 'app/autopost/page.tsx'
+      - 'app/autopost/Task14AutopostOrchestration.tsx'
+      - 'backend/creator-publishing-queue/tests/task21PlanSchedulingServices.test.ts'
+      - 'backend/creator-publishing-queue/tests/task21PlanSchedulingSourceContract.test.ts'
+      - 'backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts'
+      - 'docs/creator-publishing/task21-onlyfans-reliability-operations.md'
+      - '.github/workflows/task21-onlyfans-reliability.yml'
   workflow_dispatch:
 
 jobs:
@@ -27,18 +32,25 @@ jobs:
           set -euo pipefail
           base="${{ github.event.pull_request.base.sha || github.sha }}"
           git diff --name-only "$base"...HEAD | tee changed-files.txt
-          if grep -Ev '^(app/api/creator-publishing-queue/scheduler/run/route\.ts|backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract\.test\.ts|backend/creator-publishing-queue/tests/task21SchedulerRunnerTelemetryContract\.test\.ts|docs/creator-publishing/task21-onlyfans-reliability-operations\.md|\.github/workflows/task21-onlyfans-reliability\.yml)$' changed-files.txt; then
+          allowed='^(lib/creator-publishing-queue/scheduling/(types|validation|response|serviceCore|service|loaders)\.ts|app/api/creator-publishing-queue/scheduling/(schedule|cancel-plan)/route\.ts|app/autopost/(Task15PlanScheduling|page|Task14AutopostOrchestration)\.tsx|backend/creator-publishing-queue/tests/task21PlanScheduling(Services|SourceContract|Ui)\.test\.ts|docs/creator-publishing/task21-onlyfans-reliability-operations\.md|\.github/workflows/task21-onlyfans-reliability\.yml)$'
+          if grep -Ev "$allowed" changed-files.txt; then
             echo "Unauthorized Task 21 Creator Publishing Reliability path changed" >&2
             exit 1
           fi
-          if grep -E '^(vercel\.json|lib/creator-publishing-queue/scheduler-runner/service\.ts|lib/creator-publishing-queue/scheduler-runner/serviceCore\.ts|supabase/migrations/|app/api/autopost/|lib/autopost/|backend/autopost/|docs/autopost/)|(^|/)(fanvue|reddit|x)(/|$)' changed-files.txt; then
+          forbidden='^(vercel\.json|package\.json|package-lock\.json|lib/creator-publishing-queue/scheduler-runner/service\.ts|lib/creator-publishing-queue/scheduler-runner/serviceCore\.ts|supabase/migrations/|app/api/autopost/run/|app/api/autopost/|lib/autopost/|backend/autopost/|docs/autopost/|\.env|\.env\.|.*environment.*|.*env\.local)|(^|/)(fanvue|reddit|x)(/|$)|platform.*connector'
+          if grep -E "$forbidden" changed-files.txt; then
             echo "Forbidden Task 21 Creator Publishing Reliability path changed" >&2
             exit 1
           fi
       - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerServices.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerTelemetryContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21PlanSchedulingServices.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21PlanSchedulingSourceContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/autopostOrchestration.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
       - run: npx tsc --noEmit
       - run: npm run build
         env:
