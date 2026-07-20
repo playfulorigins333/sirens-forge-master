@@ -3,6 +3,10 @@ name: Task 21 Creator Publishing Reliability
 on:
   pull_request:
     paths:
+      - 'app/api/creator-publishing-queue/scheduler/run/route.ts'
+      - 'backend/creator-publishing-queue/tests/task21SchedulerRunnerServices.test.ts'
+      - 'backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract.test.ts'
+      - 'backend/creator-publishing-queue/tests/task21SchedulerRunnerTelemetryContract.test.ts'
       - 'lib/creator-publishing-queue/scheduling/**'
       - 'app/api/creator-publishing-queue/scheduling/**'
       - 'app/autopost/Task15PlanScheduling.tsx'
