@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 import AutopostPageClient from "./AutopostPageClient";
 import { Task14AutopostOrchestration } from "./Task14AutopostOrchestration";
 import { loadAutopostCapabilities, loadAutopostPackageOptions } from "@/lib/creator-publishing-queue/autopost/service";
+import { loadCreatorPublishingSchedulingView } from "@/lib/creator-publishing-queue/scheduling/loaders";
+import { Task15PlanScheduling } from "./Task15PlanScheduling";
 import type { AutopostPackageOption, SafeCapability } from "@/lib/creator-publishing-queue/autopost/types";
 
 type Task14AutopostLoadResult =
@@ -31,10 +33,12 @@ export default async function AutopostPage() {
   }
 
   const task14 = await loadTask14AutopostSection();
+  const schedulingView = await loadCreatorPublishingSchedulingView().catch(() => null);
 
   return (
     <>
       <AutopostPageClient />
+      {schedulingView ? <Task15PlanScheduling view={schedulingView} /> : null}
       {task14.ok ? (
         <Task14AutopostOrchestration capabilities={task14.capabilities} packages={task14.packages} idempotencyKey={randomUUID().replaceAll("-", "_")} />
       ) : (

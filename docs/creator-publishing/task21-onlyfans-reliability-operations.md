@@ -108,3 +108,17 @@ Project-wide cron disabling is emergency-only because it also affects AutoPost.
 ## Current authorization boundary
 
 Gate 21B-3B1 does not authorize Production environment changes, scheduler invocations, cron registration, migrations, merge, Gate 21B-4B1, a Production canary, or recurring execution. Those remain separately approved gates.
+
+## Gate 21B-4B1 Phase B1 — trusted application scheduling and cancellation bridge
+
+Gate 21B-4B1 Phase B identified that the trusted application path to the existing scheduler RPCs was missing. Phase B1 adds only that bridge for authenticated, subscribed creators. It does not add a migration, Production data action, Production SQL, Production candidate-row inspection, scheduler invocation, environment activation, cron registration, direct external publishing, a canary, Gate 21B-3B2 work, or recurring execution.
+
+OnlyFans remains assisted/manual. Sirens Forge does not log into OnlyFans, contact OnlyFans, use OnlyFans credentials, upload media to OnlyFans, perform browser automation, or post directly to OnlyFans. Scheduling creates internal plan, job, and scheduler-event state only through the existing `creator_publishing_schedule_plan` RPC. Cancellation uses the existing `creator_publishing_cancel_plan_schedule` RPC.
+
+The initial Phase B1 application path intentionally accepts exactly one active creator-owned OnlyFans-assisted draft job in a draft Publishing Plan. Current AI-twin consent values are derived server-side from the existing consent version and consent text hash sources. The browser cannot provide creator, account, package, consent, platform, publishing mode, revision, RPC, or database state.
+
+Creator-selected publication time is submitted as local date, minute-resolution local time, IANA timezone, and, only when needed, an explicit UTC-offset occurrence for repeated fall-back local times. The server resolves the intended UTC instant deterministically, rejects nonexistent spring-forward local times, requires explicit fall-back occurrence selection, rejects timezone/offset mismatches, requires intended publication to be at least 90 minutes ahead, and sets operator due exactly 60 minutes before publication.
+
+The UI keeps the original idempotency key when scheduling or cancellation has an uncertain transport outcome. A new key is created only after exact success is confirmed or after trusted server state is reloaded and the creator deliberately starts a new action. Cancelled-plan reconciliation after refresh exposes only minimal creator-owned safe state needed to determine whether an uncertain cancellation with a matching normalized reason succeeded; it exposes no queue-task IDs, scheduler-event IDs, account IDs, package IDs, audit payloads, stored idempotency results, or request fingerprints.
+
+Future legitimate nonzero canary activity remains separately gated. Phase B1 does not authorize Production access, environment changes, scheduler activation, cron, Gate 21B-3B2, or recurring execution.
