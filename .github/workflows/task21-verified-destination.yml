@@ -99,6 +99,13 @@ jobs:
       - run: npx tsx backend/creator-publishing-queue/tests/packageComposer.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/autopostOrchestration.test.ts
       - run: node backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
+      - name: Diagnose unexpected verified-destination PostgreSQL error
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          psql "$TASK21_VERIFIED_DESTINATION_DATABASE_URL" -v ON_ERROR_STOP=1 -c "select public.creator_publishing_create_autopost_plan('11111111-1111-4111-8111-111111111111',array['cccccccc-cccc-4ccc-8ccc-ccccccccccc1'::uuid],'plan_attested_diagnostic');"
+          exit 0
       - run: npm run test:creator-publishing-queue
       - run: npx tsx backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'drop database if exists task15_ci;' -c 'create database task15_ci;'
