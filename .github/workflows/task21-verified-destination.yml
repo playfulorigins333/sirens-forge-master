@@ -122,3 +122,14 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run build
       - run: git diff --check
+      - name: Upload Gate 21C-1 diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task21-verified-destination-diagnostics
+          if-no-files-found: ignore
+          path: |
+            task21-verified-destination-postgres-diagnostics.log
+            task15-postgres-diagnostics.log
+            task17a-postgres-diagnostics*.log
+            task20-postgres-diagnostics.log
