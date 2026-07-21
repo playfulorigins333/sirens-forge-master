@@ -14,7 +14,7 @@ as $$
 declare
   v_claim_limit integer := least(greatest(coalesce(p_limit, 25), 1), 50);
   v_lock_ttl interval := make_interval(mins => least(greatest(coalesce(p_lock_minutes, 15), 1), 60));
-  v_now timestamptz := clock_timestamp();
+  v_now timestamptz := transaction_timestamp();
   v_exhausted record;
 begin
   for v_exhausted in
