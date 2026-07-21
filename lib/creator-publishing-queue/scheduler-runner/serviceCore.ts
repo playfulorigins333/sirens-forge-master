@@ -8,7 +8,10 @@ export const CREATOR_PUBLISHING_SCHEDULER_LOCK_MINUTES = 15 as const
 
 type HeaderMap = { get(name: string): string | null }
 type RpcResult = { data: unknown; error: unknown }
-export type SchedulerAdminClient = { rpc(name: string, args: Record<string, unknown>): Promise<RpcResult> }
+type SchedulerEventReconciliationQuery = {
+  select(projection: "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at"): { eq(column: "id", value: string): { limit(count: 1): Promise<RpcResult> } }
+}
+export type SchedulerAdminClient = { rpc(name: string, args: Record<string, unknown>): Promise<RpcResult>; from?(table: "creator_publishing_scheduler_events"): SchedulerEventReconciliationQuery }
 
 export type SchedulerRunResult =
   | { ok: false; code: "CRON_SECRET_NOT_CONFIGURED" | "UNAUTHORIZED" | "SCHEDULER_BUILD_DISABLED" | "SCHEDULER_ENV_DISABLED" | "SCHEDULER_SERVICE_UNAVAILABLE" }
@@ -75,6 +78,29 @@ export function parseProcessSchedulerEvent(data: unknown): ProcessParse {
   return { ok: false, code: "PROCESS_RESPONSE_INVALID" }
 }
 
+const reconciliationProjection = "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at" as const
+type ReconciliationKind = { ok: true; kind: "processed" | "blocked" | "superseded" } | { ok: false }
+function validReconciliationTimestamp(value: unknown) { return typeof value === "string" && value.trim().length > 0 && Number.isFinite(new Date(value).getTime()) }
+function parseReconciledSchedulerEventRow(row: unknown): ReconciliationKind {
+  if (!isPlainObject(row) || !keysAre(row, ["status", "processed_at", "superseded_at", "safe_error_code", "lock_token", "locked_at"])) return { ok: false }
+  if (row.lock_token !== null || row.locked_at !== null) return { ok: false }
+  if (row.status === "processed" && validReconciliationTimestamp(row.processed_at) && row.superseded_at === null && row.safe_error_code === null) return { ok: true, kind: "processed" }
+  if (row.status === "blocked" && validReconciliationTimestamp(row.processed_at) && row.superseded_at === null && typeof row.safe_error_code === "string" && safeErrors.has(row.safe_error_code)) return { ok: true, kind: "blocked" }
+  if (row.status === "superseded" && row.processed_at === null && validReconciliationTimestamp(row.superseded_at) && row.safe_error_code === null) return { ok: true, kind: "superseded" }
+  return { ok: false }
+}
+async function reconcileUncertainProcessSchedulerEvent(admin: SchedulerAdminClient, eventId: string): Promise<ReconciliationKind> {
+  if (typeof admin.from !== "function") return { ok: false }
+  try {
+    const response = await admin.from("creator_publishing_scheduler_events").select(reconciliationProjection).eq("id", eventId).limit(1)
+    if (!isPlainObject(response) || response.error) return { ok: false }
+    if (!Array.isArray(response.data) || response.data.length !== 1) return { ok: false }
+    return parseReconciledSchedulerEventRow(response.data[0])
+  } catch {
+    return { ok: false }
+  }
+}
+
 export async function runCreatorPublishingSchedulerCore(input: { headers: HeaderMap; configuredSecret: string | undefined; buildEnabled: boolean; environmentEnabled: string | undefined; getAdminClient: () => SchedulerAdminClient }): Promise<SchedulerRunResult> {
   const auth = authenticateSchedulerRequest(input.headers, input.configuredSecret)
   if (auth.ok === false) return auth
@@ -90,8 +116,25 @@ export async function runCreatorPublishingSchedulerCore(input: { headers: Header
   counts.claimedCount = parsedClaim.events.length
   for (const claimed of parsedClaim.events) {
     counts.attemptedCount += 1
-    const processed = await admin.rpc("creator_publishing_process_scheduler_event", { p_event_id: claimed.event_id, p_lock_token: claimed.lock_token, p_current_ai_twin_consent_version: AI_TWIN_CONSENT_VERSION, p_current_attestation_text_sha256: getAiTwinConsentTextSha256() })
-    if (processed.error) return { ok: false, code: "PROCESS_RPC_FAILED", ...counts }
+    let processed: RpcResult
+    try {
+      processed = await admin.rpc("creator_publishing_process_scheduler_event", { p_event_id: claimed.event_id, p_lock_token: claimed.lock_token, p_current_ai_twin_consent_version: AI_TWIN_CONSENT_VERSION, p_current_attestation_text_sha256: getAiTwinConsentTextSha256() })
+    } catch {
+      const reconciled = await reconcileUncertainProcessSchedulerEvent(admin, claimed.event_id)
+      if (!reconciled.ok) return { ok: false, code: "PROCESS_RPC_FAILED", ...counts }
+      if (reconciled.kind === "processed") counts.processedCount += 1
+      if (reconciled.kind === "blocked") counts.blockedCount += 1
+      if (reconciled.kind === "superseded") counts.supersededCount += 1
+      continue
+    }
+    if (processed.error) {
+      const reconciled = await reconcileUncertainProcessSchedulerEvent(admin, claimed.event_id)
+      if (!reconciled.ok) return { ok: false, code: "PROCESS_RPC_FAILED", ...counts }
+      if (reconciled.kind === "processed") counts.processedCount += 1
+      if (reconciled.kind === "blocked") counts.blockedCount += 1
+      if (reconciled.kind === "superseded") counts.supersededCount += 1
+      continue
+    }
     const parsed = parseProcessSchedulerEvent(processed.data)
     if (parsed.ok === false) return { ok: false, code: parsed.code, ...counts }
     if (parsed.kind === "processed") counts.processedCount += 1
