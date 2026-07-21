@@ -109,7 +109,12 @@ export async function runCreatorPublishingSchedulerCore(input: { headers: Header
   let admin: SchedulerAdminClient
   try { admin = input.getAdminClient() } catch { return { ok: false, code: "SCHEDULER_SERVICE_UNAVAILABLE" } }
   const counts: Counts = { claimedCount: 0, attemptedCount: 0, processedCount: 0, blockedCount: 0, supersededCount: 0 }
-  const claim = await admin.rpc("creator_publishing_claim_due_scheduler_events", { p_limit: CREATOR_PUBLISHING_SCHEDULER_CLAIM_LIMIT, p_lock_minutes: CREATOR_PUBLISHING_SCHEDULER_LOCK_MINUTES })
+  let claim: RpcResult
+  try {
+    claim = await admin.rpc("creator_publishing_claim_due_scheduler_events", { p_limit: CREATOR_PUBLISHING_SCHEDULER_CLAIM_LIMIT, p_lock_minutes: CREATOR_PUBLISHING_SCHEDULER_LOCK_MINUTES })
+  } catch {
+    return { ok: false, code: "CLAIM_RPC_FAILED", ...counts }
+  }
   if (claim.error) return { ok: false, code: "CLAIM_RPC_FAILED", ...counts }
   const parsedClaim = parseClaimSchedulerEvents(claim.data)
   if (!parsedClaim.ok) return { ok: false, code: "CLAIM_RESPONSE_INVALID", ...counts }

@@ -7,11 +7,12 @@ const secret = "configured-secret"
 const h = (headers: Record<string, string>) => ({ get: (name: string) => headers[name.toLowerCase()] ?? null })
 const validId = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 const lock = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, "0")}`
+class ThrownClaimRpcError extends Error {}
 const fakeAdmin = (claimData: unknown, processData: unknown[] = [], reconciliationData?: unknown) => {
   const calls: { name: string; args: Record<string, unknown> }[] = []
   const fromCalls: { table: string; projection?: string; column?: string; value?: unknown; limit?: number; mutation?: string }[] = []
   const admin = {
-    rpc: async (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); if (name === "creator_publishing_claim_due_scheduler_events") return claimData instanceof Error ? { data: null, error: claimData } : { data: claimData, error: null }; const data = processData.shift(); if (data === undefined) throw new Error("unexpected process retry"); if (data instanceof Error && data.message === "throw") throw data; return data instanceof Error ? { data: null, error: data } : { data, error: null } },
+    rpc: async (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); if (name === "creator_publishing_claim_due_scheduler_events") { if (claimData instanceof ThrownClaimRpcError) throw claimData; return claimData instanceof Error ? { data: null, error: claimData } : { data: claimData, error: null } } const data = processData.shift(); if (data === undefined) throw new Error("unexpected process retry"); if (data instanceof Error && data.message === "throw") throw data; return data instanceof Error ? { data: null, error: data } : { data, error: null } },
     from: (table: "creator_publishing_scheduler_events") => { const call = { table } as { table: string; projection?: string; column?: string; value?: unknown; limit?: number; mutation?: string }; fromCalls.push(call); return {
       select: (projection: "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at") => { call.projection = projection; return {
         eq: (column: "id", value: string) => { call.column = column; call.value = value; return {
@@ -88,6 +89,49 @@ test("batch policy is sequential, bounded, finite, and stops safely", async () =
   const src = readFileSync("lib/creator-publishing-queue/scheduler-runner/serviceCore.ts", "utf8"); assert.doesNotMatch(src, /Promise\.all|\.delete\(|\.insert\(|\.upsert\(|fetch\(|console\./)
 })
 
+const failedClaimResult = { ok: false, code: "CLAIM_RPC_FAILED", claimedCount: 0, attemptedCount: 0, processedCount: 0, blockedCount: 0, supersededCount: 0 } as const
+const completedEmptyResult = { ok: true, code: "SCHEDULER_RUN_COMPLETED", claimedCount: 0, attemptedCount: 0, processedCount: 0, blockedCount: 0, supersededCount: 0 } as const
+const assertSanitizedClaimUncertainty = (result: unknown) => {
+  const serialized = JSON.stringify(result)
+  for (const forbidden of [validId(9), lock(9), "raw claim transport failure", "thrown claim transport failure", "Error", "stack", "database_row", "p_limit", "p_lock_minutes"]) assert.equal(serialized.includes(forbidden), false, forbidden)
+}
+
+test("returned claim RPC error is sanitized and stops before parsing, processing, reconciliation, or retry", async () => {
+  const f = fakeAdmin(new Error("raw claim transport failure"), [{ ok: true, status: "processed", job_state: "due_now" }], { data: [reconciledRow({})], error: null })
+  const result = await runOne(f)
+  assert.deepEqual(result, failedClaimResult)
+  assert.equal(f.calls.length, 1)
+  assert.deepEqual(f.calls, [{ name: "creator_publishing_claim_due_scheduler_events", args: { p_limit: 1, p_lock_minutes: 15 } }])
+  assert.equal(f.calls.some(c => c.name === "creator_publishing_process_scheduler_event"), false)
+  assert.equal(f.fromCalls.length, 0)
+  assertSanitizedClaimUncertainty(result)
+})
+
+test("thrown claim RPC exception resolves as sanitized CLAIM_RPC_FAILED without escaping", async () => {
+  const thrown = new ThrownClaimRpcError("thrown claim transport failure")
+  thrown.stack = "stack text with database_row and p_limit"
+  const f = fakeAdmin(thrown, [{ ok: true, status: "processed", job_state: "due_now" }], { data: [reconciledRow({})], error: null })
+  let result: unknown
+  await assert.doesNotReject(async () => { result = await runOne(f) })
+  assert.deepEqual(result, failedClaimResult)
+  assert.equal(f.calls.length, 1)
+  assert.deepEqual(f.calls[0], { name: "creator_publishing_claim_due_scheduler_events", args: { p_limit: 1, p_lock_minutes: 15 } })
+  assert.equal(f.calls.some(c => c.name === "creator_publishing_process_scheduler_event"), false)
+  assert.equal(f.fromCalls.length, 0)
+  assertSanitizedClaimUncertainty(result)
+})
+
+test("normal empty and malformed claim responses preserve existing no-reconciliation behavior", async () => {
+  const empty = fakeAdmin([], [{ ok: true, status: "processed", job_state: "due_now" }], { data: [reconciledRow({})], error: null })
+  assert.deepEqual(await runOne(empty), completedEmptyResult)
+  assert.equal(empty.calls.length, 1)
+  assert.equal(empty.fromCalls.length, 0)
+
+  const malformed = fakeAdmin([{ event_id: "bad", lock_token: lock(1) }], [{ ok: true, status: "processed", job_state: "due_now" }], { data: [reconciledRow({})], error: null })
+  assert.deepEqual(await runOne(malformed), { ok: false, code: "CLAIM_RESPONSE_INVALID", claimedCount: 0, attemptedCount: 0, processedCount: 0, blockedCount: 0, supersededCount: 0 })
+  assert.equal(malformed.calls.length, 1)
+  assert.equal(malformed.fromCalls.length, 0)
+})
 
 const reconciledRow = (overrides: Record<string, unknown>) => ({ status: "processed", processed_at: "2026-01-01T00:00:00.000Z", superseded_at: null, safe_error_code: null, lock_token: null, locked_at: null, ...overrides })
 const runOne = (f: ReturnType<typeof fakeAdmin>) => runCreatorPublishingSchedulerCore({ headers: h({ authorization: `Bearer ${secret}` }), configuredSecret: secret, buildEnabled: true, environmentEnabled: "true", getAdminClient: () => f.admin })
