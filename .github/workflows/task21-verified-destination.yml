@@ -100,7 +100,11 @@ jobs:
       - run: npx tsx backend/creator-publishing-queue/tests/task21PlanSchedulingSourceContract.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts
       - run: npx tsc --noEmit
-      - run: npm run build
+      - name: Build with captured diagnostics
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run build 2>&1 | tee task21-build.log
       - run: git diff --check
       - name: Upload Gate 21C-1 diagnostics
         if: failure()
@@ -109,6 +113,7 @@ jobs:
           name: task21-verified-destination-diagnostics
           if-no-files-found: ignore
           path: |
+            task21-build.log
             task21-verified-destination-postgres-diagnostics.log
             task15-postgres-diagnostics.log
             task17a-postgres-diagnostics*.log
