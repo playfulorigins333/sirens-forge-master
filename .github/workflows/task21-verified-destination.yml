@@ -1,0 +1,90 @@
+name: Task 21 verified destination
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - app/creator/publishing-queue/accounts/PlatformAccountForm.tsx
+      - app/creator/publishing-queue/accounts/page.tsx
+      - app/creator/publishing-queue/new/page.tsx
+      - app/creator/publishing-queue/composer/PackageComposerForm.tsx
+      - lib/creator-publishing-queue/accounts/validation.ts
+      - lib/creator-publishing-queue/composer/types.ts
+      - lib/creator-publishing-queue/composer/serviceCore.ts
+      - lib/creator-publishing-queue/ui/loaders.ts
+      - lib/creator-publishing-queue/autopost/service.ts
+      - backend/creator-publishing-queue/tests/platformAccountSetup.test.ts
+      - backend/creator-publishing-queue/tests/packageComposer.test.ts
+      - backend/creator-publishing-queue/tests/autopostOrchestration.test.ts
+      - supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql
+      - backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration.sql
+      - backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
+      - .github/workflows/task21-verified-destination.yml
+
+jobs:
+  task21:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TASK21_VERIFIED_DESTINATION_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task21_verified_destination_ci
+      TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task15_ci
+      TASK20_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task20_ci
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+      NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Changed-file scope guard
+        run: |
+          set -euo pipefail
+          allowed='^(app/creator/publishing-queue/accounts/PlatformAccountForm\.tsx|app/creator/publishing-queue/accounts/page\.tsx|app/creator/publishing-queue/new/page\.tsx|app/creator/publishing-queue/composer/PackageComposerForm\.tsx|lib/creator-publishing-queue/accounts/validation\.ts|lib/creator-publishing-queue/composer/types\.ts|lib/creator-publishing-queue/composer/serviceCore\.ts|lib/creator-publishing-queue/ui/loaders\.ts|lib/creator-publishing-queue/autopost/service\.ts|backend/creator-publishing-queue/tests/platformAccountSetup\.test\.ts|backend/creator-publishing-queue/tests/packageComposer\.test\.ts|backend/creator-publishing-queue/tests/autopostOrchestration\.test\.ts|supabase/migrations/20260721001800_creator_publishing_verified_destination_guards\.sql|backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration\.sql|backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration\.mjs|\.github/workflows/task21-verified-destination\.yml)$'
+          git diff --name-only origin/${{ github.base_ref }}...HEAD | tee /tmp/changed
+          test $(rg -c '^supabase/migrations/20260721001800_creator_publishing_verified_destination_guards\.sql$' /tmp/changed || true) -le 1
+          ! rg -v "$allowed" /tmp/changed
+          ! rg '^(vercel\.json|package\.json|package-lock\.json|.*\.env|lib/creator-publishing-queue/scheduling/|lib/creator-publishing-queue/scheduler-runner/|app/api/creator-publishing-queue/scheduler/|app/api/creator-publishing-queue/scheduling/)' /tmp/changed
+      - run: npx tsx backend/creator-publishing-queue/tests/platformAccountSetup.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/packageComposer.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/autopostOrchestration.test.ts
+      - run: node backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
+      - run: npm run test:creator-publishing-queue
+      - run: npx tsx backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'drop database if exists task15_ci;' -c 'create database task15_ci;'
+      - run: npm run test:creator-publishing-task15-postgres
+      - run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
+      - run: npm run test:creator-publishing-task17a-upgrade
+      - run: npm run test:creator-publishing-task17a-postgres
+      - run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistory.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistoryResolution.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistoryTruthfulness.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistoryExit.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistoryCompleteness.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task20OnlyFansHistorySourceContract.test.ts
+      - run: node backend/creator-publishing-queue/tests/runTask20OnlyFansHistoryPostgresIntegration.mjs
+      - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerServices.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerTelemetryContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21PlanSchedulingServices.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21PlanSchedulingSourceContract.test.ts
+      - run: npx tsx backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: git diff --check
