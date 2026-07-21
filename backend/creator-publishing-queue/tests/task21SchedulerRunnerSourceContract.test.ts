@@ -46,7 +46,12 @@ test("runner source has only authorized RPCs and no scheduling, table, autopost,
   assert.deepEqual([...new Set(rpcNames)], ["creator_publishing_claim_due_scheduler_events", "creator_publishing_process_scheduler_event"])
   assert.match(src, /p_limit: CREATOR_PUBLISHING_SCHEDULER_CLAIM_LIMIT/)
   assert.match(src, /p_lock_minutes: CREATOR_PUBLISHING_SCHEDULER_LOCK_MINUTES/)
-  for (const forbidden of ["/api/autopost/run", "autopost_rules", "autopost_jobs", "autopost_job_logs", "onlyfans.com", "fansly.com", "fanvue.com", "api.onlyfans", "fetch(", ".from(", ".insert(", ".upsert(", ".delete(", "due_at", "operator_due_at", "intended_publish_at", "timezone", "publication", "Intl.DateTimeFormat", "Date.parse", "setTimeout", "setInterval", "Promise.all"]) assert.equal(src.includes(forbidden), false, forbidden)
+  for (const forbidden of ["/api/autopost/run", "autopost_rules", "autopost_jobs", "autopost_job_logs", "onlyfans.com", "fansly.com", "fanvue.com", "api.onlyfans", "fetch(", ".insert(", ".upsert(", ".delete(", "due_at", "operator_due_at", "intended_publish_at", "timezone", "publication", "Intl.DateTimeFormat", "Date.parse", "setTimeout", "setInterval", "Promise.all"]) assert.equal(src.includes(forbidden), false, forbidden)
+  const core = readFileSync(corePath, "utf8")
+  assert.equal((core.match(/\.from\("creator_publishing_scheduler_events"\)/g) ?? []).length, 1)
+  assert.match(core, /select\(reconciliationProjection\)\.eq\("event_id", eventId\)\.limit\(1\)/)
+  assert.match(core, /const reconciliationProjection = "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at" as const/)
+  assert.doesNotMatch(core, /\.(insert|upsert|delete)\(/)
 })
 
 test("operations documentation records the accepted manual proof and telemetry-only hardening boundary", () => {
