@@ -196,3 +196,36 @@ test("normal and claim outcomes do not reconcile", async () => {
     assert.equal(f.fromCalls.length, 0)
   }
 })
+
+test("Gate 21C-4 retry exhaustion remains reconciliation-only and sanitized", async () => {
+  assert.equal((SCHEDULER_SAFE_ERROR_CODES as readonly string[]).includes("SCHEDULER_RETRY_EXHAUSTED"), false)
+  assert.deepEqual(parseProcessSchedulerEvent({ ok: true, status: "blocked", safe_error_code: "SCHEDULER_RETRY_EXHAUSTED" }), { ok: false, code: "UNKNOWN_SAFE_ERROR_CODE" })
+
+  const rows = [{ event_id: validId(21), lock_token: lock(21) }]
+  const terminalRow = { data: [reconciledRow({ status: "blocked", safe_error_code: "SCHEDULER_RETRY_EXHAUSTED" })], error: null }
+
+  const normal = fakeAdmin(rows, [{ ok: true, status: "blocked", safe_error_code: "SCHEDULER_RETRY_EXHAUSTED" }], terminalRow)
+  const normalResult = await runOne(normal)
+  assert.equal(normalResult.code, "UNKNOWN_SAFE_ERROR_CODE")
+  assert.equal(normal.fromCalls.length, 0)
+  assert.equal(JSON.stringify(normalResult).includes("SCHEDULER_RETRY_EXHAUSTED"), false)
+
+  for (const uncertainProcess of [new Error("rpc"), new Error("throw")]) {
+    const uncertain = fakeAdmin(rows, [uncertainProcess], terminalRow)
+    assert.deepEqual(await runOne(uncertain), { ok: true, code: "SCHEDULER_RUN_COMPLETED", claimedCount: 1, attemptedCount: 1, processedCount: 0, blockedCount: 1, supersededCount: 0 })
+    assert.equal(uncertain.calls.filter(c => c.name === "creator_publishing_process_scheduler_event").length, 1)
+    assert.equal(uncertain.fromCalls.length, 1)
+  }
+
+  for (const safe_error_code of SCHEDULER_SAFE_ERROR_CODES) {
+    assert.deepEqual(parseProcessSchedulerEvent({ ok: true, status: "blocked", safe_error_code }), { ok: true, kind: "blocked" })
+    const reconciled = fakeAdmin(rows, [new Error("rpc")], { data: [reconciledRow({ status: "blocked", safe_error_code })], error: null })
+    assert.deepEqual(await runOne(reconciled), { ok: true, code: "SCHEDULER_RUN_COMPLETED", claimedCount: 1, attemptedCount: 1, processedCount: 0, blockedCount: 1, supersededCount: 0 })
+  }
+
+  const unknown = fakeAdmin(rows, [new Error("rpc")], { data: [reconciledRow({ status: "blocked", safe_error_code: "SCHEDULER_UNKNOWN_RECONCILIATION_CODE" })], error: null })
+  const unknownResult = await runOne(unknown)
+  assert.equal(unknownResult.code, "PROCESS_RPC_FAILED")
+  const serialized = JSON.stringify(unknownResult)
+  for (const forbidden of [validId(21), lock(21), "SCHEDULER_UNKNOWN_RECONCILIATION_CODE", "safe_error_code", "processed_at"]) assert.equal(serialized.includes(forbidden), false)
+})
