@@ -188,10 +188,11 @@ begin
   if v_count <> array_length(v_ids,1) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
   if exists(select 1 from pg_temp.autopost_selected_packages where creator_id <> p_creator_id) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
 
-  create temp table autopost_locked_destination_accounts on commit drop as
+  create temp table autopost_locked_destination_accounts (like public.creator_platform_accounts including defaults) on commit drop;
+  insert into pg_temp.autopost_locked_destination_accounts
   select a.*
   from public.creator_platform_accounts a
-  join (select distinct platform_account_id from pg_temp.autopost_selected_packages) s on s.platform_account_id=a.id
+  where a.id in (select platform_account_id from pg_temp.autopost_selected_packages)
   order by a.id for update;
 
   if exists(
