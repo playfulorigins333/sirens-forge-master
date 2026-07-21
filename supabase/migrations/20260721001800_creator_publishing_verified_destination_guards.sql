@@ -56,7 +56,7 @@ begin
 
   select * into v_existing_audit from public.creator_publishing_audit_events where entity_type='creator_publishing_content_package' and actor_id=p_creator_id and idempotency_key=v_idempotency_key and action in ('creator_publishing_package_created','creator_publishing_package_updated','creator_publishing_package_noop') limit 1;
   if found then
-    if (v_existing_audit.after_state->'request_canonical' - 'target_platform') is distinct from v_retry_probe_canonical
+    if ((v_existing_audit.after_state->'request_canonical') - 'target_platform'::text) is distinct from v_retry_probe_canonical
        or v_existing_audit.after_state->>'retry_probe_fingerprint' is distinct from v_retry_probe_fingerprint then
       raise exception 'IDEMPOTENCY_CONFLICT';
     end if;
@@ -128,7 +128,6 @@ revoke execute on function public.creator_publishing_save_content_package(uuid, 
 revoke execute on function public.creator_publishing_save_content_package(uuid, text, uuid, uuid, text, text, boolean, text, text, timestamptz, text) from authenticated;
 grant execute on function public.creator_publishing_save_content_package(uuid, text, uuid, uuid, text, text, boolean, text, text, timestamptz, text) to service_role;
 
-
 create or replace function public.creator_publishing_create_autopost_plan(p_creator_id uuid, p_content_package_ids uuid[], p_idempotency_key text)
 returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
 declare
@@ -188,7 +187,6 @@ begin
   get diagnostics v_count = row_count;
   if v_count <> array_length(v_ids,1) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
   if exists(select 1 from pg_temp.autopost_selected_packages where creator_id <> p_creator_id) then raise exception 'CONTENT_PACKAGE_NOT_FOUND'; end if;
-
 
   create temp table autopost_locked_destination_accounts on commit drop as
   select a.*
