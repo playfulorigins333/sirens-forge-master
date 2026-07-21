@@ -14,7 +14,7 @@ const fakeAdmin = (claimData: unknown, processData: unknown[] = [], reconciliati
     rpc: async (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); if (name === "creator_publishing_claim_due_scheduler_events") return claimData instanceof Error ? { data: null, error: claimData } : { data: claimData, error: null }; const data = processData.shift(); if (data === undefined) throw new Error("unexpected process retry"); if (data instanceof Error && data.message === "throw") throw data; return data instanceof Error ? { data: null, error: data } : { data, error: null } },
     from: (table: "creator_publishing_scheduler_events") => { const call = { table } as { table: string; projection?: string; column?: string; value?: unknown; limit?: number; mutation?: string }; fromCalls.push(call); return {
       select: (projection: "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at") => { call.projection = projection; return {
-        eq: (column: "event_id", value: string) => { call.column = column; call.value = value; return {
+        eq: (column: "id", value: string) => { call.column = column; call.value = value; return {
           limit: async (limit: 1) => { call.limit = limit; if (reconciliationData instanceof Error && reconciliationData.message === "throw") throw reconciliationData; return reconciliationData instanceof Error ? { data: null, error: reconciliationData } : reconciliationData }
         } }
       } },
@@ -97,7 +97,7 @@ test("uncertain process outcomes reconcile exactly one read-only scheduler-event
   const processed = fakeAdmin(rows, [new Error("rpc")], { data: [reconciledRow({})], error: null })
   assert.deepEqual(await runOne(processed), { ok: true, code: "SCHEDULER_RUN_COMPLETED", claimedCount: 1, attemptedCount: 1, processedCount: 1, blockedCount: 0, supersededCount: 0 })
   assert.equal(processed.calls.filter(c => c.name === "creator_publishing_process_scheduler_event").length, 1)
-  assert.deepEqual(processed.fromCalls, [{ table: "creator_publishing_scheduler_events", projection: "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at", column: "event_id", value: validId(1), limit: 1 }])
+  assert.deepEqual(processed.fromCalls, [{ table: "creator_publishing_scheduler_events", projection: "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at", column: "id", value: validId(1), limit: 1 }])
 
   const blocked = fakeAdmin(rows, [new Error("throw")], { data: [reconciledRow({ status: "blocked", safe_error_code: SCHEDULER_SAFE_ERROR_CODES[0] })], error: null })
   assert.deepEqual(await runOne(blocked), { ok: true, code: "SCHEDULER_RUN_COMPLETED", claimedCount: 1, attemptedCount: 1, processedCount: 0, blockedCount: 1, supersededCount: 0 })
