@@ -22,8 +22,9 @@ type ClaimedSchedulerEvent = { event_id: string; lock_token: string }
 type Counts = { claimedCount: number; attemptedCount: number; processedCount: number; blockedCount: number; supersededCount: number }
 const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const processedStates = new Set(["awaiting_operator", "due_now", "direct_publish_queued", "ready_for_export"])
-export const SCHEDULER_SAFE_ERROR_CODES = ["PLATFORM_UNAVAILABLE","FANVUE_NOT_AVAILABLE","DESTINATION_ACCOUNT_REVOKED","DESTINATION_ACCOUNT_NOT_VERIFIED","CREATOR_VERIFICATION_MISSING","AI_TWIN_CONSENT_MISSING","CREATOR_APPROVAL_MISSING","COMPLIANCE_EVIDENCE_INVALID","CO_PERFORMER_RELEASE_MISSING","ACTIVE_QUEUE_TASK_CONFLICT","SOURCE_FINGERPRINT_STALE","ACTIVE_PUBLICATION_JOB_CONFLICT","SCHEDULER_STATE_TRANSITION_INVALID","SCHEDULER_RETRY_EXHAUSTED"] as const
+export const SCHEDULER_SAFE_ERROR_CODES = ["PLATFORM_UNAVAILABLE","FANVUE_NOT_AVAILABLE","DESTINATION_ACCOUNT_REVOKED","DESTINATION_ACCOUNT_NOT_VERIFIED","CREATOR_VERIFICATION_MISSING","AI_TWIN_CONSENT_MISSING","CREATOR_APPROVAL_MISSING","COMPLIANCE_EVIDENCE_INVALID","CO_PERFORMER_RELEASE_MISSING","ACTIVE_QUEUE_TASK_CONFLICT","SOURCE_FINGERPRINT_STALE","ACTIVE_PUBLICATION_JOB_CONFLICT","SCHEDULER_STATE_TRANSITION_INVALID"] as const
 const safeErrors = new Set<string>(SCHEDULER_SAFE_ERROR_CODES)
+const reconciliationSafeErrors = new Set<string>([...SCHEDULER_SAFE_ERROR_CODES, "SCHEDULER_RETRY_EXHAUSTED"])
 const jobStates = new Set(["draft","ready_to_publish","direct_publish_queued","publishing_direct","published_direct","direct_publish_failed","retry_scheduled","authentication_required","platform_rejected","scheduled_internally","awaiting_operator","due_now","claimed","scheduled_on_platform","awaiting_post_confirmation","confirmed_posted_manual","failed_manual_upload","needs_fix","skipped","blocked","archived","package_ready","ready_for_export","exported"])
 
 function isPlainObject(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype }
@@ -85,7 +86,7 @@ function parseReconciledSchedulerEventRow(row: unknown): ReconciliationKind {
   if (!isPlainObject(row) || !keysAre(row, ["status", "processed_at", "superseded_at", "safe_error_code", "lock_token", "locked_at"])) return { ok: false }
   if (row.lock_token !== null || row.locked_at !== null) return { ok: false }
   if (row.status === "processed" && validReconciliationTimestamp(row.processed_at) && row.superseded_at === null && row.safe_error_code === null) return { ok: true, kind: "processed" }
-  if (row.status === "blocked" && validReconciliationTimestamp(row.processed_at) && row.superseded_at === null && typeof row.safe_error_code === "string" && safeErrors.has(row.safe_error_code)) return { ok: true, kind: "blocked" }
+  if (row.status === "blocked" && validReconciliationTimestamp(row.processed_at) && row.superseded_at === null && typeof row.safe_error_code === "string" && reconciliationSafeErrors.has(row.safe_error_code)) return { ok: true, kind: "blocked" }
   if (row.status === "superseded" && row.processed_at === null && validReconciliationTimestamp(row.superseded_at) && row.safe_error_code === null) return { ok: true, kind: "superseded" }
   return { ok: false }
 }
