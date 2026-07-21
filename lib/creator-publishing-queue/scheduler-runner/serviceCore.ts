@@ -9,7 +9,7 @@ export const CREATOR_PUBLISHING_SCHEDULER_LOCK_MINUTES = 15 as const
 type HeaderMap = { get(name: string): string | null }
 type RpcResult = { data: unknown; error: unknown }
 type SchedulerEventReconciliationQuery = {
-  select(projection: "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at"): { eq(column: "event_id", value: string): { limit(count: 1): Promise<RpcResult> } }
+  select(projection: "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at"): { eq(column: "id", value: string): { limit(count: 1): Promise<RpcResult> } }
 }
 export type SchedulerAdminClient = { rpc(name: string, args: Record<string, unknown>): Promise<RpcResult>; from?(table: "creator_publishing_scheduler_events"): SchedulerEventReconciliationQuery }
 
@@ -92,7 +92,7 @@ function parseReconciledSchedulerEventRow(row: unknown): ReconciliationKind {
 async function reconcileUncertainProcessSchedulerEvent(admin: SchedulerAdminClient, eventId: string): Promise<ReconciliationKind> {
   if (typeof admin.from !== "function") return { ok: false }
   try {
-    const response = await admin.from("creator_publishing_scheduler_events").select(reconciliationProjection).eq("event_id", eventId).limit(1)
+    const response = await admin.from("creator_publishing_scheduler_events").select(reconciliationProjection).eq("id", eventId).limit(1)
     if (!isPlainObject(response) || response.error) return { ok: false }
     if (!Array.isArray(response.data) || response.data.length !== 1) return { ok: false }
     return parseReconciledSchedulerEventRow(response.data[0])
