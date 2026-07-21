@@ -196,3 +196,11 @@ test("normal and claim outcomes do not reconcile", async () => {
     assert.equal(f.fromCalls.length, 0)
   }
 })
+
+
+test("retry exhaustion safe code is accepted as a blocked terminal scheduler outcome", async () => {
+  assert.deepEqual(parseProcessSchedulerEvent({ ok: true, status: "blocked", safe_error_code: "SCHEDULER_RETRY_EXHAUSTED" }), { ok: true, kind: "blocked" })
+  const rows = [{ event_id: validId(21), lock_token: lock(21) }]
+  const f = fakeAdmin(rows, [{ ok: true, status: "blocked", safe_error_code: "SCHEDULER_RETRY_EXHAUSTED" }])
+  assert.deepEqual(await runOne(f), { ok: true, code: "SCHEDULER_RUN_COMPLETED", claimedCount: 1, attemptedCount: 1, processedCount: 0, blockedCount: 1, supersededCount: 0 })
+})

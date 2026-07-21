@@ -144,3 +144,12 @@ If the claim RPC returns an error or throws while being invoked, the public resu
 After claim uncertainty, the runner does not parse claim data, perform claim reconciliation, infer an event from recent scheduler state, query scheduler or audit tables, invoke the process RPC, clear locks, replace locks, release claims, write tables, or invoke another mutating RPC. Locks must not be cleared directly. If the claim transaction committed, database stale-lock expiry remains authoritative for automated recovery.
 
 Operationally, an uncertain claim outcome should be treated as possible committed work with a lost response. Any Production inspection or intervention requires separate explicit authorization. Gate 21C-3 introduces no Production activation, scheduler invocation, cron registration, migration, environment change, generation behavior, or external-platform behavior.
+
+
+## Gate 21C-4 — scheduler retry exhaustion
+
+Gate 21C-4 bounds scheduler event claiming to three successful processing claims per scheduler event. The initial claim sets `processing_attempts = 1`; stale-lock recovery can advance the same event to attempt 2 and then attempt 3. Once an attempt-3 processing lock is stale, the next claim invocation terminalizes the scheduler event as `blocked` with safe error code `SCHEDULER_RETRY_EXHAUSTED` instead of returning that event as a fourth claim.
+
+The retry-exhaustion migration is forward-only and redefines only `public.creator_publishing_claim_due_scheduler_events(integer,integer)`. Applying the migration alone does not mutate existing scheduler rows, does not invoke the scheduler, does not terminalize existing records, and does not write audit records at migration-application time. Exhaustion state changes occur only during a later claim invocation against an eligible stale attempt-3 processing event.
+
+Gate 21C-4 does not authorize Production access, Production migration application, Production inspection, scheduler activation, cron registration, environment changes, direct publishing, credentials, browser automation, scraping, unofficial API use, or external-platform behavior.
