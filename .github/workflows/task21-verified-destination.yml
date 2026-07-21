@@ -45,6 +45,7 @@ jobs:
       NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
       SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
       NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3000
+      STRIPE_SECRET_KEY: dummy-stripe-key
     steps:
       - uses: actions/checkout@v4
         with:
