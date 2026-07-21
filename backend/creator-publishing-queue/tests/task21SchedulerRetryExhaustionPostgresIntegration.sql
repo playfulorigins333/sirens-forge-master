@@ -1,69 +1,89 @@
+\set ON_ERROR_STOP on
 create schema if not exists task21_retry_exhaustion_test;
-create or replace function task21_retry_exhaustion_test.assert(ok boolean, msg text) returns void language plpgsql as $$ begin if not ok then raise exception '%', msg; end if; end $$;
+create or replace function task21_retry_exhaustion_test.assert(ok boolean,msg text) returns void language plpgsql as $$ begin if not coalesce(ok,false) then raise exception 'ASSERTION_FAILED: %',msg; end if; end $$;
+create or replace function task21_retry_exhaustion_test.uuid(kind int,n int) returns uuid language sql immutable as $$ select ('21200000-0000-4'||lpad(kind::text,3,'0')||'-8000-'||lpad(n::text,12,'0'))::uuid $$;
 
-select task21_retry_exhaustion_test.assert(
-  pg_get_function_arguments('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure) = 'p_limit integer DEFAULT 25, p_lock_minutes integer DEFAULT 15',
-  'claim signature defaults preserved'
-);
+with current_rows as (
+ select 'account' entity_type,id::text entity_id,to_jsonb(x) row_data from public.creator_platform_accounts x
+ union all select 'package',id::text,to_jsonb(x) from public.creator_publishing_content_packages x
+ union all select 'plan',id::text,to_jsonb(x) from public.creator_publishing_plans x
+ union all select 'job',id::text,to_jsonb(x) from public.creator_publishing_platform_jobs x
+ union all select 'queue',id::text,to_jsonb(x) from public.creator_publishing_queue_tasks x
+ union all select 'event',id::text,to_jsonb(x) from public.creator_publishing_scheduler_events x
+ union all select 'audit',id::text,to_jsonb(x) from public.creator_publishing_audit_events x
+ union all select 'idempotency',creator_id::text||':'||action_type||':'||idempotency_key,to_jsonb(x) from public.creator_publishing_scheduler_idempotency x
+), delta as ((select * from current_rows except select * from public.task21_retry_pre_data_snapshot) union all (select * from public.task21_retry_pre_data_snapshot except select * from current_rows))
+select task21_retry_exhaustion_test.assert(not exists(select 1 from delta),'01900 application alone mutates no fixture data');
+select task21_retry_exhaustion_test.assert(not exists(select 1 from public.creator_publishing_audit_events where action='creator_publishing_scheduler_event_retry_exhausted'),'01900 application alone inserts no exhaustion audit');
 
-select task21_retry_exhaustion_test.assert(
-  pg_get_function_result('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure) = 'TABLE(event_id uuid, lock_token uuid)',
-  'claim return columns preserved'
-);
+select task21_retry_exhaustion_test.assert(pg_get_function_arguments('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure)='p_limit integer DEFAULT 25, p_lock_minutes integer DEFAULT 15','signature defaults exact');
+select task21_retry_exhaustion_test.assert(pg_get_function_result('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure)='TABLE(event_id uuid, lock_token uuid)','return type exact');
+select task21_retry_exhaustion_test.assert((select prosecdef from pg_proc where oid='public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure),'security definer exact');
+select task21_retry_exhaustion_test.assert((select proconfig=array['search_path=public, pg_temp'] from pg_proc where oid='public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure),'search path exact');
+select task21_retry_exhaustion_test.assert(has_function_privilege('service_role','public.creator_publishing_claim_due_scheduler_events(integer,integer)','execute'),'service_role execute');
+select task21_retry_exhaustion_test.assert(not has_function_privilege('public','public.creator_publishing_claim_due_scheduler_events(integer,integer)','execute') and not has_function_privilege('anon','public.creator_publishing_claim_due_scheduler_events(integer,integer)','execute') and not has_function_privilege('authenticated','public.creator_publishing_claim_due_scheduler_events(integer,integer)','execute'),'public roles denied');
+select task21_retry_exhaustion_test.assert((select count(*)=1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='creator_publishing_claim_due_scheduler_events' and pg_get_function_identity_arguments(p.oid)='p_limit integer, p_lock_minutes integer'),'one exact claim overload');
+select task21_retry_exhaustion_test.assert(position('SCHEDULER_RETRY_EXHAUSTED' in pg_get_functiondef('public.creator_publishing_process_scheduler_event(uuid,uuid,text,text)'::regprocedure))=0,'process RPC does not produce exhaustion code');
+select task21_retry_exhaustion_test.assert(not exists(select 1 from public.task21_retry_pre_function_snapshot s where s.signature<>'creator_publishing_claim_due_scheduler_events(integer,integer)' and s.definition is distinct from pg_get_functiondef(s.signature::regprocedure)),'every other function definition unchanged');
 
-select task21_retry_exhaustion_test.assert(
-  position('security definer' in lower(pg_get_functiondef('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure))) > 0,
-  'claim remains security definer'
-);
+do $$ declare n int; begin
+ for n in 1..70 loop
+  insert into public.creator_platform_accounts(id,creator_id,platform,platform_username,verification_status,verification_attested_at) values(task21_retry_exhaustion_test.uuid(1,n),'21100000-0000-4000-8000-000000000101','onlyfans','retry_'||n,'creator_attested',clock_timestamp());
+  insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,ai_flag,ai_detail,second_person_present,compliance_status,compliance_policy_version,creator_approval_status,platform_meta) values(task21_retry_exhaustion_test.uuid(2,n),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(1,n),'onlyfans','p'||n,'c','none','{}',false,'pending','unassigned','pending','{}');
+  insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version) values(task21_retry_exhaustion_test.uuid(3,n),'21100000-0000-4000-8000-000000000101','scheduled','retry-plan-'||lpad(n::text,4,'0'),md5(n::text)||md5(n::text),'task14.20260711.001');
+  insert into public.creator_publishing_platform_jobs(id,publishing_plan_id,creator_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,schedule_revision,intended_publish_at,schedule_timezone,operator_due_at,scheduled_at,scheduled_by) values(task21_retry_exhaustion_test.uuid(4,n),task21_retry_exhaustion_test.uuid(3,n),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(2,n),task21_retry_exhaustion_test.uuid(1,n),'onlyfans','assisted','scheduled_internally',clock_timestamp(),md5(('s'||n)::text)||md5(('s'||n)::text),'task14.20260711.001',md5(('r'||n)::text)||md5(('r'||n)::text),1,clock_timestamp()+interval '2 hours','UTC',clock_timestamp()+interval '1 hour',clock_timestamp(),'21100000-0000-4000-8000-000000000101');
+ end loop;
+end $$;
 
-select task21_retry_exhaustion_test.assert(
-  position('set search_path = public, pg_temp' in lower(pg_get_functiondef('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure))) > 0,
-  'claim search path preserved'
-);
+insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,processing_attempts) values(task21_retry_exhaustion_test.uuid(5,1),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,1),task21_retry_exhaustion_test.uuid(4,1),'publish_due','pending',clock_timestamp()-interval '1 hour',1,0);
+create temp table a1 as select * from public.creator_publishing_claim_due_scheduler_events(1,1);
+update public.creator_publishing_scheduler_events set locked_at=clock_timestamp()-interval '2 minutes' where id=task21_retry_exhaustion_test.uuid(5,1);
+create temp table a2 as select * from public.creator_publishing_claim_due_scheduler_events(1,1);
+update public.creator_publishing_scheduler_events set locked_at=clock_timestamp()-interval '2 minutes' where id=task21_retry_exhaustion_test.uuid(5,1);
+create temp table a3 as select * from public.creator_publishing_claim_due_scheduler_events(1,1);
+select task21_retry_exhaustion_test.assert((select count(*)=1 and min(event_id)=task21_retry_exhaustion_test.uuid(5,1) and min(lock_token) is not null from a1) and (select count(*)=1 and min(event_id)=task21_retry_exhaustion_test.uuid(5,1) and min(lock_token) is not null from a2) and (select count(*)=1 and min(event_id)=task21_retry_exhaustion_test.uuid(5,1) and min(lock_token) is not null from a3),'claims 1 2 3 exact');
+select task21_retry_exhaustion_test.assert((select x.lock_token<>y.lock_token and y.lock_token<>z.lock_token and x.lock_token<>z.lock_token from a1 x cross join a2 y cross join a3 z),'claim tokens differ');
+select task21_retry_exhaustion_test.assert((select processing_attempts=3 from public.creator_publishing_scheduler_events where id=task21_retry_exhaustion_test.uuid(5,1)),'attempt 3 stored');
+update public.creator_publishing_scheduler_events set locked_at=clock_timestamp()-interval '2 minutes' where id=task21_retry_exhaustion_test.uuid(5,1);
+create temp table a4 as select * from public.creator_publishing_claim_due_scheduler_events(1,1);
+select task21_retry_exhaustion_test.assert((select count(*)=0 from a4),'no fourth claim');
+select task21_retry_exhaustion_test.assert((select status='blocked' and processing_attempts=3 and processed_at is not null and processed_at=updated_at and safe_error_code='SCHEDULER_RETRY_EXHAUSTED' and lock_token is null and locked_at is null from public.creator_publishing_scheduler_events where id=task21_retry_exhaustion_test.uuid(5,1)),'exact exhaustion shape');
+select task21_retry_exhaustion_test.assert((select count(*)=1 and bool_and(entity_type='creator_publishing_scheduler_event' and actor_id is null and actor_role='scheduler' and array(select jsonb_object_keys(before_state) order by 1)=array['due_at','event_type','processing_attempts','schedule_revision','status']::text[] and array(select jsonb_object_keys(after_state) order by 1)=array['due_at','event_type','processing_attempts','safe_error_code','schedule_revision','status']::text[] and before_state->>'processing_attempts'='3' and after_state->>'processing_attempts'='3' and created_at=(select processed_at from public.creator_publishing_scheduler_events where id=task21_retry_exhaustion_test.uuid(5,1))) from public.creator_publishing_audit_events where entity_id=task21_retry_exhaustion_test.uuid(5,1) and action='creator_publishing_scheduler_event_retry_exhausted'),'one exact exhaustion audit');
+select * from public.creator_publishing_claim_due_scheduler_events(1,1);
+select task21_retry_exhaustion_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id=task21_retry_exhaustion_test.uuid(5,1) and action='creator_publishing_scheduler_event_retry_exhausted'),'no duplicate exhaustion audit');
 
-select task21_retry_exhaustion_test.assert(
-  position('for update of event_source skip locked' in lower(pg_get_functiondef('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure))) > 0,
-  'skip locked preserved'
-);
-
-select task21_retry_exhaustion_test.assert(
-  position('SCHEDULER_RETRY_EXHAUSTED' in pg_get_functiondef('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure)) > 0,
-  'retry exhaustion safe code installed'
-);
-
-select task21_retry_exhaustion_test.assert(
-  has_function_privilege('service_role','public.creator_publishing_claim_due_scheduler_events(integer,integer)','execute'),
-  'service role can execute claim'
-);
-select task21_retry_exhaustion_test.assert(
-  not has_function_privilege('anon','public.creator_publishing_claim_due_scheduler_events(integer,integer)','execute')
-  and not has_function_privilege('authenticated','public.creator_publishing_claim_due_scheduler_events(integer,integer)','execute'),
-  'public creator roles cannot execute claim'
-);
-
-insert into auth.users(id,email) values ('21000000-0000-4000-8000-000000000101','task21-retry@example.test') on conflict do nothing;
-insert into public.creator_platform_accounts(id,creator_id,platform,platform_username,verification_status) values
- ('21000000-0000-4000-8000-000000000401','21000000-0000-4000-8000-000000000101','onlyfans','task21_retry','creator_attested') on conflict do nothing;
-insert into public.creator_publishing_content_packages(id,creator_id,platform_account_id,target_platform,title,caption_body,ai_flag,ai_detail,second_person_present,compliance_status) values
- ('21000000-0000-4000-8000-000000000501','21000000-0000-4000-8000-000000000101','21000000-0000-4000-8000-000000000401','onlyfans','Task 21 retry package','Safe fixture caption','none','{}',false,'passed') on conflict do nothing;
-insert into public.creator_publishing_plans(id,creator_id,status,idempotency_key,request_fingerprint,registry_version) values
- ('21000000-0000-4000-8000-000000000001','21000000-0000-4000-8000-000000000101','scheduled','task21retry','aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','task21') on conflict do nothing;
-insert into public.creator_publishing_platform_jobs(id,creator_id,publishing_plan_id,content_package_id,platform_account_id,target_platform,publishing_mode,job_state,source_package_updated_at,source_package_fingerprint,capability_registry_version,original_request_fingerprint,schedule_revision,intended_publish_at,schedule_timezone,scheduled_at,scheduled_by) values
- ('21000000-0000-4000-8000-000000000201','21000000-0000-4000-8000-000000000101','21000000-0000-4000-8000-000000000001','21000000-0000-4000-8000-000000000501','21000000-0000-4000-8000-000000000401','onlyfans','assisted','due_now',clock_timestamp(),'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb','task21','cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',1,clock_timestamp()+interval '1 hour','UTC',clock_timestamp(),'21000000-0000-4000-8000-000000000101') on conflict do nothing;
 insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,processing_attempts,lock_token,locked_at) values
- ('21000000-0000-4000-8000-000000000301','21000000-0000-4000-8000-000000000101','21000000-0000-4000-8000-000000000001','21000000-0000-4000-8000-000000000201','publish_due','pending',clock_timestamp()-interval '1 hour',1,0,null,null) on conflict do nothing;
+(task21_retry_exhaustion_test.uuid(5,2),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,2),task21_retry_exhaustion_test.uuid(4,2),'operator_due','processing',clock_timestamp()-interval '2 hours',1,3,task21_retry_exhaustion_test.uuid(6,2),clock_timestamp()-interval '2 minutes'),
+(task21_retry_exhaustion_test.uuid(5,3),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,2),task21_retry_exhaustion_test.uuid(4,2),'publish_due','pending',clock_timestamp()-interval '1 hour',1,0,null,null);
+create temp table same_run as select * from public.creator_publishing_claim_due_scheduler_events(1,1);
+select task21_retry_exhaustion_test.assert((select status='blocked' from public.creator_publishing_scheduler_events where id=task21_retry_exhaustion_test.uuid(5,2)) and (select count(*)=1 and min(event_id)=task21_retry_exhaustion_test.uuid(5,3) from same_run),'same invocation terminalizes earlier and claims later');
+update public.creator_publishing_scheduler_events set status='cancelled',cancelled_at=clock_timestamp(),lock_token=null,locked_at=null where id=task21_retry_exhaustion_test.uuid(5,3);
 
-select event_id as attempt1_event_id, lock_token as attempt1_lock from public.creator_publishing_claim_due_scheduler_events(1,1) \gset
-select task21_retry_exhaustion_test.assert(:'attempt1_event_id'::uuid='21000000-0000-4000-8000-000000000301'::uuid, 'first claim returned event');
-select task21_retry_exhaustion_test.assert((select processing_attempts=1 and status='processing' from public.creator_publishing_scheduler_events where id=:'attempt1_event_id'::uuid), 'first claim sets attempt 1');
-update public.creator_publishing_scheduler_events set locked_at=clock_timestamp()-interval '10 minutes' where id=:'attempt1_event_id'::uuid;
-select event_id as attempt2_event_id, lock_token as attempt2_lock from public.creator_publishing_claim_due_scheduler_events(1,1) \gset
-select task21_retry_exhaustion_test.assert((select processing_attempts=2 from public.creator_publishing_scheduler_events where id=:'attempt2_event_id'::uuid), 'stale retry sets attempt 2');
-update public.creator_publishing_scheduler_events set locked_at=clock_timestamp()-interval '10 minutes' where id=:'attempt2_event_id'::uuid;
-select event_id as attempt3_event_id, lock_token as attempt3_lock from public.creator_publishing_claim_due_scheduler_events(1,1) \gset
-select task21_retry_exhaustion_test.assert((select processing_attempts=3 from public.creator_publishing_scheduler_events where id=:'attempt3_event_id'::uuid), 'second stale retry sets attempt 3');
-update public.creator_publishing_scheduler_events set locked_at=clock_timestamp()-interval '10 minutes' where id=:'attempt3_event_id'::uuid;
-create temp table task21_fourth_claim as select * from public.creator_publishing_claim_due_scheduler_events(1,1);
-select task21_retry_exhaustion_test.assert((select count(*)=0 from task21_fourth_claim), 'fourth claim is not returned');
-select task21_retry_exhaustion_test.assert((select status='blocked' and safe_error_code='SCHEDULER_RETRY_EXHAUSTED' and processing_attempts=3 and lock_token is null and locked_at is null from public.creator_publishing_scheduler_events where id='21000000-0000-4000-8000-000000000301'), 'attempt 3 stale event terminalized without attempt 4');
-select task21_retry_exhaustion_test.assert((select count(*)=1 from public.creator_publishing_audit_events where entity_id='21000000-0000-4000-8000-000000000301' and action='creator_publishing_scheduler_gate_failed' and after_state->>'safe_error_code'='SCHEDULER_RETRY_EXHAUSTED'), 'exhaustion audit emitted only by claim invocation');
+insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,processing_attempts,lock_token,locked_at)
+select task21_retry_exhaustion_test.uuid(5,n),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,n),task21_retry_exhaustion_test.uuid(4,n),'publish_due','processing',clock_timestamp()-(10-n)*interval '1 minute',1,3,task21_retry_exhaustion_test.uuid(6,n),clock_timestamp()-interval '2 minutes' from generate_series(4,6)n;
+select * from public.creator_publishing_claim_due_scheduler_events(2,1);
+select task21_retry_exhaustion_test.assert((select count(*)=2 from public.creator_publishing_scheduler_events where id in(task21_retry_exhaustion_test.uuid(5,4),task21_retry_exhaustion_test.uuid(5,5),task21_retry_exhaustion_test.uuid(5,6)) and status='blocked') and (select count(*)=1 from public.creator_publishing_scheduler_events where id in(task21_retry_exhaustion_test.uuid(5,4),task21_retry_exhaustion_test.uuid(5,5),task21_retry_exhaustion_test.uuid(5,6)) and status='processing' and processing_attempts=3),'exhaustion bound exact');
+select task21_retry_exhaustion_test.assert(not exists(select 1 from public.creator_publishing_scheduler_events where processing_attempts>3),'no attempt 4 anywhere');
+select * from public.creator_publishing_claim_due_scheduler_events(1,1);
+select task21_retry_exhaustion_test.assert((select count(*)=3 from public.creator_publishing_scheduler_events where id in(task21_retry_exhaustion_test.uuid(5,4),task21_retry_exhaustion_test.uuid(5,5),task21_retry_exhaustion_test.uuid(5,6)) and status='blocked'),'later invocation terminalizes overflow');
+
+insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,processing_attempts,lock_token,locked_at) values
+(task21_retry_exhaustion_test.uuid(5,10),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,10),task21_retry_exhaustion_test.uuid(4,10),'publish_due','processing',clock_timestamp()-interval '1 hour',1,2,task21_retry_exhaustion_test.uuid(6,10),clock_timestamp()-interval '2 minutes'),
+(task21_retry_exhaustion_test.uuid(5,11),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,11),task21_retry_exhaustion_test.uuid(4,11),'operator_due','processing',clock_timestamp()-interval '2 hours',1,3,task21_retry_exhaustion_test.uuid(6,11),clock_timestamp()+interval '1 day'),
+(task21_retry_exhaustion_test.uuid(5,12),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,11),task21_retry_exhaustion_test.uuid(4,11),'publish_due','pending',clock_timestamp()-interval '1 hour',1,0,null,null),
+(task21_retry_exhaustion_test.uuid(5,13),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,13),task21_retry_exhaustion_test.uuid(4,13),'operator_due','pending',clock_timestamp()-interval '1 hour',1,0,null,null),
+(task21_retry_exhaustion_test.uuid(5,14),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,14),task21_retry_exhaustion_test.uuid(4,14),'publish_due','pending',clock_timestamp()-interval '1 hour',1,0,null,null);
+create temp table ordered(ordinal bigserial,event_id uuid,lock_token uuid); insert into ordered(event_id,lock_token) select * from public.creator_publishing_claim_due_scheduler_events(3,1);
+select task21_retry_exhaustion_test.assert((select count(*)=3 from ordered) and (select array_agg(event_id order by ordinal)=array[task21_retry_exhaustion_test.uuid(5,10),task21_retry_exhaustion_test.uuid(5,13),task21_retry_exhaustion_test.uuid(5,14)] from ordered),'below-ceiling retry and deterministic ordering; fresh same-job lock excludes duplicate');
+select task21_retry_exhaustion_test.assert((select status='processing' and processing_attempts=3 and locked_at>clock_timestamp() from public.creator_publishing_scheduler_events where id=task21_retry_exhaustion_test.uuid(5,11)) and (select status='pending' from public.creator_publishing_scheduler_events where id=task21_retry_exhaustion_test.uuid(5,12)),'fresh attempt-3 and blocked pending untouched');
+
+select * from public.creator_publishing_claim_due_scheduler_events(null,null);
+insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,processing_attempts)
+select task21_retry_exhaustion_test.uuid(5,n),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,n),task21_retry_exhaustion_test.uuid(4,n),'publish_due','pending',clock_timestamp()-interval '1 day',1,0 from generate_series(20,70)n;
+create temp table low as select * from public.creator_publishing_claim_due_scheduler_events(0,0); select task21_retry_exhaustion_test.assert((select count(*)=1 from low),'low limit normalized to one');
+create temp table high as select * from public.creator_publishing_claim_due_scheduler_events(99,99); select task21_retry_exhaustion_test.assert((select count(*)=50 from high),'high limit normalized to fifty');
+
+select task21_retry_exhaustion_test.assert(not exists(select 1 from public.task21_retry_pre_data_snapshot s where s.entity_type in('account','package','plan','job','queue','idempotency') and s.row_data is distinct from case s.entity_type when 'account' then (select to_jsonb(x) from public.creator_platform_accounts x where x.id=s.entity_id::uuid) when 'package' then (select to_jsonb(x) from public.creator_publishing_content_packages x where x.id=s.entity_id::uuid) when 'plan' then (select to_jsonb(x) from public.creator_publishing_plans x where x.id=s.entity_id::uuid) when 'job' then (select to_jsonb(x) from public.creator_publishing_platform_jobs x where x.id=s.entity_id::uuid) when 'queue' then (select to_jsonb(x) from public.creator_publishing_queue_tasks x where x.id=s.entity_id::uuid) when 'idempotency' then (select to_jsonb(x) from public.creator_publishing_scheduler_idempotency x where x.creator_id::text||':'||x.action_type||':'||x.idempotency_key=s.entity_id) end),'no unrelated entity mutation');
+select task21_retry_exhaustion_test.assert(not exists(select 1 from public.task21_retry_pre_data_snapshot s join public.creator_publishing_scheduler_events e on s.entity_type='event' and s.entity_id=e.id::text where s.row_data is distinct from to_jsonb(e)),'historical terminal scheduler rows unchanged');
+select task21_retry_exhaustion_test.assert(not exists(select 1 from public.creator_publishing_scheduler_events where safe_error_code='SCHEDULER_RETRY_EXHAUSTED' and processing_attempts<>3),'exhaustion preserves attempt count');
+\echo 'TASK21_SCHEDULER_RETRY_EXHAUSTION_ASSERTIONS_PASSED'
