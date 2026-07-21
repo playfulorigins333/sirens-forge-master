@@ -7,11 +7,12 @@ const secret = "configured-secret"
 const h = (headers: Record<string, string>) => ({ get: (name: string) => headers[name.toLowerCase()] ?? null })
 const validId = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 const lock = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, "0")}`
+class ThrownClaimRpcError extends Error {}
 const fakeAdmin = (claimData: unknown, processData: unknown[] = [], reconciliationData?: unknown) => {
   const calls: { name: string; args: Record<string, unknown> }[] = []
   const fromCalls: { table: string; projection?: string; column?: string; value?: unknown; limit?: number; mutation?: string }[] = []
   const admin = {
-    rpc: async (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); if (name === "creator_publishing_claim_due_scheduler_events") { if (claimData instanceof Error && claimData.message === "throw") throw claimData; return claimData instanceof Error ? { data: null, error: claimData } : { data: claimData, error: null } } const data = processData.shift(); if (data === undefined) throw new Error("unexpected process retry"); if (data instanceof Error && data.message === "throw") throw data; return data instanceof Error ? { data: null, error: data } : { data, error: null } },
+    rpc: async (name: string, args: Record<string, unknown>) => { calls.push({ name, args }); if (name === "creator_publishing_claim_due_scheduler_events") { if (claimData instanceof ThrownClaimRpcError) throw claimData; return claimData instanceof Error ? { data: null, error: claimData } : { data: claimData, error: null } } const data = processData.shift(); if (data === undefined) throw new Error("unexpected process retry"); if (data instanceof Error && data.message === "throw") throw data; return data instanceof Error ? { data: null, error: data } : { data, error: null } },
     from: (table: "creator_publishing_scheduler_events") => { const call = { table } as { table: string; projection?: string; column?: string; value?: unknown; limit?: number; mutation?: string }; fromCalls.push(call); return {
       select: (projection: "status,processed_at,superseded_at,safe_error_code,lock_token,locked_at") => { call.projection = projection; return {
         eq: (column: "id", value: string) => { call.column = column; call.value = value; return {
@@ -107,7 +108,7 @@ test("returned claim RPC error is sanitized and stops before parsing, processing
 })
 
 test("thrown claim RPC exception resolves as sanitized CLAIM_RPC_FAILED without escaping", async () => {
-  const thrown = new Error("thrown claim transport failure")
+  const thrown = new ThrownClaimRpcError("thrown claim transport failure")
   thrown.stack = "stack text with database_row and p_limit"
   const f = fakeAdmin(thrown, [{ ok: true, status: "processed", job_state: "due_now" }], { data: [reconciledRow({})], error: null })
   let result: unknown
