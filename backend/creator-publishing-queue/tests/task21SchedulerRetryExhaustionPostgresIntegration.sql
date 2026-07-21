@@ -25,6 +25,10 @@ select task21_retry_exhaustion_test.assert(not has_function_privilege('public','
 select task21_retry_exhaustion_test.assert((select count(*)=1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='creator_publishing_claim_due_scheduler_events' and pg_get_function_identity_arguments(p.oid)='p_limit integer, p_lock_minutes integer'),'one exact claim overload');
 select task21_retry_exhaustion_test.assert(position('SCHEDULER_RETRY_EXHAUSTED' in pg_get_functiondef('public.creator_publishing_process_scheduler_event(uuid,uuid,text,text)'::regprocedure))=0,'process RPC does not produce exhaustion code');
 select task21_retry_exhaustion_test.assert(not exists(select 1 from public.task21_retry_pre_function_snapshot s where s.signature<>'creator_publishing_claim_due_scheduler_events(integer,integer)' and s.definition is distinct from pg_get_functiondef(s.signature::regprocedure)),'every other function definition unchanged');
+select task21_retry_exhaustion_test.assert(regexp_count(pg_get_functiondef('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure),'transaction_timestamp\(\)')=1,'claim function captures transaction timestamp exactly once');
+select task21_retry_exhaustion_test.assert(position('clock_timestamp()' in pg_get_functiondef('public.creator_publishing_claim_due_scheduler_events(integer,integer)'::regprocedure))=0,'claim function contains no clock timestamp');
+select task21_retry_exhaustion_test.assert((select definition=pg_get_functiondef('public.set_updated_at()'::regprocedure) from public.task21_retry_pre_function_snapshot where signature='set_updated_at()'),'shared set_updated_at definition unchanged');
+select task21_retry_exhaustion_test.assert(not exists(select 1 from public.task21_retry_pre_trigger_snapshot s where s.definition is distinct from (select pg_get_triggerdef(t.oid) from pg_trigger t where t.tgrelid='public.creator_publishing_scheduler_events'::regclass and not t.tgisinternal and t.tgname=s.trigger_name)) and (select count(*) from public.task21_retry_pre_trigger_snapshot)=(select count(*) from pg_trigger t where t.tgrelid='public.creator_publishing_scheduler_events'::regclass and not t.tgisinternal),'scheduler event trigger definitions unchanged');
 
 do $$ declare n int; begin
  for n in 1..70 loop
@@ -37,6 +41,7 @@ end $$;
 
 insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,processing_attempts) values(task21_retry_exhaustion_test.uuid(5,1),'21100000-0000-4000-8000-000000000101',task21_retry_exhaustion_test.uuid(3,1),task21_retry_exhaustion_test.uuid(4,1),'publish_due','pending',clock_timestamp()-interval '1 hour',1,0);
 create temp table a1 as select * from public.creator_publishing_claim_due_scheduler_events(1,1);
+select task21_retry_exhaustion_test.assert((select locked_at is not null and locked_at=updated_at from public.creator_publishing_scheduler_events where id=task21_retry_exhaustion_test.uuid(5,1)),'new claim locked_at equals trigger-written updated_at');
 update public.creator_publishing_scheduler_events set locked_at=clock_timestamp()-interval '2 minutes' where id=task21_retry_exhaustion_test.uuid(5,1);
 create temp table a2 as select * from public.creator_publishing_claim_due_scheduler_events(1,1);
 update public.creator_publishing_scheduler_events set locked_at=clock_timestamp()-interval '2 minutes' where id=task21_retry_exhaustion_test.uuid(5,1);
