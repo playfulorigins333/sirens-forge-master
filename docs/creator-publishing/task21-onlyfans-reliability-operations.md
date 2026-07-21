@@ -134,3 +134,13 @@ A reconciled processed terminal state is accepted only when `status === "process
 Cancelled states, unresolved states, malformed states, nonterminal states, missing fields, extra fields, invalid timestamps, unknown safe error codes, non-null terminal locks, reconciliation query errors, thrown reconciliation queries, no-row results, multi-row results, and malformed response containers all fail closed to the existing `PROCESS_RPC_FAILED` public result with the current aggregate counts. When reconciliation cannot prove one exact terminal shape, database stale-lock recovery remains authoritative.
 
 Claim-RPC uncertainty remains unresolved by Gate 21C-2 because no trusted claimed event-ID and lock-token response may have been received. Gate 21C-2 authorizes no Production activation, scheduler invocation, cron registration, migration, environment change, generation, direct publishing, credentials, browser automation, scraping, unofficial API use, or external-platform behavior.
+
+## Gate 21C-3 uncertain claim outcomes
+
+Gate 21C-3 treats scheduler claim transport/client uncertainty as a handled scheduler result. The runner invokes `creator_publishing_claim_due_scheduler_events` once only, with the existing claim limit and lock TTL constants, and never retries the claim RPC.
+
+If the claim RPC returns an error or throws while being invoked, the public result is the sanitized `CLAIM_RPC_FAILED` result. All aggregate counts remain zero because no trusted claim response was received. Those zero counts are not proof that the database claimed no scheduler event; the claim transaction may have committed while the response was lost.
+
+After claim uncertainty, the runner does not parse claim data, perform claim reconciliation, infer an event from recent scheduler state, query scheduler or audit tables, invoke the process RPC, clear locks, replace locks, release claims, write tables, or invoke another mutating RPC. Locks must not be cleared directly. If the claim transaction committed, database stale-lock expiry remains authoritative for automated recovery.
+
+Operationally, an uncertain claim outcome should be treated as possible committed work with a lost response. Any Production inspection or intervention requires separate explicit authorization. Gate 21C-3 introduces no Production activation, scheduler invocation, cron registration, migration, environment change, generation behavior, or external-platform behavior.

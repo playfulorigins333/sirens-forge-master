@@ -45,7 +45,7 @@ jobs:
             ".github/workflows/task21-onlyfans-reliability.yml"
           )
           if [ ! -s changed-files.txt ]; then
-            echo "Task 21 Gate 21C-2 changed-file set is empty" >&2
+            echo "Task 21 Gate 21C-3 changed-file set is empty" >&2
             exit 1
           fi
           while IFS= read -r changed; do
@@ -57,7 +57,7 @@ jobs:
               fi
             done
             if [ "$allowed" != true ]; then
-              echo "Unauthorized Task 21 Gate 21C-2 path changed: $changed" >&2
+              echo "Unauthorized Task 21 Gate 21C-3 path changed: $changed" >&2
               exit 1
             fi
           done < changed-files.txt
