@@ -58,7 +58,9 @@ insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_
 create table public.task21_retry_pre_data_snapshot(entity_type text,entity_id text,row_data jsonb,primary key(entity_type,entity_id));
 insert into public.task21_retry_pre_data_snapshot select 'account',id::text,to_jsonb(x) from public.creator_platform_accounts x union all select 'package',id::text,to_jsonb(x) from public.creator_publishing_content_packages x union all select 'plan',id::text,to_jsonb(x) from public.creator_publishing_plans x union all select 'job',id::text,to_jsonb(x) from public.creator_publishing_platform_jobs x union all select 'queue',id::text,to_jsonb(x) from public.creator_publishing_queue_tasks x union all select 'event',id::text,to_jsonb(x) from public.creator_publishing_scheduler_events x union all select 'audit',id::text,to_jsonb(x) from public.creator_publishing_audit_events x union all select 'idempotency',creator_id::text||':'||action_type||':'||idempotency_key,to_jsonb(x) from public.creator_publishing_scheduler_idempotency x;
 create table public.task21_retry_pre_function_snapshot(signature text primary key,definition text not null);
-insert into public.task21_retry_pre_function_snapshot select p.oid::regprocedure::text,pg_get_functiondef(p.oid) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public';`
+insert into public.task21_retry_pre_function_snapshot select p.oid::regprocedure::text,pg_get_functiondef(p.oid) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public';
+create table public.task21_retry_pre_trigger_snapshot(trigger_name text primary key,definition text not null);
+insert into public.task21_retry_pre_trigger_snapshot select t.tgname,pg_get_triggerdef(t.oid) from pg_trigger t where t.tgrelid='public.creator_publishing_scheduler_events'::regclass and not t.tgisinternal;`
 try {
  runSql("recreate", "drop database if exists task21_scheduler_retry_exhaustion_ci with (force); create database task21_scheduler_retry_exhaustion_ci;", adminUrl)
  runSql("bootstrap", bootstrap)
