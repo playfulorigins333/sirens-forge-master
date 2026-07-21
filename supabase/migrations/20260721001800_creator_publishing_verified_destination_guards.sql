@@ -212,14 +212,15 @@ begin
   join pg_temp.autopost_selected_packages s on s.content_package_id=m.content_package_id
   order by m.id for update;
 
-  create temp table autopost_locked_generations on commit drop as
+  create temp table autopost_locked_generations (like public.generations including defaults) on commit drop;
+  insert into pg_temp.autopost_locked_generations
   select g.*
   from public.generations g
-  join (
-    select distinct generation_id_text::uuid generation_id
+  where g.id in (
+    select generation_id_text::uuid
     from pg_temp.autopost_locked_media
     where coalesce(generation_id_text,'') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-  ) ids on ids.generation_id=g.id
+  )
   order by g.id for update;
 
   -- Compute source fingerprints only after package, media, and linked generation rows are locked.
