@@ -120,7 +120,7 @@ test("action and UI source assertions enforce safe fields and copy", () => {
   assert.match(form, /readOnly/); assert.match(form, /platformUsername/); assert.match(form, /profileUrl/); assert.match(form, /isVirtualEntity/); assert.match(form, /creatorAttested/)
   assert.doesNotMatch(form + page, /type="password"|name="token"|name="cookie"|Connect account|Login connected|Test connection|Platform verified|Automatically verified/i)
   assert.match(form + page, /does not store your password, tokens, cookies, or login session/)
-  assert.match(page, /Creator attested/); assert.match(page, /Attestation required/)
+  assert.match(page, /Creator attested/); assert.match(form + page, /Creator attestation confirms ownership or authorization only/); assert.match(form + page, /does not enable publishing packages, Publishing Plans, or scheduling/); assert.doesNotMatch(form + page, /Creator attested[\s\S]{0,80}Trusted verification recorded/); assert.doesNotMatch(form + page, /attestation enables publishing/i)
   assert.match(actions, /updateAccountIdSchema = z\.string\(\)\.uuid\(\)/); assert.match(actions, /if \(!parsed\.success\) return invalidForm\(\)/); assert.match(actions, /operation: "create"/); assert.match(actions, /operation: "update"/); assert.match(actions, /revalidatePath\("\/creator\/publishing-queue\/accounts"\)/); assert.match(actions, /revalidatePath\("\/creator\/publishing-queue"\)/)
   assert.match(queue, /Manage platform accounts/)
   assert.doesNotMatch(form, /getSupabaseAdmin|service_role|\.from\("creator_platform_accounts"\)\.(insert|update)/)
