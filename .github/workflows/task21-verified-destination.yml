@@ -21,9 +21,6 @@ on:
       - backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
       - .github/workflows/task21-verified-destination.yml
 
-permissions:
-  contents: write
-
 jobs:
   task21:
     runs-on: ubuntu-latest
@@ -72,52 +69,43 @@ jobs:
           unauthorized=()
           forbidden=()
           for path in "${changed[@]}"; do
-            if [[ ! "$path" =~ $allowed ]]; then unauthorized+=("$path"); fi
+            if [[ ! "$path" =~ $allowed ]]; then
+              unauthorized+=("$path")
+            fi
             if [[ "$path" == "$authorized_migration" ]]; then
               ((migration_count += 1))
             elif [[ "$path" == supabase/migrations/* ]]; then
               forbidden+=("$path")
             fi
             case "$path" in
-              vercel.json|package.json|package-lock.json|.env|.env.*|*/.env|*/.env.*|lib/creator-publishing-queue/scheduling/*|lib/creator-publishing-queue/scheduler-runner/*|app/api/creator-publishing-queue/scheduler/*|app/api/creator-publishing-queue/scheduling/*|*connector*|*adapter*) forbidden+=("$path");;
+              vercel.json|package.json|package-lock.json|.env|.env.*|*/.env|*/.env.*|lib/creator-publishing-queue/scheduling/*|lib/creator-publishing-queue/scheduler-runner/*|app/api/creator-publishing-queue/scheduler/*|app/api/creator-publishing-queue/scheduling/*|*connector*|*adapter*)
+                forbidden+=("$path")
+                ;;
             esac
           done
-          if ((${#unauthorized[@]} > 0)); then printf 'Unauthorized Gate 21C-1 path changed: %s\n' "${unauthorized[@]}" >&2; exit 1; fi
-          if ((migration_count > 1)); then echo "More than one authorized 01800 migration path was found." >&2; exit 1; fi
-          if ((${#forbidden[@]} > 0)); then printf 'Forbidden Gate 21C-1 path changed: %s\n' "${forbidden[@]}" >&2; exit 1; fi
-      - name: Apply authorized destination-account lock correction
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql')
-          source = path.read_text()
-          old = """  create temp table autopost_locked_destination_accounts on commit drop as
-            select a.*
-            from public.creator_platform_accounts a
-            join (select distinct platform_account_id from pg_temp.autopost_selected_packages) s on s.platform_account_id=a.id
-            order by a.id for update;"""
-          new = """  create temp table autopost_locked_destination_accounts (like public.creator_platform_accounts including defaults) on commit drop;
-            insert into pg_temp.autopost_locked_destination_accounts
-            select a.*
-            from public.creator_platform_accounts a
-            where a.id in (select platform_account_id from pg_temp.autopost_selected_packages)
-            order by a.id for update;"""
-          if old not in source:
-              raise SystemExit('Expected destination-account lock block was not found')
-          path.write_text(source.replace(old, new, 1))
-          PY
-          git diff --check
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql
-          git commit -m "Fix Gate 21C-1 destination account locking"
-          git push origin HEAD:codex/implement-gate-21c-1-verified-destination-checks
+          if ((${#unauthorized[@]} > 0)); then
+            printf 'Unauthorized Gate 21C-1 path changed: %s\n' "${unauthorized[@]}" >&2
+            exit 1
+          fi
+          if ((migration_count > 1)); then
+            echo "More than one authorized 01800 migration path was found." >&2
+            exit 1
+          fi
+          if ((${#forbidden[@]} > 0)); then
+            printf 'Forbidden Gate 21C-1 path changed: %s\n' "${forbidden[@]}" >&2
+            exit 1
+          fi
       - run: npx tsx backend/creator-publishing-queue/tests/platformAccountSetup.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/packageComposer.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/autopostOrchestration.test.ts
       - run: node backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
+      - name: Diagnose unexpected verified-destination PostgreSQL error
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          psql "$TASK21_VERIFIED_DESTINATION_DATABASE_URL" -v ON_ERROR_STOP=1 -c "select public.creator_publishing_create_autopost_plan('11111111-1111-4111-8111-111111111111',array['cccccccc-cccc-4ccc-8ccc-ccccccccccc1'::uuid],'plan_attested_diagnostic');" > task21-plan-diagnostic.log 2>&1
+          exit 0
       - run: npm run test:creator-publishing-queue
       - run: npx tsx backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'drop database if exists task15_ci;' -c 'create database task15_ci;'
@@ -149,6 +137,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             task21-verified-destination-postgres-diagnostics.log
+            task21-plan-diagnostic.log
             task15-postgres-diagnostics.log
             task17a-postgres-diagnostics*.log
             task20-postgres-diagnostics.log
