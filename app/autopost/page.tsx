@@ -1,25 +1,6 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
-import { randomUUID } from "node:crypto";
-import AutopostPageClient from "./AutopostPageClient";
-import { Task14AutopostOrchestration } from "./Task14AutopostOrchestration";
-import { loadAutopostCapabilities, loadAutopostPackageOptions } from "@/lib/creator-publishing-queue/autopost/service";
-import { loadCreatorPublishingSchedulingView } from "@/lib/creator-publishing-queue/scheduling/loaders";
-import { Task15PlanScheduling } from "./Task15PlanScheduling";
-import type { AutopostPackageOption, SafeCapability } from "@/lib/creator-publishing-queue/autopost/types";
-
-type Task14AutopostLoadResult =
-  | { ok: true; capabilities: SafeCapability[]; packages: AutopostPackageOption[] }
-  | { ok: false };
-
-async function loadTask14AutopostSection(): Promise<Task14AutopostLoadResult> {
-  try {
-    const [capabilities, packages] = await Promise.all([loadAutopostCapabilities(), loadAutopostPackageOptions()]);
-    return { ok: true, capabilities, packages };
-  } catch {
-    return { ok: false };
-  }
-}
 
 export default async function AutopostPage() {
   const auth = await ensureActiveSubscription();
@@ -32,22 +13,24 @@ export default async function AutopostPage() {
     }
   }
 
-  const task14 = await loadTask14AutopostSection();
-  const schedulingView = await loadCreatorPublishingSchedulingView().catch(() => null);
-
   return (
-    <>
-      <AutopostPageClient />
-      {schedulingView ? <Task15PlanScheduling view={schedulingView} /> : null}
-      {task14.ok ? (
-        <Task14AutopostOrchestration capabilities={task14.capabilities} packages={task14.packages} idempotencyKey={randomUUID().replaceAll("-", "_")} />
-      ) : (
-        <section className="relative z-10 mx-auto mt-8 max-w-6xl rounded-3xl border border-cyan-300/20 bg-cyan-950/20 p-5 text-cyan-50">
-          <p className="text-sm uppercase tracking-[0.25em] text-cyan-200">Task 14 Creator Publishing Orchestration</p>
-          <h2 className="mt-2 text-2xl font-semibold">Autopost orchestration is temporarily unavailable</h2>
-          <p className="mt-2 text-sm text-cyan-100">Existing Autopost tools remain available. The new draft Publishing Plan workflow will appear here after its trusted server data is available.</p>
-        </section>
-      )}
-    </>
+    <main className="relative z-10 mx-auto flex min-h-[70vh] max-w-3xl flex-col justify-center px-6 py-16 text-cyan-50">
+      <section className="rounded-3xl border border-cyan-300/20 bg-cyan-950/25 p-8 shadow-2xl shadow-cyan-950/20 backdrop-blur">
+        <p className="text-sm font-semibold uppercase tracking-[0.35em] text-cyan-200">AutoPost</p>
+        <h1 className="mt-4 text-4xl font-bold tracking-tight text-white sm:text-5xl">AutoPost is currently unavailable</h1>
+        <p className="mt-6 text-base leading-7 text-cyan-100">
+          Publishing automation and scheduling are not available for customer use right now. Your existing records remain preserved.
+        </p>
+        <p className="mt-4 text-sm leading-6 text-cyan-200">
+          No publishing, scheduling, or external-platform action can be started from this page.
+        </p>
+        <Link
+          href="/dashboard"
+          className="mt-8 inline-flex rounded-full border border-cyan-300/30 px-5 py-3 text-sm font-semibold text-cyan-50 transition hover:border-cyan-200 hover:bg-cyan-300/10"
+        >
+          Return to dashboard
+        </Link>
+      </section>
+    </main>
   );
 }
