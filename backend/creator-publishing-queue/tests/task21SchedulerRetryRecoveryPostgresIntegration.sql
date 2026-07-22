@@ -74,7 +74,7 @@ call task21_retry_recovery_test.seed(15); update public.creator_publishing_sched
 call task21_retry_recovery_test.seed(16); update public.creator_publishing_scheduler_events set processing_attempts=2 where id=task21_retry_recovery_test.uuid(5,16);
 call task21_retry_recovery_test.seed(17); update public.creator_publishing_scheduler_events set due_at=transaction_timestamp()+interval '1 hour' where id=task21_retry_recovery_test.uuid(5,17);
 call task21_retry_recovery_test.seed(18); update public.creator_publishing_plans set status='cancelled',cancelled_at=transaction_timestamp() where id=task21_retry_recovery_test.uuid(3,18);
-call task21_retry_recovery_test.seed(19); update public.creator_publishing_platform_jobs set cancelled_at=transaction_timestamp() where id=task21_retry_recovery_test.uuid(4,19);
+call task21_retry_recovery_test.seed(19); update public.creator_publishing_platform_jobs set cancelled_at=transaction_timestamp(),cancelled_by='21500000-0000-4000-8000-000000000101',cancellation_reason='test cancellation' where id=task21_retry_recovery_test.uuid(4,19);
 call task21_retry_recovery_test.seed(20); update public.creator_publishing_platform_jobs set schedule_revision=2 where id=task21_retry_recovery_test.uuid(4,20);
 call task21_retry_recovery_test.seed(21,'operator_due','direct','ready_to_publish');
 call task21_retry_recovery_test.seed(22,'operator_due','assisted','due_now');
