@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { register } from 'node:module'
 
 process.env.SUPABASE_URL = 'http://127.0.0.1:54321'
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321'
@@ -86,6 +87,25 @@ function dueRule(id: string, next = '2026-07-21T00:00:00.000Z') {
   return { id, user_id: `user-${id}`, approval_state: 'APPROVED', enabled: true, selected_platforms: ['x'], next_run_at: next, timezone: 'UTC', start_date: null, end_date: null, posts_per_day: 1, time_slots: ['00:00'], paused_at: null, revoked_at: null, content_payload: { platform: 'x', content_type: 'text', media_posting_enabled: false, text: `local text ${id}` } }
 }
 function authed(url: string) { return new Request(url, { headers: { authorization: 'Bearer dummy-cron-secret' } }) }
+
+const emptyServerOnlyModule = 'data:text/javascript,export%20{}'
+const loaderSource = `
+export async function resolve(specifier, context, nextResolve) {
+  if (specifier === 'server-only') {
+    return {
+      url: ${JSON.stringify(emptyServerOnlyModule)},
+      shortCircuit: true
+    }
+  }
+
+  return nextResolve(specifier, context)
+}
+`
+
+register(
+  `data:text/javascript,${encodeURIComponent(loaderSource)}`,
+  import.meta.url
+)
 
 const { executeAutopost } = await import('../../../app/api/autopost/run/route')
 
