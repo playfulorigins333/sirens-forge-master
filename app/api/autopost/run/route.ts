@@ -43,6 +43,7 @@ type ExecuteAutopostDeps = {
   supabaseAdmin?: AutopostRunDbClient;
   cronSecret?: string;
   env?: Record<string, string | undefined>;
+  postXTextOnlyAutopost?: typeof postXTextOnlyAutopost;
 };
 
 /* ──────────────────────────────────────────────
@@ -158,8 +159,8 @@ function assertCronAuth(req: Request, cronSecret = CRON_SECRET) {
 /* ──────────────────────────────────────────────
    DB Helpers
 ────────────────────────────────────────────── */
-async function logJobEvent(jobId: string, message: string, meta: Record<string, unknown> = {}) {
-  await supabaseAdmin.from("autopost_job_logs").insert({
+async function logJobEvent(db: AutopostRunDbClient, jobId: string, message: string, meta: Record<string, unknown> = {}) {
+  await db.from("autopost_job_logs").insert({
     job_id: jobId,
     level: "info",
     message,
@@ -167,13 +168,13 @@ async function logJobEvent(jobId: string, message: string, meta: Record<string, 
   });
 }
 
-async function advanceScheduleAfterPostedProof(args: {
+async function advanceScheduleAfterPostedProof(db: AutopostRunDbClient, args: {
   rule: AutopostRuleForJobs;
   jobId: string;
   scheduledFor: string;
   now: Date;
 }) {
-  const { data: persistedJob, error } = await supabaseAdmin
+  const { data: persistedJob, error } = await db
     .from("autopost_jobs")
     .select("id,rule_id,user_id,platform,scheduled_for,result_status,platform_post_id")
     .eq("id", args.jobId)
@@ -191,7 +192,7 @@ async function advanceScheduleAfterPostedProof(args: {
     typeof persistedJob.platform_post_id !== "string" ||
     persistedJob.platform_post_id.trim() === ""
   ) {
-    await logJobEvent(args.jobId, "schedule_advancement_skipped", {
+    await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
       reason: "POSTED_PROOF_NOT_PERSISTED_FOR_SLOT",
       rule_id: args.rule.id,
       platform: "x",
@@ -207,7 +208,7 @@ async function advanceScheduleAfterPostedProof(args: {
   });
 
   if (nextRun.ok === false) {
-    await logJobEvent(args.jobId, "schedule_advancement_skipped", {
+    await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
       reason: nextRun.error_code,
       rule_id: args.rule.id,
       platform: "x",
@@ -216,7 +217,7 @@ async function advanceScheduleAfterPostedProof(args: {
     return { advanced: false, skipped: true, reason: nextRun.error_code };
   }
 
-  const { data: updatedRule, error: updateError } = await supabaseAdmin
+  const { data: updatedRule, error: updateError } = await db
     .from("autopost_rules")
     .update({
       last_run_at: args.now.toISOString(),
@@ -234,7 +235,7 @@ async function advanceScheduleAfterPostedProof(args: {
   if (updateError) throw updateError;
 
   if (!updatedRule) {
-    await logJobEvent(args.jobId, "schedule_advancement_skipped", {
+    await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
       reason: "RULE_NOT_ADVANCEABLE",
       rule_id: args.rule.id,
       platform: "x",
@@ -243,7 +244,7 @@ async function advanceScheduleAfterPostedProof(args: {
     return { advanced: false, skipped: true, reason: "RULE_NOT_ADVANCEABLE" };
   }
 
-  await logJobEvent(args.jobId, "schedule_advanced", {
+  await logJobEvent(db, args.jobId, "schedule_advanced", {
     rule_id: args.rule.id,
     platform: "x",
     scheduled_for: args.scheduledFor,
@@ -254,8 +255,8 @@ async function advanceScheduleAfterPostedProof(args: {
   return { advanced: true, skipped: false, next_run_at: nextRun.next_run_at };
 }
 
-async function findExistingJob(ruleId: string, platform: AutopostProofPlatform, scheduledFor: string) {
-  const { data, error } = await supabaseAdmin
+async function findExistingJob(db: AutopostRunDbClient, ruleId: string, platform: AutopostProofPlatform, scheduledFor: string) {
+  const { data, error } = await db
     .from("autopost_jobs")
     .select("id, attempt_count, locked_at, lock_id, state")
     .eq("rule_id", ruleId)
@@ -267,13 +268,13 @@ async function findExistingJob(ruleId: string, platform: AutopostProofPlatform, 
   return data as AutopostJobRow | null;
 }
 
-async function createOrFindPendingJob(args: {
+async function createOrFindPendingJob(db: AutopostRunDbClient, args: {
   rule: AutopostRuleForJobs;
   platform: AutopostProofPlatform;
   scheduledFor: string;
   payload: Record<string, unknown>;
 }) {
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("autopost_jobs")
     .insert({
       rule_id: args.rule.id,
@@ -297,7 +298,7 @@ async function createOrFindPendingJob(args: {
 
   if (!error && data) {
     const job = data as AutopostJobRow;
-    await logJobEvent(job.id, "job_created", {
+    await logJobEvent(db, job.id, "job_created", {
       rule_id: args.rule.id,
       platform: args.platform,
       scheduled_for: args.scheduledFor,
@@ -309,10 +310,10 @@ async function createOrFindPendingJob(args: {
     throw error;
   }
 
-  const existingJob = await findExistingJob(args.rule.id, args.platform, args.scheduledFor);
+  const existingJob = await findExistingJob(db, args.rule.id, args.platform, args.scheduledFor);
   if (!existingJob) throw error;
 
-  await logJobEvent(existingJob.id, "job_dedupe_skipped", {
+  await logJobEvent(db, existingJob.id, "job_dedupe_skipped", {
     rule_id: args.rule.id,
     platform: args.platform,
     scheduled_for: args.scheduledFor,
@@ -321,12 +322,12 @@ async function createOrFindPendingJob(args: {
   return { job: existingJob, created: false };
 }
 
-async function lockJobIfAvailable(job: AutopostJobRow, now: Date, countAttempt: boolean) {
+async function lockJobIfAvailable(db: AutopostRunDbClient, job: AutopostJobRow, now: Date, countAttempt: boolean) {
   const expiredBefore = new Date(now.getTime() - LOCK_TTL_MS).toISOString();
   const lockId = crypto.randomUUID();
   const nextAttemptCount = countAttempt ? (job.attempt_count ?? 0) + 1 : job.attempt_count ?? 0;
 
-  const { data, error } = await supabaseAdmin
+  const { data, error } = await db
     .from("autopost_jobs")
     .update({
       state: "QUEUED",
@@ -343,14 +344,14 @@ async function lockJobIfAvailable(job: AutopostJobRow, now: Date, countAttempt: 
   if (error) throw error;
 
   if (!data) {
-    await logJobEvent(job.id, "job_lock_skipped", {
+    await logJobEvent(db, job.id, "job_lock_skipped", {
       reason: "JOB_ALREADY_LOCKED_OR_NOT_QUEUED",
     });
     return { locked: false, job };
   }
 
   const lockedJob = data as AutopostJobRow;
-  await logJobEvent(lockedJob.id, "job_locked", {
+  await logJobEvent(db, lockedJob.id, "job_locked", {
     lock_id: lockId,
     dispatches_attempted: 0,
     posts_attempted: 0,
@@ -366,6 +367,8 @@ async function lockJobIfAvailable(job: AutopostJobRow, now: Date, countAttempt: 
 export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = {}) {
   const db = deps.supabaseAdmin ?? supabaseAdmin;
   const env = deps.env ?? process.env;
+  // Default no-dependency dispatch still resolves to postXTextOnlyAutopost(...).
+  const postX = deps.postXTextOnlyAutopost ?? postXTextOnlyAutopost;
   const auth = assertCronAuth(req, deps.cronSecret);
   if (!auth.ok) return json(401, auth);
 
@@ -449,7 +452,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
         metadata: content.metadata,
       });
 
-      const { job, created } = await createOrFindPendingJob({
+      const { job, created } = await createOrFindPendingJob(db, {
         rule,
         platform,
         scheduledFor: rule.next_run_at,
@@ -461,7 +464,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
       summary.jobs_found++;
 
       if (claimJobs) {
-        const lockResult = await lockJobIfAvailable(job, now, dispatchEnabled);
+        const lockResult = await lockJobIfAvailable(db, job, now, dispatchEnabled);
         if (lockResult.locked) {
           summary.jobs_locked++;
 
@@ -469,7 +472,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
             summary.dispatches_attempted++;
             summary.posts_attempted++;
 
-            const adapterResult = await postXTextOnlyAutopost({
+            const adapterResult = await postX({
               run_mode: "autopost",
               user_id: rule.user_id,
               rule_id: rule.id,
@@ -477,7 +480,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
               payload: { text: content.text },
             });
 
-            const persisted = await persistAutopostJobResult(supabaseAdmin, {
+            const persisted = await persistAutopostJobResult(db, {
               job_id: lockResult.job.id,
               adapter_result: adapterResult,
               now,
@@ -486,7 +489,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
             if (persisted.persisted_status === "POSTED") {
               summary.results_posted++;
 
-              const advancement = await advanceScheduleAfterPostedProof({
+              const advancement = await advanceScheduleAfterPostedProof(db, {
                 rule,
                 jobId: lockResult.job.id,
                 scheduledFor: rule.next_run_at,
