@@ -10,6 +10,7 @@ on:
       - 'backend/creator-publishing-queue/tests/task21SchedulerRunnerTelemetryContract.test.ts'
       - 'backend/creator-publishing-queue/tests/task21SchedulerRetryExhaustionPostgresIntegration.sql'
       - 'backend/creator-publishing-queue/tests/runTask21SchedulerRetryExhaustionPostgresIntegration.mjs'
+      - 'supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql'
       - 'supabase/migrations/20260721001900_creator_publishing_scheduler_retry_exhaustion.sql'
       - 'backend/creator-publishing-queue/tests/task21SchedulerRetryRecoveryPostgresIntegration.sql'
       - 'backend/creator-publishing-queue/tests/runTask21SchedulerRetryRecoveryPostgresIntegration.mjs'
@@ -22,6 +23,7 @@ on:
       - 'backend/creator-publishing-queue/tests/task21PlanSchedulingServices.test.ts'
       - 'backend/creator-publishing-queue/tests/task21PlanSchedulingSourceContract.test.ts'
       - 'backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts'
+      - 'backend/creator-publishing-queue/tests/autopostOrchestration.test.ts'
       - 'docs/creator-publishing/task21-onlyfans-reliability-operations.md'
       - '.github/workflows/task21-onlyfans-reliability.yml'
   workflow_dispatch:
@@ -63,77 +65,102 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Changed-file scope guard
+      - name: Task 21 reliability changed-file guard
+        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
-          base="${{ github.event.pull_request.base.sha || github.sha }}"
+          base="${{ github.event.pull_request.base.sha }}"
           mapfile -t changed < <(git diff --name-only "$base"...HEAD)
           printf '%s\n' "${changed[@]}" | tee changed-files.txt
 
-          required=(
-            "supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql"
-            "backend/creator-publishing-queue/tests/task21SchedulerRetryRecoveryPostgresIntegration.sql"
-            "backend/creator-publishing-queue/tests/runTask21SchedulerRetryRecoveryPostgresIntegration.mjs"
-            "docs/creator-publishing/task21-onlyfans-reliability-operations.md"
+          if ((${#changed[@]} == 0)); then
+            echo "Task 21 reliability changed-file guard found no changed paths" >&2
+            exit 1
+          fi
+
+          compatibility_paths=(
+            "backend/creator-publishing-queue/tests/autopostOrchestration.test.ts"
+            "backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts"
             ".github/workflows/task21-onlyfans-reliability.yml"
           )
 
-          if ((${#changed[@]} == 0)); then
-            echo "Task 21 Gate 21C-5 changed-file set is empty" >&2
-            exit 1
-          fi
+          immutable_migrations=(
+            "supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql"
+            "supabase/migrations/20260721001900_creator_publishing_scheduler_retry_exhaustion.sql"
+            "supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql"
+          )
 
-          unauthorized=()
-          missing=()
-          migration_count=0
+          workflow_changed=false
           for path in "${changed[@]}"; do
-            allowed=false
-            for required_path in "${required[@]}"; do
-              if [[ "$path" == "$required_path" ]]; then
-                allowed=true
-                break
-              fi
-            done
-            if [[ "$allowed" != true ]]; then unauthorized+=("$path"); fi
-            if [[ "$path" == supabase/migrations/* ]]; then
-              ((migration_count += 1))
-              if [[ "$path" != "supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql" ]]; then
-                unauthorized+=("$path")
-              fi
+            if [[ "$path" == ".github/workflows/task21-onlyfans-reliability.yml" ]]; then
+              workflow_changed=true
             fi
-          done
-
-          for required_path in "${required[@]}"; do
-            found=false
-            for path in "${changed[@]}"; do
-              if [[ "$path" == "$required_path" ]]; then
-                found=true
-                break
+            if [[ "$path" == supabase/migrations/* ]]; then
+              printf 'Task 21 reliability changed-file guard forbids migration changes: %s\n' "$path" >&2
+              exit 1
+            fi
+            for migration_path in "${immutable_migrations[@]}"; do
+              if [[ "$path" == "$migration_path" ]]; then
+                printf 'Task 21 reliability changed-file guard forbids immutable migration changes: %s\n' "$path" >&2
+                exit 1
               fi
             done
-            if [[ "$found" != true ]]; then missing+=("$required_path"); fi
           done
 
-          if ((${#unauthorized[@]} > 0)); then
-            printf 'Unauthorized Task 21 Gate 21C-5 path changed: %s\n' "${unauthorized[@]}" >&2
-            exit 1
+          if [[ "$workflow_changed" == true ]]; then
+            if ((${#changed[@]} != ${#compatibility_paths[@]})); then
+              echo "Task 21 reliability compatibility classification requires exactly three changed files" >&2
+              exit 1
+            fi
+            for required_path in "${compatibility_paths[@]}"; do
+              found=false
+              for path in "${changed[@]}"; do
+                if [[ "$path" == "$required_path" ]]; then
+                  found=true
+                  break
+                fi
+              done
+              if [[ "$found" != true ]]; then
+                printf 'Task 21 reliability compatibility classification missing required path: %s\n' "$required_path" >&2
+                exit 1
+              fi
+            done
+          else
+            for path in "${changed[@]}"; do
+              case "$path" in
+                app/api/creator-publishing-queue/scheduler/run/route.ts|\
+                lib/creator-publishing-queue/scheduler-runner/serviceCore.ts|\
+                backend/creator-publishing-queue/tests/task21SchedulerRunnerServices.test.ts|\
+                backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract.test.ts|\
+                backend/creator-publishing-queue/tests/task21SchedulerRunnerTelemetryContract.test.ts|\
+                backend/creator-publishing-queue/tests/task21SchedulerRetryExhaustionPostgresIntegration.sql|\
+                backend/creator-publishing-queue/tests/runTask21SchedulerRetryExhaustionPostgresIntegration.mjs|\
+                backend/creator-publishing-queue/tests/task21SchedulerRetryRecoveryPostgresIntegration.sql|\
+                backend/creator-publishing-queue/tests/runTask21SchedulerRetryRecoveryPostgresIntegration.mjs|\
+                lib/creator-publishing-queue/scheduling/*|\
+                lib/creator-publishing-queue/scheduling/**/*|\
+                app/api/creator-publishing-queue/scheduling/*|\
+                app/api/creator-publishing-queue/scheduling/**/*|\
+                app/autopost/Task15PlanScheduling.tsx|\
+                app/autopost/page.tsx|\
+                app/autopost/Task14AutopostOrchestration.tsx|\
+                backend/creator-publishing-queue/tests/task21PlanSchedulingServices.test.ts|\
+                backend/creator-publishing-queue/tests/task21PlanSchedulingSourceContract.test.ts|\
+                backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts|\
+                backend/creator-publishing-queue/tests/autopostOrchestration.test.ts|\
+                docs/creator-publishing/task21-onlyfans-reliability-operations.md)
+                  ;;
+                *)
+                  printf 'Task 21 reliability changed-file guard rejects unrelated path: %s\n' "$path" >&2
+                  exit 1
+                  ;;
+              esac
+            done
           fi
-          if ((${#missing[@]} > 0)); then
-            printf 'Required Task 21 Gate 21C-5 path missing: %s\n' "${missing[@]}" >&2
-            exit 1
-          fi
-          if ((migration_count != 1)); then
-            echo "Task 21 Gate 21C-5 requires exactly one migration, the exact 02000 path" >&2
-            exit 1
-          fi
-          if ((${#changed[@]} != ${#required[@]})); then
-            echo "Task 21 Gate 21C-5 must change exactly five authorized files" >&2
-            exit 1
-          fi
-      - name: Gate 21C-5 disposable PostgreSQL integration and concurrency
+      - name: Task 21 scheduler retry recovery PostgreSQL integration and concurrency
         run: node backend/creator-publishing-queue/tests/runTask21SchedulerRetryRecoveryPostgresIntegration.mjs
-      - name: Gate 21C-4 disposable PostgreSQL regression
+      - name: Task 21 scheduler retry exhaustion PostgreSQL regression
         run: node backend/creator-publishing-queue/tests/runTask21SchedulerRetryExhaustionPostgresIntegration.mjs
       - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerServices.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract.test.ts
@@ -160,7 +187,7 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run build
       - run: git diff --check
-      - name: Upload Task 21 Gate 21C-5 diagnostics
+      - name: Upload Task 21 reliability diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
