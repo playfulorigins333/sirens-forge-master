@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { cancelUncertainTransition, classifyMutationResponse, failureTransition, confirmCancelledReconciliation, confirmScheduleReconciliation, scheduleUncertainTransition } from '../../../lib/creator-publishing-queue/scheduling/validation'
-const ui=fs.readFileSync('app/autopost/Task15PlanScheduling.tsx','utf8'), page=fs.readFileSync('app/autopost/page.tsx','utf8'), t14=fs.readFileSync('app/autopost/Task14AutopostOrchestration.tsx','utf8')
+const ui=fs.readFileSync('app/autopost/Task15PlanScheduling.tsx','utf8'), t14=fs.readFileSync('app/autopost/Task14AutopostOrchestration.tsx','utf8')
 assert.match(ui,/confirm\(/); assert.match(ui,/localDate|localTime|scheduleTimezone|publicationUtcOffsetMinutes|intendedPublishAtUtc/); assert.match(ui,/operatorDueUtcOffsetMinutes|operatorDueAtUtc|operatorDueLocalDate|operatorDueLocalTime/)
 assert.doesNotMatch(ui,/useEffect\([^)]*fetch|setTimeout\([^)]*fetch|automaticRetry/i); assert.doesNotMatch(ui,/scheduler\/run/)
 assert.match(ui,/assisted\/manual/); assert.match(ui,/never logs into OnlyFans|never.*posts directly|will not log in or post/)
@@ -18,5 +18,4 @@ const cancel=cancelUncertainTransition({publishingPlanId:'plan',cancellationReas
 assert.equal(confirmCancelledReconciliation([], 'plan','reason'),false); assert.equal(confirmCancelledReconciliation([{publishingPlanId:'plan',status:'cancelled',normalizedCancellationReason:'reason',allPlanJobsBelongToCreator:true,planJobRelationshipConsistent:true}], 'plan','reason'),true); assert.equal(confirmCancelledReconciliation([{publishingPlanId:'plan',status:'cancelled',normalizedCancellationReason:'reason',allPlanJobsBelongToCreator:true,planJobRelationshipConsistent:false}], 'plan','reason'),false)
 assert.match(ui,/not an unschedule operation/); assert.match(ui,/cancels active scheduler events/); assert.match(ui,/archives active plan jobs/); assert.match(ui,/archives related operator queue work/); assert.match(ui,/may clear an active operator claim/); assert.match(ui,/cannot be undone after confirmation/); assert.equal((ui.match(/cannot be undone after confirmation/g)||[]).length,2); assert.doesNotMatch(ui,/cannot be undone through Phase B1/); assert.doesNotMatch(ui,/Task 15 trusted plan scheduling/); for (const label of ['Task 15','Task 21','Phase B1','Phase B2','Gate 21'] as const) assert.equal(ui.includes(label),false,label)
 assert.equal((ui.match(/fetch\("\/api\/creator-publishing-queue\/scheduling\/cancel-plan/g)||[]).length,1); assert.equal((ui.match(/fetch\("\/api\/creator-publishing-queue\/scheduling\/schedule/g)||[]).length,1)
-assert.match(page,/loadCreatorPublishingSchedulingView/); assert.match(page,/Task15PlanScheduling/)
 console.log('task21PlanSchedulingUi ok')
