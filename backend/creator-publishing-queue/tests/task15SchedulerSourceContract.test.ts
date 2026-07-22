@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
@@ -31,10 +31,20 @@ test('Task 15 database contracts include final overrides and no application laye
   assert.doesNotMatch(src, /fetch\(|onlyfans\.com|fansly\.com|fanvue\.com|browser automation/i)
 })
 
-test('Task 15 pass 1 does not modify application cron files', () => {
-  const vercel = readFileSync('vercel.json','utf8')
-  const runRoute = readFileSync('app/api/autopost/run/route.ts','utf8')
-  assert.match(vercel, /"path": "\/api\/autopost\/run"/)
-  assert.doesNotMatch(vercel, /creator-publishing-queue\/scheduler/)
+test('Task 15 pass 1 keeps application cron registration dormant after Task 22B-1', () => {
+  const vercel = JSON.parse(readFileSync('vercel.json', 'utf8')) as { version?: unknown; crons?: unknown }
+  const crons = vercel.crons === undefined ? [] : vercel.crons
+  assert.equal(vercel.version, 2)
+  assert.deepEqual(Object.keys(vercel).sort(), ['version'])
+  assert.deepEqual(crons, [])
+  assert.equal(Array.isArray(crons), true)
+
+  for (const cron of crons as Array<{ path?: unknown }>) {
+    assert.notEqual(cron.path, '/api/autopost/run')
+    assert.notEqual(cron.path, '/api/creator-publishing-queue/scheduler/run')
+  }
+
+  assert.equal(existsSync('app/api/autopost/run/route.ts'), true)
+  const runRoute = readFileSync('app/api/autopost/run/route.ts', 'utf8')
   assert.match(runRoute, /AUTOPOST JOB FOUNDATION RUNNER/)
 })

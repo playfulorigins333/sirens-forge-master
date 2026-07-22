@@ -5,6 +5,7 @@ on:
     paths:
       - 'vercel.json'
       - 'backend/creator-publishing-queue/tests/task22DormantAutopostCronSourceContract.test.ts'
+      - 'backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts'
       - '.github/workflows/task22-dormant-autopost-cron.yml'
   workflow_dispatch:
 
@@ -39,11 +40,12 @@ jobs:
           required=(
             "vercel.json"
             "backend/creator-publishing-queue/tests/task22DormantAutopostCronSourceContract.test.ts"
+            "backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts"
             ".github/workflows/task22-dormant-autopost-cron.yml"
           )
 
           if ((${#changed[@]} != ${#required[@]})); then
-            echo "Task 22B-1 must change exactly three authorized files" >&2
+            echo "Task 22B-1 must change exactly four authorized files" >&2
             exit 1
           fi
 
