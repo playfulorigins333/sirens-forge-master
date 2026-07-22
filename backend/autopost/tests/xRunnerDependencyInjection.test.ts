@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 
 process.env.SUPABASE_URL = 'http://127.0.0.1:54321'
 process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321'
@@ -7,9 +7,6 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = 'dummy-service-role-key'
 process.env.CRON_SECRET = 'dummy-cron-secret'
 process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED = 'false'
 
-mkdirSync('node_modules/server-only', { recursive: true })
-writeFileSync('node_modules/server-only/package.json', JSON.stringify({ name: 'server-only', type: 'module', exports: { '.': { 'react-server': './index.js', default: './index.js' } } }))
-writeFileSync('node_modules/server-only/index.js', '')
 
 type Op = { table: string; type: string; values?: any; filters: any[]; select?: string }
 
@@ -169,5 +166,4 @@ assert.doesNotMatch(routeSource, /supabaseAdmin\.from\(/)
 assert.doesNotMatch(routeSource, /persistAutopostJobResult\(supabaseAdmin/)
 assert.doesNotMatch(routeSource, /fetch\(|api\.x\.com|oauth|supabase\.co/i)
 
-rmSync('node_modules/server-only', { recursive: true, force: true })
 console.log('X runner dependency-injection tests passed')
