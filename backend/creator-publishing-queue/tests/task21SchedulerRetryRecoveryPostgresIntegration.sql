@@ -62,7 +62,7 @@ call task21_retry_recovery_test.seed(4,'publish_due','direct','ready_to_publish'
 call task21_retry_recovery_test.seed(5,'publish_due','planner','package_ready');
 call task21_retry_recovery_test.seed(6);
 call task21_retry_recovery_test.seed(7);
-insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,processing_attempts,processed_at,safe_error_code) select task21_retry_recovery_test.uuid(6,7),creator_id,publishing_plan_id,platform_job_id,'operator_due','blocked',operator_due_at,1,3,transaction_timestamp()-interval '1 minute','SCHEDULER_RETRY_EXHAUSTED' from public.creator_publishing_platform_jobs where id=task21_retry_recovery_test.uuid(4,7);
+insert into public.creator_publishing_scheduler_events(id,creator_id,publishing_plan_id,platform_job_id,event_type,status,due_at,schedule_revision,processing_attempts,processed_at,safe_error_code) select task21_retry_recovery_test.uuid(6,7),creator_id,publishing_plan_id,id,'operator_due','blocked',operator_due_at,1,3,transaction_timestamp()-interval '1 minute','SCHEDULER_RETRY_EXHAUSTED' from public.creator_publishing_platform_jobs where id=task21_retry_recovery_test.uuid(4,7);
 create temp table sibling_before as select to_jsonb(e) v from public.creator_publishing_scheduler_events e where id=task21_retry_recovery_test.uuid(6,7);
 
 call task21_retry_recovery_test.seed(10); update public.creator_publishing_scheduler_events set status='pending',processed_at=null,safe_error_code=null where id=task21_retry_recovery_test.uuid(5,10);
