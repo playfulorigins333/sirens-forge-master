@@ -16,6 +16,8 @@ on:
       - backend/creator-publishing-queue/tests/platformAccountSetup.test.ts
       - backend/creator-publishing-queue/tests/packageComposer.test.ts
       - backend/creator-publishing-queue/tests/autopostOrchestration.test.ts
+      - backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts
+      - .github/workflows/task21-onlyfans-reliability.yml
       - supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql
       - backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration.sql
       - backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
@@ -54,28 +56,36 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
-      - name: Changed-file scope guard
+      - name: Task 21 verified-destination changed-file scope guard
+        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
-          allowed='^(app/creator/publishing-queue/accounts/PlatformAccountForm\.tsx|app/creator/publishing-queue/accounts/page\.tsx|app/creator/publishing-queue/new/page\.tsx|app/creator/publishing-queue/composer/PackageComposerForm\.tsx|lib/creator-publishing-queue/accounts/validation\.ts|lib/creator-publishing-queue/composer/types\.ts|lib/creator-publishing-queue/composer/serviceCore\.ts|lib/creator-publishing-queue/ui/loaders\.ts|lib/creator-publishing-queue/autopost/service\.ts|backend/creator-publishing-queue/tests/platformAccountSetup\.test\.ts|backend/creator-publishing-queue/tests/packageComposer\.test\.ts|backend/creator-publishing-queue/tests/autopostOrchestration\.test\.ts|supabase/migrations/20260721001800_creator_publishing_verified_destination_guards\.sql|backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration\.sql|backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration\.mjs|\.github/workflows/task21-verified-destination\.yml)$'
-          authorized_migration='supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql'
-          mapfile -t changed < <(git diff --name-only "origin/${{ github.base_ref }}...HEAD")
+          allowed='^(app/creator/publishing-queue/accounts/PlatformAccountForm\.tsx|app/creator/publishing-queue/accounts/page\.tsx|app/creator/publishing-queue/new/page\.tsx|app/creator/publishing-queue/composer/PackageComposerForm\.tsx|lib/creator-publishing-queue/accounts/validation\.ts|lib/creator-publishing-queue/composer/types\.ts|lib/creator-publishing-queue/composer/serviceCore\.ts|lib/creator-publishing-queue/ui/loaders\.ts|lib/creator-publishing-queue/autopost/service\.ts|backend/creator-publishing-queue/tests/platformAccountSetup\.test\.ts|backend/creator-publishing-queue/tests/packageComposer\.test\.ts|backend/creator-publishing-queue/tests/autopostOrchestration\.test\.ts|backend/creator-publishing-queue/tests/task21PlanSchedulingUi\.test\.ts|backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration\.sql|backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration\.mjs|\.github/workflows/task21-onlyfans-reliability\.yml|\.github/workflows/task21-verified-destination\.yml)$'
+          immutable_migrations=(
+            supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql
+            supabase/migrations/20260721001900_creator_publishing_scheduler_retry_exhaustion.sql
+            supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql
+          )
+          base_sha='${{ github.event.pull_request.base.sha }}'
+          mapfile -t changed < <(git diff --name-only "${base_sha}..HEAD")
           printf '%s\n' "${changed[@]}" | tee /tmp/changed
-          if ((${#changed[@]} == 0)); then echo "No pull-request changes were found." >&2; exit 1; fi
-          migration_count=0
+          if ((${#changed[@]} == 0)); then echo "No Task 21 verified-destination pull-request changes were found." >&2; exit 1; fi
           unauthorized=()
           forbidden=()
           for path in "${changed[@]}"; do
             if [[ ! "$path" =~ $allowed ]]; then unauthorized+=("$path"); fi
-            if [[ "$path" == "$authorized_migration" ]]; then ((migration_count += 1)); elif [[ "$path" == supabase/migrations/* ]]; then forbidden+=("$path"); fi
+            for migration in "${immutable_migrations[@]}"; do
+              if [[ "$path" == "$migration" ]]; then
+                forbidden+=("$path")
+              fi
+            done
             case "$path" in
-              vercel.json|package.json|package-lock.json|.env|.env.*|*/.env|*/.env.*|lib/creator-publishing-queue/scheduling/*|lib/creator-publishing-queue/scheduler-runner/*|app/api/creator-publishing-queue/scheduler/*|app/api/creator-publishing-queue/scheduling/*|*connector*|*adapter*) forbidden+=("$path");;
+              supabase/migrations/*|vercel.json|package.json|package-lock.json|.env|.env.*|*/.env|*/.env.*|lib/creator-publishing-queue/scheduling/*|lib/creator-publishing-queue/scheduler-runner/*|app/api/creator-publishing-queue/scheduler/*|app/api/creator-publishing-queue/scheduling/*|*connector*|*adapter*) forbidden+=("$path");;
             esac
           done
-          if ((${#unauthorized[@]} > 0)); then printf 'Unauthorized Gate 21C-1 path changed: %s\n' "${unauthorized[@]}" >&2; exit 1; fi
-          if ((migration_count > 1)); then echo "More than one authorized 01800 migration path was found." >&2; exit 1; fi
-          if ((${#forbidden[@]} > 0)); then printf 'Forbidden Gate 21C-1 path changed: %s\n' "${forbidden[@]}" >&2; exit 1; fi
+          if ((${#unauthorized[@]} > 0)); then printf 'Unauthorized Task 21 verified-destination reliability path changed: %s\n' "${unauthorized[@]}" >&2; exit 1; fi
+          if ((${#forbidden[@]} > 0)); then printf 'Forbidden Task 21 verified-destination reliability path changed: %s\n' "${forbidden[@]}" >&2; exit 1; fi
       - run: npx tsx backend/creator-publishing-queue/tests/platformAccountSetup.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/packageComposer.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/autopostOrchestration.test.ts
@@ -107,7 +117,7 @@ jobs:
           set -o pipefail
           npm run build 2>&1 | tee task21-build.log
       - run: git diff --check
-      - name: Upload Gate 21C-1 diagnostics
+      - name: Upload Task 21 verified-destination diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
