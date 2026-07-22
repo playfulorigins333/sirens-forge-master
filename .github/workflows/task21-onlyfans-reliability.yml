@@ -11,6 +11,9 @@ on:
       - 'backend/creator-publishing-queue/tests/task21SchedulerRetryExhaustionPostgresIntegration.sql'
       - 'backend/creator-publishing-queue/tests/runTask21SchedulerRetryExhaustionPostgresIntegration.mjs'
       - 'supabase/migrations/20260721001900_creator_publishing_scheduler_retry_exhaustion.sql'
+      - 'backend/creator-publishing-queue/tests/task21SchedulerRetryRecoveryPostgresIntegration.sql'
+      - 'backend/creator-publishing-queue/tests/runTask21SchedulerRetryRecoveryPostgresIntegration.mjs'
+      - 'supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql'
       - 'lib/creator-publishing-queue/scheduling/**'
       - 'app/api/creator-publishing-queue/scheduling/**'
       - 'app/autopost/Task15PlanScheduling.tsx'
@@ -42,6 +45,7 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       TASK21_SCHEDULER_RETRY_EXHAUSTION_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task21_scheduler_retry_exhaustion_ci
+      TASK21_SCHEDULER_RETRY_RECOVERY_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task21_scheduler_retry_recovery_ci
       TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task15_ci
       TASK17A_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task17a_ci
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
@@ -68,17 +72,15 @@ jobs:
           printf '%s\n' "${changed[@]}" | tee changed-files.txt
 
           required=(
-            "supabase/migrations/20260721001900_creator_publishing_scheduler_retry_exhaustion.sql"
-            "backend/creator-publishing-queue/tests/task21SchedulerRetryExhaustionPostgresIntegration.sql"
-            "backend/creator-publishing-queue/tests/runTask21SchedulerRetryExhaustionPostgresIntegration.mjs"
-            "lib/creator-publishing-queue/scheduler-runner/serviceCore.ts"
-            "backend/creator-publishing-queue/tests/task21SchedulerRunnerServices.test.ts"
+            "supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql"
+            "backend/creator-publishing-queue/tests/task21SchedulerRetryRecoveryPostgresIntegration.sql"
+            "backend/creator-publishing-queue/tests/runTask21SchedulerRetryRecoveryPostgresIntegration.mjs"
             "docs/creator-publishing/task21-onlyfans-reliability-operations.md"
             ".github/workflows/task21-onlyfans-reliability.yml"
           )
 
           if ((${#changed[@]} == 0)); then
-            echo "Task 21 Gate 21C-4 changed-file set is empty" >&2
+            echo "Task 21 Gate 21C-5 changed-file set is empty" >&2
             exit 1
           fi
 
@@ -96,7 +98,7 @@ jobs:
             if [[ "$allowed" != true ]]; then unauthorized+=("$path"); fi
             if [[ "$path" == supabase/migrations/* ]]; then
               ((migration_count += 1))
-              if [[ "$path" != "supabase/migrations/20260721001900_creator_publishing_scheduler_retry_exhaustion.sql" ]]; then
+              if [[ "$path" != "supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql" ]]; then
                 unauthorized+=("$path")
               fi
             fi
@@ -114,22 +116,24 @@ jobs:
           done
 
           if ((${#unauthorized[@]} > 0)); then
-            printf 'Unauthorized Task 21 Gate 21C-4 path changed: %s\n' "${unauthorized[@]}" >&2
+            printf 'Unauthorized Task 21 Gate 21C-5 path changed: %s\n' "${unauthorized[@]}" >&2
             exit 1
           fi
           if ((${#missing[@]} > 0)); then
-            printf 'Required Task 21 Gate 21C-4 path missing: %s\n' "${missing[@]}" >&2
+            printf 'Required Task 21 Gate 21C-5 path missing: %s\n' "${missing[@]}" >&2
             exit 1
           fi
           if ((migration_count != 1)); then
-            echo "Task 21 Gate 21C-4 requires exactly one migration, the exact 01900 path" >&2
+            echo "Task 21 Gate 21C-5 requires exactly one migration, the exact 02000 path" >&2
             exit 1
           fi
           if ((${#changed[@]} != ${#required[@]})); then
-            echo "Task 21 Gate 21C-4 must change exactly seven authorized files" >&2
+            echo "Task 21 Gate 21C-5 must change exactly five authorized files" >&2
             exit 1
           fi
-      - name: Gate 21C-4 disposable PostgreSQL integration
+      - name: Gate 21C-5 disposable PostgreSQL integration and concurrency
+        run: node backend/creator-publishing-queue/tests/runTask21SchedulerRetryRecoveryPostgresIntegration.mjs
+      - name: Gate 21C-4 disposable PostgreSQL regression
         run: node backend/creator-publishing-queue/tests/runTask21SchedulerRetryExhaustionPostgresIntegration.mjs
       - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerServices.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/task21SchedulerRunnerSourceContract.test.ts
@@ -156,7 +160,7 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run build
       - run: git diff --check
-      - name: Upload Task 21 Gate 21C-4 diagnostics
+      - name: Upload Task 21 Gate 21C-5 diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -164,6 +168,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             changed-files.txt
+            task21-scheduler-retry-recovery-postgres-diagnostics.log
             task21-scheduler-retry-exhaustion-postgres-diagnostics.log
             task15-postgres-diagnostics.log
             task17a-postgres-diagnostics*.log

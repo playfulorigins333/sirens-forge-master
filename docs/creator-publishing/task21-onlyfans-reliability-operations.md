@@ -157,4 +157,16 @@ Retry exhaustion changes no Platform Job, Publishing Plan, queue task, content p
 
 `SCHEDULER_RETRY_EXHAUSTED` is not a process-RPC safe code. A normal process response containing it remains `UNKNOWN_SAFE_ERROR_CODE`. Only the exact read-only uncertain-process reconciliation shape may recognize a blocked event with this code after another scheduler invocation legitimately terminalized its expired lock.
 
-Migration `20260721001900_creator_publishing_scheduler_retry_exhaustion.sql` is repository implementation only until separately authorized for Production. Gate 21C-4 authorizes no Supabase linking, Production migration application, Production SQL or inspection, scheduler invocation, cron registration, environment change, generation, direct publishing, credentials, browser automation, scraping, unofficial API use, or external-platform behavior.
+Migration `20260721001900_creator_publishing_scheduler_retry_exhaustion.sql` is applied and verified in Production. Gate 21C-4 is closed. The Production scheduler remains disabled, no Creator Publishing cron is registered, and the legitimate nonzero OnlyFans-assisted canary remains deferred until the creator account is genuinely verified.
+
+## Gate 21C-5 — controlled retry-exhaustion recovery
+
+Gate 21C-5 adds one dormant, service-role-only RPC for an explicitly authorized operator to requeue one exact scheduler event that is still terminally blocked with `SCHEDULER_RETRY_EXHAUSTED`. It is not automatic recovery and is not called by the scheduler runner, a route, the browser, cron, or any external platform integration.
+
+Recovery uses one transaction-stable database timestamp and one transaction advisory lock scoped to `creator_scheduler_retry_recovery:<event_id>`. It then follows the scheduler process lock order: read event identity, lock Publishing Plan, lock Platform Job, lock Scheduler Event, and revalidate identity. A first successful recovery is allowed only when the event remains exhausted with cleared locks, is already due, belongs to a noncancelled nonterminal plan/job at the current revision, and still matches one transition family accepted by scheduler processing.
+
+The only mutation is the targeted scheduler event: `status = pending`, `processing_attempts = 0`, `processed_at = null`, `safe_error_code = null`, and cleared locks. Scheduling identity, timestamps not listed for mutation, sibling events, plans, jobs, queue tasks, packages, accounts, capabilities, generations, scheduler idempotency rows, and historical audits remain unchanged. One sanitized append-only `creator_publishing_scheduler_event_retry_requeued` audit records the finite recovery reason and the exhausted cycle's prior `processed_at` marker.
+
+Successful-operation idempotency is scoped to event, action, and key. An exact same-key/same-reason replay returns finite idempotent success even after the recovered event progresses. A reused key with a different reason conflicts. If the event later legitimately exhausts again with a new `processed_at`, the old key is stale and cannot falsely report recovery for the new cycle; a new valid key is required.
+
+Gate 21C-5 repository implementation does not authorize merge, Production migration application, Production RPC invocation, scheduler invocation, cron or environment changes, automatic recovery, a recovery UI or API, dashboards, alert delivery, a live canary, generation, credentials, browser automation, scraping, unofficial APIs, or external-platform interaction.
