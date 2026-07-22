@@ -19,6 +19,8 @@ on:
       - backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts
       - .github/workflows/task21-onlyfans-reliability.yml
       - supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql
+      - supabase/migrations/20260721001900_creator_publishing_scheduler_retry_exhaustion.sql
+      - supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql
       - backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration.sql
       - backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
       - .github/workflows/task21-verified-destination.yml
