@@ -18,6 +18,10 @@ type SupabaseWriteClient = {
 };
 
 export type PersistableJobResultStatus = Extract<RunProofResultStatus, "POSTED" | "FAILED" | "NOT_CONFIGURED" | "UNSUPPORTED">;
+type JobLogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
+type JobLogInsertOutcome =
+  | { ok: true; error_code: null }
+  | { ok: false; error_code: "JOB_LOG_PERSIST_FAILED" };
 
 export type JobResultPersistenceInput = {
   job_id: string;
@@ -29,6 +33,9 @@ export type JobResultPersistenceOutcome = {
   ok: boolean;
   job_id: string;
   persisted_status: PersistableJobResultStatus;
+  job_result_persisted: boolean;
+  audit_log_persisted: boolean;
+  audit_log_error_code: "JOB_LOG_PERSIST_FAILED" | null;
   posted: boolean;
   platform_post_id: string | null;
   error_code: string | null;
@@ -101,22 +108,40 @@ async function logJobResult(
   status: PersistableJobResultStatus,
   meta: Record<string, unknown>,
 ) {
-  await supabase.from("autopost_job_logs").insert({
+  const resultLevel: JobLogLevel = status === "POSTED" ? "INFO" : "WARN";
+  const resultLog = await insertJobLog(supabase, {
     job_id: jobId,
-    level: status === "POSTED" ? "info" : "warn",
+    level: resultLevel,
     message: RESULT_LOG_MESSAGES[status],
     meta,
   });
 
-  await supabase.from("autopost_job_logs").insert({
+  const persistedLog = await insertJobLog(supabase, {
     job_id: jobId,
-    level: "info",
+    level: "INFO",
     message: "job_result_persisted",
     meta: {
       result_status: status,
       posted: status === "POSTED",
     },
   });
+
+  return resultLog.ok && persistedLog.ok
+    ? ({ ok: true, error_code: null } as const)
+    : ({ ok: false, error_code: "JOB_LOG_PERSIST_FAILED" } as const);
+}
+
+async function insertJobLog(
+  supabase: SupabaseWriteClient,
+  values: { job_id: string; level: JobLogLevel; message: string; meta: Record<string, unknown> },
+): Promise<JobLogInsertOutcome> {
+  try {
+    const { error } = await supabase.from("autopost_job_logs").insert(values);
+    if (error) return { ok: false, error_code: "JOB_LOG_PERSIST_FAILED" };
+    return { ok: true, error_code: null };
+  } catch {
+    return { ok: false, error_code: "JOB_LOG_PERSIST_FAILED" };
+  }
 }
 
 export async function persistAutopostJobResult(
@@ -156,6 +181,9 @@ export async function persistAutopostJobResult(
       ok: false,
       job_id: input.job_id,
       persisted_status: status,
+      job_result_persisted: false,
+      audit_log_persisted: false,
+      audit_log_error_code: null,
       posted: false,
       platform_post_id: null,
       error_code: "JOB_RESULT_PERSIST_FAILED",
@@ -165,7 +193,7 @@ export async function persistAutopostJobResult(
     };
   }
 
-  await logJobResult(supabase, input.job_id, status, {
+  const logOutcome = await logJobResult(supabase, input.job_id, status, {
     result_status: status,
     retryable: classification.retryable,
     terminal: classification.terminal,
@@ -177,6 +205,9 @@ export async function persistAutopostJobResult(
     ok: true,
     job_id: input.job_id,
     persisted_status: status,
+    job_result_persisted: true,
+    audit_log_persisted: logOutcome.ok,
+    audit_log_error_code: logOutcome.error_code,
     posted: proof.posted,
     platform_post_id: proof.posted ? proof.platform_post_id : null,
     error_code: errorCode,

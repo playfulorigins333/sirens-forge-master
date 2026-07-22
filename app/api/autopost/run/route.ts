@@ -88,6 +88,8 @@ type RunSummary = {
   posts_attempted: number;
   results_posted: number;
   results_failed: number;
+  result_persistence_failures: number;
+  job_log_persistence_failures: number;
   results_not_configured: number;
   results_unsupported: number;
   schedule_advancements: number;
@@ -96,6 +98,11 @@ type RunSummary = {
   fanvue_dry_run_blocked: number;
   lock_mode: "foundation_no_dispatch" | "dispatch_gate";
 };
+
+type JobLogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
+type RunnerLogOutcome =
+  | { ok: true; error_code: null }
+  | { ok: false; error_code: "JOB_LOG_PERSIST_FAILED" };
 
 /* ──────────────────────────────────────────────
    Helpers
@@ -159,13 +166,25 @@ function assertCronAuth(req: Request, cronSecret = CRON_SECRET) {
 /* ──────────────────────────────────────────────
    DB Helpers
 ────────────────────────────────────────────── */
-async function logJobEvent(db: AutopostRunDbClient, jobId: string, message: string, meta: Record<string, unknown> = {}) {
-  await db.from("autopost_job_logs").insert({
-    job_id: jobId,
-    level: "info",
-    message,
-    meta,
-  });
+async function logJobEvent(
+  db: AutopostRunDbClient,
+  jobId: string,
+  message: string,
+  meta: Record<string, unknown> = {},
+  level: JobLogLevel = "INFO",
+): Promise<RunnerLogOutcome> {
+  try {
+    const { error } = await db.from("autopost_job_logs").insert({
+      job_id: jobId,
+      level,
+      message,
+      meta,
+    });
+    if (error) return { ok: false, error_code: "JOB_LOG_PERSIST_FAILED" };
+    return { ok: true, error_code: null };
+  } catch {
+    return { ok: false, error_code: "JOB_LOG_PERSIST_FAILED" };
+  }
 }
 
 async function advanceScheduleAfterPostedProof(db: AutopostRunDbClient, args: {
@@ -192,13 +211,13 @@ async function advanceScheduleAfterPostedProof(db: AutopostRunDbClient, args: {
     typeof persistedJob.platform_post_id !== "string" ||
     persistedJob.platform_post_id.trim() === ""
   ) {
-    await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
+    const log = await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
       reason: "POSTED_PROOF_NOT_PERSISTED_FOR_SLOT",
       rule_id: args.rule.id,
       platform: "x",
       scheduled_for: args.scheduledFor,
-    });
-    return { advanced: false, skipped: true, reason: "POSTED_PROOF_NOT_PERSISTED_FOR_SLOT" };
+    }, "WARN");
+    return { advanced: false, skipped: true, reason: "POSTED_PROOF_NOT_PERSISTED_FOR_SLOT", log };
   }
 
   const nextRun = calculateNextRunAtAfterPostedProof({
@@ -208,13 +227,13 @@ async function advanceScheduleAfterPostedProof(db: AutopostRunDbClient, args: {
   });
 
   if (nextRun.ok === false) {
-    await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
+    const log = await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
       reason: nextRun.error_code,
       rule_id: args.rule.id,
       platform: "x",
       scheduled_for: args.scheduledFor,
-    });
-    return { advanced: false, skipped: true, reason: nextRun.error_code };
+    }, "WARN");
+    return { advanced: false, skipped: true, reason: nextRun.error_code, log };
   }
 
   const { data: updatedRule, error: updateError } = await db
@@ -235,16 +254,16 @@ async function advanceScheduleAfterPostedProof(db: AutopostRunDbClient, args: {
   if (updateError) throw updateError;
 
   if (!updatedRule) {
-    await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
+    const log = await logJobEvent(db, args.jobId, "schedule_advancement_skipped", {
       reason: "RULE_NOT_ADVANCEABLE",
       rule_id: args.rule.id,
       platform: "x",
       scheduled_for: args.scheduledFor,
-    });
-    return { advanced: false, skipped: true, reason: "RULE_NOT_ADVANCEABLE" };
+    }, "WARN");
+    return { advanced: false, skipped: true, reason: "RULE_NOT_ADVANCEABLE", log };
   }
 
-  await logJobEvent(db, args.jobId, "schedule_advanced", {
+  const log = await logJobEvent(db, args.jobId, "schedule_advanced", {
     rule_id: args.rule.id,
     platform: "x",
     scheduled_for: args.scheduledFor,
@@ -252,7 +271,7 @@ async function advanceScheduleAfterPostedProof(db: AutopostRunDbClient, args: {
     reason: nextRun.reason,
   });
 
-  return { advanced: true, skipped: false, next_run_at: nextRun.next_run_at };
+  return { advanced: true, skipped: false, next_run_at: nextRun.next_run_at, log };
 }
 
 async function findExistingJob(db: AutopostRunDbClient, ruleId: string, platform: AutopostProofPlatform, scheduledFor: string) {
@@ -298,12 +317,12 @@ async function createOrFindPendingJob(db: AutopostRunDbClient, args: {
 
   if (!error && data) {
     const job = data as AutopostJobRow;
-    await logJobEvent(db, job.id, "job_created", {
+    const log = await logJobEvent(db, job.id, "job_created", {
       rule_id: args.rule.id,
       platform: args.platform,
       scheduled_for: args.scheduledFor,
     });
-    return { job, created: true };
+    return { job, created: true, log };
   }
 
   if (!isDuplicateError(error)) {
@@ -313,13 +332,13 @@ async function createOrFindPendingJob(db: AutopostRunDbClient, args: {
   const existingJob = await findExistingJob(db, args.rule.id, args.platform, args.scheduledFor);
   if (!existingJob) throw error;
 
-  await logJobEvent(db, existingJob.id, "job_dedupe_skipped", {
+  const log = await logJobEvent(db, existingJob.id, "job_dedupe_skipped", {
     rule_id: args.rule.id,
     platform: args.platform,
     scheduled_for: args.scheduledFor,
   });
 
-  return { job: existingJob, created: false };
+  return { job: existingJob, created: false, log };
 }
 
 async function lockJobIfAvailable(db: AutopostRunDbClient, job: AutopostJobRow, now: Date, countAttempt: boolean) {
@@ -344,21 +363,21 @@ async function lockJobIfAvailable(db: AutopostRunDbClient, job: AutopostJobRow, 
   if (error) throw error;
 
   if (!data) {
-    await logJobEvent(db, job.id, "job_lock_skipped", {
+    const log = await logJobEvent(db, job.id, "job_lock_skipped", {
       reason: "JOB_ALREADY_LOCKED_OR_NOT_QUEUED",
-    });
-    return { locked: false, job };
+    }, "WARN");
+    return { locked: false, job, log };
   }
 
   const lockedJob = data as AutopostJobRow;
-  await logJobEvent(db, lockedJob.id, "job_locked", {
+  const log = await logJobEvent(db, lockedJob.id, "job_locked", {
     lock_id: lockId,
     dispatches_attempted: 0,
     posts_attempted: 0,
     lock_mode: "foundation_no_dispatch",
   });
 
-  return { locked: true, job: lockedJob };
+  return { locked: true, job: lockedJob, log };
 }
 
 /* ──────────────────────────────────────────────
@@ -406,6 +425,8 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
     posts_attempted: 0,
     results_posted: 0,
     results_failed: 0,
+    result_persistence_failures: 0,
+    job_log_persistence_failures: 0,
     results_not_configured: 0,
     results_unsupported: 0,
     schedule_advancements: 0,
@@ -452,7 +473,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
         metadata: content.metadata,
       });
 
-      const { job, created } = await createOrFindPendingJob(db, {
+      const { job, created, log: createLog } = await createOrFindPendingJob(db, {
         rule,
         platform,
         scheduledFor: rule.next_run_at,
@@ -461,10 +482,12 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
 
       if (created) summary.jobs_created++;
       else summary.jobs_existing++;
+      if (!createLog.ok) summary.job_log_persistence_failures++;
       summary.jobs_found++;
 
       if (claimJobs) {
         const lockResult = await lockJobIfAvailable(db, job, now, dispatchEnabled);
+        if (!lockResult.log.ok) summary.job_log_persistence_failures++;
         if (lockResult.locked) {
           summary.jobs_locked++;
 
@@ -486,7 +509,33 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
               now,
             });
 
-            if (persisted.persisted_status === "POSTED") {
+            if (persisted.ok === false || persisted.job_result_persisted === false) {
+              summary.result_persistence_failures++;
+              summary.results_failed++;
+              summary.schedule_advancement_skipped++;
+              const skippedLog = await logJobEvent(db, lockResult.job.id, "schedule_advancement_skipped", {
+                reason: "JOB_RESULT_PERSIST_FAILED",
+                rule_id: rule.id,
+                platform: "x",
+                scheduled_for: rule.next_run_at,
+              }, "WARN");
+              if (!skippedLog.ok) summary.job_log_persistence_failures++;
+              continue;
+            }
+
+            if (
+              persisted.audit_log_persisted === false &&
+              persisted.audit_log_error_code === "JOB_LOG_PERSIST_FAILED"
+            ) {
+              summary.job_log_persistence_failures++;
+            }
+
+            if (
+              persisted.persisted_status === "POSTED" &&
+              persisted.posted === true &&
+              typeof persisted.platform_post_id === "string" &&
+              persisted.platform_post_id.trim() !== ""
+            ) {
               summary.results_posted++;
 
               const advancement = await advanceScheduleAfterPostedProof(db, {
@@ -496,8 +545,19 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
                 now: new Date(),
               });
 
+              if (!advancement.log.ok) summary.job_log_persistence_failures++;
               if (advancement.advanced) summary.schedule_advancements++;
               else summary.schedule_advancement_skipped++;
+            } else if (persisted.persisted_status === "POSTED") {
+              summary.results_failed++;
+              summary.schedule_advancement_skipped++;
+              const skippedLog = await logJobEvent(db, lockResult.job.id, "schedule_advancement_skipped", {
+                reason: "POSTED_RESULT_MISSING_DURABLE_PLATFORM_POST_ID",
+                rule_id: rule.id,
+                platform: "x",
+                scheduled_for: rule.next_run_at,
+              }, "WARN");
+              if (!skippedLog.ok) summary.job_log_persistence_failures++;
             } else if (persisted.persisted_status === "NOT_CONFIGURED") {
               summary.results_not_configured++;
               summary.schedule_advancement_skipped++;
