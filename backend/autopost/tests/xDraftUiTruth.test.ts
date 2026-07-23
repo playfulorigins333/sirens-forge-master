@@ -160,9 +160,52 @@ function clearXEnv() {
 function setFakeXOAuthEnv() {
   process.env.X_CLIENT_ID = "local-x-client"
   process.env.X_CLIENT_SECRET = "local-x-secret"
-  process.env.X_REDIRECT_URI = "http://127.0.0.1:3000/api/autopost/x/callback"
-  process.env.AUTOPOST_TOKEN_ENCRYPTION_KEY = "local-fake-encryption-key"
+  process.env.X_REDIRECT_URI = "http://127.0.0.1:3000/api/autopost/connect/x/callback"
+  process.env.AUTOPOST_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64")
   process.env.AUTOPOST_OAUTH_STATE_SECRET = "local-fake-state-secret"
+}
+
+function assertFakeXOAuthEnvironmentContract() {
+  const redirectUri = process.env.X_REDIRECT_URI
+  assert.ok(redirectUri, "fake X redirect URI must be configured")
+
+  const parsedRedirectUri = new URL(redirectUri)
+  assert.equal(
+    parsedRedirectUri.pathname,
+    "/api/autopost/connect/x/callback",
+    "fake X redirect URI must use the actual callback pathname"
+  )
+  assert.equal(parsedRedirectUri.search, "", "fake X redirect URI must not contain a query string")
+  assert.equal(parsedRedirectUri.hash, "", "fake X redirect URI must not contain a fragment")
+
+  const envExample = read(".env.example")
+  assertIncludes(
+    envExample,
+    "X_REDIRECT_URI=https://example.com/api/autopost/connect/x/callback",
+    ".env.example must document the actual X callback pathname"
+  )
+
+  assert.equal(
+    existsSync("app/api/autopost/connect/x/callback/route.ts"),
+    true,
+    "actual X callback route must exist"
+  )
+  assert.equal(
+    existsSync("app/api/autopost/x/callback/route.ts"),
+    false,
+    "obsolete X callback route must not exist"
+  )
+
+  const encodedKey = process.env.AUTOPOST_TOKEN_ENCRYPTION_KEY
+  assert.ok(encodedKey, "fake token-encryption key must be configured")
+
+  const decodedKey = Buffer.from(encodedKey, "base64")
+  assert.equal(decodedKey.length, 32, "fake token-encryption key must decode to exactly 32 bytes")
+  assert.equal(
+    decodedKey.toString("base64"),
+    encodedKey,
+    "fake token-encryption key must use canonical base64"
+  )
 }
 
 function assertXCapability(status: any) {
@@ -220,6 +263,7 @@ try {
   assert.doesNotMatch(`${incompleteStatus.status_message} ${incompleteStatus.disabled_reason}`, /no (native|direct) posting integration/i)
 
   setFakeXOAuthEnv()
+  assertFakeXOAuthEnvironmentContract()
   const completeStatus = buildUserPlatformStatus(x, new Map())
   assert.equal(completeStatus.launch_status, "coming_soon")
   assert.equal(completeStatus.app_configured, true)
