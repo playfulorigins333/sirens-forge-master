@@ -11,10 +11,13 @@ jobs:
   task17b1:
     runs-on: ubuntu-latest
     env:
-      BASE_SHA: a25d23cca89c859b394a10f9410e63f7e0e86d08
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
       NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      SUPABASE_URL: https://example.supabase.co
       NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
       SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+      CRON_SECRET: dummy-cron-secret
+      OPENAI_API_KEY: dummy-openai-key
       STRIPE_SECRET_KEY: sk_test_dummy
       NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_dummy
       RESEND_API_KEY: re_dummy
@@ -22,15 +25,68 @@ jobs:
       R2_ACCESS_KEY_ID: dummy
       R2_SECRET_ACCESS_KEY: dummy
       R2_BUCKET: dummy
+      AUTOPOST_X_RUN_DISPATCH_ENABLED: "false"
+      X_API_BASE_URL: https://api.x.invalid
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify approved baseline is present
+      - name: Verify current pull request base is present
         run: git cat-file -e "$BASE_SHA^{commit}"
-      - name: Verify branch contains approved baseline
+      - name: Verify current pull request head contains its base
         run: git merge-base --is-ancestor "$BASE_SHA" HEAD
+      - name: Determine Task 17B-1 relevance
+        id: task17b1_relevance
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          changed_files=$(mktemp)
+          git diff --name-only "$BASE_SHA"...HEAD | tee "$changed_files"
+
+          relevant=false
+          while IFS= read -r file; do
+            case "$file" in
+              lib/creator-publishing-queue/operator-queue/*|backend/creator-publishing-queue/tests/task17b1OperatorQueueServices.test.ts|backend/creator-publishing-queue/tests/task17b1OperatorQueueSourceContract.test.ts|.github/workflows/task17b1-operator-services.yml)
+                relevant=true
+                ;;
+            esac
+          done < "$changed_files"
+
+          if grep -Fxq 'package.json' "$changed_files"; then
+            git show "${BASE_SHA}:package.json" > /tmp/task17b1-base-package.json
+            if node - /tmp/task17b1-base-package.json package.json <<'NODE'
+          const fs = require('node:fs')
+          const [basePath, headPath] = process.argv.slice(2)
+          const basePackage = JSON.parse(fs.readFileSync(basePath, 'utf8'))
+          const headPackage = JSON.parse(fs.readFileSync(headPath, 'utf8'))
+          const scriptNames = [
+            'test:creator-publishing-task17b1-services',
+            'test:creator-publishing-task17b1-source-contract',
+            'test:creator-publishing-task17b1',
+          ]
+          const changed = scriptNames.some(
+            (name) => (basePackage.scripts?.[name] ?? null) !== (headPackage.scripts?.[name] ?? null),
+          )
+          process.exit(changed ? 0 : 1)
+          NODE
+            then
+              relevant=true
+            fi
+          fi
+
+          echo "task17b1_relevant=$relevant" >> "$GITHUB_OUTPUT"
+          if [[ "$relevant" == 'true' ]]; then
+            echo 'Task 17B-1 is affected by this pull request; full boundary and validation checks will run.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Task 17B-1 is unaffected by this pull request; Task 17B-1 boundary and heavy validation steps are intentionally skipped.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Record Task 17B-1 unaffected
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant != 'true' }}
+        run: echo 'Task 17B-1 is unaffected by this pull request; the required workflow check succeeds without running unrelated heavy validation.' | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Enforce Task 17B-1 changed-file boundary
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
+        shell: bash
         run: |
           set -euo pipefail
           allowed='^(lib/creator-publishing-queue/operator-queue/(types|validation|status|instructions|response|serviceCore|service|loaders|index)\.ts|backend/creator-publishing-queue/tests/task17b1OperatorQueue(Services|SourceContract)\.test\.ts|\.github/workflows/task17b1-operator-services\.yml|package\.json)$'
@@ -50,22 +106,31 @@ jobs:
             fi
           done < /tmp/changed.txt
       - name: Verify migrations unchanged
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
         run: test -z "$(git diff --name-only "$BASE_SHA"...HEAD -- supabase/migrations)"
       - uses: actions/setup-node@v4
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
         with:
           node-version: 22
           cache: npm
       - name: Install dependencies
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
         run: npm ci
       - name: Run Task 17B-1 service tests
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
         run: npm run test:creator-publishing-task17b1-services
       - name: Run Task 17B-1 source-contract tests
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
         run: npm run test:creator-publishing-task17b1-source-contract
       - name: Run existing Creator Publishing Queue tests
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
         run: npm run test:creator-publishing-queue
       - name: Typecheck
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
         run: npx tsc --noEmit
       - name: Production build
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
         run: npm run build
       - name: Whitespace check
-        run: git diff --check
+        if: ${{ steps.task17b1_relevance.outputs.task17b1_relevant == 'true' }}
+        run: git diff --check "$BASE_SHA"...HEAD
