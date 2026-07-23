@@ -27,6 +27,8 @@ export type JobResultPersistenceInput = {
   job_id: string;
   adapter_result: AdapterProofInput;
   now?: Date;
+  attempt_count?: number;
+  max_attempts?: number;
 };
 
 export type JobResultPersistenceOutcome = {
@@ -42,6 +44,9 @@ export type JobResultPersistenceOutcome = {
   retryable: boolean;
   terminal: boolean;
   next_attempt_at: string | null;
+  retry_exhausted: boolean;
+  attempt_count: number | null;
+  max_attempts: number | null;
 };
 
 const RESULT_LOG_MESSAGES: Record<PersistableJobResultStatus, string> = {
@@ -86,19 +91,33 @@ function classifyForPersistence(status: PersistableJobResultStatus, errorCode: s
   return classifyAutopostFailure(errorCode ?? "ADAPTER_RESULT_NOT_POSTED", now);
 }
 
+function normalizeAttemptValue(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function normalizeMaxAttempts(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function buildExhaustionMeta(attemptCount: number, maxAttempts: number) {
+  return { retry_exhausted: true, attempt_count: attemptCount, max_attempts: maxAttempts };
+}
+
 function buildSafeResultJson(args: {
   status: PersistableJobResultStatus;
-  proof: NormalizedAdapterProof;
+  proof?: NormalizedAdapterProof;
   errorCode: string | null;
   safeErrorMessage: string | null;
+  exhaustion?: { attempt_count: number; max_attempts: number } | null;
 }) {
   return {
     status: args.status,
-    platform: args.proof.platform,
-    posted: args.proof.posted,
-    platform_post_id: args.proof.posted ? args.proof.platform_post_id : null,
+    platform: args.proof?.platform ?? "x",
+    posted: args.proof?.posted ?? false,
+    platform_post_id: args.proof?.posted ? args.proof.platform_post_id : null,
     error_code: args.errorCode,
     error_message: args.safeErrorMessage,
+    ...(args.exhaustion ? buildExhaustionMeta(args.exhaustion.attempt_count, args.exhaustion.max_attempts) : {}),
   };
 }
 
@@ -154,7 +173,14 @@ export async function persistAutopostJobResult(
   const status: PersistableJobResultStatus = proof.posted ? "POSTED" : normalizeNonPostedStatus(proof);
   const errorCode = proof.posted ? null : proof.error_code ?? "ADAPTER_RESULT_NOT_POSTED";
   const safeErrorMessage = proof.posted ? null : safeMessage(proof.safe_error_message) ?? "Adapter result was not posted.";
-  const classification = classifyForPersistence(status, errorCode, now);
+  const initialClassification = classifyForPersistence(status, errorCode, now);
+  const attemptCount = normalizeAttemptValue(input.attempt_count);
+  const maxAttempts = normalizeMaxAttempts(input.max_attempts);
+  const retryExhausted =
+    status === "FAILED" && initialClassification.retryable && attemptCount !== null && maxAttempts !== null && attemptCount >= maxAttempts;
+  const classification = retryExhausted
+    ? { retryable: false, terminal: true, next_attempt_at: null, error_code: errorCode ?? "ADAPTER_RESULT_NOT_POSTED" }
+    : initialClassification;
 
   const values = {
     state: status === "POSTED" ? "SUCCEEDED" : classification.retryable ? "QUEUED" : status === "FAILED" ? "FAILED" : "SKIPPED",
@@ -164,6 +190,7 @@ export async function persistAutopostJobResult(
       proof,
       errorCode,
       safeErrorMessage,
+      exhaustion: retryExhausted && attemptCount !== null && maxAttempts !== null ? { attempt_count: attemptCount, max_attempts: maxAttempts } : null,
     }),
     error_code: errorCode,
     error_message: safeErrorMessage,
@@ -190,10 +217,20 @@ export async function persistAutopostJobResult(
       retryable: false,
       terminal: true,
       next_attempt_at: null,
+      retry_exhausted: false,
+      attempt_count: null,
+      max_attempts: null,
     };
   }
 
-  const logOutcome = await logJobResult(supabase, input.job_id, status, {
+  const logOutcome = retryExhausted
+    ? await insertJobLog(supabase, {
+        job_id: input.job_id,
+        level: "WARN",
+        message: "job_retry_exhausted",
+        meta: { error_code: errorCode, ...buildExhaustionMeta(attemptCount!, maxAttempts!) },
+      })
+    : await logJobResult(supabase, input.job_id, status, {
     result_status: status,
     retryable: classification.retryable,
     terminal: classification.terminal,
@@ -214,5 +251,50 @@ export async function persistAutopostJobResult(
     retryable: classification.retryable,
     terminal: classification.terminal,
     next_attempt_at: classification.next_attempt_at,
+    retry_exhausted: retryExhausted,
+    attempt_count: attemptCount,
+    max_attempts: maxAttempts,
   };
+}
+
+export async function persistAutopostRetryExhaustion(
+  supabase: SupabaseWriteClient,
+  input: { job_id: string; now: Date; attempt_count: number; max_attempts: number; error_code?: string | null; error_message?: string | null },
+): Promise<JobResultPersistenceOutcome> {
+  const attemptCount = normalizeAttemptValue(input.attempt_count);
+  const maxAttempts = normalizeMaxAttempts(input.max_attempts);
+  const completedAt = input.now.toISOString();
+  const errorCode = safeMessage(input.error_code) ?? "X_RETRY_ATTEMPTS_EXHAUSTED";
+  const safeErrorMessage = safeMessage(input.error_message) ?? "Retry attempts exhausted.";
+  const values = {
+    state: "FAILED",
+    result_status: "FAILED",
+    result: buildSafeResultJson({
+      status: "FAILED",
+      errorCode,
+      safeErrorMessage,
+      exhaustion: attemptCount !== null && maxAttempts !== null ? { attempt_count: attemptCount, max_attempts: maxAttempts } : null,
+    }),
+    error_code: errorCode,
+    error_message: safeErrorMessage,
+    retryable: false,
+    terminal: true,
+    next_attempt_at: null,
+    completed_at: completedAt,
+    locked_at: null,
+    lock_id: null,
+    platform_post_id: null,
+    posted_at: null,
+  };
+  const { error } = await supabase.from("autopost_jobs").update(values).eq("id", input.job_id);
+  if (error) {
+    return { ok: false, job_id: input.job_id, persisted_status: "FAILED", job_result_persisted: false, audit_log_persisted: false, audit_log_error_code: null, posted: false, platform_post_id: null, error_code: "JOB_RESULT_PERSIST_FAILED", retryable: false, terminal: true, next_attempt_at: null, retry_exhausted: false, attempt_count: attemptCount, max_attempts: maxAttempts };
+  }
+  const logOutcome = await insertJobLog(supabase, {
+    job_id: input.job_id,
+    level: "WARN",
+    message: "job_retry_exhausted",
+    meta: { error_code: errorCode, retry_exhausted: true, attempt_count: attemptCount, max_attempts: maxAttempts },
+  });
+  return { ok: true, job_id: input.job_id, persisted_status: "FAILED", job_result_persisted: true, audit_log_persisted: logOutcome.ok, audit_log_error_code: logOutcome.error_code, posted: false, platform_post_id: null, error_code: errorCode, retryable: false, terminal: true, next_attempt_at: null, retry_exhausted: true, attempt_count: attemptCount, max_attempts: maxAttempts };
 }

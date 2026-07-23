@@ -1,0 +1,75 @@
+import assert from 'node:assert/strict'
+import { register } from 'node:module'
+
+process.env.SUPABASE_URL = 'http://127.0.0.1:54321'
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321'
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'dummy-service-role-key'
+process.env.CRON_SECRET = 'dummy-cron-secret'
+process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED = 'false'
+
+type Op = { table: string; type: string; values?: any; filters: any[]; select?: string }
+class FakeQuery { table:string; type='select'; values:any; filters:any[]=[]; selectValue?:string; client:FakeSupabase
+  constructor(c:FakeSupabase,t:string){this.client=c;this.table=t} select(v?:string){this.selectValue=v;return this} insert(v:any){this.type='insert';this.values=v;return this} update(v:any){this.type='update';this.values=v;return this}
+  eq(c:string,v:any){this.filters.push(['eq',c,v]);return this} is(c:string,v:any){this.filters.push(['is',c,v]);return this} not(c:string,o:string,v:any){this.filters.push(['not',c,o,v]);return this} lte(c:string,v:any){this.filters.push(['lte',c,v]);return this} or(v:string){this.filters.push(['or',v]);return this}
+  single(){return this} maybeSingle(){return this} then(r:any,j:any){return Promise.resolve(this.client.execute(this)).then(r,j)} }
+class FakeSupabase { operations:Op[]=[]; rules:any[]; jobs:any[]=[]; beforeLock?:()=>void; failResultLog=false
+  constructor(rules:any[]=[]){this.rules=rules} from(t:string){return new FakeQuery(this,t)}
+  execute(q:FakeQuery){ this.operations.push({table:q.table,type:q.type,values:q.values,filters:q.filters,select:q.selectValue})
+    if(q.table==='autopost_rules'&&q.type==='select') return {data:this.rules,error:null}
+    if(q.table==='autopost_rules'&&q.type==='update'){const r=this.rules.find(x=>x.id===filter(q,'id')); if(r) Object.assign(r,q.values); return {data:r?{id:r.id}:null,error:null}}
+    if(q.table==='autopost_job_logs'&&q.type==='insert') return {data:null,error:this.failResultLog?{message:'SECRET_DB_LOG_LEAK'}:null}
+    if(q.table==='autopost_jobs'&&q.type==='insert'){if(this.jobs.some(j=>j.rule_id===q.values.rule_id&&j.platform===q.values.platform&&j.scheduled_for===q.values.scheduled_for)) return {data:null,error:{code:'23505',message:'duplicate'}}; const job={id:`job-${this.jobs.length+1}`,...q.values}; this.jobs.push(job); return {data:pickJob(job),error:null}}
+    if(q.table==='autopost_jobs'&&q.type==='select'){const id=filter(q,'id'); const job=id?this.jobs.find(j=>j.id===id):this.jobs.find(j=>j.rule_id===filter(q,'rule_id')&&j.platform===filter(q,'platform')&&j.scheduled_for===filter(q,'scheduled_for')); return {data:job??null,error:null}}
+    if(q.table==='autopost_jobs'&&q.type==='update'){const id=filter(q,'id'); const job=this.jobs.find(j=>j.id===id); if(!job) return {data:null,error:null}; if('lock_id' in q.values && !('result_status' in q.values)){this.beforeLock?.(); this.beforeLock=undefined; if(!atomicAllows(q,job)) return {data:null,error:null}} Object.assign(job,q.values); return {data:pickJob(job),error:null}}
+    throw new Error(`Unexpected ${q.table}.${q.type}`)} }
+function filter(q:FakeQuery,c:string){return q.filters.find(f=>f[0]==='eq'&&f[1]===c)?.[2]}
+function pickJob(j:any){return {id:j.id,attempt_count:j.attempt_count,locked_at:j.locked_at,lock_id:j.lock_id,state:j.state,next_attempt_at:j.next_attempt_at,completed_at:j.completed_at,result_status:j.result_status,error_code:j.error_code,error_message:j.error_message}}
+function atomicAllows(q:FakeQuery,j:any){ if(j.state!=='QUEUED'||j.completed_at!==null) return false; if(j.attempt_count!==filter(q,'attempt_count')) return false; const or=q.filters.find(f=>f[0]==='or')?.[1]??''; const now=(or.match(/next_attempt_at\.lte\.([^,)]*)/)||[])[1]; const exp=(or.match(/locked_at\.lt\.([^,)]*)/)||[])[1]; const retryDue=j.next_attempt_at===null || (!!now && j.next_attempt_at<=now); const lockFree=j.locked_at===null || (!!exp && j.locked_at<exp); return retryDue&&lockFree }
+function ops(db:FakeSupabase,t:string,type:string){return db.operations.filter(o=>o.table===t&&o.type===type)}
+function logs(db:FakeSupabase,m:string){return ops(db,'autopost_job_logs','insert').filter(o=>o.values.message===m)}
+function dueRule(id:string,next='2026-07-23T00:00:00.000Z'){return {id,user_id:`user-${id}`,approval_state:'APPROVED',enabled:true,selected_platforms:['x'],next_run_at:next,timezone:'UTC',start_date:null,end_date:null,posts_per_day:1,time_slots:['00:00'],paused_at:null,revoked_at:null,content_payload:{platform:'x',content_type:'text',media_posting_enabled:false,text:`text ${id}`}}}
+function authed(url:string){return new Request(url,{headers:{authorization:'Bearer dummy-cron-secret'}})}
+const loaderSource=`export async function resolve(specifier, context, nextResolve) { if (specifier === 'server-only') return { url: 'data:text/javascript,export%20{}', shortCircuit: true }; return nextResolve(specifier, context) }`
+register(`data:text/javascript,${encodeURIComponent(loaderSource)}`, import.meta.url)
+const { executeAutopost } = await import('../../../app/api/autopost/run/route')
+const { persistAutopostJobResult, persistAutopostRetryExhaustion } = await import('../../../lib/autopost/jobResults')
+const { classifyAutopostFailure } = await import('../../../lib/autopost/jobProof')
+let currentNow = new Date('2026-07-23T00:00:00.000Z')
+async function run(db:FakeSupabase, adapter:any=async()=>({ok:false,status:'FAILED',platform:'x',error_code:'X_API_RATE_LIMITED',error_message:'safe'}), url='http://local.test/api/autopost/run?dispatch=1'){const res=await executeAutopost(authed(url),{supabaseAdmin:db as any,cronSecret:'dummy-cron-secret',env:{AUTOPOST_X_RUN_DISPATCH_ENABLED:'true'},now:()=>new Date(currentNow),postXTextOnlyAutopost:adapter}); return res.json()}
+
+{
+ const db=new FakeSupabase([dueRule('a')]); let calls=0; const body=await run(db,async()=>{calls++; assert.equal(db.jobs[0].attempt_count,1); return {ok:false,status:'FAILED',platform:'x',error_code:'X_API_RATE_LIMITED',error_message:'safe'}})
+ const job=db.jobs[0]; assert.equal(job.attempt_count,1); assert.equal(calls,1); assert.equal(body.summary.dispatches_attempted,1); assert.equal(body.summary.posts_attempted,1); assert.equal(job.state,'QUEUED'); assert.equal(job.next_attempt_at,'2026-07-23T00:05:00.000Z'); assert.equal(job.completed_at,null); assert.equal(job.locked_at,null); assert.equal(job.lock_id,null); assert.equal(job.result.retry_exhausted,undefined); assert.equal(db.rules[0].next_run_at,'2026-07-23T00:00:00.000Z')
+ currentNow=new Date('2026-07-23T00:04:59.000Z'); const before=await run(db,async()=>{throw new Error('no fourth or early dispatch')}); assert.equal(db.jobs[0].attempt_count,1); assert.equal(before.summary.retry_not_due,1); assert.equal(logs(db,'job_retry_not_due').length,1)
+ currentNow=new Date('2026-07-23T00:05:00.000Z'); await run(db,async()=>({ok:false,status:'FAILED',platform:'x',error_code:'X_API_RATE_LIMITED',error_message:'safe2'})); assert.equal(db.jobs[0].attempt_count,2); assert.equal(db.jobs[0].state,'QUEUED'); assert.equal(db.jobs[0].next_attempt_at,'2026-07-23T00:10:00.000Z')
+ currentNow=new Date('2026-07-23T00:10:00.000Z'); await run(db,async()=>({ok:false,status:'FAILED',platform:'x',error_code:'X_API_RATE_LIMITED',error_message:'safe3'})); assert.equal(db.jobs[0].attempt_count,3); assert.equal(db.jobs[0].state,'FAILED'); assert.equal(db.jobs[0].completed_at,'2026-07-23T00:10:00.000Z'); assert.equal(db.jobs[0].next_attempt_at,null); assert.equal(db.jobs[0].error_code,'X_API_RATE_LIMITED'); assert.deepEqual({retry_exhausted:db.jobs[0].result.retry_exhausted,attempt_count:db.jobs[0].result.attempt_count,max_attempts:db.jobs[0].result.max_attempts},{retry_exhausted:true,attempt_count:3,max_attempts:3}); assert.equal(logs(db,'job_retry_exhausted').length,1)
+ const terminal=await run(db,async()=>{throw new Error('terminal no dispatch')}); assert.equal(terminal.summary.terminal_jobs_skipped,1)
+}
+{
+ currentNow=new Date('2026-07-23T01:00:00.000Z'); const db=new FakeSupabase([dueRule('existing')]); db.jobs.push({id:'j3',rule_id:'existing',user_id:'user-existing',platform:'x',scheduled_for:'2026-07-23T00:00:00.000Z',payload:{},state:'QUEUED',result_status:'FAILED',attempt_count:3,next_attempt_at:'2026-07-23T00:00:00.000Z',completed_at:null,locked_at:null,lock_id:null,error_code:'X_API_RATE_LIMITED',error_message:'safe'}); const body=await run(db,async()=>{throw new Error('no dispatch')}); assert.equal(db.jobs[0].attempt_count,3); assert.equal(db.jobs[0].state,'FAILED'); assert.equal(body.summary.retry_exhausted,1)
+}
+{
+ const db=new FakeSupabase([dueRule('four')]); db.jobs.push({id:'j4',rule_id:'four',user_id:'user-four',platform:'x',scheduled_for:'2026-07-23T00:00:00.000Z',payload:{},state:'QUEUED',result_status:'FAILED',attempt_count:4,next_attempt_at:null,completed_at:null,locked_at:'2026-07-22T00:00:00.000Z',lock_id:'old',error_code:null,error_message:'raw secret should not appear'}); await run(db,async()=>{throw new Error('no dispatch')}); assert.equal(db.jobs[0].attempt_count,4); assert.equal(db.jobs[0].state,'FAILED'); assert.equal(db.jobs[0].result.retry_exhausted,true); assert.equal(db.jobs[0].result.error_code,'X_RETRY_ATTEMPTS_EXHAUSTED')
+}
+{
+ currentNow=new Date('2026-07-23T02:00:00.000Z'); const db=new FakeSupabase([dueRule('race')]); db.jobs.push({id:'race-job',rule_id:'race',user_id:'user-race',platform:'x',scheduled_for:'2026-07-23T00:00:00.000Z',payload:{},state:'QUEUED',result_status:'FAILED',attempt_count:2,next_attempt_at:'2026-07-23T01:00:00.000Z',completed_at:null,locked_at:null,lock_id:null,error_code:'X_API_RATE_LIMITED',error_message:'safe'}); db.beforeLock=()=>{db.jobs[0].attempt_count=3}; const body=await run(db,async()=>{throw new Error('stale snapshot no dispatch')}); assert.equal(db.jobs[0].attempt_count,3); assert.equal(body.summary.lock_eligibility_changed + body.summary.retry_exhausted, 1)
+}
+{
+ currentNow=new Date('2026-07-23T03:00:00.000Z'); const db=new FakeSupabase([dueRule('locked')]); db.jobs.push({id:'locked-job',rule_id:'locked',user_id:'user-locked',platform:'x',scheduled_for:'2026-07-23T00:00:00.000Z',payload:{},state:'QUEUED',result_status:'FAILED',attempt_count:1,next_attempt_at:'2026-07-23T02:00:00.000Z',completed_at:null,locked_at:'2026-07-23T02:55:00.000Z',lock_id:'active',error_code:'X_API_RATE_LIMITED',error_message:'safe'}); const body=await run(db,async()=>{throw new Error('active lock')}); assert.equal(body.summary.currently_locked,1)
+ db.jobs[0].locked_at='2026-07-23T02:00:00.000Z'; let calls=0; await run(db,async()=>{calls++; return {ok:false,status:'FAILED',platform:'x',error_code:'X_API_RATE_LIMITED',error_message:'safe'}}); assert.equal(calls,1); assert.equal(db.jobs[0].attempt_count,2)
+ db.jobs[0].locked_at='2026-07-23T02:00:00.000Z'; db.jobs[0].next_attempt_at='2026-07-23T04:00:00.000Z'; const future=await run(db,async()=>{throw new Error('future retry')}); assert.equal(future.summary.retry_not_due,1)
+}
+{
+ const db=new FakeSupabase(); const now=new Date('2026-07-23T05:00:00.000Z'); db.jobs.push({id:'direct',state:'QUEUED',attempt_count:0}); let out=await persistAutopostJobResult(db as any,{job_id:'direct',now,attempt_count:2,max_attempts:3,adapter_result:{ok:false,status:'FAILED',platform:'x',error_code:'X_API_RATE_LIMITED',error_message:'safe'}}); assert.equal(out.retryable,true); assert.equal(out.next_attempt_at,'2026-07-23T05:05:00.000Z')
+ out=await persistAutopostJobResult(db as any,{job_id:'direct',now,attempt_count:3,max_attempts:3,adapter_result:{ok:false,status:'FAILED',platform:'x',error_code:'X_API_RATE_LIMITED',error_message:'safe'}}); assert.equal(out.retry_exhausted,true); assert.equal(db.jobs[0].error_code,'X_API_RATE_LIMITED')
+ out=await persistAutopostJobResult(db as any,{job_id:'direct',now,adapter_result:{ok:false,status:'FAILED',platform:'x',error_code:'X_POST_OUTCOME_UNKNOWN',error_message:'safe'}}); assert.equal(out.terminal,true); assert.equal(out.retryable,false); assert.equal(out.next_attempt_at,null)
+ out=await persistAutopostJobResult(db as any,{job_id:'direct',now,adapter_result:{ok:false,status:'FAILED',platform:'x',error_code:'X_API_REJECTED',error_message:'safe'}}); assert.equal(out.terminal,true); assert.equal(out.retryable,false)
+ db.failResultLog=true; out=await persistAutopostJobResult(db as any,{job_id:'direct',now,adapter_result:{ok:true,status:'POSTED',platform:'x',platform_post_id:'posted-id'}}); assert.equal(out.ok,true); assert.equal(out.audit_log_persisted,false); assert.equal(out.retry_exhausted,false)
+ await persistAutopostRetryExhaustion(db as any,{job_id:'direct',now,attempt_count:3,max_attempts:3,error_code:null,error_message:null}); assert.equal(db.jobs[0].error_code,'X_RETRY_ATTEMPTS_EXHAUSTED')
+ assert.equal(classifyAutopostFailure('X_API_RATE_LIMITED',now).retryable,true); assert.equal(classifyAutopostFailure('X_POST_OUTCOME_UNKNOWN',now).terminal,true)
+}
+{
+ currentNow=new Date('2026-07-23T06:00:00.000Z'); const db=new FakeSupabase([dueRule('public')]); let calls=0; const body=await run(db,async()=>{calls++; throw new Error('disabled')},'http://local.test/api/autopost/run?foundation=1&claim=1'); assert.equal(calls,0); assert.equal(db.jobs[0].attempt_count,0); assert.equal(body.summary.schedule_advancements,0)
+ db.jobs[0].next_attempt_at='2026-07-23T07:00:00.000Z'; db.jobs[0].locked_at=null; db.jobs[0].lock_id=null; await run(db,async()=>{calls++},'http://local.test/api/autopost/run?foundation=1&claim=1'); assert.equal(db.jobs[0].lock_id,null); assert.equal(calls,0)
+}
+console.log('X-05 local injected fakes only: no X, OAuth, Supabase, Vercel, Production, SQL, Supabase CLI, cron, OnlyFans, Fanvue, Reddit, Generate, live route, live adapter route, real token, or real secret was contacted.')
