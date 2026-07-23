@@ -228,13 +228,6 @@ export async function postXTextOnlyAutopost(
   input: XAdapterRequest,
   deps: XAdapterDeps = {}
 ): Promise<XAdapterResponse> {
-  const supabaseAdmin = deps.supabaseAdmin ?? getSupabaseAdmin()
-  const fetchImpl = deps.fetchImpl ?? fetch
-  const decryptToken = deps.decryptToken ?? decryptAutopostToken
-  const refreshAccessToken = deps.refreshAccessToken ?? refreshXAccessToken
-  const getApiBaseUrl = deps.getApiBaseUrl ?? getXApiBaseUrl
-  const now = deps.now ?? (() => new Date())
-
   if (input.run_mode !== "autopost") {
     return failure("FAILED", "INVALID_RUN_MODE", "run_mode must be autopost")
   }
@@ -264,6 +257,13 @@ export async function postXTextOnlyAutopost(
   if (Array.from(text).length > 280) {
     return failure("FAILED", "X_TEXT_TOO_LONG", "X text must be 280 characters or fewer")
   }
+
+  const supabaseAdmin = deps.supabaseAdmin ?? getSupabaseAdmin()
+  const fetchImpl = deps.fetchImpl ?? fetch
+  const decryptToken = deps.decryptToken ?? decryptAutopostToken
+  const refreshAccessToken = deps.refreshAccessToken ?? refreshXAccessToken
+  const getApiBaseUrl = deps.getApiBaseUrl ?? getXApiBaseUrl
+  const now = deps.now ?? (() => new Date())
 
   const userId = input.user_id.trim()
   let account: XAccountRow | null

@@ -319,6 +319,16 @@ for (const [status, code] of [[401, 'X_API_UNAUTHORIZED'], [403, 'X_API_FORBIDDE
   assertNoSecrets(out)
 }
 
+
+// Pre-validation failures must not resolve production defaults that can touch external configuration.
+{
+  const depsWithThrowingDefaults: any = {}
+  Object.defineProperty(depsWithThrowingDefaults, 'supabaseAdmin', { get: () => { throw new Error('default dependency touched before validation') } })
+  const result = await postXTextOnlyAutopost({ run_mode: 'manual', user_id: 'user-1', rule_id: 'rule-1', payload: { text: expectedText } }, depsWithThrowingDefaults)
+  assert.equal(result.ok, false)
+  assert.equal(result.error_code, 'INVALID_RUN_MODE')
+}
+
 // 18. Representative pre-provider local failures never create-post.
 const preProviderCases: Array<{ name: string; input?: any; opts?: Parameters<typeof makeAdapterHarness>[0]; code: string; status?: string; refreshCalls?: number }> = [
   { name: 'invalid run mode', input: { run_mode: 'manual' }, code: 'INVALID_RUN_MODE' },
