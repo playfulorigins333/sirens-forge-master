@@ -8,7 +8,7 @@ import {
   validateXRunContentPayload,
   type AutopostProofPlatform,
 } from "@/lib/autopost/jobProof";
-import { persistAutopostJobResult } from "@/lib/autopost/jobResults";
+import { persistAutopostJobResult, persistAutopostRetryExhaustion } from "@/lib/autopost/jobResults";
 import { calculateNextRunAtAfterPostedProof } from "@/lib/autopost/scheduleAdvance";
 import { postXTextOnlyAutopost } from "@/lib/autopost/xAdapter";
 import { runFanvueRouteDryRunVerification, isFanvueRouteDryRunConfirmed } from "@/lib/autopost/fanvueRunRouteDryRunVerifier";
@@ -35,6 +35,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABAS
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const CRON_SECRET = process.env.CRON_SECRET || process.env.VERCEL_CRON_SECRET || "";
 const LOCK_TTL_MS = 15 * 60 * 1000;
+const MAX_X_DISPATCH_ATTEMPTS = 3;
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -44,6 +45,7 @@ type ExecuteAutopostDeps = {
   cronSecret?: string;
   env?: Record<string, string | undefined>;
   postXTextOnlyAutopost?: typeof postXTextOnlyAutopost;
+  now?: () => Date;
 };
 
 /* ──────────────────────────────────────────────
@@ -72,6 +74,11 @@ type AutopostJobRow = {
   locked_at: string | null;
   lock_id: string | null;
   state: string | null;
+  next_attempt_at: string | null;
+  completed_at: string | null;
+  result_status: string | null;
+  error_code: string | null;
+  error_message: string | null;
 };
 
 type RunSummary = {
@@ -96,6 +103,11 @@ type RunSummary = {
   schedule_advancement_skipped: number;
   fanvue_dry_runs: number;
   fanvue_dry_run_blocked: number;
+  retry_not_due: number;
+  retry_exhausted: number;
+  terminal_jobs_skipped: number;
+  currently_locked: number;
+  lock_eligibility_changed: number;
   lock_mode: "foundation_no_dispatch" | "dispatch_gate";
 };
 
@@ -109,10 +121,6 @@ type RunnerLogOutcome =
 ────────────────────────────────────────────── */
 function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
-}
-
-function nowISO() {
-  return new Date().toISOString();
 }
 
 function isDuplicateError(error: { code?: string | null } | null) {
@@ -277,7 +285,7 @@ async function advanceScheduleAfterPostedProof(db: AutopostRunDbClient, args: {
 async function findExistingJob(db: AutopostRunDbClient, ruleId: string, platform: AutopostProofPlatform, scheduledFor: string) {
   const { data, error } = await db
     .from("autopost_jobs")
-    .select("id, attempt_count, locked_at, lock_id, state")
+    .select("id, attempt_count, locked_at, lock_id, state, next_attempt_at, completed_at, result_status, error_code, error_message")
     .eq("rule_id", ruleId)
     .eq("platform", platform)
     .eq("scheduled_for", scheduledFor)
@@ -311,8 +319,9 @@ async function createOrFindPendingJob(db: AutopostRunDbClient, args: {
       lock_id: null,
       posted_at: null,
       completed_at: null,
+      next_attempt_at: null,
     })
-    .select("id, attempt_count, locked_at, lock_id, state")
+    .select("id, attempt_count, locked_at, lock_id, state, next_attempt_at, completed_at, result_status, error_code, error_message")
     .single();
 
   if (!error && data) {
@@ -341,43 +350,109 @@ async function createOrFindPendingJob(db: AutopostRunDbClient, args: {
   return { job: existingJob, created: false, log };
 }
 
+
+type DispatchEligibilityReason =
+  | "ELIGIBLE"
+  | "RETRY_NOT_DUE"
+  | "MAX_ATTEMPTS_EXHAUSTED"
+  | "TERMINAL_JOB"
+  | "CURRENTLY_LOCKED"
+  | "LOCK_ELIGIBILITY_CHANGED"
+  | "JOB_NOT_FOUND";
+
+function normalizeObservedAttemptCount(value: number | null) {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : MAX_X_DISPATCH_ATTEMPTS;
+}
+
+function classifyDispatchEligibility(job: AutopostJobRow | null, now: Date): DispatchEligibilityReason {
+  if (!job) return "JOB_NOT_FOUND";
+  if (job.state !== "QUEUED" || job.completed_at != null) return "TERMINAL_JOB";
+  if (job.locked_at != null) {
+    const lockedAt = Date.parse(job.locked_at);
+    if (!Number.isFinite(lockedAt)) return "CURRENTLY_LOCKED";
+    if (lockedAt >= now.getTime() - LOCK_TTL_MS) return "CURRENTLY_LOCKED";
+  }
+  const attemptCount = normalizeObservedAttemptCount(job.attempt_count);
+  if (attemptCount >= MAX_X_DISPATCH_ATTEMPTS) return "MAX_ATTEMPTS_EXHAUSTED";
+  if (job.next_attempt_at != null) {
+    const nextAttemptAt = Date.parse(job.next_attempt_at);
+    if (!Number.isFinite(nextAttemptAt)) return "RETRY_NOT_DUE";
+    if (nextAttemptAt > now.getTime()) return "RETRY_NOT_DUE";
+  }
+  return "ELIGIBLE";
+}
+
+async function readJobById(db: AutopostRunDbClient, jobId: string) {
+  const { data, error } = await db.from("autopost_jobs").select("id, attempt_count, locked_at, lock_id, state, next_attempt_at, completed_at, result_status, error_code, error_message").eq("id", jobId).maybeSingle();
+  if (error) throw error;
+  return data as AutopostJobRow | null;
+}
+
 async function lockJobIfAvailable(db: AutopostRunDbClient, job: AutopostJobRow, now: Date, countAttempt: boolean) {
+  const precheck = classifyDispatchEligibility(job, now);
+  if (precheck !== "ELIGIBLE") {
+    const log = await logJobEvent(db, job.id, precheck === "RETRY_NOT_DUE" ? "job_retry_not_due" : precheck === "TERMINAL_JOB" ? "job_terminal_skipped" : "job_lock_skipped", {
+      reason: precheck,
+      attempt_count: normalizeObservedAttemptCount(job.attempt_count),
+      max_attempts: MAX_X_DISPATCH_ATTEMPTS,
+      next_attempt_at: job.next_attempt_at,
+      runner_now: now.toISOString(),
+    }, "WARN");
+    return { locked: false, job, log, reason: precheck };
+  }
+
+  const observedAttemptCount = normalizeObservedAttemptCount(job.attempt_count);
+  if (observedAttemptCount >= MAX_X_DISPATCH_ATTEMPTS) {
+    const log = await logJobEvent(db, job.id, "job_lock_skipped", { reason: "MAX_ATTEMPTS_EXHAUSTED" }, "WARN");
+    return { locked: false, job, log, reason: "MAX_ATTEMPTS_EXHAUSTED" as const };
+  }
+
   const expiredBefore = new Date(now.getTime() - LOCK_TTL_MS).toISOString();
+  const capturedNowIso = now.toISOString();
   const lockId = crypto.randomUUID();
-  const nextAttemptCount = countAttempt ? (job.attempt_count ?? 0) + 1 : job.attempt_count ?? 0;
+  const nextAttemptCount = countAttempt ? observedAttemptCount + 1 : observedAttemptCount;
 
   const { data, error } = await db
     .from("autopost_jobs")
     .update({
       state: "QUEUED",
-      locked_at: now.toISOString(),
+      locked_at: capturedNowIso,
       lock_id: lockId,
       attempt_count: nextAttemptCount,
     })
     .eq("id", job.id)
     .eq("state", "QUEUED")
-    .or(`locked_at.is.null,locked_at.lt.${expiredBefore}`)
-    .select("id, attempt_count, locked_at, lock_id, state")
+    .is("completed_at", null)
+    .eq("attempt_count", observedAttemptCount)
+    .or([
+      `and(next_attempt_at.is.null,locked_at.is.null)`,
+      `and(next_attempt_at.is.null,locked_at.lt.${expiredBefore})`,
+      `and(next_attempt_at.lte.${capturedNowIso},locked_at.is.null)`,
+      `and(next_attempt_at.lte.${capturedNowIso},locked_at.lt.${expiredBefore})`,
+    ].join(","))
+    .select("id, attempt_count, locked_at, lock_id, state, next_attempt_at, completed_at, result_status, error_code, error_message")
     .maybeSingle();
 
   if (error) throw error;
 
   if (!data) {
-    const log = await logJobEvent(db, job.id, "job_lock_skipped", {
-      reason: "JOB_ALREADY_LOCKED_OR_NOT_QUEUED",
-    }, "WARN");
-    return { locked: false, job, log };
+    const durableJob = await readJobById(db, job.id);
+    const durableReason = classifyDispatchEligibility(durableJob, now);
+    const reason = durableReason === "ELIGIBLE" ? "LOCK_ELIGIBILITY_CHANGED" : durableReason;
+    const log = await logJobEvent(db, job.id, reason === "RETRY_NOT_DUE" ? "job_retry_not_due" : reason === "TERMINAL_JOB" ? "job_terminal_skipped" : "job_lock_skipped", { reason }, "WARN");
+    return { locked: false, job: durableJob ?? job, log, reason };
   }
 
   const lockedJob = data as AutopostJobRow;
   const log = await logJobEvent(db, lockedJob.id, "job_locked", {
     lock_id: lockId,
-    dispatches_attempted: 0,
-    posts_attempted: 0,
-    lock_mode: "foundation_no_dispatch",
+    dispatches_attempted: countAttempt ? 1 : 0,
+    posts_attempted: countAttempt ? 1 : 0,
+    lock_mode: countAttempt ? "dispatch_gate" : "foundation_no_dispatch",
+    attempt_count: lockedJob.attempt_count,
   });
 
-  return { locked: true, job: lockedJob, log };
+  return { locked: true, job: lockedJob, log, reason: "ELIGIBLE" as const };
 }
 
 /* ──────────────────────────────────────────────
@@ -391,7 +466,8 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
   const auth = assertCronAuth(req, deps.cronSecret);
   if (!auth.ok) return json(401, auth);
 
-  const now = new Date();
+  const capturedNow = new Date((deps.now ?? (() => new Date()))().getTime());
+  const now = Number.isFinite(capturedNow.getTime()) ? capturedNow : new Date();
   const dispatchEnabled = isDispatchGateEnabled(req, env);
   const fanvueDryRunConfirmation = getFanvueDryRunConfirmation(req);
   const schedulablePlatforms: AutopostProofPlatform[] = dispatchEnabled ? ["x"] : getFoundationSchedulablePlatforms(req);
@@ -433,6 +509,11 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
     schedule_advancement_skipped: 0,
     fanvue_dry_runs: 0,
     fanvue_dry_run_blocked: 0,
+    retry_not_due: 0,
+    retry_exhausted: 0,
+    terminal_jobs_skipped: 0,
+    currently_locked: 0,
+    lock_eligibility_changed: 0,
     lock_mode: dispatchEnabled ? "dispatch_gate" : "foundation_no_dispatch",
   };
   const typedRules = (rules ?? []) as AutopostRuleForJobs[];
@@ -507,6 +588,8 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
               job_id: lockResult.job.id,
               adapter_result: adapterResult,
               now,
+              attempt_count: lockResult.job.attempt_count ?? null,
+              max_attempts: MAX_X_DISPATCH_ATTEMPTS,
             });
 
             if (persisted.ok === false || persisted.job_result_persisted === false) {
@@ -530,6 +613,10 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
               summary.job_log_persistence_failures++;
             }
 
+            if (persisted.retry_exhausted === true) {
+              summary.retry_exhausted++;
+            }
+
             if (
               persisted.persisted_status === "POSTED" &&
               persisted.posted === true &&
@@ -542,7 +629,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
                 rule,
                 jobId: lockResult.job.id,
                 scheduledFor: rule.next_run_at,
-                now: new Date(),
+                now,
               });
 
               if (!advancement.log.ok) summary.job_log_persistence_failures++;
@@ -570,7 +657,30 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
             }
           }
         } else {
-          summary.job_lock_skipped++;
+          if (lockResult.reason === "MAX_ATTEMPTS_EXHAUSTED") {
+            const exhausted = await persistAutopostRetryExhaustion(db, {
+              job_id: lockResult.job.id,
+              now,
+              attempt_count: normalizeObservedAttemptCount(lockResult.job.attempt_count),
+              max_attempts: MAX_X_DISPATCH_ATTEMPTS,
+              error_code: lockResult.job.error_code,
+              error_message: lockResult.job.error_message,
+            });
+            if (exhausted.ok && exhausted.job_result_persisted) {
+              summary.retry_exhausted++;
+              summary.results_failed++;
+            } else {
+              summary.result_persistence_failures++;
+            }
+            if (!exhausted.audit_log_persisted && exhausted.audit_log_error_code === "JOB_LOG_PERSIST_FAILED") summary.job_log_persistence_failures++;
+            summary.schedule_advancement_skipped++;
+          } else {
+            summary.job_lock_skipped++;
+            if (lockResult.reason === "RETRY_NOT_DUE") summary.retry_not_due++;
+            else if (lockResult.reason === "TERMINAL_JOB") summary.terminal_jobs_skipped++;
+            else if (lockResult.reason === "CURRENTLY_LOCKED") summary.currently_locked++;
+            else summary.lock_eligibility_changed++;
+          }
         }
       }
     }
