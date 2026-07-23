@@ -16,6 +16,14 @@ function assertIncludes(source: string, needle: string, message: string) {
   assert.ok(source.includes(needle), message)
 }
 
+function sliceBetween(source: string, startNeedle: string, endNeedle: string, messagePrefix: string) {
+  const start = source.indexOf(startNeedle)
+  assert.notEqual(start, -1, `${messagePrefix} start must exist`)
+  const end = source.indexOf(endNeedle, start + startNeedle.length)
+  assert.notEqual(end, -1, `${messagePrefix} end must exist`)
+  return source.slice(start, end)
+}
+
 const autopostClientPath = "app/autopost/AutopostPageClient.tsx"
 const autopostPagePath = "app/autopost/page.tsx"
 const rulesRoutePath = "app/api/autopost/rules/route.ts"
@@ -61,8 +69,16 @@ assertIncludes(autopostClient, "X draft only", "X-only DRAFT status must say X d
 assertIncludes(autopostClient, "Approval unavailable", "X-only DRAFT status must say approval is unavailable")
 assertIncludes(autopostClient, "Scheduled posting disabled", "X-only DRAFT status must say scheduled posting is disabled")
 assertIncludes(autopostClient, "This X draft remains saved and visible in My Rules. Approval is unavailable and scheduled posting is disabled. Nothing has been posted, scheduled, or sent to X.", "X-only DRAFT status must state saved visibility and no post/schedule/send occurred")
-assertIncludes(autopostClient, "label: \"X DRAFT ONLY\"", "X-only DRAFT must use a narrow card state label override")
-assert.ok(!autopostClient.includes("xOnlyDraft\n                            ? { ...baseBadge, label: \"NEEDS APPROVAL\" }"), "X-only DRAFT must not display the generic NEEDS APPROVAL state label")
+const xOnlyBadgeAssignment = sliceBetween(
+  autopostClient,
+  "const badge = xOnlyDraft",
+  "const BadgeIcon = badge.icon",
+  "X-only per-card badge assignment"
+)
+assertIncludes(xOnlyBadgeAssignment, "const badge = xOnlyDraft", "X-only DRAFT badge assignment must be scoped to xOnlyDraft")
+assertIncludes(xOnlyBadgeAssignment, "? { ...baseBadge, label: \"X DRAFT ONLY\" }", "X-only DRAFT must assign the X DRAFT ONLY label")
+assertIncludes(xOnlyBadgeAssignment, ": baseBadge", "non-X-only rules must keep the base badge assignment")
+assert.ok(!xOnlyBadgeAssignment.includes("NEEDS APPROVAL"), "X-only DRAFT badge assignment must not assign NEEDS APPROVAL")
 
 assertIncludes(rulesRoute, ".select(\"*\")", "rules GET route must still select all database fields")
 for (const needle of ["enabled: false", "approval_state: \"DRAFT\"", "next_run_at: null", "last_run_at: null"]) {
@@ -71,10 +87,43 @@ for (const needle of ["enabled: false", "approval_state: \"DRAFT\"", "next_run_a
 assert.ok(existsSync(approveRoutePath), "actual approve route must remain under [rule_id]")
 assert.ok(!existsSync("app/api/autopost/rules/[id]/approve/route.ts"), "incorrect [id] approve route must not exist")
 assertIncludes(approveRoute, "filterSelectableAutopostPlatformIds(knownPlatforms)", "approve route must still filter through selectable platform IDs")
-assertIncludes(platformRegistry, "public_selectable: false", "X must remain public_selectable false in registry")
-assertIncludes(platformAvailability, "can_schedule: false", "X must remain can_schedule false")
-assertIncludes(platformAvailability, "supports_real_posting: false", "X must remain supports_real_posting false")
-assertIncludes(platformAvailability, "public_selectable: false", "X availability must preserve public_selectable false")
+const xAvailabilityBlock = sliceBetween(
+  platformAvailability,
+  'if (platform.id === "x") {',
+  "\n  return {",
+  "X platform availability branch"
+)
+for (const needle of [
+  "public_selectable: false",
+  "can_schedule: false",
+  "supports_real_posting: false",
+  "supports_text_posting: false",
+  "supports_media_posting: false",
+]) {
+  assertIncludes(xAvailabilityBlock, needle, `X platform availability branch must contain ${needle}`)
+}
+
+const xRegistrySeed = sliceBetween(
+  platformRegistry,
+  'id: "x",',
+  'id: "reddit",',
+  "X platform registry seed"
+)
+assertIncludes(xRegistrySeed, 'name: "X (Twitter)"', "X registry seed must exist")
+
+const registryProjectionBlock = sliceBetween(
+  platformRegistry,
+  "export function getAutopostPlatformRegistry(): AutopostPlatformRegistryEntry[] {",
+  "export function getPublicAutopostPlatforms()",
+  "registry projection"
+)
+for (const needle of [
+  "public_selectable: false",
+  "supports_real_posting: false",
+  "supports_async_dispatch: false",
+]) {
+  assertIncludes(registryProjectionBlock, needle, `registry projection must disable every platform with ${needle}`)
+}
 
 assertIncludes(autopostPage, "<AutopostPageClient />", "autopost page must still mount AutopostPageClient")
 assertIncludes(autopostClient, "AUTOPOST_PACK_PREFILL_STORAGE_KEY", "Generate handoff support must remain present")
