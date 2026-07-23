@@ -258,7 +258,6 @@ export async function postXTextOnlyAutopost(
     return failure("FAILED", "X_TEXT_TOO_LONG", "X text must be 280 characters or fewer")
   }
 
-  const supabaseAdmin = deps.supabaseAdmin ?? getSupabaseAdmin()
   const fetchImpl = deps.fetchImpl ?? fetch
   const decryptToken = deps.decryptToken ?? decryptAutopostToken
   const refreshAccessToken = deps.refreshAccessToken ?? refreshXAccessToken
@@ -268,6 +267,7 @@ export async function postXTextOnlyAutopost(
   const userId = input.user_id.trim()
   let account: XAccountRow | null
   try {
+    const supabaseAdmin = deps.supabaseAdmin ?? getSupabaseAdmin()
     account = await loadConnectedXAccount(supabaseAdmin, userId)
   } catch {
     return failure("FAILED", "X_ACCOUNT_LOOKUP_FAILED", "Unable to load X account")

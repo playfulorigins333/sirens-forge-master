@@ -329,6 +329,49 @@ for (const [status, code] of [[401, 'X_API_UNAUTHORIZED'], [403, 'X_API_FORBIDDE
   assert.equal(result.error_code, 'INVALID_RUN_MODE')
 }
 
+
+// Valid requests must catch Supabase dependency resolution failures as safe account lookup failures.
+{
+  let fetchCalls = 0
+  let decryptCalls = 0
+  let refreshCalls = 0
+  const depsWithThrowingSupabase: any = {
+    fetchImpl: async () => {
+      fetchCalls += 1
+      throw new Error('create-post fetch must not run')
+    },
+    decryptToken: () => {
+      decryptCalls += 1
+      throw new Error('decrypt must not run')
+    },
+    refreshAccessToken: async () => {
+      refreshCalls += 1
+      throw new Error('refresh must not run')
+    },
+    getApiBaseUrl: () => 'https://api.x.invalid',
+    now: () => fixedNow,
+  }
+  Object.defineProperty(depsWithThrowingSupabase, 'supabaseAdmin', {
+    get: () => {
+      throw new Error('raw Supabase configuration failure')
+    },
+  })
+  const result = await postXTextOnlyAutopost(
+    { run_mode: 'autopost', user_id: 'user-1', rule_id: 'rule-1', payload: { text: expectedText } },
+    depsWithThrowingSupabase,
+  )
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 'FAILED')
+  assert.equal(result.platform, 'x')
+  assert.equal(result.error_code, 'X_ACCOUNT_LOOKUP_FAILED')
+  assert.equal(JSON.stringify(result).includes('raw Supabase configuration failure'), false)
+  assert.equal(fetchCalls, 0)
+  assert.equal(decryptCalls, 0)
+  assert.equal(refreshCalls, 0)
+  assert.equal('platform_post_id' in result, false)
+  assert.equal('posted_at' in result, false)
+}
+
 // 18. Representative pre-provider local failures never create-post.
 const preProviderCases: Array<{ name: string; input?: any; opts?: Parameters<typeof makeAdapterHarness>[0]; code: string; status?: string; refreshCalls?: number }> = [
   { name: 'invalid run mode', input: { run_mode: 'manual' }, code: 'INVALID_RUN_MODE' },
