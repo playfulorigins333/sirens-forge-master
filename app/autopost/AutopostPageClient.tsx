@@ -95,7 +95,7 @@ type AutopostRule = {
   frequency?: string | null
   created_at?: string | null
   updated_at?: string | null
-  last_ran_at?: string | null
+  last_run_at?: string | null
   next_run_at?: string | null
 }
 
@@ -296,11 +296,21 @@ function isFanvueInternalValidationDraft(rule: AutopostRule) {
   return isFanvueOnlyRule(rule) && String(rule.approval_state).toUpperCase() === "DRAFT"
 }
 
+function isXOnlyRule(rule: AutopostRule) {
+  const platforms = rulePlatformIds(rule).map(platform => String(platform).toLowerCase())
+  return platforms.length === 1 && platforms[0] === "x"
+}
+
+function isXOnlyDraft(rule: AutopostRule) {
+  return isXOnlyRule(rule) && String(rule.approval_state).toUpperCase() === "DRAFT"
+}
+
 function actionsFor(rule: AutopostRule) {
   const state = String(rule.approval_state).toUpperCase()
   const fanvueInternalValidationDraft = isFanvueInternalValidationDraft(rule)
+  const xOnlyDraft = isXOnlyDraft(rule)
   return {
-    canApprove: state === "DRAFT" && !fanvueInternalValidationDraft,
+    canApprove: state === "DRAFT" && !fanvueInternalValidationDraft && !xOnlyDraft,
     canPause: state === "APPROVED",
     canResume: state === "PAUSED",
     canRevoke: state !== "REVOKED",
@@ -1133,7 +1143,11 @@ export default function AutopostPage() {
                     ) : (
                       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                         {rules.map(rule => {
-                          const badge = badgeForState(rule.approval_state)
+                          const baseBadge = badgeForState(rule.approval_state)
+                          const xOnlyDraft = isXOnlyDraft(rule)
+                          const badge = xOnlyDraft
+                            ? { ...baseBadge, label: "X DRAFT ONLY" }
+                            : baseBadge
                           const BadgeIcon = badge.icon
                           const a = actionsFor(rule)
                           const busy = busyRuleId === rule.id
@@ -1171,13 +1185,26 @@ export default function AutopostPage() {
                                   </div>
                                   <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-3">
                                     <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Last Run</div>
-                                    <div className="mt-1 truncate text-sm font-semibold text-gray-200">{formatTs(rule.last_ran_at)}</div>
+                                    <div className="mt-1 truncate text-sm font-semibold text-gray-200">{formatTs(rule.last_run_at)}</div>
                                   </div>
                                   <div className="rounded-2xl border border-gray-800 bg-gray-950/60 p-3">
                                     <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Next Run</div>
                                     <div className="mt-1 truncate text-sm font-semibold text-gray-200">{formatTs(rule.next_run_at)}</div>
                                   </div>
                                 </div>
+
+                                {xOnlyDraft && (
+                                  <div className="rounded-2xl border border-sky-500/25 bg-sky-500/10 p-3 text-sm text-sky-100">
+                                    <div className="flex flex-wrap gap-2">
+                                      <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-sky-100">X draft only</span>
+                                      <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-100">Approval unavailable</span>
+                                      <span className="rounded-full border border-slate-500/40 bg-slate-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-100">Scheduled posting disabled</span>
+                                    </div>
+                                    <div className="mt-2 text-xs leading-5 text-sky-100/85">
+                                      This X draft remains saved and visible in My Rules. Approval is unavailable and scheduled posting is disabled. Nothing has been posted, scheduled, or sent to X.
+                                    </div>
+                                  </div>
+                                )}
 
                                 {fanvueInternalValidationDraft && (
                                   <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-3 text-sm text-cyan-100">
