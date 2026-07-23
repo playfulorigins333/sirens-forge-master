@@ -18,7 +18,8 @@
     "test:creator-publishing-task17a-progress-reschedule-concurrency": "node backend/creator-publishing-queue/tests/runTask17aProgressRescheduleConcurrency.mjs",
     "test:creator-publishing-task17b1-services": "tsx backend/creator-publishing-queue/tests/task17b1OperatorQueueServices.test.ts",
     "test:creator-publishing-task17b1-source-contract": "tsx backend/creator-publishing-queue/tests/task17b1OperatorQueueSourceContract.test.ts",
-    "test:creator-publishing-task17b1": "npm run test:creator-publishing-task17b1-services && npm run test:creator-publishing-task17b1-source-contract"
+    "test:creator-publishing-task17b1": "npm run test:creator-publishing-task17b1-services && npm run test:creator-publishing-task17b1-source-contract",
+    "test:autopost-x": "tsx backend/autopost/tests/tokenCryptoCore.test.ts && tsx backend/autopost/tests/xTokenRefreshContract.test.ts && tsx backend/autopost/tests/xProviderOutcomePolicy.test.ts && tsx backend/autopost/tests/xRunnerDependencyInjection.test.ts && tsx backend/autopost/tests/xJobResultPersistence.test.ts && tsx backend/autopost/tests/xJobLogLevelContract.test.ts && tsx backend/autopost/tests/xRetryEnforcement.test.ts && tsx backend/autopost/tests/xDraftUiTruth.test.ts && tsx backend/autopost/tests/xIntegratedBehavioralFlow.test.ts && tsx backend/creator-publishing-queue/tests/autopostLaunchUi.test.ts && tsx backend/creator-publishing-queue/tests/task22DormantAutopostCronSourceContract.test.ts"
   },
   "repository": {
     "type": "git",

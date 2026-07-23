@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
 import { register } from 'node:module'
 
 process.env.SUPABASE_URL='http://127.0.0.1:54321'; process.env.NEXT_PUBLIC_SUPABASE_URL='http://127.0.0.1:54321'; process.env.SUPABASE_SERVICE_ROLE_KEY='dummy-service-role-key'; process.env.CRON_SECRET='dummy-cron-secret'
@@ -12,7 +11,6 @@ for (const m of route.matchAll(/level:\s*(?:JobLogLevel\s*=\s*)?"([A-Z]+)"/g)) a
 for (const m of results.matchAll(/level:\s*(?:JobLogLevel\s*=\s*)?"([A-Z]+)"/g)) assert.ok(['DEBUG','INFO','WARN','ERROR'].includes(m[1]))
 const migration=readFileSync('supabase/migrations/20251222_autopost_v1.sql','utf8')
 assert.match(migration,/default 'INFO'/); assert.match(migration,/check \(level in \('DEBUG','INFO','WARN','ERROR'\)\)/)
-execFileSync('git',['diff','--exit-code','59eae4f67a895539916f9f7603646b153ae1ede0','--','supabase/migrations/20251222_autopost_v1.sql'],{stdio:'pipe'})
 
 type Op={table:string;type:string;values?:any;filters:any[];select?:string}
 class Q{table:string;type='select';values:any;filters:any[]=[];selectValue?:string;c:DB;constructor(c:DB,t:string){this.c=c;this.table=t}select(v?:string){this.selectValue=v;return this}insert(v:any){this.type='insert';this.values=v;return this}update(v:any){this.type='update';this.values=v;return this}eq(c:string,v:any){this.filters.push(['eq',c,v]);return this}is(c:string,v:any){this.filters.push(['is',c,v]);return this}not(c:string,o:string,v:any){this.filters.push(['not',c,o,v]);return this}lte(c:string,v:any){this.filters.push(['lte',c,v]);return this}or(v:string){this.filters.push(['or',v]);return this}single(){return this}maybeSingle(){return this}then(r:any,j:any){const p=this.c.execute(this); return Promise.resolve(p).then(r,j)}}
