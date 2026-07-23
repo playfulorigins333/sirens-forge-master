@@ -8,11 +8,17 @@ import {
   type RunProofResultStatus,
 } from "@/lib/autopost/jobProof";
 
+type SupabaseUpdateResult = { data?: unknown; error: { message?: string } | null };
+type SupabaseUpdateQuery = PromiseLike<SupabaseUpdateResult> & {
+  eq: (column: string, value: unknown) => any;
+  is: (column: string, value: unknown) => any;
+  select: (columns?: string) => any;
+  maybeSingle: () => PromiseLike<SupabaseUpdateResult>;
+};
+
 type SupabaseWriteClient = {
   from: (table: string) => {
-    update: (values: Record<string, unknown>) => {
-      eq: (column: string, value: string) => PromiseLike<{ error: { message?: string } | null }>;
-    };
+    update: (values: Record<string, unknown>) => SupabaseUpdateQuery;
     insert: (values: Record<string, unknown>) => PromiseLike<{ error: { message?: string } | null }>;
   };
 };
@@ -74,6 +80,11 @@ const STABLE_X_RETRY_EXHAUSTION_CODES = new Set([
   "X_TOKEN_EXPIRY_MISSING_AFTER_REFRESH",
   "X_ACCESS_TOKEN_MISSING",
   "X_TOKEN_DECRYPT_FAILED",
+  "X_REFRESH_FAILED",
+  "X_REFRESH_TOKEN_DECRYPT_FAILED",
+  "X_REFRESH_CLIENT_INVALID",
+  "X_REFRESH_RESPONSE_INVALID",
+  "X_REFRESH_ACCOUNT_UPDATE_FAILED",
   "X_TEXT_TOO_LONG",
   "EMPTY_X_TEXT",
   "X_MEDIA_UNSUPPORTED",
@@ -320,8 +331,21 @@ export async function persistAutopostRetryExhaustion(
     platform_post_id: null,
     posted_at: null,
   };
-  const { error } = await supabase.from("autopost_jobs").update(values).eq("id", input.job_id);
-  if (error) {
+  if (attemptCount === null) {
+    return { ok: false, job_id: input.job_id, persisted_status: "FAILED", job_result_persisted: false, audit_log_persisted: false, audit_log_error_code: null, posted: false, platform_post_id: null, error_code: "JOB_RESULT_PERSIST_FAILED", retryable: false, terminal: true, next_attempt_at: null, retry_exhausted: false, attempt_count: attemptCount, max_attempts: maxAttempts };
+  }
+
+  const { data, error } = await supabase
+    .from("autopost_jobs")
+    .update(values)
+    .eq("id", input.job_id)
+    .eq("state", "QUEUED")
+    .is("completed_at", null)
+    .eq("attempt_count", attemptCount)
+    .select("id")
+    .maybeSingle();
+
+  if (error || !data) {
     return { ok: false, job_id: input.job_id, persisted_status: "FAILED", job_result_persisted: false, audit_log_persisted: false, audit_log_error_code: null, posted: false, platform_post_id: null, error_code: "JOB_RESULT_PERSIST_FAILED", retryable: false, terminal: true, next_attempt_at: null, retry_exhausted: false, attempt_count: attemptCount, max_attempts: maxAttempts };
   }
   const logOutcome = await insertJobLog(supabase, {
