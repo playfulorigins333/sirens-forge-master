@@ -21,6 +21,11 @@ type PlatformRegistrySeed = Omit<
   "launch_status" | "public_selectable" | "supports_real_posting" | "supports_async_dispatch" | "status_message"
 > & {
   env_var?: string
+  launch_status?: PlatformLaunchStatus
+  public_selectable?: boolean
+  supports_real_posting?: boolean
+  supports_async_dispatch?: boolean
+  status_message?: string
 }
 
 const COMING_SOON_MESSAGE = "Assisted launch workflow only — scheduled Autopost is not enabled."
@@ -73,9 +78,15 @@ const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
     id: "x",
     name: "X (Twitter)",
     external_url: "https://x.com/",
-    env_var: "AUTOPOST_WEBHOOK_X",
     supports_assisted_workflow: true,
-    reason: "Use X as a traffic and discovery channel. Draft preparation is available where supported; scheduled posting is not enabled.",
+    launch_status: "coming_soon",
+    public_selectable: false,
+    supports_real_posting: true,
+    supports_async_dispatch: true,
+    status_message:
+      "Text-only X posting is implemented for controlled validation; media posting and live provider proof remain incomplete. Public scheduling remains disabled until the remaining launch gates are complete.",
+    reason:
+      "Text-only native X posting is implemented for controlled validation only. Media posting is not supported, live provider proof is incomplete, and public launch is not approved.",
   },
   {
     id: "reddit",
@@ -93,11 +104,11 @@ export function getAutopostPlatformRegistry(): AutopostPlatformRegistryEntry[] {
 
     return {
       ...platform,
-      launch_status: hasWebhookEnv ? "coming_soon" : "not_configured",
-      public_selectable: false,
-      supports_real_posting: false,
-      supports_async_dispatch: false,
-      status_message: hasWebhookEnv ? COMING_SOON_MESSAGE : NOT_CONFIGURED_MESSAGE,
+      launch_status: platform.launch_status ?? (hasWebhookEnv ? "coming_soon" : "not_configured"),
+      public_selectable: platform.public_selectable ?? false,
+      supports_real_posting: platform.supports_real_posting ?? false,
+      supports_async_dispatch: platform.supports_async_dispatch ?? false,
+      status_message: platform.status_message ?? (hasWebhookEnv ? COMING_SOON_MESSAGE : NOT_CONFIGURED_MESSAGE),
     }
   })
 }

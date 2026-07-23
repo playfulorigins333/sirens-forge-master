@@ -1068,15 +1068,18 @@ function testPublicDisabledPosture() {
   const registry = getAutopostPlatformRegistry()
   const x = registry.find((platform: any) => platform.id === 'x')
   assert.ok(x)
+  assert.equal(x.launch_status, 'coming_soon')
   assert.equal(x.public_selectable, false)
-  assert.equal(x.supports_real_posting, false)
+  assert.equal(x.supports_real_posting, true)
+  assert.equal(x.supports_async_dispatch, true)
   assert.equal(getSelectableAutopostPlatformIds().has('x'), false)
 
   const status = buildUserPlatformStatus(x, new Map())
   assert.equal(status.can_schedule, false)
-  assert.equal(status.supports_real_posting, false)
-  assert.equal(status.supports_text_posting, false)
+  assert.equal(status.supports_real_posting, true)
+  assert.equal(status.supports_text_posting, true)
   assert.equal(status.supports_media_posting, false)
+  assert.equal(status.supports_async_dispatch, true)
 }
 
 async function main() {

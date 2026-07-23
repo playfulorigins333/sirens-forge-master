@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { existsSync, readFileSync } from "node:fs"
+import { register } from "node:module"
 
 function read(path: string) {
   return readFileSync(path, "utf8")
@@ -90,9 +91,10 @@ const xAvailabilityBlock = sliceBetween(
 for (const needle of [
   "public_selectable: false",
   "can_schedule: false",
-  "supports_real_posting: false",
-  "supports_text_posting: false",
+  "supports_real_posting: platform.supports_real_posting",
+  "supports_text_posting: true",
   "supports_media_posting: false",
+  "supports_async_dispatch: platform.supports_async_dispatch",
 ]) {
   assertIncludes(xAvailabilityBlock, needle, `X platform availability branch must contain ${needle}`)
 }
@@ -112,12 +114,16 @@ const registryProjectionBlock = sliceBetween(
   "registry projection"
 )
 for (const needle of [
-  "public_selectable: false",
-  "supports_real_posting: false",
-  "supports_async_dispatch: false",
+  "platform.public_selectable ?? false",
+  "platform.supports_real_posting ?? false",
+  "platform.supports_async_dispatch ?? false",
 ]) {
-  assertIncludes(registryProjectionBlock, needle, `registry projection must disable every platform with ${needle}`)
+  assertIncludes(registryProjectionBlock, needle, `registry projection must preserve fail-closed defaults with ${needle}`)
 }
+assertIncludes(xRegistrySeed, 'launch_status: "coming_soon"', "X registry seed must remain coming soon")
+assertIncludes(xRegistrySeed, "supports_real_posting: true", "X registry seed must report implemented native text posting")
+assertIncludes(xRegistrySeed, "supports_async_dispatch: true", "X registry seed must report implemented internal async dispatch")
+assert.ok(!xRegistrySeed.includes("AUTOPOST_WEBHOOK_X"), "X registry seed must not depend on obsolete AUTOPOST_WEBHOOK_X")
 
 assertIncludes(autopostPage, "<AutopostPageClient />", "autopost page must still mount AutopostPageClient")
 assertIncludes(autopostClient, "AUTOPOST_PACK_PREFILL_STORAGE_KEY", "Generate handoff support must remain present")
@@ -126,4 +132,151 @@ assertIncludes(autopostClient, "connectX", "X connection UI support must remain 
 assertIncludes(autopostClient, "disconnectX", "X disconnection UI support must remain present")
 
 
-console.log("X draft UI truth source-contract tests passed; source-contract evidence only, not browser-runtime, provider, OAuth, Production, or live-post proof.")
+const loaderSource = `export async function resolve(specifier, context, nextResolve) { if (specifier === 'server-only') return { url: 'data:text/javascript,export%20{}', shortCircuit: true }; return nextResolve(specifier, context) }`
+register(`data:text/javascript,${encodeURIComponent(loaderSource)}`, import.meta.url)
+
+const ENV_KEYS = [
+  "X_CLIENT_ID",
+  "X_CLIENT_SECRET",
+  "X_REDIRECT_URI",
+  "AUTOPOST_TOKEN_ENCRYPTION_KEY",
+  "AUTOPOST_OAUTH_STATE_SECRET",
+  "AUTOPOST_WEBHOOK_X",
+] as const
+const originalEnv = new Map<(typeof ENV_KEYS)[number], string | undefined>(ENV_KEYS.map((key) => [key, process.env[key]]))
+
+function restoreEnv() {
+  for (const key of ENV_KEYS) {
+    const value = originalEnv.get(key)
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
+  }
+}
+
+function clearXEnv() {
+  for (const key of ENV_KEYS) delete process.env[key]
+}
+
+function setFakeXOAuthEnv() {
+  process.env.X_CLIENT_ID = "local-x-client"
+  process.env.X_CLIENT_SECRET = "local-x-secret"
+  process.env.X_REDIRECT_URI = "http://127.0.0.1:3000/api/autopost/x/callback"
+  process.env.AUTOPOST_TOKEN_ENCRYPTION_KEY = "local-fake-encryption-key"
+  process.env.AUTOPOST_OAUTH_STATE_SECRET = "local-fake-state-secret"
+}
+
+function assertXCapability(status: any) {
+  assert.equal(status.public_selectable, false)
+  assert.equal(status.can_schedule, false)
+  assert.equal(status.supports_real_posting, true)
+  assert.equal(status.supports_text_posting, true)
+  assert.equal(status.supports_media_posting, false)
+  assert.equal(status.supports_async_dispatch, true)
+}
+
+try {
+  const { getAutopostPlatformRegistry, getSelectableAutopostPlatformIds, getPublicAutopostPlatforms } = await import("../../../lib/autopost/platformRegistry")
+  const { buildUserPlatformStatus } = await import("../../../lib/autopost/platformAvailability")
+
+  clearXEnv()
+  let registry = getAutopostPlatformRegistry()
+  const x = registry.find((platform) => platform.id === "x")
+  assert.ok(x, "X registry entry must exist")
+  assert.equal(x.launch_status, "coming_soon")
+  assert.equal(x.public_selectable, false)
+  assert.equal(x.supports_real_posting, true)
+  assert.equal(x.supports_async_dispatch, true)
+  assert.equal(x.supports_assisted_workflow, true)
+  assert.notEqual(x.env_var, "AUTOPOST_WEBHOOK_X")
+  assert.match(`${x.reason} ${x.status_message}`, /Text-only .*implemented.*controlled validation/i)
+  assert.match(`${x.reason} ${x.status_message}`, /media posting.*not supported|media posting.*incomplete/i)
+  assert.doesNotMatch(`${x.reason} ${x.status_message}`, /no direct posting integration exists/i)
+  assert.equal(getSelectableAutopostPlatformIds().has("x"), false)
+
+  const withoutWebhook = {
+    launch_status: x.launch_status,
+    public_selectable: x.public_selectable,
+    supports_real_posting: x.supports_real_posting,
+    supports_async_dispatch: x.supports_async_dispatch,
+  }
+  process.env.AUTOPOST_WEBHOOK_X = "https://webhook.invalid/x"
+  const xWithWebhook = getAutopostPlatformRegistry().find((platform) => platform.id === "x")
+  assert.deepEqual({
+    launch_status: xWithWebhook?.launch_status,
+    public_selectable: xWithWebhook?.public_selectable,
+    supports_real_posting: xWithWebhook?.supports_real_posting,
+    supports_async_dispatch: xWithWebhook?.supports_async_dispatch,
+  }, withoutWebhook)
+  assert.equal(xWithWebhook?.launch_status, "coming_soon")
+
+  clearXEnv()
+  const incompleteStatus = buildUserPlatformStatus(x, new Map())
+  assert.equal(incompleteStatus.launch_status, "not_configured")
+  assert.equal(incompleteStatus.app_configured, false)
+  assert.equal(incompleteStatus.oauth_configured, false)
+  assert.equal(incompleteStatus.can_connect, false)
+  assert.equal(incompleteStatus.config_error, "X_OAUTH_CONFIG_INCOMPLETE")
+  assertXCapability(incompleteStatus)
+  assert.doesNotMatch(`${incompleteStatus.status_message} ${incompleteStatus.disabled_reason}`, /no (native|direct) posting integration/i)
+
+  setFakeXOAuthEnv()
+  const completeStatus = buildUserPlatformStatus(x, new Map())
+  assert.equal(completeStatus.launch_status, "coming_soon")
+  assert.equal(completeStatus.app_configured, true)
+  assert.equal(completeStatus.oauth_configured, true)
+  assert.equal(completeStatus.can_connect, true)
+  assert.equal(completeStatus.config_error, null)
+  assert.equal(completeStatus.user_connected, false)
+  assertXCapability(completeStatus)
+
+  const connectedStatus = buildUserPlatformStatus(x, new Map([["x", {
+    platform: "x",
+    provider_account_id: "local-provider-account",
+    provider_username: "local-provider-user",
+    connection_status: "CONNECTED",
+    connected_at: "2026-07-23T00:00:00.000Z",
+    last_refresh_at: "2026-07-23T00:10:00.000Z",
+    last_error: null,
+  }]]))
+  assert.equal(connectedStatus.user_connected, true)
+  assert.equal(connectedStatus.connection_status, "CONNECTED")
+  assert.equal(connectedStatus.public_selectable, false)
+  assert.equal(connectedStatus.can_schedule, false)
+  const connectedMessage = `${connectedStatus.status_message} ${connectedStatus.disabled_reason}`
+  assert.match(connectedMessage, /stored connection for controlled validation/i)
+  assert.match(connectedMessage, /posture.*unverified|live posting.*unverified/i)
+  assert.doesNotMatch(connectedMessage, /live-ready|ready for live posting|operationally ready|live posting enabled/i)
+
+  const remainingBlockers = [
+    "X_ENVIRONMENT_VERIFICATION_REQUIRED",
+    "X_INITIAL_OAUTH_TOKEN_VALIDATION_REQUIRED",
+    "X_WEIGHTED_TEXT_VALIDATION_REQUIRED",
+    "X_OAUTH_PROOF_REQUIRED",
+    "X_CONNECTED_ACCOUNT_POSTURE_REQUIRED",
+    "X_PROVIDER_REVOCATION_REQUIRED",
+    "X_LIVE_TEXT_POST_CANARY_REQUIRED",
+    "X_PUBLIC_ENABLEMENT_NOT_APPROVED",
+  ]
+  for (const blocker of remainingBlockers) assert.ok(completeStatus.blockers.includes(blocker), `${blocker} must remain active`)
+  for (const blocker of ["CONTENT_PERSISTENCE_NOT_READY", "X_POSTING_ADAPTER_NOT_READY", "RUN_RESULT_PERSISTENCE_NOT_READY"]) {
+    assert.ok(!completeStatus.blockers.includes(blocker), `${blocker} must be removed from active X blockers`)
+    assert.ok(!xAvailabilityBlock.includes(blocker), `${blocker} must not appear in active X availability source`)
+  }
+
+  const fanvue = registry.find((platform) => platform.id === "fanvue")
+  const onlyfans = registry.find((platform) => platform.id === "onlyfans")
+  const reddit = registry.find((platform) => platform.id === "reddit")
+  assert.equal(fanvue?.env_var, "AUTOPOST_WEBHOOK_FANVUE")
+  assert.equal(fanvue?.supports_real_posting, false)
+  assert.equal(fanvue?.supports_async_dispatch, false)
+  assert.match(fanvue?.reason ?? "", /frozen for safety/i)
+  assert.equal(onlyfans?.supports_assisted_workflow, true)
+  assert.equal(onlyfans?.supports_real_posting, false)
+  assert.equal(reddit?.public_selectable, false)
+  assert.deepEqual(getPublicAutopostPlatforms().map((platform) => platform.id), ["fanvue", "onlyfans", "x", "reddit"])
+} finally {
+  restoreEnv()
+}
+
+
+console.log("X draft UI truth source-contract and runtime capability tests passed; evidence only, not browser-runtime, provider, OAuth, Production, or live-post proof.")

@@ -18,9 +18,14 @@ export type AutopostAccountStatus = {
 export type UserAutopostPlatformStatus = ReturnType<typeof buildUserPlatformStatus>
 
 const X_SCHEDULING_BLOCKERS = [
-  "CONTENT_PERSISTENCE_NOT_READY",
-  "X_POSTING_ADAPTER_NOT_READY",
-  "RUN_RESULT_PERSISTENCE_NOT_READY",
+  "X_ENVIRONMENT_VERIFICATION_REQUIRED",
+  "X_INITIAL_OAUTH_TOKEN_VALIDATION_REQUIRED",
+  "X_WEIGHTED_TEXT_VALIDATION_REQUIRED",
+  "X_OAUTH_PROOF_REQUIRED",
+  "X_CONNECTED_ACCOUNT_POSTURE_REQUIRED",
+  "X_PROVIDER_REVOCATION_REQUIRED",
+  "X_LIVE_TEXT_POST_CANARY_REQUIRED",
+  "X_PUBLIC_ENABLEMENT_NOT_APPROVED",
 ]
 
 function hasEnv(name: string) {
@@ -135,10 +140,10 @@ export function buildUserPlatformStatus(
   if (platform.id === "x") {
     const xConfig = getXConfigStatus()
     const disabledReason = userConnected
-      ? "Scheduled posting requires content persistence, X adapter proof handling, and run/result persistence before X can be enabled."
+      ? "X has a stored connection for controlled validation. Connected-account posture and live posting remain unverified. Public scheduling remains disabled."
       : xConfig.oauth_configured
-        ? "Connect X to prepare for the text-only Autopost MVP. Scheduled posting is not enabled yet."
-        : "X OAuth is not fully configured for this environment."
+        ? "Text-only X posting is implemented for controlled validation. Environment verification, initial OAuth/token validation, weighted text enforcement, OAuth proof, connected-account verification, provider revocation, live canary proof, and public enablement remain incomplete."
+        : "Text-only X posting is implemented for controlled validation, but X OAuth is not fully configured for this environment. Public scheduling remains disabled."
 
     return {
       id: platform.id,
@@ -159,13 +164,13 @@ export function buildUserPlatformStatus(
       has_error: Boolean(account?.last_error),
       public_selectable: false,
       can_schedule: false,
-      supports_real_posting: false,
-      supports_text_posting: false,
+      supports_real_posting: platform.supports_real_posting,
+      supports_text_posting: true,
       supports_media_posting: false,
       supports_async_dispatch: platform.supports_async_dispatch,
       supports_assisted_workflow: platform.supports_assisted_workflow,
       status_message: userConnected
-        ? "X is connected, but scheduled posting is not enabled yet."
+        ? "X has a stored connection for controlled validation. Connected-account posture and live posting remain unverified."
         : platform.status_message,
       disabled_reason: disabledReason,
       blockers: X_SCHEDULING_BLOCKERS,
