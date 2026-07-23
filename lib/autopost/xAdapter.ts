@@ -32,9 +32,21 @@ type XAccountRow = {
 
 type XCreatePostResponse = {
   data?: {
-    id?: string
+    id?: unknown
   }
-  errors?: unknown
+}
+
+type XCreatePostResult =
+  | { ok: true; platform_post_id: string }
+  | { ok: false; error_code: string; error_message: string }
+
+export type XAdapterDeps = {
+  supabaseAdmin?: ReturnType<typeof getSupabaseAdmin>
+  fetchImpl?: typeof fetch
+  decryptToken?: typeof decryptAutopostToken
+  refreshAccessToken?: typeof refreshXAccessToken
+  getApiBaseUrl?: () => string
+  now?: () => Date
 }
 
 export type XAdapterResponse =
@@ -84,16 +96,19 @@ function getXApiBaseUrl() {
 }
 
 const TOKEN_EXPIRY_REFRESH_BUFFER_MS = 60 * 1000
+const X_POST_OUTCOME_UNKNOWN_MESSAGE = "X post outcome could not be verified"
 
-function isExpiredOrExpiringSoon(expiresAt: string | null) {
+function isExpiredOrExpiringSoon(expiresAt: string | null, now: Date) {
   if (!expiresAt) return true
   const expiresMs = Date.parse(expiresAt)
   if (!Number.isFinite(expiresMs)) return true
-  return expiresMs <= Date.now() + TOKEN_EXPIRY_REFRESH_BUFFER_MS
+  return expiresMs <= now.getTime() + TOKEN_EXPIRY_REFRESH_BUFFER_MS
 }
 
-async function loadConnectedXAccount(userId: string): Promise<XAccountRow | null> {
-  const supabaseAdmin = getSupabaseAdmin()
+async function loadConnectedXAccount(
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  userId: string
+): Promise<XAccountRow | null> {
   const { data, error } = await supabaseAdmin
     .from("autopost_accounts")
     .select(
@@ -111,32 +126,96 @@ async function loadConnectedXAccount(userId: string): Promise<XAccountRow | null
   return (data as XAccountRow | null) ?? null
 }
 
-async function createXTextPost(accessToken: string, text: string) {
-  const response = await fetch(`${getXApiBaseUrl()}/2/tweets`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ text }),
-  })
+function unknownPostOutcome() {
+  return {
+    ok: false as const,
+    error_code: "X_POST_OUTCOME_UNKNOWN",
+    error_message: X_POST_OUTCOME_UNKNOWN_MESSAGE,
+  }
+}
 
-  const body = (await response.json().catch(() => null)) as XCreatePostResponse | null
-  if (!response.ok) {
+async function createXTextPost(args: {
+  accessToken: string
+  text: string
+  fetchImpl: typeof fetch
+  getApiBaseUrl: () => string
+}): Promise<XCreatePostResult> {
+  let response: Response
+  try {
+    response = await args.fetchImpl(`${args.getApiBaseUrl().replace(/\/+$/, "")}/2/tweets`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${args.accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ text: args.text }),
+    })
+  } catch {
+    return unknownPostOutcome()
+  }
+
+  if (response.status === 429) {
     return {
       ok: false as const,
-      error_code: response.status === 401 ? "X_API_UNAUTHORIZED" : "X_API_ERROR",
-      error_message: `X API returned HTTP ${response.status}`,
+      error_code: "X_API_RATE_LIMITED",
+      error_message: "X API rate limit reached",
     }
   }
 
-  const platformPostId = body?.data?.id
-  if (!platformPostId) {
+  if (response.status >= 500 && response.status <= 599) {
+    return unknownPostOutcome()
+  }
+
+  if (response.status === 401) {
     return {
       ok: false as const,
-      error_code: "X_POST_ID_MISSING",
-      error_message: "X API response did not include a post ID",
+      error_code: "X_API_UNAUTHORIZED",
+      error_message: "X API rejected the request as unauthorized",
     }
+  }
+
+  if (response.status === 403) {
+    return {
+      ok: false as const,
+      error_code: "X_API_FORBIDDEN",
+      error_message: "X API rejected the request as forbidden",
+    }
+  }
+
+  if (response.status === 400 || response.status === 422) {
+    return {
+      ok: false as const,
+      error_code: "X_API_INVALID_REQUEST",
+      error_message: "X API rejected the request as invalid",
+    }
+  }
+
+  if (response.status >= 400 && response.status <= 499) {
+    return {
+      ok: false as const,
+      error_code: "X_API_REJECTED",
+      error_message: "X API rejected the request",
+    }
+  }
+
+  if (!response.ok) {
+    return unknownPostOutcome()
+  }
+
+  let body: XCreatePostResponse | null
+  try {
+    body = (await response.json()) as XCreatePostResponse | null
+  } catch {
+    return unknownPostOutcome()
+  }
+
+  if (!body || typeof body !== "object") {
+    return unknownPostOutcome()
+  }
+
+  const platformPostId = typeof body.data?.id === "string" ? body.data.id.trim() : ""
+  if (!platformPostId) {
+    return unknownPostOutcome()
   }
 
   return {
@@ -145,7 +224,17 @@ async function createXTextPost(accessToken: string, text: string) {
   }
 }
 
-export async function postXTextOnlyAutopost(input: XAdapterRequest): Promise<XAdapterResponse> {
+export async function postXTextOnlyAutopost(
+  input: XAdapterRequest,
+  deps: XAdapterDeps = {}
+): Promise<XAdapterResponse> {
+  const supabaseAdmin = deps.supabaseAdmin ?? getSupabaseAdmin()
+  const fetchImpl = deps.fetchImpl ?? fetch
+  const decryptToken = deps.decryptToken ?? decryptAutopostToken
+  const refreshAccessToken = deps.refreshAccessToken ?? refreshXAccessToken
+  const getApiBaseUrl = deps.getApiBaseUrl ?? getXApiBaseUrl
+  const now = deps.now ?? (() => new Date())
+
   if (input.run_mode !== "autopost") {
     return failure("FAILED", "INVALID_RUN_MODE", "run_mode must be autopost")
   }
@@ -176,9 +265,10 @@ export async function postXTextOnlyAutopost(input: XAdapterRequest): Promise<XAd
     return failure("FAILED", "X_TEXT_TOO_LONG", "X text must be 280 characters or fewer")
   }
 
+  const userId = input.user_id.trim()
   let account: XAccountRow | null
   try {
-    account = await loadConnectedXAccount(input.user_id.trim())
+    account = await loadConnectedXAccount(supabaseAdmin, userId)
   } catch {
     return failure("FAILED", "X_ACCOUNT_LOOKUP_FAILED", "Unable to load X account")
   }
@@ -187,13 +277,13 @@ export async function postXTextOnlyAutopost(input: XAdapterRequest): Promise<XAd
     return failure("NOT_CONFIGURED", "X_ACCOUNT_NOT_CONNECTED", "Connected X account not found")
   }
 
-  if (isExpiredOrExpiringSoon(account.token_expires_at)) {
+  if (isExpiredOrExpiringSoon(account.token_expires_at, now())) {
     if (!account.encrypted_refresh_token) {
       return failure("NOT_CONFIGURED", "X_REFRESH_TOKEN_MISSING", "Connected X account is missing a refresh token")
     }
 
-    const refreshResult = await refreshXAccessToken({
-      userId: input.user_id.trim(),
+    const refreshResult = await refreshAccessToken({
+      userId,
       encryptedRefreshToken: account.encrypted_refresh_token,
     })
 
@@ -216,13 +306,13 @@ export async function postXTextOnlyAutopost(input: XAdapterRequest): Promise<XAd
 
   let accessToken: string
   try {
-    accessToken = decryptAutopostToken(account.encrypted_access_token)
+    accessToken = decryptToken(account.encrypted_access_token)
   } catch {
     return failure("NOT_CONFIGURED", "X_TOKEN_DECRYPT_FAILED", "Unable to decrypt X access token")
   }
 
-  const postResult = await createXTextPost(accessToken, text)
-  if (!postResult.ok) {
+  const postResult = await createXTextPost({ accessToken, text, fetchImpl, getApiBaseUrl })
+  if (postResult.ok === false) {
     return failure("FAILED", postResult.error_code, postResult.error_message)
   }
 
@@ -231,6 +321,6 @@ export async function postXTextOnlyAutopost(input: XAdapterRequest): Promise<XAd
     status: "POSTED",
     platform: "x",
     platform_post_id: postResult.platform_post_id,
-    posted_at: new Date().toISOString(),
+    posted_at: now().toISOString(),
   }
 }
