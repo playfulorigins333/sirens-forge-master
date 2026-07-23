@@ -613,6 +613,10 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
               summary.job_log_persistence_failures++;
             }
 
+            if (persisted.retry_exhausted === true) {
+              summary.retry_exhausted++;
+            }
+
             if (
               persisted.persisted_status === "POSTED" &&
               persisted.posted === true &&

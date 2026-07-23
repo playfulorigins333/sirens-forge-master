@@ -56,11 +56,47 @@ const RESULT_LOG_MESSAGES: Record<PersistableJobResultStatus, string> = {
   UNSUPPORTED: "job_unsupported",
 };
 
+const STABLE_X_RETRY_EXHAUSTION_CODES = new Set([
+  "X_API_RATE_LIMITED",
+  "X_API_TIMEOUT",
+  "X_API_TEMPORARY_FAILURE",
+  "ADAPTER_NETWORK_ERROR",
+  "INTERNAL_ADAPTER_UNAVAILABLE",
+  "X_POST_OUTCOME_UNKNOWN",
+  "X_API_UNAUTHORIZED",
+  "X_API_FORBIDDEN",
+  "X_API_INVALID_REQUEST",
+  "X_API_REJECTED",
+  "X_ACCOUNT_LOOKUP_FAILED",
+  "X_ACCOUNT_NOT_CONNECTED",
+  "X_REFRESH_TOKEN_MISSING",
+  "X_REFRESH_UNAUTHORIZED",
+  "X_TOKEN_EXPIRY_MISSING_AFTER_REFRESH",
+  "X_ACCESS_TOKEN_MISSING",
+  "X_TOKEN_DECRYPT_FAILED",
+  "X_TEXT_TOO_LONG",
+  "EMPTY_X_TEXT",
+  "X_MEDIA_UNSUPPORTED",
+  "TEXT_ONLY_MVP_MEDIA_UNSUPPORTED",
+  "CONTENT_PAYLOAD_INVALID",
+  "CONTENT_PLATFORM_MISMATCH",
+  "CONTENT_TYPE_UNSUPPORTED",
+]);
+
+const RETRY_EXHAUSTED_FALLBACK_CODE = "X_RETRY_ATTEMPTS_EXHAUSTED";
+const RETRY_EXHAUSTED_SAFE_MESSAGE = "Retry attempts exhausted.";
+
 function safeMessage(message: unknown) {
   if (typeof message !== "string") return null;
   const trimmed = message.trim();
   if (!trimmed) return null;
   return trimmed.slice(0, 500);
+}
+
+function stableRetryExhaustionErrorCode(value: unknown) {
+  if (typeof value !== "string") return RETRY_EXHAUSTED_FALLBACK_CODE;
+  const trimmed = value.trim();
+  return STABLE_X_RETRY_EXHAUSTION_CODES.has(trimmed) ? trimmed : RETRY_EXHAUSTED_FALLBACK_CODE;
 }
 
 function normalizeNonPostedStatus(proof: NormalizedAdapterProof): Exclude<PersistableJobResultStatus, "POSTED"> {
@@ -264,8 +300,8 @@ export async function persistAutopostRetryExhaustion(
   const attemptCount = normalizeAttemptValue(input.attempt_count);
   const maxAttempts = normalizeMaxAttempts(input.max_attempts);
   const completedAt = input.now.toISOString();
-  const errorCode = safeMessage(input.error_code) ?? "X_RETRY_ATTEMPTS_EXHAUSTED";
-  const safeErrorMessage = safeMessage(input.error_message) ?? "Retry attempts exhausted.";
+  const errorCode = stableRetryExhaustionErrorCode(input.error_code);
+  const safeErrorMessage = RETRY_EXHAUSTED_SAFE_MESSAGE;
   const values = {
     state: "FAILED",
     result_status: "FAILED",
@@ -277,8 +313,6 @@ export async function persistAutopostRetryExhaustion(
     }),
     error_code: errorCode,
     error_message: safeErrorMessage,
-    retryable: false,
-    terminal: true,
     next_attempt_at: null,
     completed_at: completedAt,
     locked_at: null,
