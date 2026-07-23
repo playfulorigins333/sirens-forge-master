@@ -65,7 +65,7 @@ function getBasicAuthHeader(clientId: string, clientSecret: string) {
 function getXClientCredentials(env: Record<string, string | undefined>) {
   const clientId = env.X_CLIENT_ID
   const clientSecret = env.X_CLIENT_SECRET
-  if (!clientId || !clientSecret) return null
+  if (!clientId || clientId.trim().length === 0 || !clientSecret || clientSecret.trim().length === 0) return null
   return { clientId, clientSecret }
 }
 
@@ -150,14 +150,16 @@ async function persistRefreshSuccess(
     updatePayload.scopes = input.scopes
   }
 
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("autopost_accounts")
     .update(updatePayload)
     .eq("user_id", input.userId)
     .eq("platform", "x")
     .eq("connection_status", "CONNECTED")
+    .select("user_id")
+    .maybeSingle()
 
-  if (error) {
+  if (error || !data) {
     throw new Error("X_REFRESH_ACCOUNT_UPDATE_FAILED")
   }
 }

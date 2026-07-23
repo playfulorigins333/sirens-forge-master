@@ -12,25 +12,39 @@ register(`data:text/javascript,${encodeURIComponent(loaderSource)}`, import.meta
 
 const { refreshXAccessToken } = await import('../../../lib/autopost/xTokenRefresh')
 
-type Op = { table: string; values: any; filters: any[] }
+type Op = { table: string; values: any; filters: any[]; selectValue?: string; singleMode?: 'maybeSingle' }
 
 class FakeQuery {
   filters: any[] = []
+  selectValue?: string
+  singleMode?: 'maybeSingle'
   constructor(private db: FakeDb, private table: string, private values: any) {}
   eq(column: string, value: any) { this.filters.push(['eq', column, value]); return this }
-  then(resolve: any, reject: any) { return Promise.resolve(this.db.execute({ table: this.table, values: this.values, filters: this.filters })).then(resolve, reject) }
+  select(value: string) { this.selectValue = value; return this }
+  maybeSingle() { this.singleMode = 'maybeSingle'; return this }
+  then(resolve: any, reject: any) {
+    return Promise.resolve(this.db.execute({ table: this.table, values: this.values, filters: this.filters, selectValue: this.selectValue, singleMode: this.singleMode })).then(resolve, reject)
+  }
 }
 
 class FakeDb {
   operations: Op[] = []
   failSuccessUpdate = false
   failFailureUpdate = false
+  zeroRowsForSuccessUpdate = false
+  multipleRowsForSuccessUpdate = false
   from(table: string) { return { update: (values: any) => new FakeQuery(this, table, values) } }
   execute(op: Op) {
     this.operations.push(op)
     if (op.table !== 'autopost_accounts') throw new Error('unexpected table')
     const success = isSuccessfulCredentialWrite(op)
-    if (success && this.failSuccessUpdate) return { data: null, error: { message: 'raw database failure that must not escape' } }
+    if (success) {
+      if (op.selectValue !== 'user_id' || op.singleMode !== 'maybeSingle') return { data: null, error: { message: 'missing returned-row contract' } }
+      if (this.failSuccessUpdate) return { data: null, error: { message: 'raw database failure that must not escape' } }
+      if (this.multipleRowsForSuccessUpdate) return { data: null, error: { message: 'multiple rows returned' } }
+      if (this.zeroRowsForSuccessUpdate) return { data: null, error: null }
+      return { data: { user_id: 'user-1' }, error: null }
+    }
     if (!success && this.failFailureUpdate) throw new Error('failure-state write failed')
     return { data: null, error: null }
   }
@@ -94,6 +108,8 @@ const valid = (overrides: Record<string, unknown> = {}) => ({ access_token: 'sec
   assert.equal(write.last_error, null)
   assert.equal('scopes' in write, false)
   assert.deepEqual(successWrites(db)[0].filters, [['eq', 'user_id', 'user-1'], ['eq', 'platform', 'x'], ['eq', 'connection_status', 'CONNECTED']])
+  assert.equal(successWrites(db)[0].selectValue, 'user_id')
+  assert.equal(successWrites(db)[0].singleMode, 'maybeSingle')
   assert.equal(fetchCalls[0].url.endsWith('/2/oauth2/token'), true)
   assert.equal(fetchCalls[0].init.method, 'POST')
   assert.equal(fetchCalls[0].init.headers['content-type'], 'application/x-www-form-urlencoded')
@@ -110,8 +126,10 @@ const valid = (overrides: Record<string, unknown> = {}) => ({ access_token: 'sec
 }
 for (const [body, code] of [
   [valid({ access_token: undefined }), 'X_REFRESH_RESPONSE_INVALID'],
+  [valid({ access_token: '' }), 'X_REFRESH_RESPONSE_INVALID'],
   [valid({ access_token: '   ' }), 'X_REFRESH_RESPONSE_INVALID'],
   [valid({ token_type: undefined }), 'X_REFRESH_RESPONSE_INVALID'],
+  [valid({ token_type: '   ' }), 'X_REFRESH_RESPONSE_INVALID'],
   [valid({ token_type: 'mac' }), 'X_REFRESH_RESPONSE_INVALID'],
   [valid({ expires_in: undefined }), 'X_TOKEN_EXPIRY_MISSING_AFTER_REFRESH'],
 ] as const) {
@@ -173,8 +191,22 @@ for (const status of [429, 503]) {
   assertNoSuccess(db); assertLifecycle(db, 'ERROR', 'X_REFRESH_FAILED')
 }
 {
+  const { db, deps, fetchCalls } = makeDeps(valid())
+  db.zeroRowsForSuccessUpdate = true; db.failFailureUpdate = true
+  const result = await refreshXAccessToken({ userId: 'user-1', encryptedRefreshToken: 'old-encrypted-refresh' }, deps)
+  assert.equal(result.ok, false); assert.equal(result.error_code, 'X_REFRESH_ACCOUNT_UPDATE_FAILED')
+  assertSafe(result); assert.equal(fetchCalls.length, 1); assert.equal(successWrites(db).length, 1); assert.equal(failureWrites(db).length, 1)
+}
+{
   const { db, deps } = makeDeps(valid())
   db.failSuccessUpdate = true; db.failFailureUpdate = true
+  const result = await refreshXAccessToken({ userId: 'user-1', encryptedRefreshToken: 'old-encrypted-refresh' }, deps)
+  assert.equal(result.ok, false); assert.equal(result.error_code, 'X_REFRESH_ACCOUNT_UPDATE_FAILED')
+  assertSafe(result); assert.equal(successWrites(db).length, 1); assert.equal(failureWrites(db).length, 1)
+}
+{
+  const { db, deps } = makeDeps(valid())
+  db.multipleRowsForSuccessUpdate = true
   const result = await refreshXAccessToken({ userId: 'user-1', encryptedRefreshToken: 'old-encrypted-refresh' }, deps)
   assert.equal(result.ok, false); assert.equal(result.error_code, 'X_REFRESH_ACCOUNT_UPDATE_FAILED')
   assertSafe(result); assert.equal(successWrites(db).length, 1); assert.equal(failureWrites(db).length, 1)
@@ -185,9 +217,14 @@ for (const status of [429, 503]) {
   assert.equal(result.ok, false); assert.equal(result.error_code, 'X_REFRESH_TOKEN_DECRYPT_FAILED')
   assert.equal(fetchCalls.length, 0); assertNoSuccess(db); assertLifecycle(db, 'ERROR', 'X_REFRESH_TOKEN_DECRYPT_FAILED')
 }
-{
-  const { db, result } = await run(valid(), 200, { env: { X_CLIENT_ID: '', X_CLIENT_SECRET: 'dummy-secret' }, fetchImpl: async () => { throw new Error('must not fetch') } })
+for (const envOverride of [
+  { X_CLIENT_ID: '', X_CLIENT_SECRET: 'dummy-secret' },
+  { X_CLIENT_ID: '   ', X_CLIENT_SECRET: 'dummy-secret' },
+  { X_CLIENT_ID: 'dummy-client', X_CLIENT_SECRET: '   ' },
+]) {
+  const { db, result, fetchCalls } = await run(valid(), 200, { env: envOverride, fetchImpl: async () => { throw new Error('must not fetch') } })
   assert.equal(result.ok, false); assert.equal(result.error_code, 'X_REFRESH_CLIENT_INVALID')
+  assert.equal(fetchCalls.length, 0)
   assertNoSuccess(db); assertLifecycle(db, 'ERROR', 'X_REFRESH_CLIENT_INVALID')
 }
 
