@@ -17,8 +17,13 @@ const headers = {
 
 export async function POST(request: Request) {
   const response = await handleXIdentityDiagnosticRequest({
-    request, getAuthenticatedUserId: (sessionRequest) => requireUserId({ request: sessionRequest }),
-    loadAccount: createXIdentityDiagnosticAccountLoader(getSupabaseAdmin()), fetchImpl: fetch,
+    request,
+    getAuthenticatedUserId: (sessionRequest) => requireUserId({ request: sessionRequest }),
+    loadAccount: async (userId) => {
+      const loadAccount = createXIdentityDiagnosticAccountLoader(getSupabaseAdmin())
+      return loadAccount(userId)
+    },
+    fetchImpl: fetch,
   })
   return NextResponse.json(response.body, { status: response.status, headers })
 }
