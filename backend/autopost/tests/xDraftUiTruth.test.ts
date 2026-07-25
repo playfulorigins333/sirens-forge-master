@@ -25,6 +25,7 @@ const rulesRoutePath = "app/api/autopost/rules/route.ts"
 const approveRoutePath = "app/api/autopost/rules/[rule_id]/approve/route.ts"
 const platformAvailabilityPath = "lib/autopost/platformAvailability.ts"
 const platformRegistryPath = "lib/autopost/platformRegistry.ts"
+const platformsMeRoutePath = "app/api/autopost/platforms/me/route.ts"
 
 const autopostClient = read(autopostClientPath)
 const autopostPage = read(autopostPagePath)
@@ -32,6 +33,7 @@ const rulesRoute = read(rulesRoutePath)
 const approveRoute = read(approveRoutePath)
 const platformAvailability = read(platformAvailabilityPath)
 const platformRegistry = read(platformRegistryPath)
+const platformsMeRoute = read(platformsMeRoutePath)
 
 assertIncludes(autopostClient, "last_run_at?: string | null", "AutopostRule must use the database last_run_at field")
 assert.ok(!autopostClient.includes("last_ran_at"), "active UI source must not reference last_ran_at")
@@ -130,6 +132,24 @@ assertIncludes(autopostClient, "AUTOPOST_PACK_PREFILL_STORAGE_KEY", "Generate ha
 assertIncludes(autopostClient, "setXDraftText(bestDraftText)", "Generate handoff must still prepare X draft text")
 assertIncludes(autopostClient, "connectX", "X connection UI support must remain present")
 assertIncludes(autopostClient, "disconnectX", "X disconnection UI support must remain present")
+assertIncludes(autopostClient, 'const xUserConnected = xStatus?.user_connected === true && xStatus?.connection_status === "CONNECTED"', "X draft eligibility must require evaluated connection and CONNECTED status")
+assertIncludes(autopostClient, "xStatus?.connection_blocker ?? null", "X UI must read the sanitized connection blocker")
+assertIncludes(autopostClient, 'xConnectionBlocker === "X_ACCOUNT_NOT_CONNECTED" || xConnectionBlocker === "X_ACCOUNT_STATUS_DISCONNECTED"', "X OAuth connect must be limited to absent or explicitly disconnected accounts")
+const blockedXUi = sliceBetween(autopostClient, ') : xStoredPostureBlocked ? (', ') : (', "stored X posture UI branch")
+assertIncludes(blockedXUi, "data-x-stored-posture-blocked", "posture-blocked X accounts must use a separate branch")
+assertIncludes(blockedXUi, "Stored X connection requires internal validation.", "blocked branch must explain internal validation")
+assertIncludes(blockedXUi, "Reconnect and reauthorization are unavailable.", "blocked branch must suppress reauthorization")
+assert.ok(!blockedXUi.includes("Connect X") && !blockedXUi.includes("Disconnect X"), "blocked branch must offer no provider account action")
+assertIncludes(autopostClient, "disabled={isSavingXDraft || !xUserConnected", "Save X Draft must remain disabled without evaluated connection")
+assert.ok(!autopostClient.includes("useEffect(() => connectX") && !autopostClient.includes("useEffect(() => disconnectX"), "X account actions must not run automatically")
+
+for (const field of ["encrypted_access_token", "encrypted_refresh_token", "token_expires_at", "token_key_version"]) {
+  assertIncludes(platformsMeRoute, field, `platform status route must select ${field}`)
+}
+const forbiddenRouteOperations = ["update", "upsert", "insert", "delete", "rpc"].map((operation) => `.${operation}(`)
+for (const forbidden of [...forbiddenRouteOperations, "decrypt", "refreshX", "fetch("]) {
+  assert.ok(!platformsMeRoute.includes(forbidden), `platform status route must remain read-only and local: ${forbidden}`)
+}
 
 
 const loaderSource = `export async function resolve(specifier, context, nextResolve) { if (specifier === 'server-only') return { url: 'data:text/javascript,export%20{}', shortCircuit: true }; return nextResolve(specifier, context) }`
@@ -142,6 +162,7 @@ const ENV_KEYS = [
   "AUTOPOST_TOKEN_ENCRYPTION_KEY",
   "AUTOPOST_OAUTH_STATE_SECRET",
   "AUTOPOST_WEBHOOK_X",
+  "AUTOPOST_X_RUN_DISPATCH_ENABLED",
 ] as const
 const originalEnv = new Map<(typeof ENV_KEYS)[number], string | undefined>(ENV_KEYS.map((key) => [key, process.env[key]]))
 
@@ -155,6 +176,7 @@ function restoreEnv() {
 
 function clearXEnv() {
   for (const key of ENV_KEYS) delete process.env[key]
+  process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED = "false"
 }
 
 function setFakeXOAuthEnv() {
@@ -273,23 +295,143 @@ try {
   assert.equal(completeStatus.user_connected, false)
   assertXCapability(completeStatus)
 
-  const connectedStatus = buildUserPlatformStatus(x, new Map([["x", {
-    platform: "x",
-    provider_account_id: "local-provider-account",
-    provider_username: "local-provider-user",
+  assert.equal(process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED, "false")
+
+  const completeXAccount = {
+    platform: "x" as const,
+    provider_account_id: "fake-provider-account",
+    provider_username: "fake-provider-user",
     connection_status: "CONNECTED",
     connected_at: "2026-07-23T00:00:00.000Z",
     last_refresh_at: "2026-07-23T00:10:00.000Z",
     last_error: null,
-  }]]))
+    encrypted_access_token: "fake-encrypted-access-marker",
+    encrypted_refresh_token: "fake-encrypted-refresh-marker",
+    token_expires_at: "2027-07-23T00:00:00.000Z",
+    token_key_version: 1,
+    metadata: { provider: "x", identity_fetched: true },
+  }
+  const fixtureSnapshot = structuredClone(completeXAccount)
+  const statusFor = (changes: Record<string, unknown> = {}) => buildUserPlatformStatus(x, new Map([["x", { ...completeXAccount, ...changes } as any]]))
+  const blockerFor = (changes: Record<string, unknown> = {}) => statusFor(changes).connection_blocker
+
+  const connectedStatus = statusFor()
   assert.equal(connectedStatus.user_connected, true)
   assert.equal(connectedStatus.connection_status, "CONNECTED")
+  assert.equal(connectedStatus.connection_blocker, null)
+  assert.equal(connectedStatus.has_error, false)
+  assert.equal(connectedStatus.can_connect, false)
+  assert.equal(connectedStatus.provider_username, "fake-provider-user")
   assert.equal(connectedStatus.public_selectable, false)
   assert.equal(connectedStatus.can_schedule, false)
+  assert.ok(!("provider_valid" in connectedStatus), "status must make no provider-validity claim")
+  const serializedConnected = JSON.stringify(connectedStatus)
+  for (const forbidden of ["encrypted_access_token", "encrypted_refresh_token", "token_expires_at", "token_key_version", "metadata", "fake-encrypted", "last_error", "fake-metadata-inspection-diagnostic"]) {
+    assert.ok(!serializedConnected.includes(forbidden), `serialized browser status must not contain ${forbidden}`)
+  }
   const connectedMessage = `${connectedStatus.status_message} ${connectedStatus.disabled_reason}`
-  assert.match(connectedMessage, /stored connection for controlled validation/i)
-  assert.match(connectedMessage, /posture.*unverified|live posting.*unverified/i)
-  assert.doesNotMatch(connectedMessage, /live-ready|ready for live posting|operationally ready|live posting enabled/i)
+  assert.match(connectedMessage, /stored connected-account posture is verified for controlled validation/i)
+  assert.match(connectedMessage, /provider validity and live posting remain unverified/i)
+  assert.doesNotMatch(connectedMessage, /connected-account posture (?:remains|is) unverified|stored posture (?:remains|is) unverified/i)
+  assert.doesNotMatch(connectedMessage, /live-ready|ready for live posting|operationally ready|provider-valid|live posting enabled|scheduling enabled/i)
+
+  const noAccount = buildUserPlatformStatus(x, new Map())
+  assert.equal(noAccount.connection_blocker, "X_ACCOUNT_NOT_CONNECTED")
+  assert.equal(noAccount.has_error, false)
+  assert.equal(noAccount.can_connect, true)
+  for (const [connection_status, blocker, hasError, canConnect] of [
+    ["DISCONNECTED", "X_ACCOUNT_STATUS_DISCONNECTED", false, true],
+    ["ERROR", "X_ACCOUNT_STATUS_ERROR", true, false],
+    ["EXPIRED", "X_ACCOUNT_STATUS_EXPIRED", true, false],
+    ["REVOKED", "X_ACCOUNT_STATUS_REVOKED", true, false],
+    [null, "X_ACCOUNT_STATUS_UNKNOWN", true, false],
+    ["", "X_ACCOUNT_STATUS_UNKNOWN", true, false],
+    ["connected", "X_ACCOUNT_STATUS_UNKNOWN", true, false],
+    ["SURPRISE", "X_ACCOUNT_STATUS_UNKNOWN", true, false],
+  ] as const) {
+    const status = statusFor({ connection_status })
+    assert.equal(status.connection_blocker, blocker)
+    assert.equal(status.has_error, hasError)
+    assert.equal(status.can_connect, canConnect)
+  }
+
+  const invalidCases: Array<[Record<string, unknown>, string]> = [
+    [{ provider_account_id: undefined }, "X_PROVIDER_ACCOUNT_ID_MISSING"],
+    [{ provider_account_id: "  " }, "X_PROVIDER_ACCOUNT_ID_MISSING"],
+    [{ provider_username: undefined }, "X_PROVIDER_USERNAME_MISSING"],
+    [{ provider_username: " " }, "X_PROVIDER_USERNAME_MISSING"],
+    [{ encrypted_access_token: undefined }, "X_ENCRYPTED_ACCESS_TOKEN_MISSING"],
+    [{ encrypted_access_token: " " }, "X_ENCRYPTED_ACCESS_TOKEN_MISSING"],
+    [{ encrypted_refresh_token: undefined }, "X_ENCRYPTED_REFRESH_TOKEN_MISSING"],
+    [{ encrypted_refresh_token: " " }, "X_ENCRYPTED_REFRESH_TOKEN_MISSING"],
+    [{ token_expires_at: undefined }, "X_TOKEN_EXPIRY_INVALID"],
+    [{ token_expires_at: null }, "X_TOKEN_EXPIRY_INVALID"],
+    [{ token_expires_at: 123 }, "X_TOKEN_EXPIRY_INVALID"],
+    [{ token_expires_at: " " }, "X_TOKEN_EXPIRY_INVALID"],
+    [{ token_expires_at: "not-a-date" }, "X_TOKEN_EXPIRY_INVALID"],
+    [{ token_key_version: undefined }, "X_TOKEN_KEY_VERSION_INVALID"],
+    [{ token_key_version: null }, "X_TOKEN_KEY_VERSION_INVALID"],
+    [{ token_key_version: "1" }, "X_TOKEN_KEY_VERSION_INVALID"],
+    [{ token_key_version: 0 }, "X_TOKEN_KEY_VERSION_INVALID"],
+    [{ token_key_version: -1 }, "X_TOKEN_KEY_VERSION_INVALID"],
+    [{ token_key_version: 1.5 }, "X_TOKEN_KEY_VERSION_INVALID"],
+    [{ token_key_version: Number.NaN }, "X_TOKEN_KEY_VERSION_INVALID"],
+    [{ token_key_version: Number.POSITIVE_INFINITY }, "X_TOKEN_KEY_VERSION_INVALID"],
+    [{ metadata: undefined }, "X_PROVIDER_METADATA_MISSING"],
+    [{ metadata: null }, "X_PROVIDER_METADATA_MISSING"],
+    [{ metadata: "x" }, "X_PROVIDER_METADATA_MISSING"],
+    [{ metadata: [] }, "X_PROVIDER_METADATA_MISSING"],
+    [{ metadata: new Date() }, "X_PROVIDER_METADATA_MISSING"],
+    [{ metadata: {} }, "X_PROVIDER_METADATA_MISSING"],
+    [{ metadata: { provider: "other", identity_fetched: true } }, "X_PROVIDER_METADATA_MISSING"],
+    [{ metadata: { provider: "x" } }, "X_IDENTITY_NOT_CONFIRMED"],
+    [{ metadata: { provider: "x", identity_fetched: false } }, "X_IDENTITY_NOT_CONFIRMED"],
+    [{ metadata: { provider: "x", identity_fetched: "true" } }, "X_IDENTITY_NOT_CONFIRMED"],
+    [{ last_error: "problem" }, "X_ACCOUNT_ERROR_PRESENT"],
+    [{ last_error: "" }, "X_ACCOUNT_ERROR_PRESENT"],
+  ]
+  for (const [changes, expected] of invalidCases) {
+    const status = statusFor(changes)
+    assert.equal(status.connection_blocker, expected)
+    assert.equal(status.user_connected, false)
+    assert.equal(status.can_connect, false)
+    assert.equal(status.has_error, true)
+  }
+  assert.equal(blockerFor({ token_expires_at: "2020-01-01T00:00:00.000Z" }), null, "valid past expiry is structurally accepted")
+  assert.equal(blockerFor({ token_expires_at: "2030-01-01T00:00:00.000Z" }), null, "valid future expiry is structurally accepted")
+  assert.equal(blockerFor({ metadata: Object.assign(Object.create(null), { provider: "x", identity_fetched: true }) }), null, "null-prototype metadata is accepted")
+  const throwingPrototypeMetadata = new Proxy({}, {
+    getPrototypeOf() {
+      throw new Error("fake-metadata-inspection-diagnostic")
+    },
+  })
+  const throwingProviderMetadata = new Proxy({}, {
+    getPrototypeOf() {
+      return Object.prototype
+    },
+    get(_target, property) {
+      if (property === "provider") throw new Error("fake-metadata-inspection-diagnostic")
+      return undefined
+    },
+  })
+  const throwingIdentityMetadata = new Proxy({ provider: "x" }, {
+    get(target, property, receiver) {
+      if (property === "identity_fetched") throw new Error("fake-metadata-inspection-diagnostic")
+      return Reflect.get(target, property, receiver)
+    },
+  })
+  for (const metadata of [throwingPrototypeMetadata, throwingProviderMetadata, throwingIdentityMetadata]) {
+    const status = statusFor({ metadata })
+    assert.equal(status.connection_blocker, "X_PROVIDER_METADATA_MISSING")
+    assert.equal(status.user_connected, false)
+    assert.equal(status.has_error, true)
+    assert.equal(status.can_connect, false)
+    assert.ok(!JSON.stringify(status).includes("fake-metadata-inspection-diagnostic"))
+  }
+  assert.equal(blockerFor({ last_error: undefined }), null)
+  assert.equal(blockerFor({ provider_account_id: "", encrypted_access_token: "" }), "X_PROVIDER_ACCOUNT_ID_MISSING", "first blocker must win")
+  assert.equal(blockerFor({ provider_account_id: "", encrypted_access_token: "" }), blockerFor({ provider_account_id: "", encrypted_access_token: "" }), "evaluation must repeat deterministically")
+  assert.deepEqual(completeXAccount, fixtureSnapshot, "posture evaluation must not mutate fixtures")
 
   const remainingBlockers = [
     "X_ENVIRONMENT_VERIFICATION_REQUIRED",

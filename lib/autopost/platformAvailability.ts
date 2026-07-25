@@ -12,6 +12,8 @@ export type AutopostAccountStatus = {
   last_error: string | null
   encrypted_access_token?: string | null
   encrypted_refresh_token?: string | null
+  token_expires_at?: string | null
+  token_key_version?: number | null
   metadata?: Record<string, unknown> | null
 }
 
@@ -61,6 +63,45 @@ function isConnectedStatus(status: string | null | undefined) {
 
 function nonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
+}
+
+function inspectXProviderMetadata(value: unknown) {
+  if (value === null || typeof value !== "object") return null
+  try {
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return null
+    const metadata = value as Record<string, unknown>
+    if (metadata.provider !== "x") return null
+    return { identityFetched: metadata.identity_fetched }
+  } catch {
+    return null
+  }
+}
+
+function getXStoredPostureBlocker(account: AutopostAccountStatus | null) {
+  if (!account) return "X_ACCOUNT_NOT_CONNECTED"
+  if (account.connection_status !== "CONNECTED") {
+    if (account.connection_status === "DISCONNECTED") return "X_ACCOUNT_STATUS_DISCONNECTED"
+    if (account.connection_status === "EXPIRED") return "X_ACCOUNT_STATUS_EXPIRED"
+    if (account.connection_status === "REVOKED") return "X_ACCOUNT_STATUS_REVOKED"
+    if (account.connection_status === "ERROR") return "X_ACCOUNT_STATUS_ERROR"
+    return "X_ACCOUNT_STATUS_UNKNOWN"
+  }
+  if (!nonEmptyString(account.provider_account_id)) return "X_PROVIDER_ACCOUNT_ID_MISSING"
+  if (!nonEmptyString(account.provider_username)) return "X_PROVIDER_USERNAME_MISSING"
+  if (!nonEmptyString(account.encrypted_access_token)) return "X_ENCRYPTED_ACCESS_TOKEN_MISSING"
+  if (!nonEmptyString(account.encrypted_refresh_token)) return "X_ENCRYPTED_REFRESH_TOKEN_MISSING"
+  if (!nonEmptyString(account.token_expires_at) || !Number.isFinite(new Date(account.token_expires_at as string).getTime())) {
+    return "X_TOKEN_EXPIRY_INVALID"
+  }
+  if (!Number.isFinite(account.token_key_version) || !Number.isInteger(account.token_key_version) || (account.token_key_version as number) <= 0) {
+    return "X_TOKEN_KEY_VERSION_INVALID"
+  }
+  const metadataInspection = inspectXProviderMetadata(account.metadata)
+  if (!metadataInspection) return "X_PROVIDER_METADATA_MISSING"
+  if (metadataInspection.identityFetched !== true) return "X_IDENTITY_NOT_CONFIRMED"
+  if (account.last_error !== null && account.last_error !== undefined) return "X_ACCOUNT_ERROR_PRESENT"
+  return null
 }
 
 function getFanvueConnectionBlocker(args: {
@@ -139,8 +180,13 @@ export function buildUserPlatformStatus(
 
   if (platform.id === "x") {
     const xConfig = getXConfigStatus()
+    const connectionBlocker = getXStoredPostureBlocker(account)
+    const userConnected = connectionBlocker === null
+    const canConnect = xConfig.oauth_configured && (
+      connectionBlocker === "X_ACCOUNT_NOT_CONNECTED" || connectionBlocker === "X_ACCOUNT_STATUS_DISCONNECTED"
+    )
     const disabledReason = userConnected
-      ? "X has a stored connection for controlled validation. Connected-account posture and live posting remain unverified. Public scheduling remains disabled."
+      ? "X stored connected-account posture is verified for controlled validation. Provider validity and live posting remain unverified. Public scheduling remains disabled."
       : xConfig.oauth_configured
         ? "Text-only X posting is implemented for controlled validation. Environment verification, initial OAuth/token validation, weighted text enforcement, OAuth proof, connected-account verification, provider revocation, live canary proof, and public enablement remain incomplete."
         : "Text-only X posting is implemented for controlled validation, but X OAuth is not fully configured for this environment. Public scheduling remains disabled."
@@ -154,14 +200,18 @@ export function buildUserPlatformStatus(
       app_configured: xConfig.app_configured,
       oauth_configured: xConfig.oauth_configured,
       config_error: xConfig.config_error,
-      can_connect: xConfig.oauth_configured,
+      can_connect: canConnect,
       user_connected: userConnected,
       connection_status: account?.connection_status ?? "DISCONNECTED",
+      connection_blocker: connectionBlocker,
       provider_username: account?.provider_username ?? null,
       provider_account_id: account?.provider_account_id ?? null,
       connected_at: account?.connected_at ?? null,
       last_refresh_at: account?.last_refresh_at ?? null,
-      has_error: Boolean(account?.last_error),
+      has_error: Boolean(account) && (
+        (account.last_error !== null && account.last_error !== undefined) ||
+        (connectionBlocker !== null && connectionBlocker !== "X_ACCOUNT_STATUS_DISCONNECTED")
+      ),
       public_selectable: false,
       can_schedule: false,
       supports_real_posting: platform.supports_real_posting,
@@ -170,7 +220,7 @@ export function buildUserPlatformStatus(
       supports_async_dispatch: platform.supports_async_dispatch,
       supports_assisted_workflow: platform.supports_assisted_workflow,
       status_message: userConnected
-        ? "X has a stored connection for controlled validation. Connected-account posture and live posting remain unverified."
+        ? "X stored connected-account posture is verified for controlled validation. Provider validity and live posting remain unverified."
         : platform.status_message,
       disabled_reason: disabledReason,
       blockers: X_SCHEDULING_BLOCKERS,
