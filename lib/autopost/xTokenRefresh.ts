@@ -7,14 +7,6 @@ import {
   getAutopostTokenKeyVersion,
 } from "@/lib/autopost/tokenCrypto"
 
-type XRefreshTokenResponse = {
-  token_type?: unknown
-  expires_in?: unknown
-  access_token?: unknown
-  refresh_token?: unknown
-  scope?: unknown
-}
-
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>
 
 export type XTokenRefreshDeps = {
@@ -65,27 +57,41 @@ function getBasicAuthHeader(clientId: string, clientSecret: string) {
 function getXClientCredentials(env: Record<string, string | undefined>) {
   const clientId = env.X_CLIENT_ID
   const clientSecret = env.X_CLIENT_SECRET
-  if (!clientId || clientId.trim().length === 0 || !clientSecret || clientSecret.trim().length === 0) return null
-  return { clientId, clientSecret }
+  if (typeof clientId !== "string" || typeof clientSecret !== "string") return null
+  const normalizedClientId = clientId.trim()
+  const normalizedClientSecret = clientSecret.trim()
+  if (!normalizedClientId || !normalizedClientSecret) return null
+  return { clientId: normalizedClientId, clientSecret: normalizedClientSecret }
 }
 
-function parseTokenExpiresAt(expiresIn: unknown, now: () => Date) {
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
+function parseTokenExpiresAt(expiresIn: unknown, capturedNowMs: number) {
   if (typeof expiresIn !== "number" || !Number.isFinite(expiresIn) || expiresIn <= 0) {
     return null
   }
 
-  const expiresAtMs = now().getTime() + expiresIn * 1000
+  const expiresAtMs = capturedNowMs + expiresIn * 1000
   if (!Number.isFinite(expiresAtMs)) return null
 
   const expiresAt = new Date(expiresAtMs)
   if (!Number.isFinite(expiresAt.getTime())) return null
-  return expiresAt.toISOString()
+  try {
+    const iso = expiresAt.toISOString()
+    return iso.length > 0 ? iso : null
+  } catch {
+    return null
+  }
 }
 
 function parseScopes(scope: unknown): { ok: true; scopes?: string[] } | { ok: false } {
   if (scope === undefined) return { ok: true }
   if (typeof scope !== "string") return { ok: false }
-  const scopes = scope.split(/\s+/).filter(Boolean)
+  const scopes = [...new Set(scope.trim().split(/\s+/).filter(Boolean))]
   return scopes.length > 0 ? { ok: true, scopes } : { ok: false }
 }
 
@@ -251,30 +257,53 @@ export async function refreshXAccessToken(
     return fail(supabaseAdmin, input.userId, "X_REFRESH_FAILED")
   }
 
-  const tokenResponse = (parsedBody ?? {}) as XRefreshTokenResponse
-  if (typeof tokenResponse.access_token !== "string" || tokenResponse.access_token.trim().length === 0) {
+  if (!isPlainObject(parsedBody)) {
     return fail(supabaseAdmin, input.userId, "X_REFRESH_RESPONSE_INVALID")
   }
 
-  if (typeof tokenResponse.token_type !== "string" || tokenResponse.token_type.trim().length === 0) {
+  const tokenResponse = parsedBody
+  if (typeof tokenResponse.access_token !== "string") {
+    return fail(supabaseAdmin, input.userId, "X_REFRESH_RESPONSE_INVALID")
+  }
+  const normalizedAccessToken = tokenResponse.access_token.trim()
+  if (!normalizedAccessToken) return fail(supabaseAdmin, input.userId, "X_REFRESH_RESPONSE_INVALID")
+
+  if (typeof tokenResponse.token_type !== "string" || tokenResponse.token_type.trim().toLowerCase() !== "bearer") {
     return fail(supabaseAdmin, input.userId, "X_REFRESH_RESPONSE_INVALID")
   }
 
-  if (tokenResponse.token_type.trim().toLowerCase() !== "bearer") {
-    return fail(supabaseAdmin, input.userId, "X_REFRESH_RESPONSE_INVALID")
+  if (
+    typeof tokenResponse.expires_in !== "number" ||
+    !Number.isFinite(tokenResponse.expires_in) ||
+    tokenResponse.expires_in <= 0
+  ) {
+    return fail(supabaseAdmin, input.userId, "X_TOKEN_EXPIRY_MISSING_AFTER_REFRESH")
   }
 
-  const tokenExpiresAt = parseTokenExpiresAt(tokenResponse.expires_in, now)
+  let capturedNowMs: number
+  let capturedNowIso: string
+  try {
+    const capturedNow = now()
+    if (!(capturedNow instanceof Date)) throw new Error("invalid clock")
+    capturedNowMs = capturedNow.getTime()
+    if (!Number.isFinite(capturedNowMs)) throw new Error("invalid clock")
+    capturedNowIso = capturedNow.toISOString()
+    if (!capturedNowIso) throw new Error("invalid clock")
+  } catch {
+    return fail(supabaseAdmin, input.userId, "X_TOKEN_EXPIRY_MISSING_AFTER_REFRESH")
+  }
+
+  const tokenExpiresAt = parseTokenExpiresAt(tokenResponse.expires_in, capturedNowMs)
   if (!tokenExpiresAt) {
     return fail(supabaseAdmin, input.userId, "X_TOKEN_EXPIRY_MISSING_AFTER_REFRESH")
   }
 
-  let replacementRefreshToken: string | null = null
-  if (tokenResponse.refresh_token !== undefined) {
+  let replacementRefreshToken: string | undefined
+  if (Object.prototype.hasOwnProperty.call(tokenResponse, "refresh_token")) {
     if (typeof tokenResponse.refresh_token !== "string" || tokenResponse.refresh_token.trim().length === 0) {
       return fail(supabaseAdmin, input.userId, "X_REFRESH_RESPONSE_INVALID")
     }
-    replacementRefreshToken = tokenResponse.refresh_token
+    replacementRefreshToken = tokenResponse.refresh_token.trim()
   }
 
   const scopesResult = parseScopes(tokenResponse.scope)
@@ -286,8 +315,8 @@ export async function refreshXAccessToken(
   let encryptedRefreshToken: string
   let tokenKeyVersion: number
   try {
-    encryptedAccessToken = encryptToken(tokenResponse.access_token)
-    encryptedRefreshToken = replacementRefreshToken ? encryptToken(replacementRefreshToken) : input.encryptedRefreshToken
+    encryptedAccessToken = encryptToken(normalizedAccessToken)
+    encryptedRefreshToken = replacementRefreshToken === undefined ? input.encryptedRefreshToken : encryptToken(replacementRefreshToken)
     tokenKeyVersion = getTokenKeyVersion()
   } catch {
     return fail(supabaseAdmin, input.userId, "X_REFRESH_FAILED")
@@ -302,7 +331,7 @@ export async function refreshXAccessToken(
       tokenType: "bearer",
       scopes: scopesResult.scopes,
       tokenKeyVersion,
-      lastRefreshAt: now().toISOString(),
+      lastRefreshAt: capturedNowIso,
     })
   } catch {
     await markRefreshFailure(supabaseAdmin, {
