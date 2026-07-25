@@ -459,7 +459,13 @@ export default function AutopostPage() {
   }, [userPlatformStatuses])
 
   const xUserConnected = xStatus?.user_connected === true && xStatus?.connection_status === "CONNECTED"
-  const xCanConnect = xStatus?.can_connect === true
+  const xConnectionBlocker = xStatus?.connection_blocker ?? null
+  const xCanConnect = xStatus?.can_connect === true && (
+    xConnectionBlocker === "X_ACCOUNT_NOT_CONNECTED" || xConnectionBlocker === "X_ACCOUNT_STATUS_DISCONNECTED"
+  )
+  const xStoredPostureBlocked = xConnectionBlocker !== null &&
+    xConnectionBlocker !== "X_ACCOUNT_NOT_CONNECTED" &&
+    xConnectionBlocker !== "X_ACCOUNT_STATUS_DISCONNECTED"
   const fanvueUserConnected = fanvueStatus?.user_connected === true && fanvueStatus?.connection_status === "CONNECTED"
   const xDraftCharacterCount = Array.from(xDraftText).length
   const xDraftTooLong = xDraftCharacterCount > 280
@@ -1513,7 +1519,13 @@ export default function AutopostPage() {
                         <div className="inline-flex items-center rounded-full border border-cyan-400/35 bg-cyan-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-100">
                           X draft preparation
                         </div>
-                        <div className="mt-3 text-lg font-bold text-white">Connect X to prepare a text-only draft</div>
+                        <div className="mt-3 text-lg font-bold text-white">
+                          {xUserConnected
+                            ? "Prepare a text-only X draft"
+                            : xStoredPostureBlocked
+                              ? "Stored X connection requires internal validation"
+                              : "Connect X to prepare a text-only draft"}
+                        </div>
                         <div className="mt-1 max-w-3xl text-xs leading-5 text-gray-300">
                           X draft preparation is available after connection. Scheduled posting is not enabled yet. This saves a non-runnable draft rule only.
                         </div>
@@ -1548,6 +1560,16 @@ export default function AutopostPage() {
                               {xAccountBusy ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <X className="mr-2 h-4 w-4" />}
                               Disconnect X
                             </Button>
+                          </div>
+                        ) : xStoredPostureBlocked ? (
+                          <div className="space-y-3" data-x-stored-posture-blocked>
+                            <div>
+                              <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">X connection</div>
+                              <div className="mt-1 font-semibold text-amber-200">Stored X connection requires internal validation.</div>
+                              {xStatus?.provider_username && <div className="mt-1 text-xs text-gray-300">Stored as @{xStatus.provider_username}</div>}
+                              <div className="mt-2 text-xs text-gray-400">{xConnectionBlocker.replaceAll("_", " ")}</div>
+                              <div className="mt-2 text-xs text-gray-400">Reconnect and reauthorization are unavailable. No account change was made. Scheduled posting remains disabled.</div>
+                            </div>
                           </div>
                         ) : (
                           <div className="space-y-3">
