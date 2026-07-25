@@ -13,6 +13,9 @@ export type XOAuthCookiePayload = {
   code_verifier: string
   created_at: string
   expires_at: string
+  flow?: "initial" | "reauthorize"
+  expected_provider_account_id?: string
+  expected_provider_username?: string
 }
 
 function requireStateSecret() {
@@ -72,6 +75,19 @@ export function verifySignedXOAuthCookie(cookieValue: string) {
     throw new Error("X_OAUTH_STATE_PROVIDER_INVALID")
   }
 
+  const flow = payload.flow ?? "initial"
+  if (flow !== "initial" && flow !== "reauthorize") {
+    throw new Error("X_OAUTH_STATE_FLOW_INVALID")
+  }
+  if (
+    flow === "reauthorize" &&
+    (!payload.expected_provider_account_id?.trim() ||
+      !payload.expected_provider_username?.trim())
+  ) {
+    throw new Error("X_OAUTH_STATE_IDENTITY_INVALID")
+  }
+  payload.flow = flow
+
   if (!payload.expires_at || Date.parse(payload.expires_at) <= Date.now()) {
     throw new Error("X_OAUTH_STATE_EXPIRED")
   }
@@ -92,8 +108,43 @@ export function createXOAuthState(userId: string) {
     code_verifier: codeVerifier,
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
+    flow: "initial",
   }
 
+  return {
+    state,
+    codeVerifier,
+    codeChallenge: sha256Base64Url(codeVerifier),
+    cookieValue: createSignedXOAuthCookie(payload),
+  }
+}
+
+export function createXReauthorizationOAuthState(
+  userId: string,
+  expectedProviderAccountId: string,
+  expectedProviderUsername: string
+) {
+  const normalizedUserId = userId.trim()
+  const normalizedProviderAccountId = expectedProviderAccountId.trim()
+  const normalizedProviderUsername = expectedProviderUsername.trim()
+  if (!normalizedUserId || !normalizedProviderAccountId || !normalizedProviderUsername) {
+    throw new Error("X_REAUTH_STATE_IDENTITY_INVALID")
+  }
+  const state = randomBase64Url(32)
+  const codeVerifier = randomBase64Url(64)
+  const now = new Date()
+  const expiresAt = new Date(now.getTime() + X_OAUTH_EXPIRES_IN_SECONDS * 1000)
+  const payload: XOAuthCookiePayload = {
+    provider: "x",
+    user_id: normalizedUserId,
+    state_hash: sha256Base64Url(state),
+    code_verifier: codeVerifier,
+    created_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    flow: "reauthorize",
+    expected_provider_account_id: normalizedProviderAccountId,
+    expected_provider_username: normalizedProviderUsername,
+  }
   return {
     state,
     codeVerifier,
