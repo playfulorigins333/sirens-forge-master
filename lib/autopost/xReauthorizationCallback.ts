@@ -24,6 +24,7 @@ type Account = {
   metadata?: unknown
 }
 type Admin = ReturnType<typeof getSupabaseAdmin>
+const DEFAULT_SCOPES = "tweet.read tweet.write users.read offline.access"
 export type XReauthorizationCallbackDeps = {
   fetchImpl?: typeof fetch
   getApiBaseUrl?: () => string
@@ -145,7 +146,10 @@ export async function completeXReauthorization(
   const accessToken = text(tokenBody.access_token)
   const refreshToken = text(tokenBody.refresh_token)
   const tokenType = text(tokenBody.token_type)
-  const normalizedScopes = normalizeScopes(tokenBody.scope)
+  const scopeSource = Object.prototype.hasOwnProperty.call(tokenBody, "scope")
+    ? tokenBody.scope
+    : text(env.X_OAUTH_SCOPES) ?? DEFAULT_SCOPES
+  const normalizedScopes = normalizeScopes(scopeSource)
   let now: Date
   try { now = (deps.now ?? (() => new Date()))() } catch { return result("X_REAUTH_TOKEN_RESPONSE_INVALID", true) }
   const tokenExpiresAt = expiry(tokenBody.expires_in, now)
@@ -175,14 +179,16 @@ export async function completeXReauthorization(
   let encryptedAccessToken: string
   let encryptedRefreshToken: string
   let keyVersion: number
-  let admin: Admin
   try {
     const encrypt = deps.encryptToken ?? encryptAutopostToken
     encryptedAccessToken = encrypt(accessToken)
     encryptedRefreshToken = encrypt(refreshToken)
     keyVersion = (deps.getTokenKeyVersion ?? getAutopostTokenKeyVersion)()
-    admin = (deps.getSupabaseAdmin ?? getSupabaseAdmin)()
   } catch { return result("X_REAUTH_TOKEN_ENCRYPTION_FAILED", true, true) }
+  let admin: Admin
+  try {
+    admin = (deps.getSupabaseAdmin ?? getSupabaseAdmin)()
+  } catch { return result("X_REAUTH_ACCOUNT_UPDATE_FAILED", true, true) }
 
   const oldMetadata = plain(current.metadata) ? current.metadata : {}
   const update = {
