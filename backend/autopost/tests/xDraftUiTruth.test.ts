@@ -326,13 +326,14 @@ try {
   assert.equal(connectedStatus.can_schedule, false)
   assert.ok(!("provider_valid" in connectedStatus), "status must make no provider-validity claim")
   const serializedConnected = JSON.stringify(connectedStatus)
-  for (const forbidden of ["encrypted_access_token", "encrypted_refresh_token", "token_expires_at", "token_key_version", "metadata", "fake-encrypted", "last_error"]) {
+  for (const forbidden of ["encrypted_access_token", "encrypted_refresh_token", "token_expires_at", "token_key_version", "metadata", "fake-encrypted", "last_error", "fake-metadata-inspection-diagnostic"]) {
     assert.ok(!serializedConnected.includes(forbidden), `serialized browser status must not contain ${forbidden}`)
   }
   const connectedMessage = `${connectedStatus.status_message} ${connectedStatus.disabled_reason}`
-  assert.match(connectedMessage, /stored connection for controlled validation/i)
-  assert.match(connectedMessage, /posture.*unverified|live posting.*unverified/i)
-  assert.doesNotMatch(connectedMessage, /live-ready|ready for live posting|operationally ready|live posting enabled/i)
+  assert.match(connectedMessage, /stored connected-account posture is verified for controlled validation/i)
+  assert.match(connectedMessage, /provider validity and live posting remain unverified/i)
+  assert.doesNotMatch(connectedMessage, /connected-account posture (?:remains|is) unverified|stored posture (?:remains|is) unverified/i)
+  assert.doesNotMatch(connectedMessage, /live-ready|ready for live posting|operationally ready|provider-valid|live posting enabled|scheduling enabled/i)
 
   const noAccount = buildUserPlatformStatus(x, new Map())
   assert.equal(noAccount.connection_blocker, "X_ACCOUNT_NOT_CONNECTED")
@@ -399,6 +400,34 @@ try {
   assert.equal(blockerFor({ token_expires_at: "2020-01-01T00:00:00.000Z" }), null, "valid past expiry is structurally accepted")
   assert.equal(blockerFor({ token_expires_at: "2030-01-01T00:00:00.000Z" }), null, "valid future expiry is structurally accepted")
   assert.equal(blockerFor({ metadata: Object.assign(Object.create(null), { provider: "x", identity_fetched: true }) }), null, "null-prototype metadata is accepted")
+  const throwingPrototypeMetadata = new Proxy({}, {
+    getPrototypeOf() {
+      throw new Error("fake-metadata-inspection-diagnostic")
+    },
+  })
+  const throwingProviderMetadata = new Proxy({}, {
+    getPrototypeOf() {
+      return Object.prototype
+    },
+    get(_target, property) {
+      if (property === "provider") throw new Error("fake-metadata-inspection-diagnostic")
+      return undefined
+    },
+  })
+  const throwingIdentityMetadata = new Proxy({ provider: "x" }, {
+    get(target, property, receiver) {
+      if (property === "identity_fetched") throw new Error("fake-metadata-inspection-diagnostic")
+      return Reflect.get(target, property, receiver)
+    },
+  })
+  for (const metadata of [throwingPrototypeMetadata, throwingProviderMetadata, throwingIdentityMetadata]) {
+    const status = statusFor({ metadata })
+    assert.equal(status.connection_blocker, "X_PROVIDER_METADATA_MISSING")
+    assert.equal(status.user_connected, false)
+    assert.equal(status.has_error, true)
+    assert.equal(status.can_connect, false)
+    assert.ok(!JSON.stringify(status).includes("fake-metadata-inspection-diagnostic"))
+  }
   assert.equal(blockerFor({ last_error: undefined }), null)
   assert.equal(blockerFor({ provider_account_id: "", encrypted_access_token: "" }), "X_PROVIDER_ACCOUNT_ID_MISSING", "first blocker must win")
   assert.equal(blockerFor({ provider_account_id: "", encrypted_access_token: "" }), blockerFor({ provider_account_id: "", encrypted_access_token: "" }), "evaluation must repeat deterministically")

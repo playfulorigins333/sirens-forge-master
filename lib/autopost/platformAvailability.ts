@@ -65,10 +65,17 @@ function nonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== "object") return false
-  const prototype = Object.getPrototypeOf(value)
-  return prototype === Object.prototype || prototype === null
+function inspectXProviderMetadata(value: unknown) {
+  if (value === null || typeof value !== "object") return null
+  try {
+    const prototype = Object.getPrototypeOf(value)
+    if (prototype !== Object.prototype && prototype !== null) return null
+    const metadata = value as Record<string, unknown>
+    if (metadata.provider !== "x") return null
+    return { identityFetched: metadata.identity_fetched }
+  } catch {
+    return null
+  }
 }
 
 function getXStoredPostureBlocker(account: AutopostAccountStatus | null) {
@@ -90,8 +97,9 @@ function getXStoredPostureBlocker(account: AutopostAccountStatus | null) {
   if (!Number.isFinite(account.token_key_version) || !Number.isInteger(account.token_key_version) || (account.token_key_version as number) <= 0) {
     return "X_TOKEN_KEY_VERSION_INVALID"
   }
-  if (!isPlainObject(account.metadata) || account.metadata.provider !== "x") return "X_PROVIDER_METADATA_MISSING"
-  if (account.metadata.identity_fetched !== true) return "X_IDENTITY_NOT_CONFIRMED"
+  const metadataInspection = inspectXProviderMetadata(account.metadata)
+  if (!metadataInspection) return "X_PROVIDER_METADATA_MISSING"
+  if (metadataInspection.identityFetched !== true) return "X_IDENTITY_NOT_CONFIRMED"
   if (account.last_error !== null && account.last_error !== undefined) return "X_ACCOUNT_ERROR_PRESENT"
   return null
 }
@@ -178,7 +186,7 @@ export function buildUserPlatformStatus(
       connectionBlocker === "X_ACCOUNT_NOT_CONNECTED" || connectionBlocker === "X_ACCOUNT_STATUS_DISCONNECTED"
     )
     const disabledReason = userConnected
-      ? "X has a stored connection for controlled validation. Connected-account posture and live posting remain unverified. Public scheduling remains disabled."
+      ? "X stored connected-account posture is verified for controlled validation. Provider validity and live posting remain unverified. Public scheduling remains disabled."
       : xConfig.oauth_configured
         ? "Text-only X posting is implemented for controlled validation. Environment verification, initial OAuth/token validation, weighted text enforcement, OAuth proof, connected-account verification, provider revocation, live canary proof, and public enablement remain incomplete."
         : "Text-only X posting is implemented for controlled validation, but X OAuth is not fully configured for this environment. Public scheduling remains disabled."
@@ -212,7 +220,7 @@ export function buildUserPlatformStatus(
       supports_async_dispatch: platform.supports_async_dispatch,
       supports_assisted_workflow: platform.supports_assisted_workflow,
       status_message: userConnected
-        ? "X has a stored connection for controlled validation. Connected-account posture and live posting remain unverified."
+        ? "X stored connected-account posture is verified for controlled validation. Provider validity and live posting remain unverified."
         : platform.status_message,
       disabled_reason: disabledReason,
       blockers: X_SCHEDULING_BLOCKERS,
