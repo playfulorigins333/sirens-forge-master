@@ -78,7 +78,38 @@ function inspectXProviderMetadata(value: unknown) {
   }
 }
 
-function getXStoredPostureBlocker(account: AutopostAccountStatus | null) {
+export type XStoredPostureAccount = Pick<
+  AutopostAccountStatus,
+  | "connection_status"
+  | "provider_account_id"
+  | "provider_username"
+  | "encrypted_access_token"
+  | "encrypted_refresh_token"
+  | "token_expires_at"
+  | "token_key_version"
+  | "metadata"
+  | "last_error"
+>
+
+export type XStoredPostureBlocker =
+  | "X_ACCOUNT_NOT_CONNECTED"
+  | "X_ACCOUNT_STATUS_DISCONNECTED"
+  | "X_ACCOUNT_STATUS_EXPIRED"
+  | "X_ACCOUNT_STATUS_REVOKED"
+  | "X_ACCOUNT_STATUS_ERROR"
+  | "X_ACCOUNT_STATUS_UNKNOWN"
+  | "X_PROVIDER_ACCOUNT_ID_MISSING"
+  | "X_PROVIDER_USERNAME_MISSING"
+  | "X_ENCRYPTED_ACCESS_TOKEN_MISSING"
+  | "X_ENCRYPTED_REFRESH_TOKEN_MISSING"
+  | "X_TOKEN_EXPIRY_INVALID"
+  | "X_TOKEN_KEY_VERSION_INVALID"
+  | "X_PROVIDER_METADATA_MISSING"
+  | "X_IDENTITY_NOT_CONFIRMED"
+  | "X_ACCOUNT_ERROR_PRESENT"
+  | null
+
+export function getXStoredPostureBlocker(account: XStoredPostureAccount | null): XStoredPostureBlocker {
   if (!account) return "X_ACCOUNT_NOT_CONNECTED"
   if (account.connection_status !== "CONNECTED") {
     if (account.connection_status === "DISCONNECTED") return "X_ACCOUNT_STATUS_DISCONNECTED"
