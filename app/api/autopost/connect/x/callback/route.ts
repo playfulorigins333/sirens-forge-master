@@ -9,6 +9,7 @@ import {
   X_OAUTH_COOKIE_NAME,
 } from "@/lib/autopost/xOAuth"
 import { completeInitialXOAuthConnection } from "@/lib/autopost/xInitialOAuthCallback"
+import { completeXReauthorization } from "@/lib/autopost/xReauthorizationCallback"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -54,6 +55,27 @@ export async function GET(req: Request) {
 
     if (statePayload.state_hash !== sha256Base64Url(returnedState)) {
       return redirectWithClearedCookie({ error: "x_oauth_state_mismatch" })
+    }
+
+    if (statePayload.flow === "reauthorize") {
+      const completion = await completeXReauthorization({
+        userId,
+        code,
+        codeVerifier: statePayload.code_verifier,
+        expectedProviderAccountId: statePayload.expected_provider_account_id!,
+        expectedProviderUsername: statePayload.expected_provider_username!,
+      })
+      if (completion.ok) return redirectWithClearedCookie({ reauthorized: "x" })
+      const errorByCode: Partial<Record<typeof completion.safe_code, string>> = {
+        X_REAUTH_ACCOUNT_NOT_READY: "x_reauthorization_account_not_ready",
+        X_REAUTH_ACCOUNT_CHANGED: "x_reauthorization_account_changed",
+        X_REAUTH_PROVIDER_ID_MISMATCH: "x_reauthorization_provider_id_mismatch",
+        X_REAUTH_USERNAME_MISMATCH: "x_reauthorization_username_mismatch",
+        X_REAUTH_ACCOUNT_UPDATE_FAILED: "x_reauthorization_account_update_failed",
+      }
+      return redirectWithClearedCookie({
+        error: errorByCode[completion.safe_code] ?? "x_reauthorization_failed",
+      })
     }
 
     const completion = await completeInitialXOAuthConnection({
