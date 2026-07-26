@@ -52,6 +52,24 @@ function response(safeCode: SafeCode, status: number, authorizationUrl?: string)
   )
 }
 
+async function hasRequestBody(req: Request) {
+  if (req.body === null) return false
+
+  const reader = req.body.getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) return false
+      if (value.byteLength > 0) {
+        await reader.cancel().catch(() => undefined)
+        return true
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export async function POST(req: Request) {
   const userId = await requireUserId({ request: req }).catch(() => null)
   if (!userId?.trim()) return response("X_REAUTH_START_UNAUTHENTICATED", 401)
@@ -59,7 +77,14 @@ export async function POST(req: Request) {
     return response("X_REAUTH_START_CONFIRMATION_REQUIRED", 400)
   }
   const url = new URL(req.url)
-  if (url.search.length || req.body !== null) {
+  if (url.search.length) {
+    return response("X_REAUTH_START_PARAMETERS_NOT_ALLOWED", 400)
+  }
+  try {
+    if (await hasRequestBody(req)) {
+      return response("X_REAUTH_START_PARAMETERS_NOT_ALLOWED", 400)
+    }
+  } catch {
     return response("X_REAUTH_START_PARAMETERS_NOT_ALLOWED", 400)
   }
 

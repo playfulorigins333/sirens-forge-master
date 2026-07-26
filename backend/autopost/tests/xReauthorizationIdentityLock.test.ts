@@ -70,13 +70,13 @@ function accountClient(data: unknown, error: unknown = null) {
   const client = { from(table: string) { calls.push(["from", table]); return { select(columns: string) { calls.push(["select", columns]); const chain = { eq(column: string, value: unknown) { calls.push(["eq", column, value]); return chain }, async maybeSingle() { calls.push(["maybeSingle"]); return { data, error } } }; return chain } } } }
   return { client, calls }
 }
-async function start(input: { user?: unknown; confirmation?: string; url?: string; body?: string; data?: unknown; error?: unknown }) {
+async function start(input: { user?: unknown; confirmation?: string; url?: string; body?: BodyInit; data?: unknown; error?: unknown }) {
   let adminCalls = 0
   const fake = accountClient(input.data === undefined ? { connection_status: "CONNECTED", provider_account_id: ID, provider_username: USERNAME } : input.data, input.error)
   hooks.requireUserId = async () => input.user
   hooks.getSupabaseAdmin = () => { adminCalls++; return fake.client }
   const headers = new Headers(); if (input.confirmation !== undefined) headers.set("x-autopost-x-reauthorize", input.confirmation)
-  const req = new Request(input.url ?? "https://app.invalid/api/admin/autopost/x/reauthorize", { method: "POST", headers, ...(input.body === undefined ? {} : { body: input.body }) })
+  const req = new Request(input.url ?? "https://app.invalid/api/admin/autopost/x/reauthorize", { method: "POST", headers, ...(input.body === undefined ? {} : { body: input.body, duplex: "half" }) } as RequestInit)
   const result: any = await startRoute.POST(req)
   return { result, adminCalls, calls: fake.calls }
 }
@@ -87,8 +87,19 @@ for (const [input, status] of [
   [{ user: null, confirmation: "preserve-existing-x-identity-v1" }, 401], [{ user: "   ", confirmation: "preserve-existing-x-identity-v1" }, 401],
   [{ user: USER }, 400], [{ user: USER, confirmation: "wrong" }, 400],
   [{ user: USER, confirmation: "preserve-existing-x-identity-v1", url: "https://app.invalid/api/admin/autopost/x/reauthorize?x=1" }, 400],
+  [{ user: USER, confirmation: "preserve-existing-x-identity-v1", body: "x" }, 400],
+  [{ user: USER, confirmation: "preserve-existing-x-identity-v1", body: " " }, 400],
   [{ user: USER, confirmation: "preserve-existing-x-identity-v1", body: "{}" }, 400],
+  [{ user: USER, confirmation: "preserve-existing-x-identity-v1", body: "null" }, 400],
 ] as const) { const value = await start(input); assert.equal(value.result.status, status); assert.equal(value.adminCalls, 0); assertSanitized(value.result.body) }
+{
+  const zeroByteStream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(0)); controller.close() } })
+  const value = await start({ user: USER, confirmation: "preserve-existing-x-identity-v1", body: zeroByteStream }); assert.equal(value.result.status, 200); assert.equal(value.adminCalls, 1)
+}
+{
+  const failingStream = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new Error(EXCEPTION)) } })
+  const value = await start({ user: USER, confirmation: "preserve-existing-x-identity-v1", body: failingStream }); assert.equal(value.result.status, 400); assert.equal(value.result.body.safe_code, "X_REAUTH_START_PARAMETERS_NOT_ALLOWED"); assert.equal(value.adminCalls, 0); assertSanitized(value.result.body)
+}
 {
   let adminCalls = 0; hooks.getSupabaseAdmin = () => { adminCalls++; throw new Error(EXCEPTION) }
   const get: any = await startRoute.GET(); assert.equal(get.status, 405); assert.equal(adminCalls, 0); assert.equal(get.body.safe_code, "X_REAUTH_START_METHOD_NOT_ALLOWED")
