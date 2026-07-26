@@ -1,7 +1,7 @@
 import "server-only"
 
 import { decryptAutopostToken, getAutopostTokenKeyVersion } from "./tokenCrypto"
-import { getXStoredPostureBlocker, type XStoredPostureAccount } from "./platformAvailability"
+import { getXStoredPostureBlocker, type XStoredPostureAccount } from "./xStoredPosture"
 import {
   createXTextPost,
   X_TOKEN_EXPIRY_REFRESH_BUFFER_MS,
@@ -116,7 +116,13 @@ export async function runXLiveTextCanary(userId: string, deps: XLiveTextCanaryDe
   }
   if (account?.token_key_version !== currentVersion) return xLiveCanaryResult("X_LIVE_CANARY_TOKEN_KEY_VERSION_MISMATCH")
 
-  const capturedNow = (deps.now ?? (() => new Date()))()
+  let capturedNow: Date
+  try {
+    capturedNow = (deps.now ?? (() => new Date()))()
+    if (!(capturedNow instanceof Date) || !Number.isFinite(capturedNow.getTime())) throw new Error("invalid clock")
+  } catch {
+    return xLiveCanaryResult("X_LIVE_CANARY_TOKEN_EXPIRED_OR_EXPIRING")
+  }
   const expiry = typeof account?.token_expires_at === "string" ? Date.parse(account.token_expires_at) : NaN
   if (!Number.isFinite(expiry) || expiry <= capturedNow.getTime() + X_TOKEN_EXPIRY_REFRESH_BUFFER_MS) {
     return xLiveCanaryResult("X_LIVE_CANARY_TOKEN_EXPIRED_OR_EXPIRING")
