@@ -12,6 +12,9 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 const CONFIRMATION = "preserve-existing-x-identity-v1"
+const MAX_ZERO_LENGTH_READS = 8
+const BODY_READ_TIMEOUT_MS = 250
+const BODY_CANCEL_TIMEOUT_MS = 50
 const SECURITY_HEADERS = {
   "cache-control": "private, no-store, max-age=0",
   pragma: "no-cache",
@@ -52,6 +55,62 @@ function response(safeCode: SafeCode, status: number, authorizationUrl?: string)
   )
 }
 
+async function withTimeout<T>(operation: Promise<T>, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error("request body operation timed out")), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+}
+
+async function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  const cancellation = reader.cancel().catch(() => undefined)
+  try {
+    await Promise.race([
+      cancellation,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, BODY_CANCEL_TIMEOUT_MS)
+      }),
+    ])
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+}
+
+async function hasRequestBody(req: Request) {
+  if (req.body === null) return false
+
+  const reader = req.body.getReader()
+  try {
+    for (let zeroLengthReads = 0; zeroLengthReads <= MAX_ZERO_LENGTH_READS; zeroLengthReads++) {
+      const { done, value } = await withTimeout(reader.read(), BODY_READ_TIMEOUT_MS)
+      if (done) return false
+      if (value.byteLength > 0) {
+        await cancelReader(reader)
+        return true
+      }
+    }
+    await cancelReader(reader)
+    throw new Error("request body produced too many zero-length chunks")
+  } catch (error) {
+    await cancelReader(reader)
+    throw error
+  } finally {
+    try {
+      reader.releaseLock()
+    } catch {
+      throw new Error("request body reader cleanup failed")
+    }
+  }
+}
+
 export async function POST(req: Request) {
   const userId = await requireUserId({ request: req }).catch(() => null)
   if (!userId?.trim()) return response("X_REAUTH_START_UNAUTHENTICATED", 401)
@@ -59,7 +118,14 @@ export async function POST(req: Request) {
     return response("X_REAUTH_START_CONFIRMATION_REQUIRED", 400)
   }
   const url = new URL(req.url)
-  if (url.search.length || req.body !== null) {
+  if (url.search.length) {
+    return response("X_REAUTH_START_PARAMETERS_NOT_ALLOWED", 400)
+  }
+  try {
+    if (await hasRequestBody(req)) {
+      return response("X_REAUTH_START_PARAMETERS_NOT_ALLOWED", 400)
+    }
+  } catch {
     return response("X_REAUTH_START_PARAMETERS_NOT_ALLOWED", 400)
   }
 
