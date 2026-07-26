@@ -36,9 +36,20 @@ type XCreatePostResponse = {
   }
 }
 
-type XCreatePostResult =
+export type XCreatePostFailureKind =
+  | "network_failure"
+  | "timeout"
+  | "rate_limited"
+  | "outcome_unknown"
+  | "unauthorized"
+  | "forbidden"
+  | "invalid_request"
+  | "rejected"
+  | "response_invalid"
+
+export type XCreatePostResult =
   | { ok: true; platform_post_id: string }
-  | { ok: false; error_code: string; error_message: string }
+  | { ok: false; error_code: string; error_message: string; failure_kind: XCreatePostFailureKind }
 
 export type XAdapterDeps = {
   supabaseAdmin?: ReturnType<typeof getSupabaseAdmin>
@@ -95,14 +106,14 @@ function getXApiBaseUrl() {
   return (process.env.X_API_BASE_URL || "https://api.x.com").replace(/\/+$/, "")
 }
 
-const TOKEN_EXPIRY_REFRESH_BUFFER_MS = 60 * 1000
+export const X_TOKEN_EXPIRY_REFRESH_BUFFER_MS = 60 * 1000
 const X_POST_OUTCOME_UNKNOWN_MESSAGE = "X post outcome could not be verified"
 
 function isExpiredOrExpiringSoon(expiresAt: string | null, now: Date) {
   if (!expiresAt) return true
   const expiresMs = Date.parse(expiresAt)
   if (!Number.isFinite(expiresMs)) return true
-  return expiresMs <= now.getTime() + TOKEN_EXPIRY_REFRESH_BUFFER_MS
+  return expiresMs <= now.getTime() + X_TOKEN_EXPIRY_REFRESH_BUFFER_MS
 }
 
 async function loadConnectedXAccount(
@@ -126,19 +137,21 @@ async function loadConnectedXAccount(
   return (data as XAccountRow | null) ?? null
 }
 
-function unknownPostOutcome() {
+function unknownPostOutcome(failureKind: XCreatePostFailureKind = "outcome_unknown") {
   return {
     ok: false as const,
     error_code: "X_POST_OUTCOME_UNKNOWN",
     error_message: X_POST_OUTCOME_UNKNOWN_MESSAGE,
+    failure_kind: failureKind,
   }
 }
 
-async function createXTextPost(args: {
+export async function createXTextPost(args: {
   accessToken: string
   text: string
   fetchImpl: typeof fetch
   getApiBaseUrl: () => string
+  signal?: AbortSignal
 }): Promise<XCreatePostResult> {
   let response: Response
   try {
@@ -149,9 +162,14 @@ async function createXTextPost(args: {
         "content-type": "application/json",
       },
       body: JSON.stringify({ text: args.text }),
+      ...(args.signal ? { signal: args.signal } : {}),
     })
-  } catch {
-    return unknownPostOutcome()
+  } catch (error) {
+    const name = error instanceof Error || error instanceof DOMException ? error.name : ""
+    if (name === "TimeoutError" || (name === "AbortError" && args.signal?.aborted)) {
+      return unknownPostOutcome("timeout")
+    }
+    return unknownPostOutcome("network_failure")
   }
 
   if (response.status === 429) {
@@ -159,6 +177,7 @@ async function createXTextPost(args: {
       ok: false as const,
       error_code: "X_API_RATE_LIMITED",
       error_message: "X API rate limit reached",
+      failure_kind: "rate_limited",
     }
   }
 
@@ -171,6 +190,7 @@ async function createXTextPost(args: {
       ok: false as const,
       error_code: "X_API_UNAUTHORIZED",
       error_message: "X API rejected the request as unauthorized",
+      failure_kind: "unauthorized",
     }
   }
 
@@ -179,6 +199,7 @@ async function createXTextPost(args: {
       ok: false as const,
       error_code: "X_API_FORBIDDEN",
       error_message: "X API rejected the request as forbidden",
+      failure_kind: "forbidden",
     }
   }
 
@@ -187,6 +208,7 @@ async function createXTextPost(args: {
       ok: false as const,
       error_code: "X_API_INVALID_REQUEST",
       error_message: "X API rejected the request as invalid",
+      failure_kind: "invalid_request",
     }
   }
 
@@ -195,6 +217,7 @@ async function createXTextPost(args: {
       ok: false as const,
       error_code: "X_API_REJECTED",
       error_message: "X API rejected the request",
+      failure_kind: "rejected",
     }
   }
 
@@ -206,16 +229,16 @@ async function createXTextPost(args: {
   try {
     body = (await response.json()) as XCreatePostResponse | null
   } catch {
-    return unknownPostOutcome()
+    return unknownPostOutcome("response_invalid")
   }
 
   if (!body || typeof body !== "object") {
-    return unknownPostOutcome()
+    return unknownPostOutcome("response_invalid")
   }
 
   const platformPostId = typeof body.data?.id === "string" ? body.data.id.trim() : ""
   if (!platformPostId) {
-    return unknownPostOutcome()
+    return unknownPostOutcome("response_invalid")
   }
 
   return {
