@@ -80,6 +80,20 @@ async function start(input: { user?: unknown; confirmation?: string; url?: strin
   const result: any = await startRoute.POST(req)
   return { result, adminCalls, calls: fake.calls }
 }
+async function boundedStart(input: Parameters<typeof start>[0]) {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      start(input),
+      new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("start route test timed out")), 1_500) }),
+    ])
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout)
+  }
+}
+const stream = (chunks: Uint8Array[]) => new ReadableStream<Uint8Array>({ start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close() } })
+const emptyChunk = () => new Uint8Array(0)
+const byteChunk = () => new Uint8Array([120])
 process.env.AUTOPOST_OAUTH_STATE_SECRET = "fake-state-secret"
 process.env.X_CLIENT_ID = "fake-client-id"
 process.env.X_REDIRECT_URI = "https://app.invalid/api/autopost/connect/x/callback"
@@ -92,13 +106,29 @@ for (const [input, status] of [
   [{ user: USER, confirmation: "preserve-existing-x-identity-v1", body: "{}" }, 400],
   [{ user: USER, confirmation: "preserve-existing-x-identity-v1", body: "null" }, 400],
 ] as const) { const value = await start(input); assert.equal(value.result.status, status); assert.equal(value.adminCalls, 0); assertSanitized(value.result.body) }
-{
-  const zeroByteStream = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new Uint8Array(0)); controller.close() } })
-  const value = await start({ user: USER, confirmation: "preserve-existing-x-identity-v1", body: zeroByteStream }); assert.equal(value.result.status, 200); assert.equal(value.adminCalls, 1)
+for (const body of [stream([]), stream([emptyChunk()]), stream([emptyChunk(), emptyChunk(), emptyChunk()])]) {
+  const value = await boundedStart({ user: USER, confirmation: "preserve-existing-x-identity-v1", body }); assert.equal(value.result.status, 200); assert.equal(value.adminCalls, 1); assert.deepEqual(value.calls, [["from", "autopost_accounts"], ["select", "connection_status, provider_account_id, provider_username"], ["eq", "user_id", USER], ["eq", "platform", "x"], ["maybeSingle"]])
+}
+for (const body of [stream([emptyChunk(), byteChunk()]), stream([emptyChunk(), emptyChunk(), emptyChunk(), byteChunk()]), stream(Array.from({ length: 9 }, emptyChunk))]) {
+  const value = await boundedStart({ user: USER, confirmation: "preserve-existing-x-identity-v1", body }); assert.equal(value.result.status, 400); assert.equal(value.result.body.safe_code, "X_REAUTH_START_PARAMETERS_NOT_ALLOWED"); assert.equal(value.adminCalls, 0)
 }
 {
   const failingStream = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new Error(EXCEPTION)) } })
-  const value = await start({ user: USER, confirmation: "preserve-existing-x-identity-v1", body: failingStream }); assert.equal(value.result.status, 400); assert.equal(value.result.body.safe_code, "X_REAUTH_START_PARAMETERS_NOT_ALLOWED"); assert.equal(value.adminCalls, 0); assertSanitized(value.result.body)
+  const value = await boundedStart({ user: USER, confirmation: "preserve-existing-x-identity-v1", body: failingStream }); assert.equal(value.result.status, 400); assert.equal(value.result.body.safe_code, "X_REAUTH_START_PARAMETERS_NOT_ALLOWED"); assert.equal(value.adminCalls, 0); assertSanitized(value.result.body)
+}
+for (const stalledStream of [
+  new ReadableStream<Uint8Array>({ pull() { return new Promise<void>(() => undefined) }, cancel() { return Promise.resolve() } }),
+  new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(byteChunk()) }, cancel() { return Promise.reject(new Error(EXCEPTION)) } }),
+  new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(byteChunk()) }, cancel() { return new Promise<void>(() => undefined) } }),
+]) {
+  const startedAt = Date.now(), value = await boundedStart({ user: USER, confirmation: "preserve-existing-x-identity-v1", body: stalledStream }); assert.equal(value.result.status, 400); assert.equal(value.result.body.safe_code, "X_REAUTH_START_PARAMETERS_NOT_ALLOWED"); assert.equal(value.adminCalls, 0); assert.ok(Date.now() - startedAt < 1_000)
+}
+for (const input of [
+  { user: null, confirmation: "preserve-existing-x-identity-v1" }, { user: "   ", confirmation: "preserve-existing-x-identity-v1" }, { user: USER }, { user: USER, confirmation: "wrong" }, { user: USER, confirmation: "preserve-existing-x-identity-v1", url: "https://app.invalid/api/admin/autopost/x/reauthorize?x=1" },
+] as const) {
+  let bodyRead = false
+  const poison = new ReadableStream<Uint8Array>(); poison.getReader = (() => { bodyRead = true; throw new Error(EXCEPTION) }) as typeof poison.getReader
+  const value = await boundedStart({ ...input, body: poison }); assert.equal(value.adminCalls, 0); assert.equal(bodyRead, false)
 }
 {
   let adminCalls = 0; hooks.getSupabaseAdmin = () => { adminCalls++; throw new Error(EXCEPTION) }
