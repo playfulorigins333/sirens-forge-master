@@ -171,6 +171,13 @@ export default function PrivacyPage() {
           audit purposes. Any retained exception is minimized and is not used
           for future publishing or marketing.
         </p>
+        <p>
+          For data obtained through a connected platform API, any retained
+          exception applies only to the extent required by applicable law or
+          expressly permitted by that platform’s terms or written approval.
+          Deleted or removed platform content is not retained in audit records.
+          Any permitted audit record is limited to minimal non-content metadata.
+        </p>
       </section>
 
       <section>
