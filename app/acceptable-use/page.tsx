@@ -175,7 +175,7 @@ export default function AcceptableUsePage() {
         <h2 className="text-xl font-semibold">15. Contact</h2>
         <p>
           If you have questions about this policy or need to report a concern,
-          contact us at admin@sirensforge.com.
+          contact us at admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

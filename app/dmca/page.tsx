@@ -46,7 +46,7 @@ export default function DMCAPage() {
         <p>
           DMCA notices should be submitted to:
         </p>
-        <p className="font-medium">admin@sirensforge.com</p>
+        <p className="font-medium">admin@sirensforge.vip</p>
       </section>
 
       <section>
@@ -125,7 +125,7 @@ export default function DMCAPage() {
       <section>
         <h2 className="text-xl font-semibold">8. Contact</h2>
         <p>
-          For DMCA-related inquiries, contact us at admin@sirensforge.com.
+          For DMCA-related inquiries, contact us at admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

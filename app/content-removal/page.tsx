@@ -34,7 +34,7 @@ export default function ContentRemovalPage() {
           If you believe content on or generated through Sirens Forge violates
           your rights, you may submit a removal request by contacting us at:
         </p>
-        <p className="font-medium">admin@sirensforge.com</p>
+        <p className="font-medium">admin@sirensforge.vip</p>
         <p>
           Your request should include sufficient detail to allow us to evaluate
           the claim, including:
@@ -123,7 +123,7 @@ export default function ContentRemovalPage() {
         <h2 className="text-xl font-semibold">9. Contact</h2>
         <p>
           To submit a removal request or ask questions about this policy, contact
-          us at admin@sirensforge.com.
+          us at admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

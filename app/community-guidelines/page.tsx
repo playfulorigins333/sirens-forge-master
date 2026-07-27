@@ -125,7 +125,7 @@ export default function CommunityGuidelinesPage() {
       <section>
         <h2 className="text-xl font-semibold">11. Contact</h2>
         <p>
-          For questions or concerns, contact us at admin@sirensforge.com.
+          For questions or concerns, contact us at admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

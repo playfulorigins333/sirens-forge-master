@@ -84,7 +84,7 @@ export default function Section2257Page() {
         </h2>
         <p>
           For questions regarding this statement, contact us at
-          admin@sirensforge.com.
+          admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

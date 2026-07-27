@@ -202,7 +202,7 @@ export default function TermsPage() {
         <h2 className="text-xl font-semibold">17. Contact</h2>
         <p>
           For questions regarding these Terms, please contact us at
-          admin@sirensforge.com.
+          admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

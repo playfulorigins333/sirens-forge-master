@@ -159,7 +159,7 @@ export default function AffiliateTermsPage() {
         </h2>
         <p>
           For questions regarding the affiliate program, contact us at
-          admin@sirensforge.com.
+          admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>
