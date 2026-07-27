@@ -2,7 +2,7 @@ import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function PrivacyPage() {
   return (
-    <LegalPageLayout title="Privacy Policy" lastUpdated="April 27, 2026">
+    <LegalPageLayout title="Privacy Policy" lastUpdated="July 27, 2026">
       <section>
         <p>
           This Privacy Policy explains how Sirens Forge collects, uses, stores,
@@ -152,7 +152,29 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">12. Content Removal and Complaints</h2>
+        <h2 className="text-xl font-semibold">
+          12. Connected Social-Platform Accounts
+        </h2>
+        <p>
+          When a creator disconnects a connected social-platform account, OAuth
+          credentials and access tokens are revoked or deleted, and unpublished
+          scheduled jobs associated with that account are cancelled.
+          Disconnecting an account does not delete or alter content already
+          published on an external platform.
+        </p>
+        <p>
+          Imported platform data is deleted or de-identified when required by a
+          creator deletion request, account closure, or applicable platform
+          deletion notice. Applicable deletion notices are synchronized with
+          retained Sirens Forge records, except for records narrowly necessary
+          for legal, fraud-prevention, security, dispute-resolution, or immutable
+          audit purposes. Any retained exception is minimized and is not used
+          for future publishing or marketing.
+        </p>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold">13. Content Removal and Complaints</h2>
         <p>
           If you believe content on or generated through Sirens Forge violates
           your rights, privacy, consent, likeness, copyright, or our policies,
@@ -163,7 +185,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">13. User Responsibility</h2>
+        <h2 className="text-xl font-semibold">14. User Responsibility</h2>
         <p>
           You are responsible for ensuring that prompts, uploads, references,
           likenesses, identity materials, account activity, and generated content
@@ -174,7 +196,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">14. Children and Minors</h2>
+        <h2 className="text-xl font-semibold">15. Children and Minors</h2>
         <p>
           Sirens Forge is strictly for adults aged 18 and older. We do not
           knowingly collect information from anyone under 18. If we become aware
@@ -187,7 +209,7 @@ export default function PrivacyPage() {
 
       <section>
         <h2 className="text-xl font-semibold">
-          15. International Users and Data Transfers
+          16. International Users and Data Transfers
         </h2>
         <p>
           Sirens Forge may process and store information in the United States or
@@ -199,7 +221,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">16. Changes to This Policy</h2>
+        <h2 className="text-xl font-semibold">17. Changes to This Policy</h2>
         <p>
           We may update this Privacy Policy at any time. Continued use of the
           platform after changes are posted constitutes acceptance of the updated
@@ -208,10 +230,10 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">17. Contact</h2>
+        <h2 className="text-xl font-semibold">18. Contact</h2>
         <p>
           For questions about this Privacy Policy, contact us at
-          admin@sirensforge.com.
+          admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

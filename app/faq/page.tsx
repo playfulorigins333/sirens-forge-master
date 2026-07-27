@@ -79,7 +79,7 @@ export default function FAQPage() {
       <section>
         <h2 className="text-xl font-semibold">11. Who do I contact for help?</h2>
         <p>
-          For support, contact us at admin@sirensforge.com.
+          For support, contact us at admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

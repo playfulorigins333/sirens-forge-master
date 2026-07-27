@@ -44,7 +44,7 @@ export default function LegalPageLayout({
             If you have any questions about this policy, please contact us at:
           </p>
           <p className="text-white">
-            admin@sirensforge.com
+            admin@sirensforge.vip
           </p>
         </div>
       </div>

@@ -60,10 +60,10 @@ export default function Footer() {
           <p>© {new Date().getFullYear()} Sirens Forge. All rights reserved.</p>
 
           <a
-            href="mailto:admin@sirensforge.com"
+            href="mailto:admin@sirensforge.vip"
             className="hover:text-cyan-400 transition"
           >
-            admin@sirensforge.com
+            admin@sirensforge.vip
           </a>
         </div>
 

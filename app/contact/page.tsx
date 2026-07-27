@@ -14,10 +14,10 @@ export default function ContactPage() {
         <h2 className="text-xl font-semibold">Email</h2>
         <p className="mt-2">
           <a
-            href="mailto:admin@sirensforge.com"
+            href="mailto:admin@sirensforge.vip"
             className="text-cyan-400 hover:underline"
           >
-            admin@sirensforge.com
+            admin@sirensforge.vip
           </a>
         </p>
       </section>

@@ -104,7 +104,7 @@ export default function UnderagePolicyPage() {
         <h2 className="text-xl font-semibold">8. Contact</h2>
         <p>
           If you become aware of content that may violate this policy, contact us
-          immediately at admin@sirensforge.com.
+          immediately at admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

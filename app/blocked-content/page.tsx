@@ -151,7 +151,7 @@ export default function BlockedContentPage() {
         <h2 className="text-xl font-semibold">10. Contact</h2>
         <p>
           For questions or reports regarding blocked content, contact us at
-          admin@sirensforge.com.
+          admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>

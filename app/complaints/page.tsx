@@ -34,7 +34,7 @@ export default function ComplaintsPage() {
         <p>
           To submit a complaint, contact us at:
         </p>
-        <p className="font-medium">admin@sirensforge.com</p>
+        <p className="font-medium">admin@sirensforge.vip</p>
         <p>
           Please include as much detail as possible to help us evaluate your
           request:
@@ -122,7 +122,7 @@ export default function ComplaintsPage() {
       <section>
         <h2 className="text-xl font-semibold">9. Contact</h2>
         <p>
-          For complaints or appeals, contact us at admin@sirensforge.com.
+          For complaints or appeals, contact us at admin@sirensforge.vip.
         </p>
       </section>
     </LegalPageLayout>
