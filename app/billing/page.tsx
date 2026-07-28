@@ -380,7 +380,7 @@ export default async function BillingPage() {
             <ul className="space-y-3 text-sm text-gray-300">
               <li>Create content on demand from your prompts</li>
               <li>Build and train your AI Twin for more consistent results</li>
-              <li>Save, review, and reuse your best content in the Vault</li>
+              <li>Save, review, and reuse your best content in the Creation Loop</li>
               <li>Use Siren&apos;s Mind to sharpen prompts before you generate</li>
               <li>Access the creator workflow tied to your active plan</li>
             </ul>

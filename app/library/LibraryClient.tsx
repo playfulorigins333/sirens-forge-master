@@ -338,7 +338,7 @@ function VaultIntentBanner() {
                 Save it. Reuse it. Generate the next scene.
               </h2>
               <p className="max-w-3xl text-sm leading-6 text-gray-300">
-                Your Vault is not just storage. It is the loop: save the best concepts, reuse proven prompts, generate the next image or video, and keep building around the same AI Twin.
+                Your Creation Loop is more than storage. It is the loop: save the best concepts, reuse proven prompts, generate the next image or video, and keep building around the same AI Twin.
               </p>
             </div>
 
@@ -374,7 +374,7 @@ function EmptyState() {
 
           <div>
             <h2 className="bg-gradient-to-r from-purple-300 via-pink-300 to-cyan-300 bg-clip-text text-xl font-bold text-transparent">
-              Your vault is empty
+              Your Creation Loop is empty
             </h2>
             <p className="mx-auto mt-2 max-w-xl text-sm text-gray-400">
               Start from the Generator or train an AI Twin, then every saved result and reusable concept will appear here.
@@ -418,7 +418,7 @@ function VaultToolbar(props: {
           <div>
             <CardTitle className="flex items-center gap-2 text-sm md:text-base">
               <Filter className="h-4 w-4 text-purple-300" />
-              Vault Controls
+              Creation Loop Controls
             </CardTitle>
             <CardDescription className="mt-1 text-xs text-gray-300">
               Browse saved creations, reusable starter concepts, or full AI Twin loops.

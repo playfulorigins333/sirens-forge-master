@@ -734,7 +734,7 @@ function ContinueIdentityBlock({ identity }: { identity: ContinueIdentity | null
               </h2>
 
               <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-300 sm:text-base">
-                Pick up where you left off. Keep the same identity active and push the character deeper into your Vault.
+                Pick up where you left off. Keep the same identity active and push the character deeper into your Creation Loop.
               </p>
             </div>
 
@@ -1038,7 +1038,7 @@ export default async function DashboardPage() {
               </div>
 
               <h2 className="mb-3 text-2xl font-bold text-white">
-                Vault
+                Creation Loop
               </h2>
 
               <p className="mb-6 text-base leading-relaxed font-medium text-gray-300">
@@ -1046,7 +1046,7 @@ export default async function DashboardPage() {
               </p>
 
               <div className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-200 transition group-hover:text-white">
-                Open Vault
+                Open Creation Loop
                 <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </div>
             </div>
