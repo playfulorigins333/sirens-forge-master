@@ -2080,7 +2080,7 @@ function OutputPanel(props: {
 
   const buildCaptionExportText = (drafts: PackCaptionDraft[]) => {
     const cleanPackName = packName.trim() || "Creator Content Pack";
-    const header = `${cleanPackName}\nGenerated captions for selected Vault assets\n${new Date().toLocaleString()}\n`;
+    const header = `${cleanPackName}\nGenerated captions for selected Creation Loop assets\n${new Date().toLocaleString()}\n`;
     const body = drafts
       .map((draft, index) => {
         return [
@@ -2188,7 +2188,7 @@ function OutputPanel(props: {
     const generationRecordId = item.dbGenerationId || (isUuidLike(item.id) ? item.id : null);
 
     if (!generationRecordId) {
-      setSaveError("This output is missing its database generation ID, so it cannot be saved to the Vault yet.");
+      setSaveError("This output is missing its database generation ID, so it cannot be saved to the Creation Loop yet.");
       return;
     }
 
@@ -2200,7 +2200,7 @@ function OutputPanel(props: {
       const user = authData?.user;
 
       if (authError || !user) {
-        throw new Error("You must be logged in to save to the Vault.");
+        throw new Error("You must be logged in to save to the Creation Loop.");
       }
 
       let collectionId: string | null = null;
@@ -2236,7 +2236,7 @@ function OutputPanel(props: {
       }
 
       if (!collectionId) {
-        throw new Error("Could not find or create your Vault collection.");
+        throw new Error("Could not find or create your Creation Loop collection.");
       }
 
       const { error: insertError } = await supabase
@@ -2253,7 +2253,7 @@ function OutputPanel(props: {
       setSavedLatestId(generationRecordId);
     } catch (err: any) {
       console.error("Vault save error:", err);
-      setSaveError(err?.message || "Save to Vault failed.");
+      setSaveError(err?.message || "Save to Creation Loop failed.");
     } finally {
       setSavingLatest(false);
     }
@@ -2601,7 +2601,7 @@ function OutputPanel(props: {
               className="h-11 justify-start gap-2 bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-xs font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(16,185,129,0.18)] disabled:cursor-not-allowed disabled:opacity-70"
             >
               {savingLatest ? <Clock className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-              {savingLatest ? "Saving…" : latestIsSaved ? "Saved to Vault" : "Save to Vault"}
+              {savingLatest ? "Saving…" : latestIsSaved ? "Saved to Creation Loop" : "Save to Creation Loop"}
             </Button>
           </div>
 
@@ -2744,7 +2744,7 @@ function OutputPanel(props: {
             <div className="mt-3 rounded-xl border border-emerald-400/20 bg-emerald-500/10 px-3 py-3 text-[11px] text-emerald-100">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <div className="font-semibold text-emerald-100">Saved to Vault.</div>
+                  <div className="font-semibold text-emerald-100">Saved to Creation Loop.</div>
                   <div className="mt-1 text-emerald-100/80">
                     Next money move: build a content pack from this output and matching variations.
                   </div>
@@ -2793,11 +2793,11 @@ function OutputPanel(props: {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-fuchsia-300">
-                      Vault Pack Builder
+                      Creation Loop Pack Builder
                     </div>
                     <h3 className="mt-1 text-lg font-bold text-white">Build Content Pack</h3>
                     <p className="mt-1 text-xs leading-5 text-gray-400">
-                      Select real generated assets and save them as a reusable pack in your Vault.
+                      Select real generated assets and save them as a reusable pack in your Creation Loop.
                     </p>
                   </div>
                   <button
@@ -3101,7 +3101,7 @@ function OutputPanel(props: {
                           Creating Pack…
                         </span>
                       ) : (
-                        "Create Vault Pack"
+                        "Create Content Pack"
                       )}
                     </Button>
                   </div>

@@ -7,7 +7,7 @@ import LibraryClient, { LibraryItem } from "./LibraryClient";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Sirens Forge — Vault",
+  title: "Sirens Forge — Creation Loop",
 };
 
 type GenerationRow = {
