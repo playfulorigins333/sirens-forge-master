@@ -20,6 +20,7 @@ import {
   ExternalLink,
   Lock,
   UserRound,
+  LayoutDashboard,
 } from "lucide-react";
 import Link from "next/link";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -196,7 +197,7 @@ function buildReusePayload(item: LibraryItem) {
 function LibraryHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-950/70 backdrop-blur">
-      <div className="flex items-center justify-between px-6 py-4">
+      <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-2xl font-bold text-transparent">
             Creation Loop Hub
@@ -206,8 +207,18 @@ function LibraryHeader() {
           </p>
         </div>
 
-        <div className="flex items-center gap-4">
-          <Link href="/generate" className="hidden sm:block">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+          <Link href="/dashboard">
+            <Button
+              variant="outline"
+              className="h-9 border-gray-700 bg-gray-900/70 px-4 text-xs font-bold text-gray-100 hover:bg-gray-800 hover:text-white"
+            >
+              <LayoutDashboard className="mr-2 h-4 w-4" />
+              Dashboard
+            </Button>
+          </Link>
+
+          <Link href="/generate">
             <Button className="h-9 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 px-4 text-xs font-bold text-white shadow-[0_0_22px_rgba(168,85,247,0.30)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
               <Wand2 className="mr-2 h-4 w-4" />
               Create New Content
