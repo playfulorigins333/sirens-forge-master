@@ -16,7 +16,6 @@ import {
   Crown,
   Zap,
   Shield,
-  ChevronRight,
   Settings,
   ExternalLink,
   RefreshCw,
@@ -473,7 +472,6 @@ export default function AutopostPage() {
   // Preview state
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("blocked")
   const [isEvaluating, setIsEvaluating] = useState(false)
-  const [showDetails, setShowDetails] = useState(false)
   const [previewResult, setPreviewResult] = useState<AutopostPreviewResponse | null>(null)
   const [builderError, setBuilderError] = useState<string | null>(null)
   const [builderSuccess, setBuilderSuccess] = useState<string | null>(null)
@@ -1822,16 +1820,6 @@ export default function AutopostPage() {
                     </Button>
 
                     <Button
-                      variant="outline"
-                      onClick={() => setShowDetails(v => !v)}
-                      className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
-                      disabled={!previewResult}
-                    >
-                      <ChevronRight className={`w-4 h-4 mr-2 ${showDetails ? "rotate-90" : ""}`} />
-                      Details
-                    </Button>
-
-                    <Button
                       onClick={saveAsRule}
                       disabled={!hasSelectablePlatforms || selectedPlatforms.length === 0 || !!savedRuleSuccess}
                       className="bg-emerald-600 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
@@ -1862,22 +1850,6 @@ export default function AutopostPage() {
                         <span className="text-gray-400">—</span>
                       )}
                     </div>
-
-                    {showDetails && (previewResult?.payload || previewResult?.diagnostics) && (
-                      <div className="mt-3 rounded-xl border border-gray-800 bg-black/40 p-3">
-                        <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-gray-500">Rule Details</div>
-                        {previewResult?.payload && (
-                          <pre className="max-h-60 overflow-auto text-xs text-gray-200">
-                            {JSON.stringify(previewResult.payload, null, 2)}
-                          </pre>
-                        )}
-                        {previewResult?.diagnostics && (
-                          <pre className="mt-3 max-h-60 overflow-auto border-t border-gray-800 pt-3 text-xs text-gray-200">
-                            {JSON.stringify(previewResult.diagnostics, null, 2)}
-                          </pre>
-                        )}
-                      </div>
-                    )}
                   </div>
                 </CardContent>
               </Card>
