@@ -12,6 +12,7 @@ import {
   Flame,
   Heart,
   Image as ImageIcon,
+  LayoutDashboard,
   MapPin,
   Maximize2,
   Play,
@@ -257,21 +258,36 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
 
   return (
     <header className="border-b border-gray-800 bg-gray-950/70 backdrop-blur sticky top-0 z-40">
-      <div className="flex items-center justify-between px-6 py-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <Link href="/identities">
-              <Button
-                type="button"
-                variant="outline"
-                className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                Back
-              </Button>
-            </Link>
+      <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <nav
+              className="flex flex-wrap items-center gap-2"
+              aria-label="Identity navigation"
+            >
+              <Link href="/dashboard">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
+                >
+                  <LayoutDashboard className="mr-2 h-4 w-4" />
+                  Dashboard
+                </Button>
+              </Link>
+              <Link href="/identities">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  My Identities
+                </Button>
+              </Link>
+            </nav>
 
-            <div>
+            <div className="min-w-0">
               <h1 className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-cyan-400 bg-clip-text text-transparent">
                 {displayName}
               </h1>
@@ -282,7 +298,7 @@ function IdentityDetailHeader({ identity }: { identity: IdentityDetailData }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4">
           <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 text-black text-xs font-bold shadow-[0_0_20px_rgba(168,85,247,0.35)]">
             <Dna className="w-3 h-3" />
             IDENTITY ENGINE
