@@ -135,7 +135,9 @@ assert.match(availability, /FANVUE_PROVIDER_IDENTITY_MISSING/, 'Manual rows with
 assert.match(availability, /FANVUE_ENCRYPTED_ACCESS_TOKEN_MISSING/, 'Legacy or manual rows without encrypted tokens must not count as connected')
 assert.match(availability, /FANVUE_IDENTITY_NOT_CONFIRMED/, 'Rows without FV-3 identity confirmation must not count as connected')
 
-assert.match(statusRoute, /encrypted_access_token, encrypted_refresh_token, metadata/, 'Fanvue status lookup must include encrypted-token and metadata fields for validation')
+for (const field of ['encrypted_access_token', 'encrypted_refresh_token', 'token_expires_at', 'token_key_version', 'metadata']) {
+  assert.match(statusRoute, new RegExp(`\\b${field}\\b`), `Fanvue status lookup must include ${field} for validation`)
+}
 
 assert.match(envExample, /FANVUE_CONNECT_ENABLED=false/, 'Fanvue connect env example must default off')
 assert.match(envExample, /FANVUE_RUN_DISPATCH_ENABLED=false/, 'Fanvue dispatch env example must default off')
