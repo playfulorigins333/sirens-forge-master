@@ -256,7 +256,7 @@ function externalButtonLabel(platform: Platform) {
 
 function platformPurpose(platform: Platform) {
   if (platform.id === "x") return "Promote your paid content and direct followers to OnlyFans or Fanvue."
-  if (platform.id === "reddit") return "Reach relevant communities and direct interested audiences to your paid page."
+  if (platform.id === "reddit") return "Native Reddit posting and scheduling are not configured. Use caption copy/export and Open Reddit to complete posting manually."
   if (platform.id === "onlyfans") return "Prepare and complete posts through the assisted Creator Publishing Queue."
   if (platform.id === "fanvue") return "Paid-content publishing remains unavailable while safety restrictions are in place."
   return platform.reason ?? platformUnavailableMessage(platform)
@@ -264,7 +264,7 @@ function platformPurpose(platform: Platform) {
 
 function platformStatusBadge(platform: Platform) {
   if (platform.id === "x") return "TRAFFIC CHANNEL"
-  if (platform.id === "reddit") return "TRAFFIC CHANNEL"
+  if (platform.id === "reddit") return "MANUAL ONLY"
   if (platform.id === "onlyfans") return "ASSISTED PUBLISHING"
   if (platform.id === "fanvue") return "FROZEN"
   return String(platform.launch_status ?? "Unavailable").replace("_", " ").toUpperCase()

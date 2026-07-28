@@ -2998,9 +2998,13 @@ function OutputPanel(props: {
                 <div className="rounded-2xl border border-emerald-500/20 bg-[linear-gradient(180deg,rgba(6,78,59,0.24),rgba(8,8,13,0.94))] p-4">
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div>
-                      <h4 className="text-sm font-semibold text-white">Autopost Handoff</h4>
+                      <h4 className="text-sm font-semibold text-white">
+                        {autopostPlatform === "reddit" ? "Manual Reddit Handoff" : "Autopost Handoff"}
+                      </h4>
                       <p className="mt-1 text-[11px] leading-5 text-gray-400">
-                        Prepare this selected pack for the Autopost dashboard, then send it to the builder as a prefilled draft. This does not publish, schedule, or simulate a post.
+                        {autopostPlatform === "reddit"
+                          ? "Native Reddit posting and scheduling are not configured. Copy or export the prepared caption, open Reddit, and complete the post manually."
+                          : "Prepare this selected pack for the Autopost dashboard, then send it to the builder as a prefilled draft. This does not publish, schedule, or simulate a post."}
                       </p>
                     </div>
                     <div className="w-full sm:w-44">
@@ -3013,7 +3017,7 @@ function OutputPanel(props: {
                           <SelectItem value="onlyfans">OnlyFans</SelectItem>
                           <SelectItem value="fansly">Fansly</SelectItem>
                           <SelectItem value="manyvids">ManyVids</SelectItem>
-                          <SelectItem value="reddit">Reddit</SelectItem>
+                          <SelectItem value="reddit">Reddit (manual only)</SelectItem>
                           <SelectItem value="x">X</SelectItem>
                         </SelectContent>
                       </Select>
@@ -3033,7 +3037,7 @@ function OutputPanel(props: {
                           Preparing…
                         </span>
                       ) : (
-                        "Prepare Autopost Draft"
+                        autopostPlatform === "reddit" ? "Prepare Manual Reddit Draft" : "Prepare Autopost Draft"
                       )}
                     </Button>
                     <Button
@@ -3042,7 +3046,7 @@ function OutputPanel(props: {
                       onClick={handleOpenAutopostDashboard}
                       className="h-10 border-emerald-500/30 bg-emerald-500/10 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/15 hover:text-white"
                     >
-                      Send to Autopost Builder
+                      {autopostPlatform === "reddit" ? "Open Manual Posting Tools" : "Send to Autopost Builder"}
                     </Button>
                   </div>
 

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 import { getPublicAutopostPlatforms, normalizeKnownPlatformIds } from "../../../lib/autopost/platformRegistry"
 
 const client = () => readFileSync("app/autopost/AutopostPageClient.tsx", "utf8")
+const generate = () => readFileSync("app/generate/page.tsx", "utf8")
 const orchestration = () => readFileSync("app/autopost/Task14AutopostOrchestration.tsx", "utf8")
 const page = () => readFileSync("app/autopost/page.tsx", "utf8")
 
@@ -34,11 +35,12 @@ test("autopost launch UI filters fallback, cards, new selections, and messaging 
   assert.match(platformTab, /ids: \["x", "reddit"\]/)
   assert.match(platformTab, /ids: \["onlyfans", "fanvue"\]/)
   assert.match(platformTab, /Open OnlyFans Publishing Queue/)
-  assert.match(src, /return "TRAFFIC CHANNEL"/)
+  assert.match(src, /platform\.id === "x"\) return "TRAFFIC CHANNEL"/)
+  assert.match(src, /platform\.id === "reddit"\) return "MANUAL ONLY"/)
   assert.match(src, /return "ASSISTED PUBLISHING"/)
   assert.match(src, /return "FROZEN"/)
   assert.match(src, /Promote your paid content and direct followers to OnlyFans or Fanvue\./)
-  assert.match(src, /Reach relevant communities and direct interested audiences to your paid page\./)
+  assert.match(src, /Native Reddit posting and scheduling are not configured\. Use caption copy\/export and Open Reddit to complete posting manually\./)
   assert.match(src, /Prepare and complete posts through the assisted Creator Publishing Queue\./)
   assert.match(src, /Paid-content publishing remains unavailable while safety restrictions are in place\./)
   assert.doesNotMatch(platformTab, /section\.title[\s\S]*rounded-full border border-cyan-300\/30 bg-cyan-300\/10 px-3 py-1/)
@@ -52,6 +54,27 @@ test("autopost launch UI filters fallback, cards, new selections, and messaging 
   assert.match(src, /return "Open Fanvue"/)
   assert.doesNotMatch(platformTab, /Open platform/)
   assert.match(src, /assisted\/manual publishing/)
+})
+
+test("Reddit launch handoff is visibly manual-only without changing non-Reddit labels", () => {
+  const src = generate()
+  assert.match(src, /<SelectItem value="reddit">Reddit \(manual only\)<\/SelectItem>/)
+  assert.match(src, /autopostPlatform === "reddit" \? "Manual Reddit Handoff" : "Autopost Handoff"/)
+  assert.match(src, /autopostPlatform === "reddit" \? "Prepare Manual Reddit Draft" : "Prepare Autopost Draft"/)
+  assert.match(src, /autopostPlatform === "reddit" \? "Open Manual Posting Tools" : "Send to Autopost Builder"/)
+  assert.match(src, /Native Reddit posting and scheduling are not configured\. Copy or export the prepared caption, open Reddit, and complete the post manually\./)
+  assert.match(src, /Copy All Captions/)
+  assert.match(src, /Export \.TXT/)
+  for (const label of ["Fanvue", "OnlyFans", "Fansly", "ManyVids", "X"]) {
+    assert.match(src, new RegExp(`>${label}<\\/SelectItem>`))
+  }
+
+  const autopost = client()
+  assert.match(autopost, /if \(platform\.id === "reddit"\) return "MANUAL ONLY"/)
+  assert.match(autopost, /Native Reddit posting and scheduling are not configured\. Use caption copy\/export and Open Reddit to complete posting manually\./)
+  assert.match(autopost, /if \(platform\.id === "reddit"\) return "Open Reddit"/)
+  assert.match(autopost, /disabled=\{!selectable\}/)
+  assert.match(autopost, /const selectable = isPlatformSelectable\(p\)/)
 })
 
 test("legacy platform ids remain displayable while not entering new creator launch UI", () => {
