@@ -8,6 +8,29 @@ const generate = () => readFileSync("app/generate/page.tsx", "utf8")
 const orchestration = () => readFileSync("app/autopost/Task14AutopostOrchestration.tsx", "utf8")
 const page = () => readFileSync("app/autopost/page.tsx", "utf8")
 
+test("Autopost provides persistent Dashboard navigation without changing launch safeguards", () => {
+  const src = client()
+  const headerStart = src.indexOf("{/* Header */}")
+  const mainStart = src.indexOf("{/* Main */}")
+
+  assert.match(src, /import Link from "next\/link"/)
+  assert.ok(headerStart >= 0)
+  assert.ok(mainStart > headerStart)
+
+  const header = src.slice(headerStart, mainStart)
+  assert.match(header, /<Button\s+asChild\s+variant="outline"[\s\S]*?<Link href="\/dashboard">[\s\S]*?Dashboard[\s\S]*?<\/Link>[\s\S]*?<\/Button>/)
+  assert.ok(src.indexOf('<Link href="/dashboard">') < mainStart)
+  assert.doesNotMatch(header, /\{tab === [^}]+&& \([\s\S]*?<Link href="\/dashboard">/)
+
+  assert.match(header, /My Rules/)
+  assert.match(header, /Build Rule/)
+  assert.match(header, /Platforms/)
+  assert.match(src, /if \(platform\.id === "reddit"\) return "MANUAL ONLY"/)
+  assert.match(src, /if \(platform\.id === "reddit"\) return "Open Reddit"/)
+  assert.match(src, /const selectable = isPlatformSelectable\(p\)/)
+  assert.match(src, /disabled=\{!selectable\}/)
+})
+
 test("creator-facing launch catalog is exactly X, Reddit, OnlyFans, and Fanvue", () => {
   const platforms = getPublicAutopostPlatforms()
   assert.deepEqual(platforms.map((platform) => platform.id), ["fanvue", "onlyfans", "x", "reddit"])
