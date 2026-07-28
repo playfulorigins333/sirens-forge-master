@@ -38,6 +38,40 @@ test("creator-facing launch catalog is exactly X, Reddit, OnlyFans, and Fanvue",
   assert.equal(platforms.some((platform) => ["fansly", "loyalfans", "justforfans"].includes(platform.id)), false)
 })
 
+test("creator UI omits Fanvue internal-validation controls while preserving legacy safety", () => {
+  const src = client()
+
+  for (const creatorVisibleText of [
+    "Fanvue internal validation only",
+    "Prepare a non-runnable Fanvue draft",
+    "Fanvue validation draft text",
+    "Internal validation audience key",
+    "Save Fanvue Validation Draft",
+  ]) {
+    assert.doesNotMatch(src, new RegExp(creatorVisibleText))
+  }
+
+  for (const localImplementationIdentifier of [
+    "fanvueValidationDraftText",
+    "setFanvueValidationDraftText",
+    "fanvueValidationAudience",
+    "setFanvueValidationAudience",
+    "isSavingFanvueValidationDraft",
+    "setIsSavingFanvueValidationDraft",
+    "saveFanvueInternalValidationDraftRule",
+  ]) {
+    assert.doesNotMatch(src, new RegExp(localImplementationIdentifier))
+  }
+
+  assert.match(src, /function isFanvueOnlyRule\(rule: AutopostRule\)/)
+  assert.match(src, /function isFanvueInternalValidationDraft\(rule: AutopostRule\)/)
+  assert.match(src, /const fanvueInternalValidationDraft = isFanvueInternalValidationDraft\(rule\)/)
+  assert.match(src, /canApprove: state === "DRAFT" && !fanvueInternalValidationDraft && !xOnlyDraft/)
+  assert.match(src, /if \(platform\.id === "fanvue"\) return "FROZEN"/)
+  assert.match(src, /Paid-content publishing remains unavailable while safety restrictions are in place\./)
+  assert.match(src, /if \(platform\.id === "fanvue"\) return "Open Fanvue"/)
+})
+
 test("autopost launch UI filters fallback, cards, new selections, and messaging to four launch platforms", () => {
   const src = client()
   const fallback = src.slice(src.indexOf("const FALLBACK_PLATFORMS"), src.indexOf("const AUTOPOST_PACK_PREFILL_STORAGE_KEY"))
