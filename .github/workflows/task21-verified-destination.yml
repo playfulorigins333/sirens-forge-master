@@ -8,6 +8,8 @@ on:
       - app/creator/publishing-queue/accounts/page.tsx
       - app/creator/publishing-queue/new/page.tsx
       - app/creator/publishing-queue/composer/PackageComposerForm.tsx
+      - app/autopost/page.tsx
+      - app/autopost/Task14AutopostOrchestration.tsx
       - lib/creator-publishing-queue/accounts/validation.ts
       - lib/creator-publishing-queue/composer/types.ts
       - lib/creator-publishing-queue/composer/serviceCore.ts
@@ -63,7 +65,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          allowed='^(app/creator/publishing-queue/accounts/PlatformAccountForm\.tsx|app/creator/publishing-queue/accounts/page\.tsx|app/creator/publishing-queue/new/page\.tsx|app/creator/publishing-queue/composer/PackageComposerForm\.tsx|lib/creator-publishing-queue/accounts/validation\.ts|lib/creator-publishing-queue/composer/types\.ts|lib/creator-publishing-queue/composer/serviceCore\.ts|lib/creator-publishing-queue/ui/loaders\.ts|lib/creator-publishing-queue/autopost/service\.ts|backend/creator-publishing-queue/tests/platformAccountSetup\.test\.ts|backend/creator-publishing-queue/tests/packageComposer\.test\.ts|backend/creator-publishing-queue/tests/autopostOrchestration\.test\.ts|backend/creator-publishing-queue/tests/task21PlanSchedulingUi\.test\.ts|backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration\.sql|backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration\.mjs|\.github/workflows/task21-onlyfans-reliability\.yml|\.github/workflows/task21-verified-destination\.yml)$'
+          allowed='^(app/creator/publishing-queue/accounts/PlatformAccountForm\.tsx|app/creator/publishing-queue/accounts/page\.tsx|app/creator/publishing-queue/new/page\.tsx|app/creator/publishing-queue/composer/PackageComposerForm\.tsx|app/autopost/page\.tsx|app/autopost/Task14AutopostOrchestration\.tsx|lib/creator-publishing-queue/accounts/validation\.ts|lib/creator-publishing-queue/composer/types\.ts|lib/creator-publishing-queue/composer/serviceCore\.ts|lib/creator-publishing-queue/ui/loaders\.ts|lib/creator-publishing-queue/autopost/service\.ts|backend/creator-publishing-queue/tests/platformAccountSetup\.test\.ts|backend/creator-publishing-queue/tests/packageComposer\.test\.ts|backend/creator-publishing-queue/tests/autopostOrchestration\.test\.ts|backend/creator-publishing-queue/tests/task21PlanSchedulingUi\.test\.ts|backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration\.sql|backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration\.mjs|\.github/workflows/task21-onlyfans-reliability\.yml|\.github/workflows/task21-verified-destination\.yml)$'
           immutable_migrations=(
             supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql
             supabase/migrations/20260721001900_creator_publishing_scheduler_retry_exhaustion.sql

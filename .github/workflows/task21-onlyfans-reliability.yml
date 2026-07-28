@@ -27,6 +27,7 @@ on:
       - 'docs/creator-publishing/task21-onlyfans-reliability-operations.md'
       - 'backend/creator-publishing-queue/tests/task22PublicAutopostScopeLockSourceContract.test.ts'
       - '.github/workflows/task22-public-autopost-scope-lock.yml'
+      - '.github/workflows/task21-verified-destination.yml'
       - '.github/workflows/task21-onlyfans-reliability.yml'
   workflow_dispatch:
 
@@ -101,6 +102,7 @@ jobs:
             "backend/creator-publishing-queue/tests/task22PublicAutopostScopeLockSourceContract.test.ts"
             "docs/creator-publishing/task21-onlyfans-reliability-operations.md"
             ".github/workflows/task22-public-autopost-scope-lock.yml"
+            ".github/workflows/task21-verified-destination.yml"
             ".github/workflows/task21-onlyfans-reliability.yml"
           )
 
