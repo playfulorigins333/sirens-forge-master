@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,6 +25,7 @@ import {
   Trash2,
   Save,
   List,
+  LayoutDashboard,
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 
@@ -1006,6 +1008,17 @@ export default function AutopostPage() {
                 <Shield className="w-4 h-4 text-cyan-300" />
                 Active rules: <span className="text-white font-semibold">{eligibleRulesCount}</span>
               </div>
+
+              <Button
+                asChild
+                variant="outline"
+                className="border-gray-800 bg-transparent text-gray-200 hover:bg-gray-900"
+              >
+                <Link href="/dashboard">
+                  <LayoutDashboard className="w-4 h-4 mr-2" />
+                  Dashboard
+                </Link>
+              </Button>
 
               <Button
                 disabled
