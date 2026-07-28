@@ -38,6 +38,32 @@ test("creator-facing launch catalog is exactly X, Reddit, OnlyFans, and Fanvue",
   assert.equal(platforms.some((platform) => ["fansly", "loyalfans", "justforfans"].includes(platform.id)), false)
 })
 
+test("creator Rule Preview omits raw payload and diagnostics while preserving preview behavior", () => {
+  const src = client()
+
+  assert.doesNotMatch(src, /const \[showDetails/)
+  assert.doesNotMatch(src, /setShowDetails/)
+  assert.doesNotMatch(src, />\s*Details\s*</)
+  assert.doesNotMatch(src, /JSON\.stringify\(previewResult\.payload/)
+  assert.doesNotMatch(src, /JSON\.stringify\(previewResult\.diagnostics/)
+  assert.doesNotMatch(src, /Rule Details/)
+  assert.doesNotMatch(src, /previewResult\?\.payload\s*&&\s*\([\s\S]*?<pre/)
+  assert.doesNotMatch(src, /previewResult\?\.diagnostics\s*&&\s*\([\s\S]*?<pre/)
+
+  assert.match(src, /Rule Preview/)
+  assert.match(src, /previewStatus\.toUpperCase\(\)/)
+  assert.match(src, /previewResult\?\.reason/)
+  assert.match(src, /evaluatePreview/)
+  assert.match(src, /runPreviewSelection/)
+  assert.match(src, /setPreviewResult\(res\)/)
+  assert.match(src, /preview_state: previewResult\?\.state \?\? null/)
+  assert.match(src, /preview_reason: previewResult\?\.reason \?\? null/)
+  assert.match(src, /preview_payload: previewResult\?\.payload \?\? null/)
+  assert.match(src, /setPreviewResult\(\{[\s\S]*?payload: parsed,[\s\S]*?diagnostics:/)
+  assert.match(src, /saveAsRule/)
+  assert.match(src, /Scheduled Save Disabled/)
+})
+
 test("creator UI omits Fanvue internal-validation controls while preserving legacy safety", () => {
   const src = client()
 
