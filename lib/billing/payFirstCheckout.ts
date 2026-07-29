@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 export const PAY_FIRST_CHECKOUT_CONTRACT = "sirens_forge_pay_first_v1";
 export const PURCHASER_COOKIE = "sf_pay_first_purchaser";
 export const PURCHASER_TOKEN_BYTES = 32;
-export const PURCHASER_TOKEN_MAX_AGE = 60 * 60 * 24;
+export const PURCHASER_TOKEN_MAX_AGE = 60 * 60 * 24 * 7;
 
 export function generatePurchaserToken(): string {
   return randomBytes(PURCHASER_TOKEN_BYTES).toString("base64url");

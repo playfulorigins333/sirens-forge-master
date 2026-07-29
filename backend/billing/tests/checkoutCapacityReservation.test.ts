@@ -93,4 +93,27 @@ await assert.rejects(ensureStripeCustomer({ id: "another-profile", userId: "auth
 
 const originalFetch = globalThis.fetch; globalThis.fetch = async () => { throw new Error("network forbidden"); };
 equal(typeof globalThis.fetch, "function"); globalThis.fetch = originalFetch;
+
+// Executable model of the migration's network-serialized, cross-tier rolling limits.
+class GuestRateLimit {
+  lock=new Mutex(); attempts:{network:string;token:string;tier:string;at:number;reservation:string}[]=[]; reservations=new Map<string,{id:string;tier:string;expires:number}>(); next=1;
+  acquire(network:string,token:string,tier:string,now:number,fail?:"sold_out"|"database") { return this.lock.run(async()=>{
+    const existing=this.reservations.get(token); if(existing){if(existing.tier!==tier)throw new Error("reservation_conflict");return existing}
+    if(!["og_throne","early_bird"].includes(tier))throw new Error("invalid_request");
+    if(this.attempts.filter(a=>a.network===network&&a.at>now-3_600_000).length>=5)throw new Error("rate_limit_hourly");
+    if(this.attempts.filter(a=>a.network===network&&a.at>now-86_400_000).length>=10)throw new Error("rate_limit_daily");
+    if(fail)throw new Error(fail);
+    const row={id:`g${this.next++}`,tier,expires:now+3_600_000};this.reservations.set(token,row);this.attempts.push({network,token,tier,at:now,reservation:row.id});return row;
+  })}
+  cleanup(now:number){this.attempts=this.attempts.filter(a=>a.at+86_400_000>now)}
+}
+let clock=2_000_000_000_000,rate=new GuestRateLimit();
+for(let i=0;i<5;i++)equal((await rate.acquire("n","t"+i,i%2?"early_bird":"og_throne",clock)).expires,clock+3_600_000);
+await assert.rejects(rate.acquire("n","t5","og_throne",clock),/rate_limit_hourly/);assertions++;
+clock+=3_600_001;for(let i=5;i<10;i++){await rate.acquire("n","t"+i,i%2?"early_bird":"og_throne",clock);clock+=3_600_001}
+await assert.rejects(rate.acquire("n","t10","early_bird",clock),/rate_limit_daily/);assertions++;
+const attempts=rate.attempts.length;equal((await rate.acquire("n","t9","early_bird",clock+20)).id,"g10");equal(rate.attempts.length,attempts);
+for(const [token,tier,fail] of [["bad","invalid",undefined],["sold","og_throne","sold_out"],["db","og_throne","database"]] as const){await assert.rejects(rate.acquire("other",token,tier,clock,fail));assertions++;equal(rate.attempts.length,attempts)}
+rate=new GuestRateLimit();const concurrent=await Promise.allSettled(Array.from({length:8},(_,i)=>rate.acquire("shared",`c${i}`,"og_throne",clock)));equal(concurrent.filter(x=>x.status==="fulfilled").length,5);equal(rate.attempts.length,5);equal(new Set(rate.attempts.map(a=>a.reservation)).size,5);
+rate.cleanup(clock+86_400_001);equal(rate.attempts.length,0);
 console.log(`checkoutCapacityReservation: ${assertions} assertions passed`);

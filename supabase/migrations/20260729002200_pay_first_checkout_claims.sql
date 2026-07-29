@@ -1,4 +1,5 @@
 -- Additive pay-first ownership and claim ledger. The preceding applied migration is immutable.
+create extension if not exists pg_cron with schema extensions;
 alter table public.checkout_capacity_reservations alter column profile_id drop not null;
 alter table public.checkout_capacity_reservations add column purchaser_token_hash bytea;
 alter table public.checkout_capacity_reservations add column stripe_subscription_id text;
@@ -49,24 +50,58 @@ create table public.pay_first_purchases (
 );
 alter table public.pay_first_purchases enable row level security;
 
-create function public.acquire_guest_checkout_capacity_reservation(p_purchaser_token_hash bytea,p_tier text)
+create table public.checkout_guest_rate_limit_attempts (
+ id uuid primary key default gen_random_uuid(),
+ network_hash bytea not null check (octet_length(network_hash)=32),
+ purchaser_token_hash bytea not null check (octet_length(purchaser_token_hash)=32),
+ reservation_id uuid not null unique references public.checkout_capacity_reservations(id) on delete cascade,
+ created_at timestamptz not null default now(),
+ expires_at timestamptz not null default (now()+interval '24 hours'),
+ check (expires_at>created_at and expires_at<=created_at+interval '25 hours')
+);
+create index checkout_guest_rate_limit_network_created_idx on public.checkout_guest_rate_limit_attempts(network_hash,created_at);
+alter table public.checkout_guest_rate_limit_attempts enable row level security;
+
+create function public.cleanup_checkout_guest_rate_limit_attempts()
+returns bigint language plpgsql security definer set search_path = public, pg_temp as $$
+declare deleted_count bigint; begin
+ delete from public.checkout_guest_rate_limit_attempts where expires_at<=now();
+ get diagnostics deleted_count=row_count; return deleted_count;
+end $$;
+
+do $$ declare existing_job bigint; begin
+ select jobid into existing_job from cron.job where jobname='sirens_forge_checkout_guest_rate_limit_cleanup';
+ if existing_job is not null then perform cron.unschedule(existing_job); end if;
+ perform cron.schedule('sirens_forge_checkout_guest_rate_limit_cleanup','17 * * * *',$cron$select public.cleanup_checkout_guest_rate_limit_attempts();$cron$);
+end $$;
+
+create function public.acquire_guest_checkout_capacity_reservation(p_purchaser_token_hash bytea,p_network_hash bytea,p_tier text)
 returns table(reservation_id uuid,expires_at timestamptz,stripe_session_id text)
 language plpgsql security definer set search_path = public, pg_temp as $$
-declare t public.subscription_tiers%rowtype; r public.checkout_capacity_reservations%rowtype; paid bigint; held bigint;
+declare t public.subscription_tiers%rowtype; r public.checkout_capacity_reservations%rowtype; paid bigint; held bigint; hourly bigint; daily bigint;
 begin
- if octet_length(p_purchaser_token_hash)<>32 or p_tier not in ('og_throne','early_bird') then raise exception 'invalid_request'; end if;
+ if octet_length(p_purchaser_token_hash)<>32 then raise exception 'invalid_request'; end if;
+ if octet_length(p_network_hash)<>32 then raise exception 'malformed_network_hash'; end if;
+ if p_tier not in ('og_throne','early_bird') then raise exception 'invalid_request'; end if;
+ perform pg_advisory_xact_lock(hashtextextended(encode(p_network_hash,'hex'),2050));
  perform pg_advisory_xact_lock(hashtextextended(encode(p_purchaser_token_hash,'hex'),2049));
- select * into t from public.subscription_tiers where name=p_tier for update;
- if not found or not coalesce(t.is_active,false) or t.max_slots is null then raise exception 'plan_unavailable'; end if;
+ delete from public.checkout_guest_rate_limit_attempts where expires_at<=now();
  update public.checkout_capacity_reservations set status='expired',updated_at=now() where status='active' and stripe_session_id is null and expires_at<=now();
  select * into r from public.checkout_capacity_reservations where purchaser_token_hash=p_purchaser_token_hash and status in ('active','associated') for update;
  if found and r.tier<>p_tier then raise exception 'reservation_conflict'; end if;
  if found then return query select r.id,r.expires_at,r.stripe_session_id; return; end if;
+ select count(*) into hourly from public.checkout_guest_rate_limit_attempts where network_hash=p_network_hash and created_at>now()-interval '60 minutes';
+ if hourly>=5 then raise exception 'rate_limit_hourly'; end if;
+ select count(*) into daily from public.checkout_guest_rate_limit_attempts where network_hash=p_network_hash and created_at>now()-interval '24 hours';
+ if daily>=10 then raise exception 'rate_limit_daily'; end if;
+ select * into t from public.subscription_tiers where name=p_tier for update;
+ if not found or not coalesce(t.is_active,false) or t.max_slots is null then raise exception 'plan_unavailable'; end if;
  select count(*) into paid from public.user_subscriptions s where s.tier_name=p_tier and s.status in ('active','trialing') and not (p_tier='og_throne' and coalesce(s.metadata->>'counts_toward_seats','true')='false');
  select count(*) into held from public.checkout_capacity_reservations x where x.tier=p_tier and ((x.status='active' and x.stripe_session_id is null and x.expires_at>now()) or x.status='associated')
   and (x.profile_id is null or not exists(select 1 from public.user_subscriptions s where s.user_id=x.profile_id and s.tier_name=x.tier and s.status in ('active','trialing')));
  if paid+held>=t.max_slots then raise exception 'sold_out'; end if;
- insert into public.checkout_capacity_reservations(profile_id,purchaser_token_hash,tier,expires_at) values(null,p_purchaser_token_hash,p_tier,now()+interval '24 hours') returning * into r;
+ insert into public.checkout_capacity_reservations(profile_id,purchaser_token_hash,tier,expires_at) values(null,p_purchaser_token_hash,p_tier,now()+interval '60 minutes') returning * into r;
+ insert into public.checkout_guest_rate_limit_attempts(network_hash,purchaser_token_hash,reservation_id,expires_at) values(p_network_hash,p_purchaser_token_hash,r.id,now()+interval '24 hours');
  return query select r.id,r.expires_at,r.stripe_session_id;
 end $$;
 
@@ -162,5 +197,7 @@ end $$;
 
 revoke all on public.pay_first_purchases from public,anon,authenticated;
 grant select,insert,update on public.pay_first_purchases to service_role;
-revoke all on function public.acquire_guest_checkout_capacity_reservation(bytea,text), public.bind_guest_checkout_session(uuid,bytea,text,text), public.expire_guest_checkout_session(uuid,text,text), public.record_pay_first_purchase(uuid,bytea,text,text,text,text,text,text), public.claim_pay_first_purchase(uuid,bytea,text,uuid,uuid,text) from public,anon,authenticated;
-grant execute on function public.acquire_guest_checkout_capacity_reservation(bytea,text), public.bind_guest_checkout_session(uuid,bytea,text,text), public.expire_guest_checkout_session(uuid,text,text), public.record_pay_first_purchase(uuid,bytea,text,text,text,text,text,text), public.claim_pay_first_purchase(uuid,bytea,text,uuid,uuid,text) to service_role;
+revoke all on public.checkout_guest_rate_limit_attempts from public,anon,authenticated;
+grant select,insert,delete on public.checkout_guest_rate_limit_attempts to service_role;
+revoke all on function public.cleanup_checkout_guest_rate_limit_attempts(), public.acquire_guest_checkout_capacity_reservation(bytea,bytea,text), public.bind_guest_checkout_session(uuid,bytea,text,text), public.expire_guest_checkout_session(uuid,text,text), public.record_pay_first_purchase(uuid,bytea,text,text,text,text,text,text), public.claim_pay_first_purchase(uuid,bytea,text,uuid,uuid,text) from public,anon,authenticated;
+grant execute on function public.cleanup_checkout_guest_rate_limit_attempts(), public.acquire_guest_checkout_capacity_reservation(bytea,bytea,text), public.bind_guest_checkout_session(uuid,bytea,text,text), public.expire_guest_checkout_session(uuid,text,text), public.record_pay_first_purchase(uuid,bytea,text,text,text,text,text,text), public.claim_pay_first_purchase(uuid,bytea,text,uuid,uuid,text) to service_role;
