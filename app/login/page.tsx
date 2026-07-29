@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabaseBrowser } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,10 +9,14 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Sparkles, Eye, EyeOff, Crown, Star } from "lucide-react"
 import { motion } from "framer-motion"
+import { checkoutPricingUrl, parseCheckoutContinuation } from "@/lib/auth/checkoutContinuation"
 
 export default function LoginPage() {
   const supabase = supabaseBrowser()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const intent = parseCheckoutContinuation(searchParams.get("checkout_intent"))
+  const destination = intent ? checkoutPricingUrl(intent) : "/dashboard"
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -21,6 +25,7 @@ export default function LoginPage() {
   const [checkingSession, setCheckingSession] = useState(true)
   const [mode, setMode] = useState<"login" | "signup">("login")
   const [error, setError] = useState<string | null>(null)
+  const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let isMounted = true
@@ -34,7 +39,7 @@ export default function LoginPage() {
         if (!isMounted) return
 
         if (user) {
-          router.replace("/dashboard")
+          router.replace(destination)
           return
         }
       } finally {
@@ -50,7 +55,7 @@ export default function LoginPage() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        router.replace("/dashboard")
+        router.replace(destination)
       }
     })
 
@@ -58,7 +63,7 @@ export default function LoginPage() {
       isMounted = false
       subscription.unsubscribe()
     }
-  }, [router, supabase])
+  }, [router, supabase, destination])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -78,12 +83,12 @@ export default function LoginPage() {
           return
         }
 
-        router.replace("/dashboard")
+        router.replace(destination)
         return
       }
 
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
         })
@@ -94,7 +99,9 @@ export default function LoginPage() {
           return
         }
 
-        router.replace("/dashboard")
+        if (data.session) router.replace(destination)
+        else setConfirmationMessage("Check your email to confirm your account, then return to continue.")
+        setIsLoading(false)
         return
       }
     } catch (err: any) {
@@ -105,19 +112,23 @@ export default function LoginPage() {
   }
 
   const handleGoogleLogin = async () => {
+    const callback = new URL("/auth/callback", window.location.origin)
+    if (intent) callback.searchParams.set("checkout_intent", searchParams.get("checkout_intent")!)
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: callback.toString(),
       },
     })
   }
 
   const handleDiscordLogin = async () => {
+    const callback = new URL("/auth/callback", window.location.origin)
+    if (intent) callback.searchParams.set("checkout_intent", searchParams.get("checkout_intent")!)
     await supabase.auth.signInWithOAuth({
       provider: "discord",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: callback.toString(),
       },
     })
   }
@@ -196,6 +207,7 @@ export default function LoginPage() {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 {error && <p className="text-red-400 text-sm">{error}</p>}
+                {confirmationMessage && <p className="text-cyan-300 text-sm">{confirmationMessage}</p>}
 
                 <div>
                   <Label className="text-gray-300">Email</Label>

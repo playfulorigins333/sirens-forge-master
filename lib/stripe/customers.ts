@@ -1,65 +1,54 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { stripeCustomerIdempotencyKey } from "@/lib/billing/launchCheckoutPolicy";
 
-function getStripe() {
-  return new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-    apiVersion: "2025-11-17.clover",
-  });
+export type CustomerProfile = { id: string; userId: string; email?: string | null; stripeCustomerId?: string | null };
+export type CustomerBoundaries = {
+  createCustomer(input: { email?: string; metadata: Record<string, string> }, idempotencyKey: string): Promise<{ id: string }>;
+  assignIfEmpty(profileId: string, userId: string, customerId: string): Promise<boolean>;
+  readCustomer(profileId: string, userId: string): Promise<string | null>;
+};
+
+export async function ensureStripeCustomer(profile: CustomerProfile, boundary: CustomerBoundaries): Promise<string> {
+  if (!profile.id || !profile.userId) throw new Error("customer_unavailable");
+  if (profile.stripeCustomerId) return profile.stripeCustomerId;
+  const customer = await boundary.createCustomer({
+    ...(profile.email ? { email: profile.email } : {}),
+    metadata: { user_id: profile.userId, profile_id: profile.id },
+  }, stripeCustomerIdempotencyKey(profile.id));
+  if (await boundary.assignIfEmpty(profile.id, profile.userId, customer.id)) return customer.id;
+  const winner = await boundary.readCustomer(profile.id, profile.userId);
+  if (winner) return winner;
+  throw new Error("customer_unavailable");
 }
 
-function getSupabaseAdminClient() {
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error("Missing Supabase admin env for Stripe customer lookup");
-  }
-
-  return createClient(supabaseUrl, serviceRoleKey);
-}
-
-export async function getOrCreateStripeCustomer(userId: string, email?: string) {
-  const stripe = getStripe();
-  const supabase = getSupabaseAdminClient();
-
-  // 1. Load user profile
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("stripe_customer_id, email")
-    .eq("id", userId)
-    .single();
-
-  if (profileError) {
-    console.error("❌ Error loading profile:", profileError);
-    throw new Error("Failed to load user profile");
-  }
-
-  // 2. If customer already exists → return it immediately
-  if (profile?.stripe_customer_id) {
-    return profile.stripe_customer_id;
-  }
-
-  // 3. Create new Stripe customer
-  const customer = await stripe.customers.create({
-    email: email ?? profile.email,
-    metadata: {
-      user_id: userId,
-      profile_id: userId,
+export function createProductionCustomerBoundary(): CustomerBoundaries {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (!url || !key || !stripeKey) throw new Error("customer_unavailable");
+  const db = createClient(url, key);
+  const stripe = new Stripe(stripeKey, { apiVersion: "2025-11-17.clover" });
+  return {
+    async createCustomer(input, idempotencyKey) { return stripe.customers.create(input, { idempotencyKey }); },
+    async assignIfEmpty(profileId, userId, customerId) {
+      const { data, error } = await db.from("profiles").update({ stripe_customer_id: customerId })
+        .eq("id", profileId).eq("user_id", userId).is("stripe_customer_id", null).select("id");
+      if (error) throw new Error("customer_unavailable");
+      return Array.isArray(data) && data.length === 1;
     },
-  });
+    async readCustomer(profileId, userId) {
+      const { data, error } = await db.from("profiles").select("stripe_customer_id")
+        .eq("id", profileId).eq("user_id", userId).maybeSingle();
+      if (error) throw new Error("customer_unavailable");
+      return data?.stripe_customer_id || null;
+    },
+  };
+}
 
-  // 4. Save Stripe customer ID into Supabase
-  const { error: updateError } = await supabase
-    .from("profiles")
-    .update({ stripe_customer_id: customer.id })
-    .eq("id", userId);
-
-  if (updateError) {
-    console.error("❌ Failed to save Stripe customer ID:", updateError);
-    throw new Error("Could not save Stripe customer ID");
-  }
-
-  console.log("✨ Created new Stripe customer:", customer.id);
-
-  return customer.id;
+// Compatibility for existing authenticated billing callers. Construction remains lazy.
+export async function getOrCreateStripeCustomer(profileId: string, email?: string) {
+  const boundary = createProductionCustomerBoundary();
+  const existing = await boundary.readCustomer(profileId, profileId);
+  return ensureStripeCustomer({ id: profileId, userId: profileId, email, stripeCustomerId: existing }, boundary);
 }
