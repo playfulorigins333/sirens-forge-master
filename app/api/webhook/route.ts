@@ -204,9 +204,22 @@ function validMetadata(md: any, deps: LaunchWebhookDependencies) {
     text(md.profile_id) && text(md.user_id) && text(md.reservation_id) && text(md.stripe_price_id) === deps.ogPriceId && text(md.stripe_customer_id)
 }
 function validConnect(object: any, md: any) {
-  if (md.connect_mode === "none") return true
-  if (md.connect_mode !== "destination_charge" || !text(md.connect_destination_account)) return false
-  return text(object?.transfer_data?.destination) === text(md.connect_destination_account) && object?.application_fee_amount != null
+  const destination = text(object?.transfer_data?.destination)
+  const fee = object?.application_fee_amount
+  if (md.connect_mode === "none") {
+    return text(md.connect_destination_account) === "" && destination === "" &&
+      (fee == null || (Number.isSafeInteger(fee) && fee <= 0))
+  }
+  if (md.connect_mode !== "destination_charge" || md.connect_onboarded !== "true") return false
+  const configuredDestination = text(md.connect_destination_account)
+  const amount = object?.amount
+  const platform = typeof md.platform_fee_percent === "string" && md.platform_fee_percent.trim() ? Number(md.platform_fee_percent) : NaN
+  const commission = typeof md.commission_percent === "string" && md.commission_percent.trim() ? Number(md.commission_percent) : NaN
+  return configuredDestination !== "" && destination === configuredDestination &&
+    Number.isSafeInteger(amount) && amount > 0 && Number.isSafeInteger(fee) && fee >= 0 &&
+    Number.isFinite(platform) && platform >= 0 && platform <= 100 &&
+    Number.isFinite(commission) && commission >= 0 && commission <= 100 &&
+    Math.abs(platform + commission - 100) < 1e-9 && fee === Math.round(amount * platform / 100)
 }
 
 export async function processLaunchStripeEvent(event: any, deps: LaunchWebhookDependencies): Promise<"ignored"|"fulfilled"|"expired"> {

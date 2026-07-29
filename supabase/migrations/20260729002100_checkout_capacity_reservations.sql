@@ -65,11 +65,13 @@ begin
  if p_checkout_contract<>'sirens_forge_launch_checkout_v1' or p_tier<>'og_throne' or p_price_id='' or p_customer_id='' or p_payment_intent_id='' then raise exception 'invalid_contract'; end if;
  select * into r from public.checkout_capacity_reservations where id=p_reservation_id and profile_id=p_profile_id and tier='og_throne' for update;
  if not found then raise exception 'reservation_unavailable'; end if;
- if r.status='fulfilled' and r.payment_intent_id=p_payment_intent_id then return 'already_fulfilled'; end if;
- if r.status<>'associated' or r.payment_intent_id is not null or (p_session_id is not null and r.stripe_session_id<>p_session_id) then raise exception 'reservation_conflict'; end if;
  if not exists(select 1 from public.profiles p where p.id=p_profile_id and p.user_id=p_user_id and p.stripe_customer_id=p_customer_id) then raise exception 'ownership_mismatch'; end if;
  select * into t from public.subscription_tiers where name='og_throne' and is_active=true for update;
  if not found or t.stripe_price_id<>p_price_id then raise exception 'price_mismatch'; end if;
+ if r.stripe_session_id is null or btrim(r.stripe_session_id)='' or (p_session_id is not null and r.stripe_session_id<>p_session_id) then raise exception 'session_mismatch'; end if;
+ if r.status='fulfilled' and r.payment_intent_id=p_payment_intent_id then return 'already_fulfilled'; end if;
+ if r.status='fulfilled' then raise exception 'payment_intent_conflict'; end if;
+ if r.status<>'associated' or r.payment_intent_id is not null then raise exception 'reservation_conflict'; end if;
  select array_agg(id) into entitlement_ids from (select id from public.user_subscriptions where user_id=p_profile_id and tier_name='og_throne' and status in ('active','trialing') for update) s;
  if coalesce(array_length(entitlement_ids,1),0)>1 then raise exception 'ambiguous_entitlement'; end if;
  if coalesce(array_length(entitlement_ids,1),0)=1 then

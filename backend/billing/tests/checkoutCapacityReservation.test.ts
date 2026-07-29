@@ -65,12 +65,16 @@ equal(checkoutSessionIdempotencyKey("reservation"), "launch-checkout:reservation
 
 class TerminalReservation {
   status:"associated"|"fulfilled"|"expired"="associated"; paymentIntent:string|null=null; entitlement=false;
-  fulfill(paymentIntent:string){if(this.status==="fulfilled"){if(this.paymentIntent===paymentIntent)return "already_fulfilled";throw new Error("payment_conflict")}if(this.status!=="associated")throw new Error("terminal_conflict");this.status="fulfilled";this.paymentIntent=paymentIntent;this.entitlement=true;return "applied"}
+  readonly authority={user:"u1",customer:"cus1",price:"price1",profile:"p1",tier:"og_throne",session:"cs_valid"};
+  fulfill(paymentIntent:string, supplied:Partial<typeof this.authority>={}){const actual={...this.authority,...supplied};for(const key of Object.keys(this.authority) as (keyof typeof this.authority)[])if(actual[key]!==this.authority[key])throw new Error(`${key}_mismatch`);if(this.status==="fulfilled"){if(this.paymentIntent===paymentIntent)return "already_fulfilled";throw new Error("payment_conflict")}if(this.status!=="associated")throw new Error("terminal_conflict");this.status="fulfilled";this.paymentIntent=paymentIntent;this.entitlement=true;return "applied"}
   expire(session:string){if(session!=="cs_valid")throw new Error("session_mismatch");if(this.status==="expired")return "already_expired";if(this.status!=="associated")throw new Error("terminal_conflict");this.status="expired";return "expired"}
 }
 let terminal=new TerminalReservation();equal(terminal.fulfill("pi1"),"applied");equal(terminal.status,"fulfilled");equal(terminal.entitlement,true);equal(terminal.fulfill("pi1"),"already_fulfilled");assert.throws(()=>terminal.fulfill("pi2"),/payment_conflict/);assertions++;
+for(const [key,value] of [["user","wrong"],["customer","wrong"],["price","wrong"],["profile","wrong"],["tier","early_bird"],["session","cs_other"]] as const){assert.throws(()=>terminal.fulfill("pi1",{[key]:value}),/mismatch/);assertions++;equal(terminal.status,"fulfilled")}
 terminal=new TerminalReservation();assert.throws(()=>terminal.expire("cs_other"),/session_mismatch/);assertions++;equal(terminal.status,"associated");equal(terminal.expire("cs_valid"),"expired");equal(terminal.status,"expired");assert.throws(()=>terminal.fulfill("pi1"),/terminal_conflict/);assertions++;
 terminal=new TerminalReservation();terminal.fulfill("pi1");assert.throws(()=>terminal.expire("cs_valid"),/terminal_conflict/);assertions++;equal(terminal.status,"fulfilled");
+const migration=(await import("node:fs")).readFileSync("supabase/migrations/20260729002100_checkout_capacity_reservations.sql","utf8");
+const replay=migration.indexOf("return 'already_fulfilled'");for(const validation of ["ownership_mismatch","price_mismatch","session_mismatch"]){equal(migration.indexOf(validation)<replay,true)}
 
 let assigned: string | null = null, created = 0;
 const customerBoundary: CustomerBoundaries = {
