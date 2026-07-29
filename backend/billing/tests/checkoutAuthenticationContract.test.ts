@@ -30,7 +30,9 @@ const trusted=(ip:string,extra:Record<string,string>={})=>new Request("https://s
 equal(trustedSourceNetwork(trusted("8.8.8.8")),"8.8.8.8");equal(trustedSourceNetwork(trusted(" 8.8.4.4 ")),"8.8.4.4");
 for(const value of ["","8.8.8.8, 1.1.1.1","not-ip","127.0.0.1","10.0.0.1","192.168.1.1","::1","fd00::1"])equal(trustedSourceNetwork(trusted(value)),null);
 for(const value of ["203.0.113.1","198.51.100.1","192.0.2.1","0:0:0:0:0:0:0:1","::","0:0:0:0:0:0:0:0","::ffff:8.8.8.8","0:0:0:0:0:ffff:0808:0808"])equal(trustedSourceNetwork(trusted(value)),null);
+for(const value of ["64:ff9b:1::1","100:0:0:1::1","3fff::1","5f00::1","192.88.99.1"])equal(trustedSourceNetwork(trusted(value)),null);
 for(const value of ["203.0.114.1","198.51.101.1","192.30.252.153"])equal(trustedSourceNetwork(trusted(value)),value);
+for(const value of ["64:ff9b::1","2001:20::1","2001:30::1","2001:1::1","2001:1::2","2001:1::3","2001:3::1","2001:4:112::1","2620:4f:8000::1"])equal(trustedSourceNetwork(trusted(value)),value);
 equal(trustedSourceNetwork(new Request("https://sirens.test",{headers:{"x-forwarded-for":"8.8.8.8","x-real-ip":"8.8.8.8","user-agent":"fingerprint"}})),null);
 const secret="s".repeat(32),h1=networkRateLimitHash("8.8.8.8",secret);equal(Buffer.from(h1,"hex").length,32);equal(h1===networkRateLimitHash("1.1.1.1",secret),false);equal(h1===networkRateLimitHash("8.8.8.8","t".repeat(32)),false);
 const compressed="2606:4700:4700::1111",expanded="2606:4700:4700:0:0:0:0:1111";equal(networkRateLimitHash(compressed,secret),networkRateLimitHash(expanded,secret));equal(networkRateLimitHash(compressed.toUpperCase(),secret),networkRateLimitHash(compressed,secret));equal(networkRateLimitHash(compressed,secret)===networkRateLimitHash("2606:4700:4700::1001",secret),false);equal(Buffer.from(networkRateLimitHash(compressed,secret),"hex").length,32);

@@ -29,13 +29,13 @@ function eligible(address:CanonicalAddress):boolean {
   const b=address.bytes;
   if(address.family===4){
     const [a,c,d,e]=b;
-    if(a===0||a===10||a===127||a>=224||(a===100&&c>=64&&c<=127)||(a===169&&c===254)||(a===172&&c>=16&&c<=31)||(a===192&&c===168)||(a===192&&c===0&&d===2)||(a===198&&(c===18||c===19))||(a===198&&c===51&&d===100)||(a===203&&c===0&&d===113))return false;
+    if(a===0||a===10||a===127||a>=224||(a===100&&c>=64&&c<=127)||(a===169&&c===254)||(a===172&&c>=16&&c<=31)||(a===192&&c===168)||(a===192&&c===0&&d===2)||(a===192&&c===88&&d===99)||(a===198&&(c===18||c===19))||(a===198&&c===51&&d===100)||(a===203&&c===0&&d===113))return false;
     if(a===192&&c===0&&d===0&&![9,10].includes(e))return false;
     return true;
   }
   if(b.every(byte=>byte===0)||b.subarray(0,15).every(byte=>byte===0)&&b[15]===1)return false;
   if(prefix(b,[0,0,0,0,0,0,0,0,0,0,255,255],96)||prefix(b,[255],8)||prefix(b,[252],7)||prefix(b,[254,128],10))return false;
-  if(prefix(b,[32,1,13,184],32)||prefix(b,[1,0,0,0,0,0,0,0],64)||prefix(b,[32,1,0,2],48)||prefix(b,[32,1,0,32],28))return false;
+  if(prefix(b,[32,1,13,184],32)||prefix(b,[1,0,0,0,0,0,0,0],64)||prefix(b,[32,1,0,2],48)||prefix(b,[0,100,255,155,0,1],48)||prefix(b,[1,0,0,0,0,0,0,1],64)||prefix(b,[63,255,0],20)||prefix(b,[95,0],16))return false;
   return true;
 }
 export function isPublicIp(value: string): boolean {
