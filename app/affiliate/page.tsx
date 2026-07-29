@@ -286,7 +286,8 @@ export default function AffiliateDashboard() {
       const res = await fetch("/api/stripe/connect/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: user.id }),
+        credentials: "same-origin",
+        body: JSON.stringify({}),
       })
 
       const json = await res.json()
