@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import Stripe from "stripe"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { LAUNCH_CHECKOUT_CONTRACT, isPurchasablePlan } from "@/lib/billing/launchCheckoutPolicy"
+import { PAY_FIRST_CHECKOUT_CONTRACT } from "@/lib/billing/payFirstCheckout"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -242,6 +243,19 @@ export async function processLaunchStripeEvent(event: any, deps: LaunchWebhookDe
   return "ignored"
 }
 
+export type PayFirstWebhookDependencies={ogPriceId:string;earlyPriceId:string;paymentIntent(id:string):Promise<any>;subscription(id:string):Promise<any>;record(input:{reservationId:string;tier:"og_throne"|"early_bird";sessionId:string;customerId:string;priceId:string;paymentIntentId:string|null;subscriptionId:string|null}):Promise<unknown>;expire(input:{reservationId:string;tier:"og_throne"|"early_bird";sessionId:string}):Promise<unknown>};
+function validPayFirstMetadata(md:any,tier:string,price:string){return md?.checkout_contract===PAY_FIRST_CHECKOUT_CONTRACT&&md?.tier_name===tier&&text(md.reservation_id)&&text(md.stripe_price_id)===price&&md.purchase_mode===(tier==="og_throne"?"payment":"subscription")}
+function validSubscriptionConnect(sub:any,md:any){const destination=text(sub?.transfer_data?.destination),fee=sub?.application_fee_percent,configured=text(md.connect_destination_account),platform=Number(md.platform_fee_percent),commission=Number(md.commission_percent);if(md.connect_mode==="none")return configured===""&&destination===""&&(fee==null||fee===0);return md.connect_mode==="destination_charge"&&md.connect_onboarded==="true"&&configured!==""&&destination===configured&&Number.isFinite(platform)&&platform>=0&&platform<=100&&Number.isFinite(commission)&&commission>=0&&commission<=100&&Math.abs(platform+commission-100)<1e-9&&fee===platform}
+export async function processPayFirstStripeEvent(event:any,deps:PayFirstWebhookDependencies):Promise<"ignored"|"recorded"|"expired">{
+ const session=event?.data?.object,md=session?.metadata;if(md?.checkout_contract!==PAY_FIRST_CHECKOUT_CONTRACT)return"ignored";
+ if(event.type==="checkout.session.expired"){if(!isPurchasablePlan(md.tier_name)||!text(session.id)||!text(md.reservation_id))return"ignored";await deps.expire({reservationId:md.reservation_id,tier:md.tier_name,sessionId:session.id});return"expired"}
+ if(event.type!=="checkout.session.completed"||!isPurchasablePlan(md.tier_name)||!text(session.id)||session.status!=="complete"||session.payment_status!=="paid")return"ignored";
+ const tier=md.tier_name,price=tier==="og_throne"?deps.ogPriceId:deps.earlyPriceId,customer=customerId(session.customer);if(!price||!customer||!validPayFirstMetadata(md,tier,price)||session.mode!==(tier==="og_throne"?"payment":"subscription"))return"ignored";
+ if(tier==="og_throne"){const id=customerId(session.payment_intent);if(!id)return"ignored";const pi=await deps.paymentIntent(id);if(pi.id!==id||pi.status!=="succeeded"||customerId(pi.customer)!==customer||!validPayFirstMetadata(pi.metadata,tier,price)||!validConnect(pi,md))return"ignored";await deps.record({reservationId:md.reservation_id,tier,sessionId:session.id,customerId:customer,priceId:price,paymentIntentId:id,subscriptionId:null});return"recorded"}
+ const id=customerId(session.subscription);if(!id)return"ignored";const sub=await deps.subscription(id),itemPrice=customerId(sub?.items?.data?.[0]?.price),invoice=sub?.latest_invoice,invoicePaid=invoice?.paid===true||invoice?.status==="paid";if(sub.id!==id||!["active","trialing"].includes(sub.status)||customerId(sub.customer)!==customer||itemPrice!==price||!validPayFirstMetadata(sub.metadata,tier,price)||!invoicePaid||!validSubscriptionConnect(sub,md))return"ignored";
+ await deps.record({reservationId:md.reservation_id,tier,sessionId:session.id,customerId:customer,priceId:price,paymentIntentId:null,subscriptionId:id});return"recorded";
+}
+
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
@@ -268,12 +282,18 @@ export async function POST(req: Request) {
 
   try {
     const supabaseAdmin = getSupabaseAdmin()
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2025-11-17.clover" as any })
+    const payFirstResult=await processPayFirstStripeEvent(event,{
+      ogPriceId:process.env.STRIPE_PRICE_OG_THRONE||"",earlyPriceId:process.env.STRIPE_PRICE_EARLY_BIRD||"",
+      async paymentIntent(id){return stripe.paymentIntents.retrieve(id)},async subscription(id){return stripe.subscriptions.retrieve(id,{expand:["latest_invoice"]})},
+      async record(input){const{data:r,error:q}=await supabaseAdmin.from("checkout_capacity_reservations").select("purchaser_token_hash").eq("id",input.reservationId).maybeSingle();if(q||!r?.purchaser_token_hash)throw new Error("reservation_unavailable");const{error}=await supabaseAdmin.rpc("record_pay_first_purchase",{p_reservation_id:input.reservationId,p_purchaser_token_hash:r.purchaser_token_hash,p_tier:input.tier,p_session_id:input.sessionId,p_customer_id:input.customerId,p_price_id:input.priceId,p_payment_intent_id:input.paymentIntentId,p_subscription_id:input.subscriptionId});if(error)throw new Error("purchase_record_unavailable")},
+      async expire(input){const{error}=await supabaseAdmin.rpc("expire_guest_checkout_session",{p_reservation_id:input.reservationId,p_tier:input.tier,p_session_id:input.sessionId});if(error)throw new Error("expiration_unavailable")}
+    })
     const launchResult = await processLaunchStripeEvent(event, {
       ogPriceId: process.env.STRIPE_PRICE_OG_THRONE || "",
       async fulfill(input) { const {error}=await supabaseAdmin.rpc("fulfill_og_checkout_payment",{p_checkout_contract:input.contract,p_reservation_id:input.reservationId,p_profile_id:input.profileId,p_user_id:input.userId,p_tier:input.tier,p_price_id:input.priceId,p_customer_id:input.customerId,p_payment_intent_id:input.paymentIntentId,p_session_id:input.sessionId}); if(error) throw new Error("fulfillment_unavailable") },
       async expire(input) { const {error}=await supabaseAdmin.rpc("expire_checkout_capacity_reservation_from_session",{p_reservation_id:input.reservationId,p_profile_id:input.profileId,p_tier:input.tier,p_session_id:input.sessionId}); if(error) throw new Error("expiration_unavailable") },
     })
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2025-11-17.clover" as any })
     switch (event.type) {
       // -------------------------------------------------
       // STRIPE CONNECT — ONBOARDING COMPLETE
@@ -304,6 +324,8 @@ export async function POST(req: Request) {
       // -------------------------------------------------
       case "checkout.session.completed": {
         const session: any = event.data.object
+
+        if (payFirstResult === "recorded") break
 
         if (session.mode === "subscription" && session.subscription) {
           const sub = await stripe.subscriptions.retrieve(
