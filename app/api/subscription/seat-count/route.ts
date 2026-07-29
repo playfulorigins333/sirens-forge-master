@@ -11,7 +11,7 @@ const ACTIVE_STATUSES = ["active", "trialing"] as const;
 
 // Launch tiers only (explicit allow-list)
 // NOTE: We intentionally exclude starter_hit for launch.
-const LAUNCH_TIERS = ["og_throne", "early_bird", "prime_access"] as const;
+const LAUNCH_TIERS = ["og_throne", "early_bird"] as const;
 type LaunchTierName = (typeof LAUNCH_TIERS)[number];
 
 type TierRow = {
@@ -21,6 +21,13 @@ type TierRow = {
   slots_remaining: number | null;
   is_active: boolean | null;
 };
+export type CapacityReservation = { status: string; expires_at: string | null; stripe_session_id: string | null };
+export function reservationConsumesCapacity(reservation: CapacityReservation, now: Date): boolean {
+  if (reservation.status === "associated") return true;
+  if (reservation.status !== "active" || reservation.stripe_session_id) return false;
+  const expiration = Date.parse(reservation.expires_at || "");
+  return Number.isFinite(expiration) && expiration > now.getTime();
+}
 
 function clampNonNegative(n: number) {
   return n < 0 ? 0 : n;
@@ -65,7 +72,6 @@ export async function GET() {
     const counts: Record<LaunchTierName, number> = {
       og_throne: 0,
       early_bird: 0,
-      prime_access: 0,
     };
 
     // Early Bird count
@@ -84,24 +90,6 @@ export async function GET() {
         );
       }
       counts.early_bird = count ?? 0;
-    }
-
-    // Prime count
-    {
-      const { count, error } = await supabase
-        .from("user_subscriptions")
-        .select("id", { count: "exact", head: true })
-        .eq("tier_name", "prime_access")
-        .in("status", [...ACTIVE_STATUSES]);
-
-      if (error) {
-        console.error("Seat count: prime_access count error:", error);
-        return NextResponse.json(
-          { success: false, error: "count_failed_prime_access" },
-          { status: 500 }
-        );
-      }
-      counts.prime_access = count ?? 0;
     }
 
     // OG count (exclude testers / grants that do NOT consume seats)
@@ -140,6 +128,19 @@ export async function GET() {
       counts.og_throne = paidOg < 0 ? 0 : paidOg;
     }
 
+    // Reservations consume capacity unless an entitlement for the same profile/tier
+    // already consumes it. This endpoint is informational; acquisition is atomic in SQL.
+    const { data: reservations, error: reservationError } = await supabase
+      .from("checkout_capacity_reservations").select("profile_id,tier,status,expires_at,stripe_session_id")
+      .in("status", ["active", "associated"]);
+    if (reservationError) return NextResponse.json({ success:false,error:"temporarily_unavailable" },{status:503});
+    for (const reservation of (reservations || []).filter((row) => reservationConsumesCapacity(row, new Date()))) {
+      const { count, error } = await supabase.from("user_subscriptions").select("id",{count:"exact",head:true})
+        .eq("user_id",reservation.profile_id).eq("tier_name",reservation.tier).in("status",[...ACTIVE_STATUSES]);
+      if (error) return NextResponse.json({success:false,error:"temporarily_unavailable"},{status:503});
+      if (!count) counts[reservation.tier as LaunchTierName] += 1;
+    }
+
     // 3) Build response in the exact format the PricingPage expects
     const responseTiers: Record<string, any> = {};
 
@@ -164,9 +165,9 @@ export async function GET() {
       tiers: responseTiers,
     });
   } catch (err: any) {
-    console.error("Seat count route fatal error:", err);
+    console.error("Seat count route failed");
     return NextResponse.json(
-      { success: false, error: err?.message || "internal_error" },
+      { success: false, error: "internal_error" },
       { status: 500 }
     );
   }

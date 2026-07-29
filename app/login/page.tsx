@@ -1,7 +1,7 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import React, { Suspense, useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabaseBrowser } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,10 +9,22 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Sparkles, Eye, EyeOff, Crown, Star } from "lucide-react"
 import { motion } from "framer-motion"
+import { authenticationDestination, checkoutAuthCallbackUrl, parseCheckoutContinuation, signupAuthOptions, signupDestination } from "@/lib/auth/checkoutContinuation"
 
 export default function LoginPage() {
+  return <Suspense fallback={<LoginPageFallback />}><LoginPageContent /></Suspense>
+}
+
+function LoginPageFallback() {
+  return <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 text-white flex items-center justify-center p-4"><div className="text-sm text-gray-300">Loading sign in…</div></div>
+}
+
+function LoginPageContent() {
   const supabase = supabaseBrowser()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const intent = parseCheckoutContinuation(searchParams.get("checkout_intent"))
+  const destination = authenticationDestination(intent)
 
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -21,6 +33,7 @@ export default function LoginPage() {
   const [checkingSession, setCheckingSession] = useState(true)
   const [mode, setMode] = useState<"login" | "signup">("login")
   const [error, setError] = useState<string | null>(null)
+  const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null)
 
   useEffect(() => {
     let isMounted = true
@@ -34,7 +47,7 @@ export default function LoginPage() {
         if (!isMounted) return
 
         if (user) {
-          router.replace("/dashboard")
+          router.replace(destination)
           return
         }
       } finally {
@@ -50,7 +63,7 @@ export default function LoginPage() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        router.replace("/dashboard")
+        router.replace(destination)
       }
     })
 
@@ -58,7 +71,7 @@ export default function LoginPage() {
       isMounted = false
       subscription.unsubscribe()
     }
-  }, [router, supabase])
+  }, [router, supabase, destination])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -78,14 +91,16 @@ export default function LoginPage() {
           return
         }
 
-        router.replace("/dashboard")
+        router.replace(destination)
         return
       }
 
       if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({
+        const serializedIntent = intent ? searchParams.get("checkout_intent") : null
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
+          options: signupAuthOptions(window.location.origin, serializedIntent),
         })
 
         if (error) {
@@ -94,7 +109,10 @@ export default function LoginPage() {
           return
         }
 
-        router.replace("/dashboard")
+        const signupRedirect = signupDestination(Boolean(data.session), intent)
+        if (signupRedirect) router.replace(signupRedirect)
+        else setConfirmationMessage("Check your email to confirm your account, then return to continue.")
+        setIsLoading(false)
         return
       }
     } catch (err: any) {
@@ -105,19 +123,21 @@ export default function LoginPage() {
   }
 
   const handleGoogleLogin = async () => {
+    const callback = checkoutAuthCallbackUrl(window.location.origin, searchParams.get("checkout_intent"))
     await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: callback,
       },
     })
   }
 
   const handleDiscordLogin = async () => {
+    const callback = checkoutAuthCallbackUrl(window.location.origin, searchParams.get("checkout_intent"))
     await supabase.auth.signInWithOAuth({
       provider: "discord",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: callback,
       },
     })
   }
@@ -196,6 +216,7 @@ export default function LoginPage() {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 {error && <p className="text-red-400 text-sm">{error}</p>}
+                {confirmationMessage && <p className="text-cyan-300 text-sm">{confirmationMessage}</p>}
 
                 <div>
                   <Label className="text-gray-300">Email</Label>

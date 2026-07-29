@@ -1,36 +1,19 @@
-import { NextResponse } from "next/server"
-import { supabaseServer } from "@/lib/supabaseServer"
+import { NextResponse } from "next/server";
+import { supabaseServer } from "@/lib/supabaseServer";
+import { oauthCallbackDestination } from "@/lib/auth/checkoutContinuation";
 
 export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const origin = url.origin;
+  const failure = () => NextResponse.redirect(new URL(oauthCallbackDestination(null, false), origin));
   try {
-    const { searchParams } = new URL(request.url)
-
-    // Supabase OAuth returns access_token + refresh_token
-    const accessToken = searchParams.get("access_token")
-    const refreshToken = searchParams.get("refresh_token")
-
-    if (!accessToken || !refreshToken) {
-      return NextResponse.redirect(
-        `${process.env.NEXT_PUBLIC_SITE_URL}/login?error=oauth_missing_tokens`
-      )
-    }
-
-    const supabase = await supabaseServer()
-
-    // Persist session server-side (sets cookies)
-    await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    })
-
-    // Successful login → redirect to generator
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_SITE_URL}/generate`
-    )
-  } catch (err) {
-    console.error("OAuth callback error:", err)
-    return NextResponse.redirect(
-      `${process.env.NEXT_PUBLIC_SITE_URL}/login?error=oauth_failed`
-    )
+    const code = url.searchParams.get("code");
+    if (!code) return failure();
+    const supabase = await supabaseServer();
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error) return failure();
+    return NextResponse.redirect(new URL(oauthCallbackDestination(url.searchParams.get("checkout_intent"), true), origin));
+  } catch {
+    return failure();
   }
 }

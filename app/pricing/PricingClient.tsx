@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Crown, Star, Sparkles, AlertTriangle, Check } from "lucide-react";
+import { normalizeReferral, parseCheckoutTier, serializeCheckoutContinuation } from "@/lib/auth/checkoutContinuation";
 
 type ViewMode = "cards" | "compare";
 type CheckoutTier = "og_throne" | "early_bird";
@@ -85,14 +86,41 @@ export default function PricingClient() {
 
   const [checkoutLoading, setCheckoutLoading] = useState<CheckoutTier | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [accessActive, setAccessActive] = useState(false);
+  const searchParams = useSearchParams();
+  const selectedTier = parseCheckoutTier(searchParams?.get("tier"));
+  const checkoutResult = searchParams?.get("checkout");
+  const confirmation = searchParams?.get("confirm") === "checkout" && selectedTier;
 
   // Referral / affiliate code
-  const searchParams = useSearchParams();
   const [referralCode, setReferralCode] = useState<string>("");
   const [referralSaved, setReferralSaved] = useState<boolean>(false);
 
   const ogSoldOut = seats ? seats.og.remaining <= 0 : false;
   const earlyBirdSoldOut = seats ? seats.earlyBird.remaining <= 0 : false;
+
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      const result = await fetch("/api/user/subscription", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
+      if (active && result) { setAuthenticated(Boolean(result.authenticated)); setAccessActive(Boolean(result.active)); }
+      return Boolean(result?.active);
+    };
+    check();
+    if (checkoutResult === "success") {
+      let attempts = 0;
+      const timer = setInterval(async () => { if (++attempts >= 12 || await check()) clearInterval(timer); }, 5000);
+      return () => { active = false; clearInterval(timer); };
+    }
+    return () => { active = false; };
+  }, [checkoutResult]);
+
+  useEffect(() => {
+    if (checkoutResult !== "canceled" || !selectedTier || !searchParams?.get("reservation")) return;
+    fetch("/api/checkout/subscription", { method:"DELETE",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({tier:selectedTier,reservation:searchParams.get("reservation")}) }).catch(() => undefined);
+  }, [checkoutResult, selectedTier, searchParams]);
 
   // Hydrate referral code from URL (?ref=CODE) or localStorage
   useEffect(() => {
@@ -109,7 +137,8 @@ export default function PricingClient() {
       const pick = (fromUrl || fromStorage || "").trim();
       if (!pick) return;
 
-      const normalized = pick.toUpperCase().replace(/\s+/g, "");
+      const normalized = normalizeReferral(pick);
+      if (!normalized) return;
       setReferralCode(normalized);
 
       if (typeof window !== "undefined") {
@@ -191,24 +220,29 @@ export default function PricingClient() {
   const handleCheckout = async (tierName: CheckoutTier) => {
     try {
       setCheckoutError(null);
+      const normalizedReferral = normalizeReferral(referralCode);
+      if (authenticated !== true) {
+        const continuation = serializeCheckoutContinuation({ tier:tierName, referral:normalizedReferral || undefined });
+        if (!continuation) { setCheckoutError("That checkout selection is not available."); return; }
+        window.location.assign(`/login?checkout_intent=${encodeURIComponent(continuation)}`);
+        return;
+      }
       setCheckoutLoading(tierName);
 
       const res = await fetch("/api/checkout/subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
         body: JSON.stringify({
           tierName,
-          referralCode: referralCode ? referralCode.trim().toUpperCase() : undefined,
+          referralCode: normalizedReferral || undefined,
         }),
       });
 
       const json = await res.json().catch(() => ({} as any));
 
       if (!res.ok) {
-        const msg =
-          json?.error ||
-          (res.status === 409 ? "That tier is sold out." : "Checkout failed. Please try again.");
+        const messages: Record<string,string> = { UNAUTHENTICATED:"Please sign in to continue.",PROFILE_UNAVAILABLE:"Your profile is not ready yet.",EXISTING_ENTITLEMENT:"An existing launch entitlement prevents another purchase.",PLAN_UNAVAILABLE:"That plan is not available.",SOLD_OUT:"That plan is sold out.",TEMPORARILY_UNAVAILABLE:"Checkout is temporarily unavailable. Please try again.",PROVIDER_FAILURE:"The payment provider is temporarily unavailable." };
+        const msg = messages[json?.code] || "Checkout is temporarily unavailable. Please try again.";
         setCheckoutError(msg);
         return;
       }
@@ -220,7 +254,7 @@ export default function PricingClient() {
 
       window.location.href = json.url as string;
     } catch (e: any) {
-      setCheckoutError(e?.message || "Checkout failed. Please try again.");
+      setCheckoutError("Checkout is temporarily unavailable. Please try again.");
     } finally {
       setCheckoutLoading(null);
     }
@@ -468,6 +502,9 @@ export default function PricingClient() {
         </motion.section>
 
         {/* Checkout error */}
+        {checkoutResult === "success" && <div className="mb-6 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-3 text-sm">{accessActive ? <strong>Your access is active.</strong> : <><strong>Payment received.</strong> Sirens Forge is confirming your access. This may take a moment. <button className="underline" onClick={() => window.location.reload()}>Refresh status</button></>}</div>}
+        {checkoutResult === "canceled" && <div className="mb-6 rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm">Checkout was canceled. No new checkout will start unless you choose to continue.</div>}
+        {confirmation && <div className="mb-6 rounded-2xl border border-purple-400/40 bg-purple-500/10 px-4 py-3 text-sm">Selected plan: <strong>{selectedTier === "og_throne" ? "OG Throne" : "Early Bird"}</strong>. Review your choice, then press Continue to Stripe.</div>}
         {checkoutError && (
           <div className="mb-6 rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-100 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-300" />
@@ -586,7 +623,7 @@ export default function PricingClient() {
                       <NeonButton
                         disabled={!canCheckout || !seats || ogSoldOut}
                         loading={checkoutLoading === "og_throne"}
-                        label={!seats ? "Loading seats…" : ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
+                        label={!seats ? "Loading seats…" : ogSoldOut ? "OG Seats Sold Out" : confirmation && selectedTier === "og_throne" ? "Continue to Stripe" : "Claim OG Throne"}
                         sublabel={
                           !seats
                             ? "Seat counter is syncing…"
@@ -683,7 +720,7 @@ export default function PricingClient() {
                         <NeonButton
                           disabled={!canCheckout || !seats || earlyBirdSoldOut}
                           loading={checkoutLoading === "early_bird"}
-                          label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
+                          label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : confirmation && selectedTier === "early_bird" ? "Continue to Stripe" : "Join Early Bird"}
                           sublabel={
                             !seats
                               ? "Seat counter is syncing…"
@@ -851,7 +888,7 @@ export default function PricingClient() {
                 <NeonButton
                   disabled={!canCheckout || !seats || ogSoldOut}
                   loading={checkoutLoading === "og_throne"}
-                  label={!seats ? "Loading seats…" : ogSoldOut ? "OG Sold Out • View Early Bird" : "Claim OG Eternal Throne"}
+                  label={!seats ? "Loading seats…" : ogSoldOut ? "OG Sold Out • View Early Bird" : confirmation && selectedTier === "og_throne" ? "Continue to Stripe" : "Claim OG Eternal Throne"}
                   sublabel={
                     !seats
                       ? "Seat counter is syncing…"
@@ -864,7 +901,7 @@ export default function PricingClient() {
                 <NeonButton
                   disabled={!canCheckout || !seats || earlyBirdSoldOut}
                   loading={checkoutLoading === "early_bird"}
-                  label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
+                  label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : confirmation && selectedTier === "early_bird" ? "Continue to Stripe" : "Join Early Bird"}
                   sublabel={
                     !seats
                       ? "Seat counter is syncing…"
@@ -961,4 +998,3 @@ function NeonButton({
     </button>
   );
 }
-

@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
+import { LAUNCH_CHECKOUT_CONTRACT, isPurchasablePlan } from "@/lib/billing/launchCheckoutPolicy"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-11-17.clover" as any,
-})
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -129,89 +126,6 @@ function destinationChargeUsed(obj: any): boolean {
   )
 }
 
-async function grantOgThroneAccessFromCheckoutSession(
-  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
-  session: any
-) {
-  const metadata = session.metadata ?? {}
-  const tierName = metadata.tier_name ?? null
-
-  // Business decision: og_throne is a one-time payment that grants lifetime app access.
-  if (session.mode !== "payment" || tierName !== "og_throne") return
-
-  if (session.payment_status && session.payment_status !== "paid") {
-    console.log("ℹ️ Skipping og_throne access grant until payment is paid:", session.id)
-    return
-  }
-
-  const stripeCustomerId = session.customer ? String(session.customer) : ""
-  const profileId = await findProfileIdByStripeCustomer(
-    supabaseAdmin,
-    stripeCustomerId,
-    metadata.profile_id ?? session.client_reference_id ?? null
-  )
-
-  if (!profileId) {
-    console.error("❌ Could not resolve profile for og_throne checkout:", session.id)
-    return
-  }
-
-  const tier = await findTierByName(supabaseAdmin, "og_throne")
-  if (!tier) {
-    console.error("❌ Active og_throne tier not found for checkout:", session.id)
-    return
-  }
-
-  const periodStart = session.created
-    ? new Date(session.created * 1000).toISOString()
-    : new Date().toISOString()
-
-  const accessRow = {
-    user_id: profileId,
-    tier_id: tier.id,
-    tier_name: "og_throne",
-    stripe_subscription_id: null,
-    stripe_customer_id: stripeCustomerId || null,
-    status: "active",
-    current_period_start: periodStart,
-    current_period_end: null,
-    cancel_at_period_end: false,
-    canceled_at: null,
-    metadata: {
-      checkout_session_id: session.id ?? null,
-      payment_intent: session.payment_intent ? String(session.payment_intent) : null,
-      stripe_price_id: metadata.stripe_price_id ?? tier.stripe_price_id ?? null,
-      access_type: "one_time_lifetime",
-      tier_name: "og_throne",
-    },
-  }
-
-  const { data: existing, error: existingError } = await supabaseAdmin
-    .from("user_subscriptions")
-    .select("id")
-    .eq("user_id", profileId)
-    .eq("tier_name", "og_throne")
-    .in("status", ["active", "trialing"])
-    .order("current_period_start", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (existingError) {
-    console.error("❌ Error checking existing og_throne access:", existingError)
-    return
-  }
-
-  const query = existing?.id
-    ? supabaseAdmin.from("user_subscriptions").update(accessRow).eq("id", existing.id)
-    : supabaseAdmin.from("user_subscriptions").insert(accessRow)
-
-  const { error } = await query
-
-  if (error) {
-    console.error("❌ Error granting og_throne access:", error)
-  }
-}
-
 async function upsertUserSubscriptionFromStripe(
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
   sub: any,
@@ -277,19 +191,69 @@ async function upsertUserSubscriptionFromStripe(
   }
 }
 
+export type LaunchWebhookDependencies = {
+  ogPriceId: string
+  fulfill(input: { contract:string;reservationId:string;profileId:string;userId:string;tier:"og_throne";priceId:string;customerId:string;paymentIntentId:string;sessionId:string|null }): Promise<unknown>
+  expire(input: { reservationId:string;profileId:string;tier:"og_throne"|"early_bird";sessionId:string }): Promise<unknown>
+}
+
+function text(value: unknown) { return typeof value === "string" ? value.trim() : "" }
+function customerId(value: any) { return text(typeof value === "string" ? value : value?.id) }
+function validMetadata(md: any, deps: LaunchWebhookDependencies) {
+  return md?.checkout_contract === LAUNCH_CHECKOUT_CONTRACT && md?.tier_name === "og_throne" &&
+    text(md.profile_id) && text(md.user_id) && text(md.reservation_id) && text(md.stripe_price_id) === deps.ogPriceId && text(md.stripe_customer_id)
+}
+function validConnect(object: any, md: any) {
+  const destination = text(object?.transfer_data?.destination)
+  const fee = object?.application_fee_amount
+  if (md.connect_mode === "none") {
+    return text(md.connect_destination_account) === "" && destination === "" &&
+      (fee == null || (Number.isSafeInteger(fee) && fee <= 0))
+  }
+  if (md.connect_mode !== "destination_charge" || md.connect_onboarded !== "true") return false
+  const configuredDestination = text(md.connect_destination_account)
+  const amount = object?.amount
+  const platform = typeof md.platform_fee_percent === "string" && md.platform_fee_percent.trim() ? Number(md.platform_fee_percent) : NaN
+  const commission = typeof md.commission_percent === "string" && md.commission_percent.trim() ? Number(md.commission_percent) : NaN
+  return configuredDestination !== "" && destination === configuredDestination &&
+    Number.isSafeInteger(amount) && amount > 0 && Number.isSafeInteger(fee) && fee >= 0 &&
+    Number.isFinite(platform) && platform >= 0 && platform <= 100 &&
+    Number.isFinite(commission) && commission >= 0 && commission <= 100 &&
+    Math.abs(platform + commission - 100) < 1e-9 && fee === Math.round(amount * platform / 100)
+}
+
+export async function processLaunchStripeEvent(event: any, deps: LaunchWebhookDependencies): Promise<"ignored"|"fulfilled"|"expired"> {
+  if (event?.type === "checkout.session.expired") {
+    const session=event.data?.object, md=session?.metadata
+    if (md?.checkout_contract !== LAUNCH_CHECKOUT_CONTRACT || !isPurchasablePlan(md?.tier_name) || !text(session?.id) || !text(md?.reservation_id) || !text(md?.profile_id)) return "ignored"
+    await deps.expire({reservationId:md.reservation_id,profileId:md.profile_id,tier:md.tier_name,sessionId:session.id}); return "expired"
+  }
+  if (event?.type === "checkout.session.completed") {
+    const session=event.data?.object, md=session?.metadata, customer=customerId(session?.customer), pi=customerId(session?.payment_intent)
+    if (session?.mode!=="payment" || session?.payment_status!=="paid" || !validMetadata(md,deps) || customer!==md.stripe_customer_id || !pi) return "ignored"
+    if (md.connect_mode !== "none") return "ignored" // destination relationship is validated on payment_intent.succeeded
+    await deps.fulfill({contract:md.checkout_contract,reservationId:md.reservation_id,profileId:md.profile_id,userId:md.user_id,tier:"og_throne",priceId:md.stripe_price_id,customerId:customer,paymentIntentId:pi,sessionId:session.id}); return "fulfilled"
+  }
+  if (event?.type === "payment_intent.succeeded") {
+    const pi=event.data?.object, md=pi?.metadata, customer=customerId(pi?.customer)
+    if (pi?.status!=="succeeded" || !text(pi?.id) || !validMetadata(md,deps) || customer!==md.stripe_customer_id || !validConnect(pi,md)) return "ignored"
+    await deps.fulfill({contract:md.checkout_contract,reservationId:md.reservation_id,profileId:md.profile_id,userId:md.user_id,tier:"og_throne",priceId:md.stripe_price_id,customerId:customer,paymentIntentId:pi.id,sessionId:null}); return "fulfilled"
+  }
+  return "ignored"
+}
+
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
 
 export async function POST(req: Request) {
-  const supabaseAdmin = getSupabaseAdmin()
-
   const signature = req.headers.get("stripe-signature")
   const payload = await req.text()
 
   let event: Stripe.Event
 
   try {
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2025-11-17.clover" as any })
     event = stripe.webhooks.constructEvent(
       payload,
       signature!,
@@ -303,6 +267,13 @@ export async function POST(req: Request) {
   console.log("🔔 Stripe Event:", event.type)
 
   try {
+    const supabaseAdmin = getSupabaseAdmin()
+    const launchResult = await processLaunchStripeEvent(event, {
+      ogPriceId: process.env.STRIPE_PRICE_OG_THRONE || "",
+      async fulfill(input) { const {error}=await supabaseAdmin.rpc("fulfill_og_checkout_payment",{p_checkout_contract:input.contract,p_reservation_id:input.reservationId,p_profile_id:input.profileId,p_user_id:input.userId,p_tier:input.tier,p_price_id:input.priceId,p_customer_id:input.customerId,p_payment_intent_id:input.paymentIntentId,p_session_id:input.sessionId}); if(error) throw new Error("fulfillment_unavailable") },
+      async expire(input) { const {error}=await supabaseAdmin.rpc("expire_checkout_capacity_reservation_from_session",{p_reservation_id:input.reservationId,p_profile_id:input.profileId,p_tier:input.tier,p_session_id:input.sessionId}); if(error) throw new Error("expiration_unavailable") },
+    })
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2025-11-17.clover" as any })
     switch (event.type) {
       // -------------------------------------------------
       // STRIPE CONNECT — ONBOARDING COMPLETE
@@ -344,12 +315,14 @@ export async function POST(req: Request) {
           })
         }
 
-        if (session.mode === "payment") {
-          await grantOgThroneAccessFromCheckoutSession(supabaseAdmin, session)
-        }
+        if (session.mode === "payment" && launchResult === "ignored") console.log("ℹ️ Ignored non-final OG checkout session")
 
         break
       }
+
+      case "payment_intent.succeeded":
+      case "checkout.session.expired":
+        break
 
       // -------------------------------------------------
       // SUBSCRIPTIONS
@@ -411,7 +384,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error("🔥 Webhook error:", err)
     return NextResponse.json(
-      { error: err?.message ?? "Webhook failed" },
+      { error: "webhook_processing_failed" },
       { status: 500 }
     )
   }
