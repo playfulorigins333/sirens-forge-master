@@ -87,6 +87,7 @@ export default function PricingClient() {
   const [checkoutLoading, setCheckoutLoading] = useState<CheckoutTier | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [accessActive, setAccessActive] = useState(false);
   const searchParams = useSearchParams();
   const selectedTier = parseCheckoutTier(searchParams?.get("tier"));
   const checkoutResult = searchParams?.get("checkout");
@@ -103,12 +104,13 @@ export default function PricingClient() {
     let active = true;
     const check = async () => {
       const result = await fetch("/api/user/subscription", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
-      if (active && result) setAuthenticated(Boolean(result.authenticated));
+      if (active && result) { setAuthenticated(Boolean(result.authenticated)); setAccessActive(Boolean(result.active)); }
+      return Boolean(result?.active);
     };
     check();
     if (checkoutResult === "success") {
       let attempts = 0;
-      const timer = setInterval(() => { if (++attempts >= 12) clearInterval(timer); else check(); }, 5000);
+      const timer = setInterval(async () => { if (++attempts >= 12 || await check()) clearInterval(timer); }, 5000);
       return () => { active = false; clearInterval(timer); };
     }
     return () => { active = false; };
@@ -230,7 +232,6 @@ export default function PricingClient() {
       const res = await fetch("/api/checkout/subscription", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
         body: JSON.stringify({
           tierName,
           referralCode: normalizedReferral || undefined,
@@ -501,7 +502,7 @@ export default function PricingClient() {
         </motion.section>
 
         {/* Checkout error */}
-        {checkoutResult === "success" && <div className="mb-6 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-3 text-sm"><strong>Payment received.</strong> Sirens Forge is confirming your access. This may take a moment. <button className="underline" onClick={() => window.location.reload()}>Refresh status</button></div>}
+        {checkoutResult === "success" && <div className="mb-6 rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-3 text-sm">{accessActive ? <strong>Your access is active.</strong> : <><strong>Payment received.</strong> Sirens Forge is confirming your access. This may take a moment. <button className="underline" onClick={() => window.location.reload()}>Refresh status</button></>}</div>}
         {checkoutResult === "canceled" && <div className="mb-6 rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm">Checkout was canceled. No new checkout will start unless you choose to continue.</div>}
         {confirmation && <div className="mb-6 rounded-2xl border border-purple-400/40 bg-purple-500/10 px-4 py-3 text-sm">Selected plan: <strong>{selectedTier === "og_throne" ? "OG Throne" : "Early Bird"}</strong>. Review your choice, then press Continue to Stripe.</div>}
         {checkoutError && (

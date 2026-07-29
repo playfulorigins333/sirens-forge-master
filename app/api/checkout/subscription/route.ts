@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 type User = { id: string; email?: string | null };
 type Profile = { id: string; user_id: string; email?: string | null; stripe_customer_id?: string | null };
 type Reservation = { reservation_id: string; expires_at: string; stripe_session_id?: string | null };
+type Referral = { code: string | null; affiliateUserId: string | null; commissionPercent: number; destination: string | null; connectOnboarded: boolean; payable: boolean };
 export type CheckoutDependencies = {
   authenticate(): Promise<User | null>;
   privileged(): Promise<{
@@ -18,18 +19,21 @@ export type CheckoutDependencies = {
     entitlements(profileId: string): Promise<unknown[]>; reserve(profileId: string, plan: PurchasablePlan): Promise<Reservation>;
     release(profileId: string, plan: PurchasablePlan, reservationId: string): Promise<void>;
     associate(profileId: string, plan: PurchasablePlan, reservationId: string, sessionId: string): Promise<void>;
-    referral(code: string | null): Promise<{ code: string | null; affiliateUserId: string | null; commissionPercent: number; destination: string | null }>;
+    referral(code: string | null): Promise<Referral>;
   }>;
   configuration(plan: PurchasablePlan, request: Request): { priceId: string; baseUrl: string };
   customer(profile: Profile, user: User): Promise<string>;
+  retrievePrice(priceId: string): Promise<{ unitAmount: number | null }>;
   createSession(input: any, idempotencyKey: string): Promise<{ id: string; url: string | null }>;
 };
 
 const response = (code: string, status: number) => NextResponse.json({ error: code, code }, { status });
+export const clampCommissionPercent = (value: unknown) => Math.min(100, Math.max(0, Number.isFinite(Number(value)) ? Number(value) : 0));
 
 export function createCheckoutHandler(deps: CheckoutDependencies) {
   return async (req: Request) => {
     let reservation: { id: string; profileId: string; plan: PurchasablePlan; db: Awaited<ReturnType<CheckoutDependencies["privileged"]>> } | null = null;
+    let sessionCreated = false;
     try {
       const user = await deps.authenticate();
       if (!user) return response(CHECKOUT_ERROR.UNAUTHENTICATED, 401);
@@ -46,29 +50,56 @@ export function createCheckoutHandler(deps: CheckoutDependencies) {
       if (blocksLaunchCheckout(entitlements)) return response(CHECKOUT_ERROR.EXISTING_ENTITLEMENT, 409);
       let held: Reservation;
       try { held = await db.reserve(profile.id, planValue); }
-      catch (error: any) { return response(error?.code === "SOLD_OUT" ? CHECKOUT_ERROR.SOLD_OUT : CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE, 409); }
+      catch (error: any) {
+        if (error?.code === "SOLD_OUT") return response(CHECKOUT_ERROR.SOLD_OUT, 409);
+        if (["EXISTING_ENTITLEMENT", "RESERVATION_CONFLICT"].includes(error?.code)) return response(CHECKOUT_ERROR.EXISTING_ENTITLEMENT, 409);
+        return response(CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE, 503);
+      }
       reservation = { id: held.reservation_id, profileId: profile.id, plan: planValue, db };
       const config = deps.configuration(planValue, req);
-      if (!config.priceId || !config.baseUrl) return response(CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE, 503);
+      if (!config.priceId || !config.baseUrl) throw new Error("configuration");
       const customer = await deps.customer(profile, user);
       const rawReferral = body?.referralCode ?? body?.referral;
       const referralCode = normalizeReferral(rawReferral);
       const referral = await db.referral(referralCode);
+      const commissionPercent = clampCommissionPercent(referral.commissionPercent);
+      const platformFeePercent = clampCommissionPercent(100 - commissionPercent);
+      const connectMode = referral.payable && referral.connectOnboarded && referral.destination ? "destination_charge" : "none";
       const success = `${config.baseUrl}/pricing?checkout=success&tier=${planValue}`;
       const canceled = `${config.baseUrl}/pricing?checkout=canceled&tier=${planValue}&reservation=${encodeURIComponent(held.reservation_id)}`;
-      const metadata = { user_id: user.id, profile_id: profile.id, tier_name: planValue, reservation_id: held.reservation_id,
-        referral_code: referral.code || "", affiliate_user_id: referral.affiliateUserId || "", commission_percent: String(referral.commissionPercent) };
+      const metadata = { user_id: user.id, profile_id: profile.id, tier_name: planValue, stripe_price_id: config.priceId, reservation_id: held.reservation_id,
+        referral_code: referral.code || "", affiliate_user_id: referral.affiliateUserId || "", commission_percent: String(commissionPercent),
+        platform_fee_percent: String(platformFeePercent), connect_destination_account: referral.destination || "",
+        connect_onboarded: referral.connectOnboarded ? "true" : "false", type: LAUNCH_PLAN_POLICY[planValue].mode === "payment" ? "one_time" : "subscription", connect_mode: connectMode };
+      const expiresAt = Math.floor(new Date(held.expires_at).getTime() / 1000);
+      if (!Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) throw new Error("reservation");
       const sessionInput: any = { mode: LAUNCH_PLAN_POLICY[planValue].mode, customer, client_reference_id: profile.id,
-        line_items: [{ price: config.priceId, quantity: 1 }], success_url: success, cancel_url: canceled, metadata };
-      if (LAUNCH_PLAN_POLICY[planValue].mode === "subscription") sessionInput.subscription_data = { metadata };
+        line_items: [{ price: config.priceId, quantity: 1 }], success_url: success, cancel_url: canceled, expires_at: expiresAt, metadata };
+      if (LAUNCH_PLAN_POLICY[planValue].mode === "payment") {
+        sessionInput.payment_intent_data = { metadata };
+        if (connectMode === "destination_charge") {
+          const price = await deps.retrievePrice(config.priceId);
+          if (!Number.isSafeInteger(price.unitAmount) || (price.unitAmount as number) < 0) throw new Error("price");
+          sessionInput.payment_intent_data.application_fee_amount = Math.round((price.unitAmount as number) * platformFeePercent / 100);
+          sessionInput.payment_intent_data.transfer_data = { destination: referral.destination };
+        }
+      } else {
+        sessionInput.subscription_data = { metadata };
+        if (connectMode === "destination_charge") {
+          sessionInput.subscription_data.application_fee_percent = platformFeePercent;
+          sessionInput.subscription_data.transfer_data = { destination: referral.destination };
+        }
+      }
       const session = await deps.createSession(sessionInput, checkoutSessionIdempotencyKey(held.reservation_id));
+      sessionCreated = true;
       if (!session.url || !/^https:\/\/checkout\.stripe\.com\//.test(session.url)) throw new Error("provider");
       await db.associate(profile.id, planValue, held.reservation_id, session.id);
       reservation = null;
       return NextResponse.json({ url: session.url });
-    } catch {
-      if (reservation) await reservation.db.release(reservation.profileId, reservation.plan, reservation.id).catch(() => undefined);
-      return response(CHECKOUT_ERROR.PROVIDER_FAILURE, 502);
+    } catch (error) {
+      if (reservation && !sessionCreated) await reservation.db.release(reservation.profileId, reservation.plan, reservation.id).catch(() => undefined);
+      const temporary = sessionCreated || (error instanceof Error && ["configuration", "reservation"].includes(error.message));
+      return response(temporary ? CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE : CHECKOUT_ERROR.PROVIDER_FAILURE, temporary ? 503 : 502);
     }
   };
 }
@@ -83,14 +114,29 @@ function productionDependencies(): CheckoutDependencies {
         async profiles(userId) { const { data, error } = await db.from("profiles").select("id,user_id,email,stripe_customer_id").eq("user_id", userId).limit(2); if (error) throw error; return data || []; },
         async tier(plan) { const { data, error } = await db.from("subscription_tiers").select("is_active").eq("name", plan).maybeSingle(); if (error) throw error; return data; },
         async entitlements(profileId) { const { data, error } = await db.from("user_subscriptions").select("status,tier_name").eq("user_id", profileId).in("status", ["active","trialing"]); if (error) throw error; return data || []; },
-        async reserve(profileId, plan) { const { data, error } = await db.rpc("acquire_checkout_capacity_reservation", { p_profile_id: profileId, p_tier: plan }); if (error || !data?.[0]) { const e:any = new Error("reservation"); e.code = error?.message?.includes("sold_out") ? "SOLD_OUT" : "UNAVAILABLE"; throw e; } return data[0]; },
+        async reserve(profileId, plan) { const { data, error } = await db.rpc("acquire_checkout_capacity_reservation", { p_profile_id: profileId, p_tier: plan }); if (error || !data?.[0]) { const e:any = new Error("reservation"); const message=String(error?.message||""); e.code = message.includes("sold_out") ? "SOLD_OUT" : message.includes("existing_entitlement") ? "EXISTING_ENTITLEMENT" : message.includes("reservation_conflict") ? "RESERVATION_CONFLICT" : "UNAVAILABLE"; throw e; } return data[0]; },
         async release(profileId, plan, id) { const { error } = await db.rpc("release_checkout_capacity_reservation", { p_reservation_id: id, p_profile_id: profileId, p_tier: plan }); if (error) throw error; },
         async associate(profileId, plan, id, sessionId) { const { error } = await db.rpc("associate_checkout_capacity_session", { p_reservation_id:id,p_profile_id:profileId,p_tier:plan,p_stripe_session_id:sessionId }); if (error) throw error; },
-        async referral(code) { if (!code) return { code:null,affiliateUserId:null,commissionPercent:0,destination:null }; const { data } = await db.from("referral_codes").select("affiliate_user_id,commission_percent").eq("code",code).maybeSingle(); return { code:data ? code:null, affiliateUserId:data?.affiliate_user_id||null, commissionPercent:Number(data?.commission_percent)||0,destination:null }; },
+        async referral(code) {
+          if (!code) return { code:null,affiliateUserId:null,commissionPercent:0,destination:null,connectOnboarded:false,payable:false };
+          const { data: referral, error } = await db.from("referral_codes").select("*").eq("code",code).maybeSingle();
+          if (error) throw new Error("referral_unavailable");
+          if (!referral) return { code:null,affiliateUserId:null,commissionPercent:0,destination:null,connectOnboarded:false,payable:false };
+          const affiliateUserId = referral.affiliate_user_id || referral.affiliate_id || referral.user_id || referral.owner_user_id || null;
+          const commissionPercent = clampCommissionPercent(referral.commission_percent ?? referral.commissionPercent ?? referral.percent ?? referral.commission_rate);
+          if (!affiliateUserId) return { code,affiliateUserId:null,commissionPercent,destination:null,connectOnboarded:false,payable:false };
+          const { data: affiliate, error: affiliateError } = await db.from("profiles").select("stripe_connect_account_id,stripe_connect_onboarded").eq("id",affiliateUserId).maybeSingle();
+          if (affiliateError) throw new Error("referral_unavailable");
+          if (!affiliate) return { code,affiliateUserId,commissionPercent,destination:null,connectOnboarded:false,payable:false };
+          const destination = typeof affiliate.stripe_connect_account_id === "string" && affiliate.stripe_connect_account_id.trim() ? affiliate.stripe_connect_account_id.trim() : null;
+          const connectOnboarded = affiliate.stripe_connect_onboarded === true;
+          return { code,affiliateUserId,commissionPercent,destination:connectOnboarded ? destination:null,connectOnboarded,payable:connectOnboarded && Boolean(destination) };
+        },
       };
     },
     configuration(plan, req) { const priceId = process.env[LAUNCH_PLAN_POLICY[plan].priceEnvironment] || ""; const configured = process.env.NEXT_PUBLIC_APP_URL || process.env.NEXT_PUBLIC_SITE_URL; return { priceId, baseUrl: (configured || new URL(req.url).origin).replace(/\/$/,"") }; },
     async customer(profile,user) { return ensureStripeCustomer({ id:profile.id,userId:user.id,email:user.email||profile.email,stripeCustomerId:profile.stripe_customer_id }, createProductionCustomerBoundary()); },
+    async retrievePrice(priceId) { const secret=process.env.STRIPE_SECRET_KEY; if(!secret) throw new Error("unavailable"); const price=await new Stripe(secret,{apiVersion:"2025-11-17.clover"}).prices.retrieve(priceId); return {unitAmount:price.unit_amount}; },
     async createSession(input,key) { const secret=process.env.STRIPE_SECRET_KEY; if(!secret) throw new Error("unavailable"); return new Stripe(secret,{apiVersion:"2025-11-17.clover"}).checkout.sessions.create(input,{idempotencyKey:key}); },
   };
 }

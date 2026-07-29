@@ -47,8 +47,33 @@ export function createProductionCustomerBoundary(): CustomerBoundaries {
 }
 
 // Compatibility for existing authenticated billing callers. Construction remains lazy.
-export async function getOrCreateStripeCustomer(profileId: string, email?: string) {
-  const boundary = createProductionCustomerBoundary();
-  const existing = await boundary.readCustomer(profileId, profileId);
-  return ensureStripeCustomer({ id: profileId, userId: profileId, email, stripeCustomerId: existing }, boundary);
+type CompatibilityDependencies = {
+  resolveProfile(profileId: string): Promise<{ id: string; userId: string; email?: string | null; stripeCustomerId?: string | null }>;
+  customerBoundary: CustomerBoundaries;
+};
+
+function createCompatibilityDependencies(): CompatibilityDependencies {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("customer_unavailable");
+  const db = createClient(url, key);
+  return {
+    customerBoundary: createProductionCustomerBoundary(),
+    async resolveProfile(profileId) {
+      const { data, error } = await db.from("profiles").select("id,user_id,email,stripe_customer_id").eq("id", profileId).maybeSingle();
+      if (error || !data?.id || !data?.user_id) throw new Error("customer_unavailable");
+      return { id:data.id,userId:data.user_id,email:data.email,stripeCustomerId:data.stripe_customer_id };
+    },
+  };
+}
+
+export async function getOrCreateStripeCustomer(profileId: string, email?: string, injected?: CompatibilityDependencies) {
+  try {
+    const dependencies = injected || createCompatibilityDependencies();
+    const profile = await dependencies.resolveProfile(profileId);
+    if (profile.id !== profileId) throw new Error("customer_unavailable");
+    return await ensureStripeCustomer({ ...profile, email: email || profile.email }, dependencies.customerBoundary);
+  } catch {
+    throw new Error("customer_unavailable");
+  }
 }

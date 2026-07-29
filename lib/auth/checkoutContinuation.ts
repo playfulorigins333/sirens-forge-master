@@ -58,3 +58,28 @@ export function checkoutPricingUrl(intent: CheckoutContinuation): string {
   if (intent.referral) params.set("ref", intent.referral);
   return `${CHECKOUT_DESTINATION}?${params}`;
 }
+
+export function authenticationDestination(intent: CheckoutContinuation | null, fallback = "/dashboard"): string {
+  return intent ? checkoutPricingUrl(intent) : fallback;
+}
+
+export function checkoutAuthCallbackUrl(origin: string, serializedIntent: string | null): string {
+  const callback = new URL("/auth/callback", origin);
+  const intent = parseCheckoutContinuation(serializedIntent);
+  if (intent) callback.searchParams.set("checkout_intent", serializeCheckoutContinuation(intent)!);
+  return callback.toString();
+}
+
+export function signupAuthOptions(origin: string, serializedIntent: string | null) {
+  const intent = parseCheckoutContinuation(serializedIntent);
+  return intent ? { emailRedirectTo: checkoutAuthCallbackUrl(origin, serializeCheckoutContinuation(intent)) } : undefined;
+}
+
+export function signupDestination(hasSession: boolean, intent: CheckoutContinuation | null): string | null {
+  return hasSession ? authenticationDestination(intent) : null;
+}
+
+export function oauthCallbackDestination(serializedIntent: string | null, succeeded: boolean): string {
+  if (!succeeded) return "/login?error=oauth_failed";
+  return authenticationDestination(parseCheckoutContinuation(serializedIntent), "/generate");
+}

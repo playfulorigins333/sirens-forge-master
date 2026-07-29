@@ -1,15 +1,77 @@
 import assert from "node:assert/strict";
 import { createCheckoutHandler, type CheckoutDependencies } from "../../../app/api/checkout/subscription/route";
-let assertions=0; const eq=(a:any,b:any)=>{assert.equal(a,b);assertions++};
-const request=(body:any)=>new Request("https://sirens.test/api/checkout/subscription",{method:"POST",body:JSON.stringify(body)});
-function deps(overrides:Partial<CheckoutDependencies>={}):CheckoutDependencies { return { authenticate:async()=>({id:"u1",email:"a@b.test"}), privileged:async()=>({profiles:async()=>[{id:"p1",user_id:"u1"}],tier:async()=>({is_active:true}),entitlements:async()=>[],reserve:async()=>({reservation_id:"r1",expires_at:"later"}),release:async()=>{},associate:async()=>{},referral:async()=>({code:null,affiliateUserId:null,commissionPercent:0,destination:null})}),configuration:()=>({priceId:"price_server",baseUrl:"https://sirens.test"}),customer:async()=>"cus_server",createSession:async(input)=>({id:"cs1",url:"https://checkout.stripe.com/test"}),...overrides}; }
-let privileged=0, stripe=0; let res=await createCheckoutHandler(deps({authenticate:async()=>null,privileged:async()=>{privileged++;throw 0},createSession:async()=>{stripe++;throw 0}}))(request({tier:"og_throne"}));eq(res.status,401);eq(privileged,0);eq(stripe,0);
-for(const tier of ["prime_access","Standard","Starter Hit","unknown"]){res=await createCheckoutHandler(deps())(request({tierName:tier,profileId:"evil",priceId:"evil",mode:"evil"}));eq(res.status,400)}
-res=await createCheckoutHandler(deps({privileged:async()=>({...await deps().privileged(),profiles:async()=>[]})}))(request({tierName:"og_throne"}));eq(res.status,403);
-res=await createCheckoutHandler(deps({privileged:async()=>({...await deps().privileged(),profiles:async()=>[{id:"p1",user_id:"u1"},{id:"p2",user_id:"u1"}]})}))(request({tierName:"og_throne"}));eq(res.status,403);
-res=await createCheckoutHandler(deps({privileged:async()=>({...await deps().privileged(),tier:async()=>({is_active:false})})}))(request({tierName:"og_throne"}));eq(res.status,409);
-res=await createCheckoutHandler(deps({privileged:async()=>({...await deps().privileged(),entitlements:async()=>[{status:"active",tier_name:"early_bird"}]})}))(request({tierName:"og_throne"}));eq(res.status,409);
-let captured:any; res=await createCheckoutHandler(deps({createSession:async(i)=>{captured=i;return{id:"cs",url:"https://checkout.stripe.com/x"}}}))(request({tierName:"og_throne",userId:"evil",customer:"evil",priceId:"evil",commissionPercent:99}));eq(res.status,200);eq(captured.customer,"cus_server");eq(captured.line_items[0].price,"price_server");eq(captured.mode,"payment");checkUrl(captured.success_url,"checkout=success");checkUrl(captured.cancel_url,"checkout=canceled");eq(captured.metadata.commission_percent,"0");
-for(const boundary of ["configuration","createSession"] as const){const bad:any=boundary==="configuration"?()=>({priceId:"",baseUrl:""}):async()=>{throw new Error("secret SQL env")};res=await createCheckoutHandler(deps({[boundary]:bad}))(request({tierName:"early_bird"}));const text=await res.text();eq(text.includes("secret"),false)}
-function checkUrl(v:string,s:string){eq(v.includes(s),true)}
+
+let assertions = 0;
+const equal = (actual: unknown, expected: unknown) => { assert.deepEqual(actual, expected); assertions += 1; };
+const request = (body: unknown) => new Request("https://sirens.test/api/checkout/subscription", { method: "POST", body: JSON.stringify(body) });
+type State = { released: number; associated: number; sessionInputs: any[]; keys: string[]; sessionCache: Map<string, any> };
+
+function dependencies(overrides: Partial<CheckoutDependencies> = {}, state?: State): CheckoutDependencies {
+  const s = state || { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
+  return {
+    authenticate: async () => ({ id: "auth-user", email: "buyer@sirens.test" }),
+    privileged: async () => ({
+      profiles: async () => [{ id: "profile-1", user_id: "auth-user" }],
+      tier: async () => ({ is_active: true }), entitlements: async () => [],
+      reserve: async () => ({ reservation_id: "reservation-1", expires_at: "2030-01-02T03:04:05.000Z" }),
+      release: async () => { s.released += 1; }, associate: async () => { s.associated += 1; },
+      referral: async () => ({ code: null, affiliateUserId: null, commissionPercent: 0, destination: null, connectOnboarded: false, payable: false }),
+    }),
+    configuration: () => ({ priceId: "price_authoritative", baseUrl: "https://sirens.test" }),
+    customer: async () => "cus_authoritative", retrievePrice: async () => ({ unitAmount: 133300 }),
+    createSession: async (input, key) => {
+      s.sessionInputs.push(input); s.keys.push(key);
+      if (!s.sessionCache.has(key)) s.sessionCache.set(key, { id: "cs_effective", url: "https://checkout.stripe.com/effective" });
+      return s.sessionCache.get(key);
+    },
+    ...overrides,
+  };
+}
+
+let privileged = 0, stripe = 0;
+let response = await createCheckoutHandler(dependencies({ authenticate: async () => null, privileged: async () => { privileged += 1; throw new Error(); }, createSession: async () => { stripe += 1; throw new Error(); } }))(request({ tier: "og_throne" }));
+equal(response.status, 401); equal(privileged, 0); equal(stripe, 0);
+for (const tier of ["prime_access", "Standard", "Starter Hit", "unknown"]) {
+  response = await createCheckoutHandler(dependencies())(request({ tierName: tier, profileId: "evil", priceId: "evil" })); equal(response.status, 400);
+}
+response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), profiles: async () => [] }) }))(request({ tierName: "og_throne" })); equal(response.status, 403);
+response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), profiles: async () => [{ id: "a", user_id: "auth-user" }, { id: "b", user_id: "auth-user" }] }) }))(request({ tierName: "og_throne" })); equal(response.status, 403);
+response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), tier: async () => ({ is_active: false }) }) }))(request({ tierName: "og_throne" })); equal(response.status, 409);
+response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), entitlements: async () => [{ status: "active", tier_name: "early_bird" }] }) }))(request({ tierName: "og_throne" })); equal(response.status, 409);
+
+const connectState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
+const payable = dependencies({}, connectState); const payableDb = await payable.privileged();
+payable.privileged = async () => ({ ...payableDb, referral: async () => ({ code: "FRIEND", affiliateUserId: "affiliate-server", commissionPercent: 125, destination: "acct_server", connectOnboarded: true, payable: true }) });
+response = await createCheckoutHandler(payable)(request({ tierName: "og_throne", referralCode: " friend ", affiliateUserId: "evil", commissionPercent: 1, destination: "acct_evil", split: 99 }));
+equal(response.status, 200);
+const og = connectState.sessionInputs[0];
+equal(og.customer, "cus_authoritative"); equal(og.line_items[0].price, "price_authoritative"); equal(og.mode, "payment");
+equal(og.expires_at, 1893553445); equal(og.payment_intent_data.application_fee_amount, 0); // clamped 100% commission
+equal(og.payment_intent_data.transfer_data.destination, "acct_server"); equal(og.metadata.affiliate_user_id, "affiliate-server");
+for (const field of ["user_id", "profile_id", "tier_name", "stripe_price_id", "reservation_id", "referral_code", "affiliate_user_id", "commission_percent", "platform_fee_percent", "connect_destination_account", "connect_onboarded", "type", "connect_mode"]) equal(typeof og.metadata[field], "string");
+equal(og.metadata.connect_mode, "destination_charge"); equal(og.payment_intent_data.metadata, og.metadata);
+equal(og.success_url, "https://sirens.test/pricing?checkout=success&tier=og_throne"); equal(og.cancel_url.includes("/pricing?checkout=canceled"), true);
+
+const subscriptionState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
+const subscription = dependencies({}, subscriptionState); const subscriptionDb = await subscription.privileged();
+subscription.privileged = async () => ({ ...subscriptionDb, referral: async () => ({ code: "FRIEND", affiliateUserId: "affiliate-server", commissionPercent: 20, destination: "acct_server", connectOnboarded: true, payable: true }) });
+response = await createCheckoutHandler(subscription)(request({ tierName: "early_bird", commissionPercent: 99, destination: "acct_evil" }));
+equal(response.status, 200); const connectedSubscription = subscriptionState.sessionInputs[0];
+equal(connectedSubscription.subscription_data.application_fee_percent, 80); equal(connectedSubscription.subscription_data.transfer_data.destination, "acct_server");
+equal(connectedSubscription.subscription_data.metadata.connect_mode, "destination_charge");
+
+const plainState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
+response = await createCheckoutHandler(dependencies({}, plainState))(request({ tierName: "early_bird", destination: "acct_evil", commissionPercent: 99 }));
+equal(response.status, 200); const early = plainState.sessionInputs[0]; equal(early.subscription_data.transfer_data, undefined); equal(early.metadata.connect_mode, "none"); equal(early.subscription_data.metadata, early.metadata);
+
+const releaseState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
+response = await createCheckoutHandler(dependencies({ configuration: () => ({ priceId: "", baseUrl: "" }) }, releaseState))(request({ tierName: "og_throne" })); equal(response.status, 503); equal(releaseState.released, 1);
+response = await createCheckoutHandler(dependencies({ createSession: async () => { throw new Error("provider secret"); } }, releaseState))(request({ tierName: "og_throne" })); equal(response.status, 502); equal(releaseState.released, 2); equal((await response.text()).includes("secret"), false);
+
+const retryState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
+let associationAttempts = 0; const retry = dependencies({}, retryState); const retryDb = await retry.privileged();
+retry.privileged = async () => ({ ...retryDb, associate: async () => { associationAttempts += 1; if (associationAttempts === 1) throw new Error("db detail"); retryState.associated += 1; } });
+response = await createCheckoutHandler(retry)(request({ tierName: "og_throne" })); equal(response.status, 503); equal(retryState.released, 0);
+response = await createCheckoutHandler(retry)(request({ tierName: "og_throne" })); equal(response.status, 200); equal(retryState.released, 0);
+equal(retryState.keys[0], retryState.keys[1]); equal(retryState.sessionCache.size, 1); equal(retryState.sessionInputs[0].expires_at, retryState.sessionInputs[1].expires_at);
 console.log(`checkoutAuthenticationContract: ${assertions} assertions passed`);

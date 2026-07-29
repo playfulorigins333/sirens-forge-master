@@ -10,8 +10,10 @@ create table if not exists public.checkout_capacity_reservations (
 );
 alter table public.checkout_capacity_reservations enable row level security;
 create index checkout_capacity_reservations_capacity_idx on public.checkout_capacity_reservations(tier,status,expires_at);
-create unique index checkout_capacity_one_effective_profile_tier on public.checkout_capacity_reservations(profile_id,tier)
+create unique index checkout_capacity_one_effective_profile on public.checkout_capacity_reservations(profile_id)
   where status in ('active','associated');
+create unique index checkout_capacity_one_stripe_session on public.checkout_capacity_reservations(stripe_session_id)
+  where stripe_session_id is not null;
 
 create or replace function public.acquire_checkout_capacity_reservation(p_profile_id uuid, p_tier text)
 returns table(reservation_id uuid, expires_at timestamptz, stripe_session_id text)
@@ -19,17 +21,20 @@ language plpgsql security definer set search_path = public, pg_temp as $$
 declare v_tier public.subscription_tiers%rowtype; v_paid bigint; v_reserved bigint; v_existing public.checkout_capacity_reservations%rowtype;
 begin
   if p_tier not in ('og_throne','early_bird') then raise exception 'plan_unavailable'; end if;
+  perform pg_advisory_xact_lock(hashtextextended(p_profile_id::text, 1901));
   select * into v_tier from public.subscription_tiers where name=p_tier for update;
   if not found or not coalesce(v_tier.is_active,false) or v_tier.max_slots is null then raise exception 'plan_unavailable'; end if;
   update public.checkout_capacity_reservations set status='expired',updated_at=now() where status in ('active','associated') and expires_at<=now();
-  select * into v_existing from public.checkout_capacity_reservations where profile_id=p_profile_id and tier=p_tier and status in ('active','associated') and expires_at>now() limit 1;
+  if exists (select 1 from public.user_subscriptions s where s.user_id=p_profile_id and s.tier_name in ('og_throne','early_bird') and s.status in ('active','trialing')) then raise exception 'existing_entitlement'; end if;
+  select * into v_existing from public.checkout_capacity_reservations where profile_id=p_profile_id and status in ('active','associated') and expires_at>now() limit 1;
+  if found and v_existing.tier<>p_tier then raise exception 'reservation_conflict'; end if;
   if found then return query select v_existing.id,v_existing.expires_at,v_existing.stripe_session_id; return; end if;
   select count(*) into v_paid from public.user_subscriptions s where s.tier_name=p_tier and s.status in ('active','trialing')
     and not (p_tier='og_throne' and coalesce(s.metadata->>'counts_toward_seats','true')='false');
   select count(*) into v_reserved from public.checkout_capacity_reservations r where r.tier=p_tier and r.status in ('active','associated') and r.expires_at>now()
     and not exists (select 1 from public.user_subscriptions s where s.user_id=r.profile_id and s.tier_name=r.tier and s.status in ('active','trialing'));
   if v_paid+v_reserved>=v_tier.max_slots then raise exception 'sold_out'; end if;
-  insert into public.checkout_capacity_reservations(profile_id,tier,expires_at) values(p_profile_id,p_tier,now()+interval '30 minutes') returning * into v_existing;
+  insert into public.checkout_capacity_reservations(profile_id,tier,expires_at) values(p_profile_id,p_tier,now()+interval '24 hours') returning * into v_existing;
   return query select v_existing.id,v_existing.expires_at,v_existing.stripe_session_id;
 end $$;
 
