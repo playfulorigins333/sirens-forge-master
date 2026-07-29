@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Sparkles, Eye, EyeOff, Crown, Star } from "lucide-react"
 import { motion } from "framer-motion"
-import { authenticationDestination, checkoutAuthCallbackUrl, parseCheckoutContinuation, signupAuthOptions, signupDestination } from "@/lib/auth/checkoutContinuation"
+import { authenticationDestination, checkoutAuthCallbackUrl, initialAuthenticationMode, parseCheckoutContinuation, signupAuthOptions, signupDestination } from "@/lib/auth/checkoutContinuation"
 
 export default function LoginPage() {
   return <Suspense fallback={<LoginPageFallback />}><LoginPageContent /></Suspense>
@@ -31,7 +31,9 @@ function LoginPageContent() {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [checkingSession, setCheckingSession] = useState(true)
-  const [mode, setMode] = useState<"login" | "signup">("login")
+  const [mode, setMode] = useState<"login" | "signup">(
+    initialAuthenticationMode(searchParams.get("mode"))
+  )
   const [error, setError] = useState<string | null>(null)
   const [confirmationMessage, setConfirmationMessage] = useState<string | null>(null)
 

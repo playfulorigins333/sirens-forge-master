@@ -3,6 +3,8 @@ export type CheckoutTier=(typeof CHECKOUT_TIERS)[number];
 export const CHECKOUT_DESTINATION="/checkout/complete" as const;
 export const MAX_REFERRAL_LENGTH=32;
 export type CheckoutContinuation={reservation:string;sessionId:string;next:typeof CHECKOUT_DESTINATION};
+export type AuthenticationMode="login"|"signup";
+export function initialAuthenticationMode(value:unknown):AuthenticationMode{return value==="signup"?"signup":"login"}
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SESSION=/^cs_[A-Za-z0-9_]{8,120}$/;
 export function parseCheckoutTier(v:unknown):CheckoutTier|null{return typeof v==="string"&&CHECKOUT_TIERS.includes(v as CheckoutTier)?v as CheckoutTier:null}

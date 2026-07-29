@@ -1,12 +1,32 @@
 -- Additive pay-first ownership and claim ledger. The preceding applied migration is immutable.
 alter table public.checkout_capacity_reservations alter column profile_id drop not null;
 alter table public.checkout_capacity_reservations add column purchaser_token_hash bytea;
+alter table public.checkout_capacity_reservations add column stripe_subscription_id text;
 alter table public.checkout_capacity_reservations add constraint checkout_capacity_exactly_one_owner
   check ((profile_id is not null)::integer + (purchaser_token_hash is not null)::integer = 1);
 alter table public.checkout_capacity_reservations add constraint checkout_capacity_token_hash_length
   check (purchaser_token_hash is null or octet_length(purchaser_token_hash)=32);
 create unique index checkout_capacity_one_effective_guest on public.checkout_capacity_reservations(purchaser_token_hash)
   where purchaser_token_hash is not null and status in ('active','associated');
+create unique index checkout_capacity_one_stripe_subscription on public.checkout_capacity_reservations(stripe_subscription_id)
+  where stripe_subscription_id is not null;
+
+-- The applied reservation migration's anonymous CHECK name is PostgreSQL-generated.
+-- Replace only the fulfilled identity constraint, without relying on that generated name.
+do $$ declare constraint_name text;
+begin
+ select c.conname into constraint_name from pg_constraint c
+ where c.conrelid='public.checkout_capacity_reservations'::regclass and c.contype='c'
+   and pg_get_constraintdef(c.oid) like '%status%fulfilled%payment_intent_id%fulfilled_at%';
+ if constraint_name is null then raise exception 'fulfilled_identity_constraint_not_found'; end if;
+ execute format('alter table public.checkout_capacity_reservations drop constraint %I',constraint_name);
+end $$;
+alter table public.checkout_capacity_reservations add constraint checkout_capacity_fulfilled_provider_identity check (
+ (status<>'fulfilled' and payment_intent_id is null and stripe_subscription_id is null and fulfilled_at is null) or
+ (status='fulfilled' and fulfilled_at is not null and
+   ((tier='og_throne' and payment_intent_id is not null and stripe_subscription_id is null) or
+    (tier='early_bird' and payment_intent_id is null and stripe_subscription_id is not null)))
+);
 
 create table public.pay_first_purchases (
   id uuid primary key default gen_random_uuid(),
@@ -96,10 +116,24 @@ begin
  if octet_length(p_purchaser_token_hash)<>32 or btrim(coalesce(p_session_id,''))='' then raise exception 'invalid_request'; end if;
  select * into p from public.pay_first_purchases where reservation_id=p_reservation_id for update;
  if not found or p.purchaser_token_hash<>p_purchaser_token_hash or p.stripe_session_id<>p_session_id then raise exception 'purchase_mismatch'; end if;
- if p.state='claimed' then if p.claimed_profile_id=p_profile_id then return 'already_claimed'; else raise exception 'claimed_by_other_profile'; end if;
  select * into r from public.checkout_capacity_reservations where id=p.reservation_id for update;
+ if not found then raise exception 'reservation_mismatch'; end if;
  select * into prof from public.profiles where id=p_profile_id for update;
  if not found or prof.user_id<>p_auth_user_id then raise exception 'ownership_mismatch'; end if;
+ if p.state='claimed' then
+  if p.claimed_profile_id<>p_profile_id then raise exception 'claimed_by_other_profile'; end if;
+  if r.status<>'fulfilled' or r.profile_id<>p_profile_id or r.purchaser_token_hash is not null or r.tier<>p.tier or r.stripe_session_id<>p.stripe_session_id or
+    r.payment_intent_id is distinct from p.payment_intent_id or r.stripe_subscription_id is distinct from p.stripe_subscription_id or r.fulfilled_at is null then
+   raise exception 'claimed_reservation_mismatch';
+  end if;
+  if prof.stripe_customer_id<>p.stripe_customer_id then raise exception 'customer_conflict'; end if;
+  return 'already_claimed';
+ end if;
+ if r.status<>'associated' or r.profile_id is not null or r.purchaser_token_hash<>p_purchaser_token_hash or
+    r.tier<>p.tier or r.stripe_session_id<>p.stripe_session_id or
+    r.payment_intent_id is not null or r.stripe_subscription_id is not null or r.fulfilled_at is not null then
+  raise exception 'reservation_mismatch';
+ end if;
  if prof.stripe_customer_id is not null and prof.stripe_customer_id<>p.stripe_customer_id then raise exception 'customer_conflict'; end if;
  select * into t from public.subscription_tiers where name=p.tier for update;
  if not found or t.stripe_price_id<>p.stripe_price_id then raise exception 'price_mismatch'; end if;
@@ -116,7 +150,8 @@ begin
    jsonb_build_object('checkout_contract','sirens_forge_pay_first_v1','reservation_id',p.reservation_id,'checkout_session_id',p.stripe_session_id,'stripe_price_id',p.stripe_price_id,'payment_intent_id',p.payment_intent_id,'access_type',case when p.tier='og_throne' then 'one_time_lifetime' else 'subscription' end));
  end if;
  update public.pay_first_purchases set state='claimed',claimed_profile_id=p_profile_id,claimed_at=now(),updated_at=now() where id=p.id;
- update public.checkout_capacity_reservations set status='fulfilled',profile_id=p_profile_id,purchaser_token_hash=null,payment_intent_id=coalesce(p.payment_intent_id,p.stripe_subscription_id),fulfilled_at=now(),updated_at=now() where id=r.id;
+ update public.checkout_capacity_reservations set status='fulfilled',profile_id=p_profile_id,purchaser_token_hash=null,
+  payment_intent_id=p.payment_intent_id,stripe_subscription_id=p.stripe_subscription_id,fulfilled_at=now(),updated_at=now() where id=r.id;
  return 'claimed';
 end $$;
 
