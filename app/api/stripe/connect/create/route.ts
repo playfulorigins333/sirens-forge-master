@@ -1,51 +1,113 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
+import { supabaseServer } from "@/lib/supabaseServer"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-11-17.clover" as any,
-})
+type ConnectDependencies = {
+  getAuthenticatedUserId: () => Promise<string | null>
+  getAdminClient: () => any
+  createStripeClient: (secretKey: string) => Pick<Stripe, "accounts" | "accountLinks">
+  getConfiguration: () => { stripeSecretKey?: string; appUrl?: string }
+}
+
+const productionDependencies: ConnectDependencies = {
+  getAuthenticatedUserId: async () => {
+    const supabase = await supabaseServer()
+    const { data, error } = await supabase.auth.getUser()
+    return error || !data.user?.id ? null : data.user.id
+  },
+  getAdminClient: getSupabaseAdmin,
+  createStripeClient: (secretKey) =>
+    new Stripe(secretKey, { apiVersion: "2025-11-17.clover" as any }),
+  getConfiguration: () => ({
+    stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+    appUrl: process.env.NEXT_PUBLIC_APP_URL,
+  }),
+}
+
+const jsonError = (error: string, status: number) =>
+  NextResponse.json({ error }, { status })
 
 /**
- * POST /api/stripe/connect/create
- *
- * Creates a Stripe Express Connect account for the logged-in affiliate
- * and redirects them to Stripe onboarding.
+ * Dependency-injected implementation keeps authentication and provider boundaries
+ * locally testable without weakening the production route.
  */
-export async function POST(req: Request) {
-  const supabaseAdmin = getSupabaseAdmin()
+export async function createStripeConnectResponse(
+  _req: Request,
+  dependencies: ConnectDependencies,
+) {
+  let authenticatedUserId: string | null
 
   try {
-    const { user_id } = await req.json()
+    authenticatedUserId = await dependencies.getAuthenticatedUserId()
+  } catch {
+    return jsonError("Unauthorized", 401)
+  }
 
-    if (!user_id) {
-      return NextResponse.json(
-        { error: "Missing user_id" },
-        { status: 400 }
-      )
-    }
+  // Do not construct either privileged client until the server session is verified.
+  if (!authenticatedUserId) return jsonError("Unauthorized", 401)
 
-    // Load profile
-    const { data: profile, error: profileErr } = await supabaseAdmin
+  let admin: any
+  try {
+    admin = dependencies.getAdminClient()
+  } catch {
+    return jsonError("Stripe Connect configuration unavailable", 503)
+  }
+
+  let profiles: any[] | null
+  try {
+    const result = await admin
       .from("profiles")
-      .select("id, email, stripe_connect_account_id")
-      .eq("id", user_id)
-      .single()
+      .select("id, user_id, email, stripe_connect_account_id")
+      .eq("user_id", authenticatedUserId)
+      .limit(2)
 
-    if (profileErr || !profile) {
-      return NextResponse.json(
-        { error: "Profile not found" },
-        { status: 404 }
-      )
-    }
+    if (result.error) return jsonError("Unable to resolve affiliate profile", 500)
+    profiles = result.data
+  } catch {
+    return jsonError("Unable to resolve affiliate profile", 500)
+  }
 
-    let accountId = profile.stripe_connect_account_id
+  if (!profiles || profiles.length === 0) {
+    return jsonError("Affiliate profile not found", 404)
+  }
+  if (
+    profiles.length !== 1 ||
+    !profiles[0]?.id ||
+    profiles[0].user_id !== authenticatedUserId
+  ) {
+    return jsonError("Unable to resolve affiliate profile", 409)
+  }
 
-    // Create Stripe Connect account if it doesn't exist
+  const profile = profiles[0]
+  let stripeSecretKey: string | undefined
+  let appUrl: string | undefined
+  try {
+    const configuration = dependencies.getConfiguration()
+    stripeSecretKey = configuration.stripeSecretKey
+    appUrl = configuration.appUrl
+  } catch {
+    return jsonError("Stripe Connect configuration unavailable", 503)
+  }
+  if (!stripeSecretKey || !appUrl) {
+    return jsonError("Stripe Connect configuration unavailable", 503)
+  }
+
+  let stripe: Pick<Stripe, "accounts" | "accountLinks">
+  try {
+    stripe = dependencies.createStripeClient(stripeSecretKey)
+  } catch {
+    return jsonError("Stripe Connect configuration unavailable", 503)
+  }
+
+  let accountId = profile.stripe_connect_account_id as string | null
+
+  try {
     if (!accountId) {
+      // This is the only account-creation site in the request.
       const account = await stripe.accounts.create({
         type: "express",
         email: profile.email ?? undefined,
@@ -55,43 +117,42 @@ export async function POST(req: Request) {
         },
         business_type: "individual",
       })
-
       accountId = account.id
 
-      // Save account ID to profile
-      const { error: updateErr } = await supabaseAdmin
+      const updateResult = await admin
         .from("profiles")
         .update({
           stripe_connect_account_id: accountId,
           stripe_connect_onboarded: false,
         })
-        .eq("id", user_id)
+        .eq("id", profile.id)
+        .eq("user_id", authenticatedUserId)
+        .select("id")
 
-      if (updateErr) {
-        console.error("❌ Failed to store Stripe Connect account:", updateErr)
-        return NextResponse.json(
-          { error: "Failed to save Stripe Connect account" },
-          { status: 500 }
-        )
+      if (
+        updateResult.error ||
+        !Array.isArray(updateResult.data) ||
+        updateResult.data.length !== 1 ||
+        updateResult.data[0]?.id !== profile.id
+      ) {
+        return jsonError("Unable to save Stripe Connect account", 500)
       }
     }
 
-    // Create onboarding link
     const accountLink = await stripe.accountLinks.create({
       account: accountId,
-      refresh_url: `${process.env.NEXT_PUBLIC_APP_URL}/affiliate`,
-      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/affiliate`,
+      refresh_url: `${appUrl}/affiliate`,
+      return_url: `${appUrl}/affiliate`,
       type: "account_onboarding",
     })
 
-    return NextResponse.json({
-      url: accountLink.url,
-    })
-  } catch (err: any) {
-    console.error("❌ Stripe Connect create error:", err)
-    return NextResponse.json(
-      { error: err?.message ?? "Stripe Connect setup failed" },
-      { status: 500 }
-    )
+    return NextResponse.json({ url: accountLink.url })
+  } catch {
+    return jsonError("Unable to start Stripe Connect onboarding", 502)
   }
+}
+
+/** Creates or reuses Stripe Connect for the server-authenticated affiliate. */
+export async function POST(req: Request) {
+  return createStripeConnectResponse(req, productionDependencies)
 }
