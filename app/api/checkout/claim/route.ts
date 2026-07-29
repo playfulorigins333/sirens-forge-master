@@ -30,13 +30,25 @@ const validMetadata = (value:any,purchase:Purchase) => value?.checkout_contract=
 
 export function createClaimHandler(deps:ClaimDependencies){return async(req:Request)=>{
   const requested=ids(req); if(!requested)return safe("invalid",400);
-  const token=readPurchaserCookie(req.headers.get("cookie")); if(!token)return safe("unavailable",403);
-  let hash:string; try{hash=hashPurchaserToken(token)}catch{return safe("unavailable",403)}
   let reservation:Reservation|null;
   try{reservation=await deps.reservation(requested.reservation)}catch{return safe("temporarily_unavailable",503)}
   if(!validReservationIdentity(reservation,requested.reservation,requested.session))return safe("unavailable",409);
   let purchase:Purchase|null;
   try{purchase=await deps.purchase(requested.reservation,requested.session)}catch{return safe("temporarily_unavailable",503)}
+  const token=readPurchaserCookie(req.headers.get("cookie"));
+  if(purchase?.state==="claimed"){
+    if(purchase.reservation_id!==requested.reservation||purchase.stripe_session_id!==requested.session||purchase.tier!==reservation!.tier)return safe("claim_conflict",409);
+    let user:{id:string}|null; try{user=await deps.authenticate()}catch{return safe("temporarily_unavailable",503)}
+    if(!user)return safe("unavailable",409);
+    let profiles:{id:string;user_id:string}[]; try{profiles=await deps.profiles(user.id)}catch{return safe("temporarily_unavailable",503)}
+    if(profiles.length!==1||profiles[0].user_id!==user.id)return safe("unavailable",409);
+    if(!validClaimedReservation(reservation,purchase,profiles[0].id))return safe("claim_conflict",409);
+    const out=safe("claimed");
+    if(token)out.cookies.set(PURCHASER_COOKIE,"",{...purchaserCookieOptions(process.env.NODE_ENV==="production"),maxAge:0});
+    return out;
+  }
+  if(!token)return safe("unavailable",403);
+  let hash:string; try{hash=hashPurchaserToken(token)}catch{return safe("unavailable",403)}
   if(!purchase){
     if(!validUnclaimedReservation(reservation,hash))return safe("unavailable",409);
     try{
@@ -52,11 +64,10 @@ export function createClaimHandler(deps:ClaimDependencies){return async(req:Requ
   if(byteaHex(purchase.purchaser_token_hash)!==hash||purchase.reservation_id!==requested.reservation||purchase.stripe_session_id!==requested.session||purchase.tier!==reservation!.tier)return safe("unavailable",409);
   if(purchase.state==="paid_unclaimed"&&!validUnclaimedReservation(reservation,hash))return safe("unavailable",409);
   let user:{id:string}|null; try{user=await deps.authenticate()}catch{return safe("temporarily_unavailable",503)}
-  if(!user)return purchase.state==="paid_unclaimed"?safe("ready_to_claim",401):safe("unavailable",409);
+  if(!user)return safe("ready_to_claim",401);
   let profiles:{id:string;user_id:string}[]; try{profiles=await deps.profiles(user.id)}catch{return safe("temporarily_unavailable",503)}
   if(profiles.length!==1||profiles[0].user_id!==user.id)return safe("unavailable",409);
   const profile=profiles[0];
-  if(purchase.state==="claimed")return validClaimedReservation(reservation,purchase,profile.id)?safe("claimed"):safe("claim_conflict",409);
   if(req.method!=="POST")return safe("ready_to_claim");
   try{
     const session=await deps.session(requested.session),customer=objectId(session.customer);

@@ -33,9 +33,12 @@ equal(boundedCompletionState("awaiting_confirmation",COMPLETION_MAX_PENDING_ATTE
 const transition=["awaiting_confirmation","ready_to_claim"];equal(shouldPollCheckoutCompletion(transition[0],1),true);equal(shouldPollCheckoutCompletion(transition[1],2),false);
 
 // Claimed ownership is resolved only after authentication and profile resolution.
-deps=baseDeps();deps.purchase=async()=>({...purchase,state:"claimed",claimed_profile_id:"profile_1"});deps.reservation=async()=>({...reservation,status:"fulfilled",profile_id:"profile_1",purchaser_token_hash:null,payment_intent_id:"pi_1"});equal((await createClaimHandler(deps)(request("GET"))).status,200);
-deps=baseDeps();deps.purchase=async()=>({...purchase,state:"claimed",claimed_profile_id:"profile_other"});let response=await createClaimHandler(deps)(request("GET"));equal(response.status,409);equal((await response.json()).state,"claim_conflict");
-deps=baseDeps();deps.authenticate=async()=>null;deps.purchase=async()=>({...purchase,state:"claimed",claimed_profile_id:"profile_1"});equal((await createClaimHandler(deps)(request("GET"))).status,409);
+const claimedDeps=(profile="profile_1"):ClaimDependencies=>({...baseDeps(),profiles:async()=>[{id:profile,user_id:"user_1"}],purchase:async()=>({...purchase,state:"claimed",claimed_profile_id:"profile_1"}),reservation:async()=>({...reservation,status:"fulfilled",profile_id:"profile_1",purchaser_token_hash:null,payment_intent_id:"pi_1"})});
+let response=await createClaimHandler(claimedDeps())(request("GET",""));equal(response.status,200);equal((await response.json()).state,"claimed");equal(response.headers.get("set-cookie"),null);
+response=await createClaimHandler(claimedDeps())(request("GET",`${PURCHASER_COOKIE}=${"B".repeat(43)}`));equal(response.status,200);equal(response.headers.get("set-cookie")?.includes("Max-Age=0"),true);
+for(const cookie of ["",`${PURCHASER_COOKIE}=${token}`]){response=await createClaimHandler(claimedDeps("profile_other"))(request("GET",cookie));equal(response.status,409);equal((await response.json()).state,"claim_conflict")}
+deps=claimedDeps();deps.authenticate=async()=>null;equal((await createClaimHandler(deps)(request("GET",""))).status,409);
+equal((await createClaimHandler(baseDeps())(request("POST",""))).status,403);
 
 // Reservation terminal and ownership states never claim.
 for(const status of ["released","expired","fulfilled"]){deps=baseDeps();deps.reservation=async()=>({...reservation,status});equal((await createClaimHandler(deps)(request())).status,409)}
@@ -46,6 +49,7 @@ deps=baseDeps();deps.reservation=async()=>({...reservation,stripe_session_id:"cs
 deps=baseDeps();deps.paymentIntent=async()=>({id:"pi_1",status:"processing",customer:"cus_1",metadata:metadata("og_throne")});equal((await createClaimHandler(deps)(request())).status,409);
 deps=baseDeps();deps.session=async()=>({...stripeSession(),payment_intent:"pi_wrong"});equal((await createClaimHandler(deps)(request())).status,409);
 deps=baseDeps();deps.claim=async()=>{throw new Error("claimed_by_other_profile")};response=await createClaimHandler(deps)(request());equal(response.status,409);equal((await response.json()).state,"claim_conflict");
+response=await createClaimHandler(baseDeps())(request());equal(response.status,200);equal(response.headers.get("set-cookie")?.includes("Max-Age=0"),true);
 
 // Early Bird revalidates Subscription identity, Customer, exact Price, state, and paid invoice.
 const earlyPurchase={...purchase,tier:"early_bird",stripe_price_id:"price_early",payment_intent_id:null,stripe_subscription_id:"sub_1"};
@@ -68,6 +72,10 @@ const migration=readFileSync("supabase/migrations/20260729002200_pay_first_check
 equal(createHash("sha1").update(`blob ${old.length}\0`).update(old).digest("hex"),"33e05a52b1974fc1257dd0484980ed79dcca5837");
 equal(migration.includes("add column stripe_subscription_id text"),true);equal(migration.includes("checkout_capacity_one_stripe_subscription"),true);equal(migration.includes("payment_intent_id=p.payment_intent_id,stripe_subscription_id=p.stripe_subscription_id"),true);equal(migration.includes("payment_intent_id=coalesce"),false);
 equal(migration.includes("tier='og_throne' and payment_intent_id is not null and stripe_subscription_id is null"),true);equal(migration.includes("tier='early_bird' and payment_intent_id is null and stripe_subscription_id is not null"),true);
+const statusValidation=migration.indexOf("subscription_status_mismatch"),firstMutation=migration.indexOf("update public.profiles",statusValidation);equal(statusValidation>0,true);equal(statusValidation<firstMutation,true);equal(migration.includes("p_subscription_status is not null"),true);equal(migration.includes("p_subscription_status not in ('active','trialing')"),true);equal(migration.includes("p_subscription_status is null"),true);
+const transactionalStatus=(tier:"og_throne"|"early_bird",status:string|null)=>{const state={purchase:"paid_unclaimed",reservation:"associated"};if((tier==="og_throne"&&status!==null)||(tier==="early_bird"&&!status)|| (tier==="early_bird"&&!['active','trialing'].includes(status)))throw Object.assign(new Error("subscription_status_mismatch"),{state});state.purchase="claimed";state.reservation="fulfilled";return state};
+equal(transactionalStatus("og_throne",null),{purchase:"claimed",reservation:"fulfilled"});equal(transactionalStatus("early_bird","active"),{purchase:"claimed",reservation:"fulfilled"});equal(transactionalStatus("early_bird","trialing"),{purchase:"claimed",reservation:"fulfilled"});
+for(const status of [null,"canceled","incomplete","unpaid","arbitrary"]){let error:any;try{transactionalStatus("early_bird",status)}catch(value){error=value}equal(error?.message,"subscription_status_mismatch");equal(error?.state,{purchase:"paid_unclaimed",reservation:"associated"})}
 equal((migration.match(/security definer/g)||[]).length,5);equal((migration.match(/search_path = public, pg_temp/g)||[]).length,5);equal(migration.includes("revoke all on public.pay_first_purchases from public,anon,authenticated"),true);equal(migration.includes("to service_role"),true);
 equal(login.includes('initialAuthenticationMode(searchParams.get("mode"))'),true);equal(login.includes("authenticationDestination(intent)"),true);
 console.log(`payFirstCheckoutClaim: ${assertions} assertions passed`);

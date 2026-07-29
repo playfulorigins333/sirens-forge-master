@@ -116,6 +116,11 @@ begin
  if octet_length(p_purchaser_token_hash)<>32 or btrim(coalesce(p_session_id,''))='' then raise exception 'invalid_request'; end if;
  select * into p from public.pay_first_purchases where reservation_id=p_reservation_id for update;
  if not found or p.purchaser_token_hash<>p_purchaser_token_hash or p.stripe_session_id<>p_session_id then raise exception 'purchase_mismatch'; end if;
+ if (p.tier='og_throne' and p_subscription_status is not null) or
+    (p.tier='early_bird' and p_subscription_status not in ('active','trialing')) or
+    (p.tier='early_bird' and p_subscription_status is null) then
+  raise exception 'subscription_status_mismatch';
+ end if;
  select * into r from public.checkout_capacity_reservations where id=p.reservation_id for update;
  if not found then raise exception 'reservation_mismatch'; end if;
  select * into prof from public.profiles where id=p_profile_id for update;
