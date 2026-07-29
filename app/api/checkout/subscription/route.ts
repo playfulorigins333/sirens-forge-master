@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { normalizeReferral } from "@/lib/auth/checkoutContinuation";
-import { CHECKOUT_ERROR, LAUNCH_PLAN_POLICY, blocksLaunchCheckout, checkoutSessionIdempotencyKey, isPurchasablePlan, type PurchasablePlan } from "@/lib/billing/launchCheckoutPolicy";
+import { CHECKOUT_ERROR, LAUNCH_CHECKOUT_CONTRACT, LAUNCH_PLAN_POLICY, blocksLaunchCheckout, checkoutSessionIdempotencyKey, isPurchasablePlan, paymentMethodTypesForLaunchPlan, type PurchasablePlan } from "@/lib/billing/launchCheckoutPolicy";
 import { createProductionCustomerBoundary, ensureStripeCustomer } from "@/lib/stripe/customers";
 
 export const runtime = "nodejs";
@@ -67,14 +67,14 @@ export function createCheckoutHandler(deps: CheckoutDependencies) {
       const connectMode = referral.payable && referral.connectOnboarded && referral.destination ? "destination_charge" : "none";
       const success = `${config.baseUrl}/pricing?checkout=success&tier=${planValue}`;
       const canceled = `${config.baseUrl}/pricing?checkout=canceled&tier=${planValue}&reservation=${encodeURIComponent(held.reservation_id)}`;
-      const metadata = { user_id: user.id, profile_id: profile.id, tier_name: planValue, stripe_price_id: config.priceId, reservation_id: held.reservation_id,
+      const metadata = { checkout_contract: LAUNCH_CHECKOUT_CONTRACT, user_id: user.id, profile_id: profile.id, tier_name: planValue, stripe_price_id: config.priceId, stripe_customer_id: customer, reservation_id: held.reservation_id,
         referral_code: referral.code || "", affiliate_user_id: referral.affiliateUserId || "", commission_percent: String(commissionPercent),
         platform_fee_percent: String(platformFeePercent), connect_destination_account: referral.destination || "",
         connect_onboarded: referral.connectOnboarded ? "true" : "false", type: LAUNCH_PLAN_POLICY[planValue].mode === "payment" ? "one_time" : "subscription", connect_mode: connectMode };
       const expiresAt = Math.floor(new Date(held.expires_at).getTime() / 1000);
       if (!Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(Date.now() / 1000)) throw new Error("reservation");
       const sessionInput: any = { mode: LAUNCH_PLAN_POLICY[planValue].mode, customer, client_reference_id: profile.id,
-        line_items: [{ price: config.priceId, quantity: 1 }], success_url: success, cancel_url: canceled, expires_at: expiresAt, metadata };
+        payment_method_types: paymentMethodTypesForLaunchPlan(planValue, process.env.STRIPE_OG_BNPL_METHODS), line_items: [{ price: config.priceId, quantity: 1 }], success_url: success, cancel_url: canceled, expires_at: expiresAt, metadata };
       if (LAUNCH_PLAN_POLICY[planValue].mode === "payment") {
         sessionInput.payment_intent_data = { metadata };
         if (connectMode === "destination_charge") {

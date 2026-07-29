@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import { createCancellationHandler, createCheckoutHandler, type CancellationDependencies, type CheckoutDependencies } from "../../../app/api/checkout/subscription/route";
+import { LAUNCH_CHECKOUT_CONTRACT, paymentMethodTypesForLaunchPlan } from "../../../lib/billing/launchCheckoutPolicy";
 
 let assertions = 0;
 const equal = (actual: unknown, expected: unknown) => { assert.deepEqual(actual, expected); assertions += 1; };
 const request = (body: unknown) => new Request("https://sirens.test/api/checkout/subscription", { method: "POST", body: JSON.stringify(body) });
+for (const [raw,expected] of [["",["card"]],["affirm",["card","affirm"]],["afterpay_clearpay",["card","afterpay_clearpay"]],["klarna",["card","klarna"]],[" Klarna, AFFIRM,affirm,afterpay_clearpay,evil ",["card","affirm","afterpay_clearpay","klarna"]],["x".repeat(300),["card"]]] as const) equal(paymentMethodTypesForLaunchPlan("og_throne",raw),expected);
+equal(paymentMethodTypesForLaunchPlan("early_bird","affirm,klarna"),["card"]);
 type State = { released: number; associated: number; sessionInputs: any[]; keys: string[]; sessionCache: Map<string, any> };
 
 function dependencies(overrides: Partial<CheckoutDependencies> = {}, state?: State): CheckoutDependencies {
@@ -40,17 +43,22 @@ response = await createCheckoutHandler(dependencies({ privileged: async () => ({
 response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), entitlements: async () => [{ status: "active", tier_name: "early_bird" }] }) }))(request({ tierName: "og_throne" })); equal(response.status, 409);
 
 const connectState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
+process.env.STRIPE_OG_BNPL_METHODS="affirm,klarna";
 const payable = dependencies({}, connectState); const payableDb = await payable.privileged();
 payable.privileged = async () => ({ ...payableDb, referral: async () => ({ code: "FRIEND", affiliateUserId: "affiliate-server", commissionPercent: 125, destination: "acct_server", connectOnboarded: true, payable: true }) });
-response = await createCheckoutHandler(payable)(request({ tierName: "og_throne", referralCode: " friend ", affiliateUserId: "evil", commissionPercent: 1, destination: "acct_evil", split: 99 }));
+response = await createCheckoutHandler(payable)(request({ tierName: "og_throne", referralCode: " friend ", affiliateUserId: "evil", commissionPercent: 1, destination: "acct_evil", split: 99, payment_method_types:["us_bank_account"],paymentMethodConfiguration:"evil",allowBnpl:true }));
 equal(response.status, 200);
 const og = connectState.sessionInputs[0];
 equal(og.customer, "cus_authoritative"); equal(og.line_items[0].price, "price_authoritative"); equal(og.mode, "payment");
+equal(og.payment_method_types,["card","affirm","klarna"]); equal(og.metadata.checkout_contract,LAUNCH_CHECKOUT_CONTRACT); equal(og.payment_intent_data.metadata.checkout_contract,LAUNCH_CHECKOUT_CONTRACT); equal(og.metadata.stripe_customer_id,"cus_authoritative");
 equal(og.expires_at, 1893553445); equal(og.payment_intent_data.application_fee_amount, 0); // clamped 100% commission
 equal(og.payment_intent_data.transfer_data.destination, "acct_server"); equal(og.metadata.affiliate_user_id, "affiliate-server");
 for (const field of ["user_id", "profile_id", "tier_name", "stripe_price_id", "reservation_id", "referral_code", "affiliate_user_id", "commission_percent", "platform_fee_percent", "connect_destination_account", "connect_onboarded", "type", "connect_mode"]) equal(typeof og.metadata[field], "string");
 equal(og.metadata.connect_mode, "destination_charge"); equal(og.payment_intent_data.metadata, og.metadata);
 equal(og.success_url, "https://sirens.test/pricing?checkout=success&tier=og_throne"); equal(og.cancel_url.includes("/pricing?checkout=canceled"), true);
+const nonConnectOgState:State={released:0,associated:0,sessionInputs:[],keys:[],sessionCache:new Map()};
+response=await createCheckoutHandler(dependencies({},nonConnectOgState))(request({tierName:"og_throne",payment_method_types:[]}));
+equal(response.status,200);equal(nonConnectOgState.sessionInputs[0].payment_method_types,og.payment_method_types);equal(nonConnectOgState.sessionInputs[0].payment_intent_data.transfer_data,undefined);
 
 const subscriptionState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
 const subscription = dependencies({}, subscriptionState); const subscriptionDb = await subscription.privileged();
@@ -62,7 +70,7 @@ equal(connectedSubscription.subscription_data.metadata.connect_mode, "destinatio
 
 const plainState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
 response = await createCheckoutHandler(dependencies({}, plainState))(request({ tierName: "early_bird", destination: "acct_evil", commissionPercent: 99 }));
-equal(response.status, 200); const early = plainState.sessionInputs[0]; equal(early.subscription_data.transfer_data, undefined); equal(early.metadata.connect_mode, "none"); equal(early.subscription_data.metadata, early.metadata);
+equal(response.status, 200); const early = plainState.sessionInputs[0]; equal(early.payment_method_types,["card"]); equal(early.subscription_data.transfer_data, undefined); equal(early.metadata.connect_mode, "none"); equal(early.subscription_data.metadata, early.metadata);
 
 const releaseState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
 response = await createCheckoutHandler(dependencies({ configuration: () => ({ priceId: "", baseUrl: "" }) }, releaseState))(request({ tierName: "og_throne" })); equal(response.status, 503); equal(releaseState.released, 1);

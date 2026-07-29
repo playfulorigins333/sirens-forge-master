@@ -1,6 +1,20 @@
 export const PURCHASABLE_PLANS = ["og_throne", "early_bird"] as const;
 export type PurchasablePlan = (typeof PURCHASABLE_PLANS)[number];
 export type CheckoutMode = "payment" | "subscription";
+export const LAUNCH_CHECKOUT_CONTRACT = "sirens_forge_launch_checkout_v1";
+export const OG_BNPL_METHOD_ALLOWLIST = ["affirm", "afterpay_clearpay", "klarna"] as const;
+export type LaunchPaymentMethod = "card" | (typeof OG_BNPL_METHOD_ALLOWLIST)[number];
+const MAX_BNPL_CONFIGURATION_LENGTH = 256;
+
+export function configuredOgPaymentMethods(raw: unknown): LaunchPaymentMethod[] {
+  if (typeof raw !== "string" || raw.length > MAX_BNPL_CONFIGURATION_LENGTH) return ["card"];
+  const configured = new Set(raw.split(",").map((value) => value.trim().toLowerCase()));
+  return ["card", ...OG_BNPL_METHOD_ALLOWLIST.filter((method) => configured.has(method))];
+}
+
+export function paymentMethodTypesForLaunchPlan(plan: PurchasablePlan, rawOgBnplConfig: unknown): LaunchPaymentMethod[] {
+  return plan === "og_throne" ? configuredOgPaymentMethods(rawOgBnplConfig) : ["card"];
+}
 
 export const LAUNCH_PLAN_POLICY: Record<PurchasablePlan, { mode: CheckoutMode; priceEnvironment: string }> = {
   og_throne: { mode: "payment", priceEnvironment: "STRIPE_PRICE_OG_THRONE" },

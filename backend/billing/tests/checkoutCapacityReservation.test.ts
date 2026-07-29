@@ -1,9 +1,21 @@
 import assert from "node:assert/strict";
 import { checkoutSessionIdempotencyKey } from "../../../lib/billing/launchCheckoutPolicy";
 import { ensureStripeCustomer, getOrCreateStripeCustomer, type CustomerBoundaries } from "../../../lib/stripe/customers";
+import { reservationConsumesCapacity } from "../../../app/api/subscription/seat-count/route";
 
 let assertions = 0;
 const equal = (actual: unknown, expected: unknown) => { assert.deepEqual(actual, expected); assertions += 1; };
+const now=new Date("2030-01-01T00:00:00Z");
+for(const [row,expected] of [
+  [{status:"active",expires_at:"2030-01-02T00:00:00Z",stripe_session_id:null},true],
+  [{status:"active",expires_at:"2029-12-31T00:00:00Z",stripe_session_id:null},false],
+  [{status:"active",expires_at:"2030-01-02T00:00:00Z",stripe_session_id:"cs_bad"},false],
+  [{status:"associated",expires_at:"2029-01-01T00:00:00Z",stripe_session_id:"cs"},true],
+  [{status:"associated",expires_at:"2031-01-01T00:00:00Z",stripe_session_id:"cs"},true],
+  [{status:"fulfilled",expires_at:null,stripe_session_id:"cs"},false],
+  [{status:"released",expires_at:null,stripe_session_id:null},false],
+  [{status:"expired",expires_at:null,stripe_session_id:"cs"},false],
+] as const) equal(reservationConsumesCapacity(row,now),expected);
 class Mutex {
   private tail = Promise.resolve();
   async run<T>(operation: () => Promise<T>): Promise<T> {
@@ -50,6 +62,15 @@ capacity.release(early.id); capacity.entitlements.add("p1:og_throne"); await ass
 capacity.entitlements.clear(); const expiring = await capacity.acquire("p3", "og_throne"); expiring.expires = 0; equal((await capacity.acquire("p4", "og_throne")).profile, "p4");
 const association = new TransactionalCapacity(2); const a = await association.acquire("a", "og_throne"), b = await association.acquire("b", "og_throne"); association.associate(a.id, "cs_unique"); assert.throws(() => association.associate(b.id, "cs_unique"), /session_conflict/); assertions += 1;
 equal(checkoutSessionIdempotencyKey("reservation"), "launch-checkout:reservation"); equal(Math.floor(a.expires / 1000), Math.floor(a.expires / 1000));
+
+class TerminalReservation {
+  status:"associated"|"fulfilled"|"expired"="associated"; paymentIntent:string|null=null; entitlement=false;
+  fulfill(paymentIntent:string){if(this.status==="fulfilled"){if(this.paymentIntent===paymentIntent)return "already_fulfilled";throw new Error("payment_conflict")}if(this.status!=="associated")throw new Error("terminal_conflict");this.status="fulfilled";this.paymentIntent=paymentIntent;this.entitlement=true;return "applied"}
+  expire(session:string){if(session!=="cs_valid")throw new Error("session_mismatch");if(this.status==="expired")return "already_expired";if(this.status!=="associated")throw new Error("terminal_conflict");this.status="expired";return "expired"}
+}
+let terminal=new TerminalReservation();equal(terminal.fulfill("pi1"),"applied");equal(terminal.status,"fulfilled");equal(terminal.entitlement,true);equal(terminal.fulfill("pi1"),"already_fulfilled");assert.throws(()=>terminal.fulfill("pi2"),/payment_conflict/);assertions++;
+terminal=new TerminalReservation();assert.throws(()=>terminal.expire("cs_other"),/session_mismatch/);assertions++;equal(terminal.status,"associated");equal(terminal.expire("cs_valid"),"expired");equal(terminal.status,"expired");assert.throws(()=>terminal.fulfill("pi1"),/terminal_conflict/);assertions++;
+terminal=new TerminalReservation();terminal.fulfill("pi1");assert.throws(()=>terminal.expire("cs_valid"),/terminal_conflict/);assertions++;equal(terminal.status,"fulfilled");
 
 let assigned: string | null = null, created = 0;
 const customerBoundary: CustomerBoundaries = {
