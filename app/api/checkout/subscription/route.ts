@@ -142,9 +142,78 @@ function productionDependencies(): CheckoutDependencies {
 }
 export async function POST(req: Request) { return createCheckoutHandler(productionDependencies())(req); }
 
-export async function DELETE(req: Request) {
-  const deps=productionDependencies(); const user=await deps.authenticate(); if(!user) return response(CHECKOUT_ERROR.UNAUTHENTICATED,401);
-  const body=await req.json().catch(()=>({})); if(!isPurchasablePlan(body.tier)||typeof body.reservation!=="string") return response(CHECKOUT_ERROR.PLAN_UNAVAILABLE,400);
-  try { const db=await deps.privileged(); const profiles=await db.profiles(user.id); if(profiles.length!==1) return response(CHECKOUT_ERROR.PROFILE_UNAVAILABLE,403); await db.release(profiles[0].id,body.tier,body.reservation); return NextResponse.json({released:true}); }
-  catch { return response(CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE,503); }
+type CancellationReservation = { reservation_id: string; status: string; stripe_session_id: string | null };
+type CancellationSession = { status: string | null; paymentStatus: string | null };
+export type CancellationDependencies = {
+  authenticate(): Promise<User | null>;
+  privileged(): Promise<{
+    profiles(userId: string): Promise<Profile[]>;
+    reservations(profileId: string, plan: PurchasablePlan, reservationId: string): Promise<CancellationReservation[]>;
+    release(profileId: string, plan: PurchasablePlan, reservationId: string): Promise<void>;
+  }>;
+  retrieveSession(sessionId: string): Promise<CancellationSession>;
+  expireSession(sessionId: string): Promise<CancellationSession>;
+};
+
+export function createCancellationHandler(deps: CancellationDependencies) {
+  return async (req: Request) => {
+    const user = await deps.authenticate().catch(() => null);
+    if (!user) return response(CHECKOUT_ERROR.UNAUTHENTICATED, 401);
+    const body = await req.json().catch(() => ({}));
+    if (!isPurchasablePlan(body.tier) || typeof body.reservation !== "string" || !body.reservation) return response(CHECKOUT_ERROR.PLAN_UNAVAILABLE, 400);
+    try {
+      const db = await deps.privileged();
+      const profiles = await db.profiles(user.id);
+      if (profiles.length !== 1 || profiles[0].user_id !== user.id || !profiles[0].id) return response(CHECKOUT_ERROR.PROFILE_UNAVAILABLE, 403);
+      const profile = profiles[0];
+      const reservations = await db.reservations(profile.id, body.tier, body.reservation);
+      if (reservations.length !== 1 || reservations[0].reservation_id !== body.reservation) return response(CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE, 503);
+      const reservation = reservations[0];
+      if (reservation.status === "released") return NextResponse.json({ released: true });
+      if (!reservation.stripe_session_id) {
+        await db.release(profile.id, body.tier, body.reservation);
+        return NextResponse.json({ released: true });
+      }
+      const session = await deps.retrieveSession(reservation.stripe_session_id);
+      if (session.status === "complete" || ["paid", "no_payment_required"].includes(session.paymentStatus || "")) {
+        return NextResponse.json({ released: false, processing: true, code: "PAYMENT_PROCESSING" }, { status: 202 });
+      }
+      if (session.status === "open") {
+        const expired = await deps.expireSession(reservation.stripe_session_id);
+        if (expired.status !== "expired") return response(CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE, 503);
+      } else if (session.status !== "expired") {
+        return response(CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE, 503);
+      }
+      await db.release(profile.id, body.tier, body.reservation);
+      return NextResponse.json({ released: true });
+    } catch {
+      return response(CHECKOUT_ERROR.TEMPORARILY_UNAVAILABLE, 503);
+    }
+  };
 }
+
+function productionCancellationDependencies(): CancellationDependencies {
+  return {
+    async authenticate() { const auth = await supabaseServer(); const { data, error } = await auth.auth.getUser(); return error ? null : data.user; },
+    async privileged() {
+      const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!url || !key) throw new Error("unavailable");
+      const db = createClient(url, key);
+      return {
+        async profiles(userId) { const { data, error } = await db.from("profiles").select("id,user_id").eq("user_id", userId).limit(2); if (error) throw error; return data || []; },
+        async reservations(profileId, plan, reservationId) {
+          const { data, error } = await db.from("checkout_capacity_reservations").select("id,status,stripe_session_id")
+            .eq("id", reservationId).eq("profile_id", profileId).eq("tier", plan).limit(2);
+          if (error) throw error;
+          return (data || []).map((row) => ({ reservation_id: row.id, status: row.status, stripe_session_id: row.stripe_session_id }));
+        },
+        async release(profileId, plan, reservationId) { const { error } = await db.rpc("release_checkout_capacity_reservation", { p_reservation_id: reservationId, p_profile_id: profileId, p_tier: plan }); if (error) throw error; },
+      };
+    },
+    async retrieveSession(sessionId) { const secret = process.env.STRIPE_SECRET_KEY; if (!secret) throw new Error("unavailable"); const session = await new Stripe(secret, { apiVersion: "2025-11-17.clover" }).checkout.sessions.retrieve(sessionId); return { status: session.status, paymentStatus: session.payment_status }; },
+    async expireSession(sessionId) { const secret = process.env.STRIPE_SECRET_KEY; if (!secret) throw new Error("unavailable"); const session = await new Stripe(secret, { apiVersion: "2025-11-17.clover" }).checkout.sessions.expire(sessionId); return { status: session.status, paymentStatus: session.payment_status }; },
+  };
+}
+
+export async function DELETE(req: Request) { return createCancellationHandler(productionCancellationDependencies())(req); }
