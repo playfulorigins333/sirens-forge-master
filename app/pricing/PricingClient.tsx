@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Crown, Star, Sparkles, AlertTriangle, Check } from "lucide-react";
-import { normalizeReferral, parseCheckoutTier, serializeCheckoutContinuation } from "@/lib/auth/checkoutContinuation";
+import { normalizeReferral, parseCheckoutTier } from "@/lib/auth/checkoutContinuation";
 
 type ViewMode = "cards" | "compare";
 type CheckoutTier = "og_throne" | "early_bird";
@@ -86,7 +86,6 @@ export default function PricingClient() {
 
   const [checkoutLoading, setCheckoutLoading] = useState<CheckoutTier | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
-  const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [accessActive, setAccessActive] = useState(false);
   const searchParams = useSearchParams();
   const selectedTier = parseCheckoutTier(searchParams?.get("tier"));
@@ -104,7 +103,7 @@ export default function PricingClient() {
     let active = true;
     const check = async () => {
       const result = await fetch("/api/user/subscription", { cache: "no-store" }).then((r) => r.json()).catch(() => null);
-      if (active && result) { setAuthenticated(Boolean(result.authenticated)); setAccessActive(Boolean(result.active)); }
+      if (active && result) setAccessActive(Boolean(result.active));
       return Boolean(result?.active);
     };
     check();
@@ -115,12 +114,6 @@ export default function PricingClient() {
     }
     return () => { active = false; };
   }, [checkoutResult]);
-
-  useEffect(() => {
-    if (checkoutResult !== "canceled" || !selectedTier || !searchParams?.get("reservation")) return;
-    fetch("/api/checkout/subscription", { method:"DELETE",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({tier:selectedTier,reservation:searchParams.get("reservation")}) }).catch(() => undefined);
-  }, [checkoutResult, selectedTier, searchParams]);
 
   // Hydrate referral code from URL (?ref=CODE) or localStorage
   useEffect(() => {
@@ -221,12 +214,6 @@ export default function PricingClient() {
     try {
       setCheckoutError(null);
       const normalizedReferral = normalizeReferral(referralCode);
-      if (authenticated !== true) {
-        const continuation = serializeCheckoutContinuation({ tier:tierName, referral:normalizedReferral || undefined });
-        if (!continuation) { setCheckoutError("That checkout selection is not available."); return; }
-        window.location.assign(`/login?checkout_intent=${encodeURIComponent(continuation)}`);
-        return;
-      }
       setCheckoutLoading(tierName);
 
       const res = await fetch("/api/checkout/subscription", {
@@ -241,7 +228,7 @@ export default function PricingClient() {
       const json = await res.json().catch(() => ({} as any));
 
       if (!res.ok) {
-        const messages: Record<string,string> = { UNAUTHENTICATED:"Please sign in to continue.",PROFILE_UNAVAILABLE:"Your profile is not ready yet.",EXISTING_ENTITLEMENT:"An existing launch entitlement prevents another purchase.",PLAN_UNAVAILABLE:"That plan is not available.",SOLD_OUT:"That plan is sold out.",TEMPORARILY_UNAVAILABLE:"Checkout is temporarily unavailable. Please try again.",PROVIDER_FAILURE:"The payment provider is temporarily unavailable." };
+        const messages: Record<string,string> = { UNAUTHENTICATED:"Please sign in to continue.",PROFILE_UNAVAILABLE:"Your profile is not ready yet.",EXISTING_ENTITLEMENT:"An existing launch entitlement prevents another purchase.",PLAN_UNAVAILABLE:"That plan is not available.",SOLD_OUT:"That plan is sold out.",RATE_LIMITED:"Too many checkout attempts. Please try again later.",TEMPORARILY_UNAVAILABLE:"Checkout is temporarily unavailable. Please try again.",PROVIDER_FAILURE:"The payment provider is temporarily unavailable." };
         const msg = messages[json?.code] || "Checkout is temporarily unavailable. Please try again.";
         setCheckoutError(msg);
         return;

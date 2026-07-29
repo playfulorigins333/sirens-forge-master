@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import Stripe from "stripe"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { LAUNCH_CHECKOUT_CONTRACT, isPurchasablePlan } from "@/lib/billing/launchCheckoutPolicy"
+import { PAY_FIRST_CHECKOUT_CONTRACT } from "@/lib/billing/payFirstCheckout"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -242,6 +243,45 @@ export async function processLaunchStripeEvent(event: any, deps: LaunchWebhookDe
   return "ignored"
 }
 
+type PayFirstReservation={id:string;purchaser_token_hash:string|null;tier:string;status:string;stripe_session_id:string|null;stripe_subscription_id:string|null};
+type ExistingPayFirstPurchase={reservation_id:string;purchaser_token_hash:string;tier:string;stripe_session_id:string;stripe_customer_id:string;stripe_price_id:string;payment_intent_id:string|null;stripe_subscription_id:string|null;state:string};
+export type PayFirstWebhookDependencies={ogPriceId:string;earlyPriceId:string;reservation(id:string):Promise<PayFirstReservation|null>;purchase(id:string):Promise<ExistingPayFirstPurchase|null>;session(id:string):Promise<any>;paymentIntent(id:string):Promise<any>;subscription(id:string):Promise<any>;record(input:{reservationId:string;tokenHash:string;tier:"og_throne"|"early_bird";sessionId:string;customerId:string;priceId:string;paymentIntentId:string|null;subscriptionId:string|null}):Promise<unknown>;expire(input:{reservationId:string;tier:"og_throne"|"early_bird";sessionId:string}):Promise<unknown>};
+function validPayFirstMetadata(md:any,tier:string,price:string){return md?.checkout_contract===PAY_FIRST_CHECKOUT_CONTRACT&&md?.tier_name===tier&&text(md.reservation_id)&&text(md.stripe_price_id)===price&&md.purchase_mode===(tier==="og_throne"?"payment":"subscription")}
+function validSubscriptionConnect(sub:any,md:any){const destination=text(sub?.transfer_data?.destination),fee=sub?.application_fee_percent,configured=text(md.connect_destination_account),platform=Number(md.platform_fee_percent),commission=Number(md.commission_percent);if(md.connect_mode==="none")return configured===""&&destination===""&&(fee==null||fee===0);return md.connect_mode==="destination_charge"&&md.connect_onboarded==="true"&&configured!==""&&destination===configured&&Number.isFinite(platform)&&platform>=0&&platform<=100&&Number.isFinite(commission)&&commission>=0&&commission<=100&&Math.abs(platform+commission-100)<1e-9&&fee===platform}
+const PAY_FIRST_METADATA_AGREEMENT=["checkout_contract","reservation_id","tier_name","stripe_price_id","purchase_mode","connect_mode","connect_destination_account","connect_onboarded","platform_fee_percent","commission_percent","referral_code","affiliate_user_id"];
+function matchingPayFirstMetadata(a:any,b:any){return PAY_FIRST_METADATA_AGREEMENT.every(key=>text(a?.[key])===text(b?.[key]))}
+function exactOgLineItem(session:any,price:string){const items=session?.line_items?.data;return Array.isArray(items)&&items.length===1&&customerId(items[0]?.price)===price&&items[0]?.quantity===1}
+function exactExistingPurchase(existing:ExistingPayFirstPurchase,reservation:PayFirstReservation,session:any,pi:any,price:string){
+ const ownership=reservation.status==="fulfilled"||existing.purchaser_token_hash===reservation.purchaser_token_hash;
+ return ownership&&existing.reservation_id===reservation.id&&existing.tier==="og_throne"&&existing.stripe_session_id===session.id&&existing.stripe_customer_id===customerId(session.customer)&&existing.stripe_price_id===price&&existing.payment_intent_id===pi.id&&existing.stripe_subscription_id==null;
+}
+async function finalizePayFirstOg(input:{metadata:any;eventSession?:any;paymentIntentId:string;paymentIntentEvent?:any;sessionSignal:boolean},deps:PayFirstWebhookDependencies):Promise<"ignored"|"recorded">{
+ const md=input.metadata;if(!validPayFirstMetadata(md,"og_throne",deps.ogPriceId))return"ignored";
+ const reservation=await deps.reservation(md.reservation_id);if(!reservation||reservation.id!==md.reservation_id||reservation.tier!=="og_throne"||!reservation.stripe_session_id||reservation.stripe_subscription_id)return"ignored";
+ if(input.eventSession&&input.eventSession.id!==reservation.stripe_session_id)return"ignored";
+ const existing=await deps.purchase(reservation.id);
+ if(!existing&&(reservation.status!=="associated"||!reservation.purchaser_token_hash))return"ignored";
+ if(existing&&!["associated","fulfilled"].includes(reservation.status))throw new Error("purchase_replay_conflict");
+ const session=await deps.session(reservation.stripe_session_id),pi=await deps.paymentIntent(input.paymentIntentId);
+ if(session?.id!==reservation.stripe_session_id||session?.mode!=="payment"||session?.status!=="complete"||customerId(session.customer)===""||customerId(session.payment_intent)!==input.paymentIntentId||!validPayFirstMetadata(session.metadata,"og_throne",deps.ogPriceId)||!exactOgLineItem(session,deps.ogPriceId))return"ignored";
+ if(input.sessionSignal&&(session.payment_status!=="paid"||input.eventSession?.status!=="complete"||input.eventSession?.payment_status!=="paid"||customerId(input.eventSession?.customer)!==customerId(session.customer)||customerId(input.eventSession?.payment_intent)!==pi.id||!matchingPayFirstMetadata(input.eventSession?.metadata,session.metadata)))return"ignored";
+ if(pi?.id!==input.paymentIntentId||pi?.status!=="succeeded"||customerId(pi.customer)!==customerId(session.customer)||!validPayFirstMetadata(pi.metadata,"og_throne",deps.ogPriceId)||!matchingPayFirstMetadata(session.metadata,pi.metadata)||!validConnect(pi,session.metadata))return"ignored";
+ if(input.paymentIntentEvent&&(input.paymentIntentEvent.id!==pi.id||input.paymentIntentEvent.status!=="succeeded"||!matchingPayFirstMetadata(input.paymentIntentEvent.metadata,pi.metadata)))return"ignored";
+ if(existing){if(!exactExistingPurchase(existing,reservation,session,pi,deps.ogPriceId))throw new Error("purchase_replay_conflict");return"recorded"}
+ await deps.record({reservationId:reservation.id,tokenHash:reservation.purchaser_token_hash!,tier:"og_throne",sessionId:session.id,customerId:customerId(session.customer),priceId:deps.ogPriceId,paymentIntentId:pi.id,subscriptionId:null});return"recorded";
+}
+export async function processPayFirstStripeEvent(event:any,deps:PayFirstWebhookDependencies):Promise<"ignored"|"recorded"|"expired">{
+ const session=event?.data?.object,md=session?.metadata;if(md?.checkout_contract!==PAY_FIRST_CHECKOUT_CONTRACT)return"ignored";
+ if(event.type==="checkout.session.expired"){if(!isPurchasablePlan(md.tier_name)||!text(session.id)||!text(md.reservation_id))return"ignored";if(await deps.purchase(md.reservation_id))return"ignored";await deps.expire({reservationId:md.reservation_id,tier:md.tier_name,sessionId:session.id});return"expired"}
+ if(event.type==="payment_intent.succeeded"&&md.tier_name==="og_throne"){if(session.status!=="succeeded"||!text(session.id))return"ignored";return finalizePayFirstOg({metadata:md,paymentIntentId:session.id,paymentIntentEvent:session,sessionSignal:false},deps)}
+ if(event.type==="payment_intent.canceled"&&md.tier_name==="og_throne"){if(session.status!=="canceled"||!validPayFirstMetadata(md,"og_throne",deps.ogPriceId))return"ignored";const reservation=await deps.reservation(md.reservation_id);if(!reservation||reservation.id!==md.reservation_id||reservation.tier!=="og_throne"||reservation.status!=="associated"||!reservation.stripe_session_id||reservation.stripe_subscription_id||await deps.purchase(reservation.id))return"ignored";const stored=await deps.session(reservation.stripe_session_id);if(stored.id!==reservation.stripe_session_id||stored.status!=="complete"||stored.payment_status==="paid"||customerId(stored.payment_intent)!==session.id||customerId(stored.customer)!==customerId(session.customer)||!exactOgLineItem(stored,deps.ogPriceId)||!matchingPayFirstMetadata(stored.metadata,md))return"ignored";await deps.expire({reservationId:reservation.id,tier:"og_throne",sessionId:stored.id});return"expired"}
+ if((event.type==="checkout.session.completed"||event.type==="checkout.session.async_payment_succeeded")&&md.tier_name==="og_throne"){if(session.status!=="complete"||session.payment_status!=="paid")return"ignored";const pi=customerId(session.payment_intent);if(!pi)return"ignored";return finalizePayFirstOg({metadata:md,eventSession:session,paymentIntentId:pi,sessionSignal:true},deps)}
+ if(event.type!=="checkout.session.completed"||!isPurchasablePlan(md.tier_name)||!text(session.id)||session.status!=="complete"||session.payment_status!=="paid")return"ignored";
+ const tier=md.tier_name,price=tier==="og_throne"?deps.ogPriceId:deps.earlyPriceId,customer=customerId(session.customer);if(!price||!customer||!validPayFirstMetadata(md,tier,price)||session.mode!==(tier==="og_throne"?"payment":"subscription"))return"ignored";
+ const id=customerId(session.subscription);if(!id)return"ignored";const sub=await deps.subscription(id),itemPrice=customerId(sub?.items?.data?.[0]?.price),invoice=sub?.latest_invoice,invoicePaid=invoice?.paid===true||invoice?.status==="paid";if(sub.id!==id||!["active","trialing"].includes(sub.status)||customerId(sub.customer)!==customer||itemPrice!==price||!validPayFirstMetadata(sub.metadata,tier,price)||!invoicePaid||!validSubscriptionConnect(sub,md))return"ignored";
+ await deps.record({reservationId:md.reservation_id,tokenHash:"",tier,sessionId:session.id,customerId:customer,priceId:price,paymentIntentId:null,subscriptionId:id});return"recorded";
+}
+
 // ---------------------------------------------------------------------------
 // Route
 // ---------------------------------------------------------------------------
@@ -268,12 +308,21 @@ export async function POST(req: Request) {
 
   try {
     const supabaseAdmin = getSupabaseAdmin()
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2025-11-17.clover" as any })
+    const payFirstResult=await processPayFirstStripeEvent(event,{
+      ogPriceId:process.env.STRIPE_PRICE_OG_THRONE||"",earlyPriceId:process.env.STRIPE_PRICE_EARLY_BIRD||"",
+      async reservation(id){const{data,error}=await supabaseAdmin.from("checkout_capacity_reservations").select("id,purchaser_token_hash,tier,status,stripe_session_id,stripe_subscription_id").eq("id",id).maybeSingle();if(error)throw new Error("reservation_unavailable");return data},
+      async purchase(id){const{data,error}=await supabaseAdmin.from("pay_first_purchases").select("reservation_id,purchaser_token_hash,tier,stripe_session_id,stripe_customer_id,stripe_price_id,payment_intent_id,stripe_subscription_id,state").eq("reservation_id",id).maybeSingle();if(error)throw new Error("purchase_unavailable");return data},
+      async session(id){return stripe.checkout.sessions.retrieve(id,{expand:["line_items"]})},
+      async paymentIntent(id){return stripe.paymentIntents.retrieve(id)},async subscription(id){return stripe.subscriptions.retrieve(id,{expand:["latest_invoice"]})},
+      async record(input){let tokenHash=input.tokenHash;if(!tokenHash){const{data:r,error:q}=await supabaseAdmin.from("checkout_capacity_reservations").select("purchaser_token_hash").eq("id",input.reservationId).maybeSingle();if(q||!r?.purchaser_token_hash)throw new Error("reservation_unavailable");tokenHash=r.purchaser_token_hash}const{error}=await supabaseAdmin.rpc("record_pay_first_purchase",{p_reservation_id:input.reservationId,p_purchaser_token_hash:tokenHash,p_tier:input.tier,p_session_id:input.sessionId,p_customer_id:input.customerId,p_price_id:input.priceId,p_payment_intent_id:input.paymentIntentId,p_subscription_id:input.subscriptionId});if(error)throw new Error("purchase_record_unavailable")},
+      async expire(input){const{error}=await supabaseAdmin.rpc("expire_guest_checkout_session",{p_reservation_id:input.reservationId,p_tier:input.tier,p_session_id:input.sessionId});if(error)throw new Error("expiration_unavailable")}
+    })
     const launchResult = await processLaunchStripeEvent(event, {
       ogPriceId: process.env.STRIPE_PRICE_OG_THRONE || "",
       async fulfill(input) { const {error}=await supabaseAdmin.rpc("fulfill_og_checkout_payment",{p_checkout_contract:input.contract,p_reservation_id:input.reservationId,p_profile_id:input.profileId,p_user_id:input.userId,p_tier:input.tier,p_price_id:input.priceId,p_customer_id:input.customerId,p_payment_intent_id:input.paymentIntentId,p_session_id:input.sessionId}); if(error) throw new Error("fulfillment_unavailable") },
       async expire(input) { const {error}=await supabaseAdmin.rpc("expire_checkout_capacity_reservation_from_session",{p_reservation_id:input.reservationId,p_profile_id:input.profileId,p_tier:input.tier,p_session_id:input.sessionId}); if(error) throw new Error("expiration_unavailable") },
     })
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: "2025-11-17.clover" as any })
     switch (event.type) {
       // -------------------------------------------------
       // STRIPE CONNECT — ONBOARDING COMPLETE
@@ -304,6 +353,8 @@ export async function POST(req: Request) {
       // -------------------------------------------------
       case "checkout.session.completed": {
         const session: any = event.data.object
+
+        if (payFirstResult === "recorded") break
 
         if (session.mode === "subscription" && session.subscription) {
           const sub = await stripe.subscriptions.retrieve(

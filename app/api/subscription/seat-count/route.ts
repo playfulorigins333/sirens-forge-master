@@ -135,6 +135,10 @@ export async function GET() {
       .in("status", ["active", "associated"]);
     if (reservationError) return NextResponse.json({ success:false,error:"temporarily_unavailable" },{status:503});
     for (const reservation of (reservations || []).filter((row) => reservationConsumesCapacity(row, new Date()))) {
+      if (!reservation.profile_id) {
+        counts[reservation.tier as LaunchTierName] += 1;
+        continue;
+      }
       const { count, error } = await supabase.from("user_subscriptions").select("id",{count:"exact",head:true})
         .eq("user_id",reservation.profile_id).eq("tier_name",reservation.tier).in("status",[...ACTIVE_STATUSES]);
       if (error) return NextResponse.json({success:false,error:"temporarily_unavailable"},{status:503});

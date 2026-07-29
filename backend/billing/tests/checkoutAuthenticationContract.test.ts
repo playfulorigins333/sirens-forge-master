@@ -1,153 +1,44 @@
 import assert from "node:assert/strict";
-import { createCancellationHandler, createCheckoutHandler, type CancellationDependencies, type CheckoutDependencies } from "../../../app/api/checkout/subscription/route";
-import { LAUNCH_CHECKOUT_CONTRACT, paymentMethodTypesForLaunchPlan } from "../../../lib/billing/launchCheckoutPolicy";
+import { readFileSync } from "node:fs";
+import { createCheckoutHandler,type CheckoutDependencies } from "../../../app/api/checkout/subscription/route";
+import { checkoutCreationConfiguration, networkRateLimitHash, payFirstCheckoutEnabled, trustedSourceNetwork } from "../../../lib/billing/checkoutCreationSecurity";
+import { PAY_FIRST_CHECKOUT_CONTRACT,generatePurchaserToken,hashPurchaserToken,isPurchaserToken,PURCHASER_COOKIE,PURCHASER_TOKEN_MAX_AGE } from "../../../lib/billing/payFirstCheckout";
+import { paymentMethodTypesForLaunchPlan } from "../../../lib/billing/launchCheckoutPolicy";
+let assertions=0;const equal=(a:unknown,b:unknown)=>{assert.deepEqual(a,b);assertions++};
+const reservation="11111111-1111-4111-8111-111111111111",token="A".repeat(43),networkHash="b".repeat(64);
+const state={inputs:[] as any[],hashes:[] as string[],networks:[] as string[],associated:[] as any[],released:0,privileged:0,generated:0,retrieved:0};
+const reset=()=>{state.inputs=[];state.hashes=[];state.networks=[];state.associated=[];state.released=0;state.privileged=0;state.generated=0;state.retrieved=0};
+const deps=(overrides:Partial<CheckoutDependencies>={}):CheckoutDependencies=>({
+ enabled:()=>true,preflight:()=>({priceId:"price_server",baseUrl:"https://sirens.test",networkHash}),generateToken:()=>{state.generated++;return token},retrievePrice:async()=>({unitAmount:10000}),
+ createSession:async(input,key)=>{state.inputs.push({input,key});return{id:"cs_server12345678",url:"https://checkout.stripe.com/pay/server"}},retrieveSession:async id=>{state.retrieved++;return{id,url:"https://checkout.stripe.com/pay/server",status:"open"}},
+ privileged:async()=>{state.privileged++;return{tier:async()=>({is_active:true}),reserve:async(hash,network)=>{state.hashes.push(hash);state.networks.push(network);return{reservation_id:reservation,expires_at:new Date(Date.now()+3_599_000).toISOString()}},release:async()=>{state.released++},associate:async(...args)=>{state.associated.push(args)},referral:async()=>({code:"SERVER",affiliateUserId:"affiliate",commissionPercent:20,destination:"acct_server",connectOnboarded:true,payable:true})}},...overrides});
+const request=(body:any,cookie?:string,url="https://sirens.test/api/checkout/subscription")=>new Request(url,{method:"POST",headers:{"content-type":"application/json",...(cookie?{cookie}: {})},body:JSON.stringify(body)});
 
-let assertions = 0;
-const equal = (actual: unknown, expected: unknown) => { assert.deepEqual(actual, expected); assertions += 1; };
-const request = (body: unknown) => new Request("https://sirens.test/api/checkout/subscription", { method: "POST", body: JSON.stringify(body) });
-for (const [raw,expected] of [["",["card"]],["affirm",["card","affirm"]],["afterpay_clearpay",["card","afterpay_clearpay"]],["klarna",["card","klarna"]],[" Klarna, AFFIRM,affirm,afterpay_clearpay,evil ",["card","affirm","afterpay_clearpay","klarna"]],["x".repeat(300),["card"]]] as const) equal(paymentMethodTypesForLaunchPlan("og_throne",raw),expected);
-equal(paymentMethodTypesForLaunchPlan("early_bird","affirm,klarna"),["card"]);
-type State = { released: number; associated: number; sessionInputs: any[]; keys: string[]; sessionCache: Map<string, any> };
+// Server-only activation gate runs before token generation, privileged DB, RPC, or Stripe boundaries.
+for(const value of [undefined,"","false","0","yes","truth","TRUE"]){equal(payFirstCheckoutEnabled(value),false)}equal(payFirstCheckoutEnabled(" true "),true);
+for(const body of [{tierName:"og_throne"},{tierName:"og_throne",PAY_FIRST_CHECKOUT_ENABLED:true}]){reset();const inactive=deps({enabled:()=>false});const response=await createCheckoutHandler(inactive)(request(body,`${PURCHASER_COOKIE}=override`,"https://sirens.test/api/checkout/subscription?PAY_FIRST_CHECKOUT_ENABLED=true"));equal(response.status,503);equal((await response.json()).code,"TEMPORARILY_UNAVAILABLE");equal(state.privileged,0);equal(state.generated,0);equal(state.inputs.length,0);equal(state.retrieved,0);equal(response.headers.get("set-cookie"),null)}
+reset();let preflightCalls=0;const missing=deps({preflight:()=>{preflightCalls++;return null}});let response=await createCheckoutHandler(missing)(request({tierName:"og_throne"}));equal(response.status,503);equal(preflightCalls,1);equal(state.privileged,0);equal(state.generated,0);equal(state.inputs.length,0);
 
-function dependencies(overrides: Partial<CheckoutDependencies> = {}, state?: State): CheckoutDependencies {
-  const s = state || { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
-  return {
-    authenticate: async () => ({ id: "auth-user", email: "buyer@sirens.test" }),
-    privileged: async () => ({
-      profiles: async () => [{ id: "profile-1", user_id: "auth-user" }],
-      tier: async () => ({ is_active: true }), entitlements: async () => [],
-      reserve: async () => ({ reservation_id: "reservation-1", expires_at: "2030-01-02T03:04:05.000Z" }),
-      release: async () => { s.released += 1; }, associate: async () => { s.associated += 1; },
-      referral: async () => ({ code: null, affiliateUserId: null, commissionPercent: 0, destination: null, connectOnboarded: false, payable: false }),
-    }),
-    configuration: () => ({ priceId: "price_authoritative", baseUrl: "https://sirens.test" }),
-    customer: async () => "cus_authoritative", retrievePrice: async () => ({ unitAmount: 133300 }),
-    createSession: async (input, key) => {
-      s.sessionInputs.push(input); s.keys.push(key);
-      if (!s.sessionCache.has(key)) s.sessionCache.set(key, { id: "cs_effective", url: "https://checkout.stripe.com/effective" });
-      return s.sessionCache.get(key);
-    },
-    ...overrides,
-  };
-}
+for(const tier of ["og_throne","early_bird"] as const){reset();const before=Math.floor(Date.now()/1000);const response=await createCheckoutHandler(deps())(request({tierName:tier,referralCode:"server"}));equal(response.status,200);equal((await response.json()).url,"https://checkout.stripe.com/pay/server");equal(response.headers.get("set-cookie")?.includes(`${PURCHASER_COOKIE}=`),true);equal(response.headers.get("set-cookie")?.includes(`Max-Age=${PURCHASER_TOKEN_MAX_AGE}`),true);const input=state.inputs[0].input;equal(input.mode,tier==="og_throne"?"payment":"subscription");equal(input.line_items[0].price,"price_server");equal(input.payment_method_types,tier==="og_throne"?paymentMethodTypesForLaunchPlan(tier,process.env.STRIPE_OG_BNPL_METHODS):["card"]);equal(input.metadata.checkout_contract,PAY_FIRST_CHECKOUT_CONTRACT);equal(JSON.stringify(input).includes(token),false);equal(input.success_url,`https://sirens.test/checkout/complete?session_id={CHECKOUT_SESSION_ID}&reservation=${reservation}`);equal(input.cancel_url.includes(token),false);equal(state.hashes[0],hashPurchaserToken(token));equal(state.networks[0],networkHash);equal(input.expires_at>=before+3598&&input.expires_at<=before+3600,true)}
+for(const tier of ["prime_access","starter_hit","standard","",null])equal((await createCheckoutHandler(deps())(request({tier}))).status,400);
+for(const evil of [{tierName:"og_throne",priceId:"evil"},{tierName:"og_throne",mode:"subscription"},{tierName:"early_bird",destination:"acct_evil"},{tierName:"early_bird",commissionPercent:99}])equal((await createCheckoutHandler(deps())(request(evil))).status,400);
+equal(isPurchaserToken(generatePurchaserToken()),true);equal(Buffer.from(generatePurchaserToken(),"base64url").length,32);equal(hashPurchaserToken(token).length,64);equal(PURCHASER_TOKEN_MAX_AGE,604800);
+reset();const limited=deps();const db=await limited.privileged();limited.privileged=async()=>({...db,reserve:async()=>{throw new Error("rate_limit_daily")}});response=await createCheckoutHandler(limited)(request({tierName:"og_throne"}));equal(response.status,429);equal((await response.json()).code,"RATE_LIMITED");equal(state.inputs.length,0);
 
-let privileged = 0, stripe = 0;
-let response = await createCheckoutHandler(dependencies({ authenticate: async () => null, privileged: async () => { privileged += 1; throw new Error(); }, createSession: async () => { stripe += 1; throw new Error(); } }))(request({ tier: "og_throne" }));
-equal(response.status, 401); equal(privileged, 0); equal(stripe, 0);
-for (const tier of ["prime_access", "Standard", "Starter Hit", "unknown"]) {
-  response = await createCheckoutHandler(dependencies())(request({ tierName: tier, profileId: "evil", priceId: "evil" })); equal(response.status, 400);
-}
-response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), profiles: async () => [] }) }))(request({ tierName: "og_throne" })); equal(response.status, 403);
-response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), profiles: async () => [{ id: "a", user_id: "auth-user" }, { id: "b", user_id: "auth-user" }] }) }))(request({ tierName: "og_throne" })); equal(response.status, 403);
-response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), tier: async () => ({ is_active: false }) }) }))(request({ tierName: "og_throne" })); equal(response.status, 409);
-response = await createCheckoutHandler(dependencies({ privileged: async () => ({ ...await dependencies().privileged(), entitlements: async () => [{ status: "active", tier_name: "early_bird" }] }) }))(request({ tierName: "og_throne" })); equal(response.status, 409);
-
-const connectState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
-process.env.STRIPE_OG_BNPL_METHODS="affirm,klarna";
-const payable = dependencies({}, connectState); const payableDb = await payable.privileged();
-payable.privileged = async () => ({ ...payableDb, referral: async () => ({ code: "FRIEND", affiliateUserId: "affiliate-server", commissionPercent: 125, destination: "acct_server", connectOnboarded: true, payable: true }) });
-response = await createCheckoutHandler(payable)(request({ tierName: "og_throne", referralCode: " friend ", affiliateUserId: "evil", commissionPercent: 1, destination: "acct_evil", split: 99, payment_method_types:["us_bank_account"],paymentMethodConfiguration:"evil",allowBnpl:true }));
-equal(response.status, 200);
-const og = connectState.sessionInputs[0];
-equal(og.customer, "cus_authoritative"); equal(og.line_items[0].price, "price_authoritative"); equal(og.mode, "payment");
-equal(og.payment_method_types,["card","affirm","klarna"]); equal(og.metadata.checkout_contract,LAUNCH_CHECKOUT_CONTRACT); equal(og.payment_intent_data.metadata.checkout_contract,LAUNCH_CHECKOUT_CONTRACT); equal(og.metadata.stripe_customer_id,"cus_authoritative");
-equal(og.expires_at, 1893553445); equal(og.payment_intent_data.application_fee_amount, 0); // clamped 100% commission
-equal(og.payment_intent_data.transfer_data.destination, "acct_server"); equal(og.metadata.affiliate_user_id, "affiliate-server");
-for (const field of ["user_id", "profile_id", "tier_name", "stripe_price_id", "reservation_id", "referral_code", "affiliate_user_id", "commission_percent", "platform_fee_percent", "connect_destination_account", "connect_onboarded", "type", "connect_mode"]) equal(typeof og.metadata[field], "string");
-equal(og.metadata.connect_mode, "destination_charge"); equal(og.payment_intent_data.metadata, og.metadata);
-equal(og.success_url, "https://sirens.test/pricing?checkout=success&tier=og_throne"); equal(og.cancel_url.includes("/pricing?checkout=canceled"), true);
-const nonConnectOgState:State={released:0,associated:0,sessionInputs:[],keys:[],sessionCache:new Map()};
-response=await createCheckoutHandler(dependencies({},nonConnectOgState))(request({tierName:"og_throne",payment_method_types:[]}));
-equal(response.status,200);equal(nonConnectOgState.sessionInputs[0].payment_method_types,og.payment_method_types);equal(nonConnectOgState.sessionInputs[0].payment_intent_data.transfer_data,undefined);
-
-const subscriptionState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
-const subscription = dependencies({}, subscriptionState); const subscriptionDb = await subscription.privileged();
-subscription.privileged = async () => ({ ...subscriptionDb, referral: async () => ({ code: "FRIEND", affiliateUserId: "affiliate-server", commissionPercent: 20, destination: "acct_server", connectOnboarded: true, payable: true }) });
-response = await createCheckoutHandler(subscription)(request({ tierName: "early_bird", commissionPercent: 99, destination: "acct_evil" }));
-equal(response.status, 200); const connectedSubscription = subscriptionState.sessionInputs[0];
-equal(connectedSubscription.subscription_data.application_fee_percent, 80); equal(connectedSubscription.subscription_data.transfer_data.destination, "acct_server");
-equal(connectedSubscription.subscription_data.metadata.connect_mode, "destination_charge");
-
-const plainState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
-response = await createCheckoutHandler(dependencies({}, plainState))(request({ tierName: "early_bird", destination: "acct_evil", commissionPercent: 99 }));
-equal(response.status, 200); const early = plainState.sessionInputs[0]; equal(early.payment_method_types,["card"]); equal(early.subscription_data.transfer_data, undefined); equal(early.metadata.connect_mode, "none"); equal(early.subscription_data.metadata, early.metadata);
-
-const releaseState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
-response = await createCheckoutHandler(dependencies({ configuration: () => ({ priceId: "", baseUrl: "" }) }, releaseState))(request({ tierName: "og_throne" })); equal(response.status, 503); equal(releaseState.released, 1);
-response = await createCheckoutHandler(dependencies({ createSession: async () => { throw new Error("provider secret"); } }, releaseState))(request({ tierName: "og_throne" })); equal(response.status, 502); equal(releaseState.released, 2); equal((await response.text()).includes("secret"), false);
-
-const retryState: State = { released: 0, associated: 0, sessionInputs: [], keys: [], sessionCache: new Map() };
-let associationAttempts = 0; const retry = dependencies({}, retryState); const retryDb = await retry.privileged();
-retry.privileged = async () => ({ ...retryDb, associate: async () => { associationAttempts += 1; if (associationAttempts === 1) throw new Error("db detail"); retryState.associated += 1; } });
-response = await createCheckoutHandler(retry)(request({ tierName: "og_throne" })); equal(response.status, 503); equal(retryState.released, 0);
-response = await createCheckoutHandler(retry)(request({ tierName: "og_throne" })); equal(response.status, 200); equal(retryState.released, 0);
-equal(retryState.keys[0], retryState.keys[1]); equal(retryState.sessionCache.size, 1); equal(retryState.sessionInputs[0].expires_at, retryState.sessionInputs[1].expires_at);
-
-const cancellationRequest = (body: unknown) => new Request("https://sirens.test/api/checkout/subscription", { method: "DELETE", body: JSON.stringify(body) });
-type CancellationState = { lookups: unknown[][]; released: number; retrieved: string[]; expired: string[]; order: string[] };
-function cancellationDependencies(
-  reservation: { reservation_id: string; status: string; stripe_session_id: string | null } | null,
-  session: { status: string; paymentStatus: string } = { status: "open", paymentStatus: "unpaid" },
-  overrides: Partial<CancellationDependencies> = {},
-) {
-  const state: CancellationState = { lookups: [], released: 0, retrieved: [], expired: [], order: [] };
-  const deps: CancellationDependencies = {
-    authenticate: async () => ({ id: "auth-user" }),
-    privileged: async () => ({
-      profiles: async () => [{ id: "profile-1", user_id: "auth-user" }],
-      reservations: async (profileId, tier, reservationId) => { state.lookups.push([profileId, tier, reservationId]); return reservation ? [reservation] : []; },
-      release: async () => { state.order.push("release"); state.released += 1; },
-    }),
-    retrieveSession: async (sessionId) => { state.order.push("retrieve"); state.retrieved.push(sessionId); return session; },
-    expireSession: async (sessionId) => { state.order.push("expire"); state.expired.push(sessionId); return { status: "expired", paymentStatus: "unpaid" }; },
-    ...overrides,
-  };
-  return { deps, state };
-}
-
-let cancellation = cancellationDependencies({ reservation_id: "reservation-owned", status: "active", stripe_session_id: null });
-response = await createCancellationHandler(cancellation.deps)(cancellationRequest({ tier: "og_throne", reservation: "reservation-owned", stripe_session_id: "cs_browser_evil" }));
-equal(response.status, 200); equal(cancellation.state.released, 1); equal(cancellation.state.retrieved, []);
-equal(cancellation.state.lookups, [["profile-1", "og_throne", "reservation-owned"]]);
-
-cancellation = cancellationDependencies({ reservation_id: "reservation-owned", status: "associated", stripe_session_id: "cs_server_stored" });
-response = await createCancellationHandler(cancellation.deps)(cancellationRequest({ tier: "og_throne", reservation: "reservation-owned", stripe_session_id: "cs_browser_evil" }));
-equal(response.status, 200); equal(cancellation.state.retrieved, ["cs_server_stored"]); equal(cancellation.state.expired, ["cs_server_stored"]);
-equal(cancellation.state.order, ["retrieve", "expire", "release"]); equal(cancellation.state.released, 1);
-
-cancellation = cancellationDependencies({ reservation_id: "reservation-owned", status: "associated", stripe_session_id: "cs_server_stored" }, { status: "open", paymentStatus: "unpaid" }, { expireSession: async () => { throw new Error("raw Stripe secret"); } });
-response = await createCancellationHandler(cancellation.deps)(cancellationRequest({ tier: "og_throne", reservation: "reservation-owned" }));
-equal(response.status, 503); equal(cancellation.state.released, 0); equal((await response.text()).includes("secret"), false);
-
-cancellation = cancellationDependencies({ reservation_id: "reservation-owned", status: "associated", stripe_session_id: "cs_expired" }, { status: "expired", paymentStatus: "unpaid" });
-response = await createCancellationHandler(cancellation.deps)(cancellationRequest({ tier: "og_throne", reservation: "reservation-owned" }));
-equal(response.status, 200); equal(cancellation.state.expired, []); equal(cancellation.state.released, 1);
-
-cancellation = cancellationDependencies({ reservation_id: "reservation-owned", status: "released", stripe_session_id: "cs_previously_expired" });
-response = await createCancellationHandler(cancellation.deps)(cancellationRequest({ tier: "og_throne", reservation: "reservation-owned" }));
-equal(response.status, 200); equal(cancellation.state.retrieved, []); equal(cancellation.state.released, 0);
-
-for (const paid of [{ status: "complete", paymentStatus: "unpaid" }, { status: "complete", paymentStatus: "paid" }, { status: "open", paymentStatus: "paid" }]) {
-  cancellation = cancellationDependencies({ reservation_id: "reservation-owned", status: "associated", stripe_session_id: "cs_paid" }, paid);
-  response = await createCancellationHandler(cancellation.deps)(cancellationRequest({ tier: "early_bird", reservation: "reservation-owned" }));
-  equal(response.status, 202); equal(cancellation.state.released, 0); equal(cancellation.state.expired, []);
-}
-
-cancellation = cancellationDependencies(null);
-response = await createCancellationHandler(cancellation.deps)(cancellationRequest({ tier: "og_throne", reservation: "missing" })); equal(response.status, 503); equal(cancellation.state.released, 0);
-const ambiguous = cancellationDependencies(null); const ambiguousDb = await ambiguous.deps.privileged();
-ambiguous.deps.privileged = async () => ({ ...ambiguousDb, reservations: async () => [
-  { reservation_id: "reservation-owned", status: "active", stripe_session_id: null },
-  { reservation_id: "reservation-owned", status: "active", stripe_session_id: null },
-] });
-response = await createCancellationHandler(ambiguous.deps)(cancellationRequest({ tier: "og_throne", reservation: "reservation-owned" })); equal(response.status, 503); equal(ambiguous.state.released, 0);
-
-const otherProfile = cancellationDependencies(null); const otherDb = await otherProfile.deps.privileged();
-otherProfile.deps.privileged = async () => ({ ...otherDb, reservations: async (profileId, tier, reservationId) => { otherProfile.state.lookups.push([profileId, tier, reservationId]); return []; } });
-response = await createCancellationHandler(otherProfile.deps)(cancellationRequest({ tier: "og_throne", reservation: "other-reservation", stripe_session_id: "cs_other" }));
-equal(response.status, 503); equal(otherProfile.state.released, 0); equal(otherProfile.state.retrieved, []);
-
-const databaseFailure = cancellationDependencies(null, undefined, { privileged: async () => { throw new Error("raw database SQL"); } });
-response = await createCancellationHandler(databaseFailure.deps)(cancellationRequest({ tier: "og_throne", reservation: "reservation-owned" }));
-equal(response.status, 503); equal((await response.text()).includes("database"), false);
+// Trusted platform source and HMAC privacy contract.
+const trusted=(ip:string,extra:Record<string,string>={})=>new Request("https://sirens.test",{headers:{"x-vercel-forwarded-for":ip,...extra}});
+equal(trustedSourceNetwork(trusted("8.8.8.8")),"8.8.8.8");equal(trustedSourceNetwork(trusted(" 8.8.4.4 ")),"8.8.4.4");
+for(const value of ["","8.8.8.8, 1.1.1.1","not-ip","127.0.0.1","10.0.0.1","192.168.1.1","::1","fd00::1"])equal(trustedSourceNetwork(trusted(value)),null);
+for(const value of ["203.0.113.1","198.51.100.1","192.0.2.1","0:0:0:0:0:0:0:1","::","0:0:0:0:0:0:0:0","::ffff:8.8.8.8","0:0:0:0:0:ffff:0808:0808"])equal(trustedSourceNetwork(trusted(value)),null);
+for(const value of ["64:ff9b:1::1","100:0:0:1::1","3fff::1","5f00::1","192.88.99.1"])equal(trustedSourceNetwork(trusted(value)),null);
+for(const value of ["203.0.114.1","198.51.101.1","192.30.252.153"])equal(trustedSourceNetwork(trusted(value)),value);
+for(const value of ["64:ff9b::1","2001:20::1","2001:30::1","2001:1::1","2001:1::2","2001:1::3","2001:3::1","2001:4:112::1","2620:4f:8000::1"])equal(trustedSourceNetwork(trusted(value)),value);
+equal(trustedSourceNetwork(new Request("https://sirens.test",{headers:{"x-forwarded-for":"8.8.8.8","x-real-ip":"8.8.8.8","user-agent":"fingerprint"}})),null);
+const secret="s".repeat(32),h1=networkRateLimitHash("8.8.8.8",secret);equal(Buffer.from(h1,"hex").length,32);equal(h1===networkRateLimitHash("1.1.1.1",secret),false);equal(h1===networkRateLimitHash("8.8.8.8","t".repeat(32)),false);
+const compressed="2606:4700:4700::1111",expanded="2606:4700:4700:0:0:0:0:1111";equal(networkRateLimitHash(compressed,secret),networkRateLimitHash(expanded,secret));equal(networkRateLimitHash(compressed.toUpperCase(),secret),networkRateLimitHash(compressed,secret));equal(networkRateLimitHash(compressed,secret)===networkRateLimitHash("2606:4700:4700::1001",secret),false);equal(Buffer.from(networkRateLimitHash(compressed,secret),"hex").length,32);
+const complete={request:trusted("8.8.8.8"),rateLimitSecret:secret,supabaseUrl:"https://project.supabase.co",serviceRoleKey:"service",stripeSecret:"sk_test_inert",priceId:"price_inert",canonicalUrl:"https://sirens.test"};equal(checkoutCreationConfiguration(complete)?.networkHash,h1);
+for(const key of ["rateLimitSecret","supabaseUrl","serviceRoleKey","stripeSecret","priceId","canonicalUrl"] as const)equal(checkoutCreationConfiguration({...complete,[key]:undefined}),null);
+equal(checkoutCreationConfiguration({...complete,request:new Request("https://sirens.test")}),null);equal(checkoutCreationConfiguration({...complete,canonicalUrl:"http://sirens.test"}),null);
+const routeSource=readFileSync("app/api/checkout/subscription/route.ts","utf8"),pricingSource=readFileSync("app/pricing/PricingClient.tsx","utf8");equal(routeSource.includes("user-agent"),false);equal(routeSource.includes("NEXT_PUBLIC_PAY_FIRST"),false);equal(pricingSource.includes("Too many checkout attempts. Please try again later."),true);equal(pricingSource.includes("finally"),true);equal(pricingSource.includes("/login?checkout_intent"),false);
+equal(state.networks.every(value=>value.length===64),true);equal(JSON.stringify(state.networks).includes("8.8.8.8"),false);equal(routeSource.includes("p_network_hash"),true);
 console.log(`checkoutAuthenticationContract: ${assertions} assertions passed`);
