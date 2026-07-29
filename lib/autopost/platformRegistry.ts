@@ -92,9 +92,13 @@ const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
     id: "reddit",
     name: "Reddit",
     external_url: "https://www.reddit.com/",
-    env_var: "AUTOPOST_WEBHOOK_REDDIT",
+    launch_status: "not_configured",
+    public_selectable: false,
+    supports_real_posting: false,
+    supports_async_dispatch: false,
     supports_assisted_workflow: true,
-    reason: "Use Reddit as a traffic and discovery channel. Direct scheduled posting is not enabled.",
+    status_message: "Manual Reddit handoff only. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval.",
+    reason: "Manual Reddit handoff only. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval.",
   },
 ]
 

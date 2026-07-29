@@ -87,6 +87,50 @@ export function buildUserPlatformStatus(
   platform: AutopostPlatformRegistryEntry,
   accountsByPlatform: Map<PlatformId, AutopostAccountStatus>
 ) {
+  if (platform.id === "reddit") {
+    const statusMessage = "Manual Reddit handoff only. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval."
+    const blockers = [
+      "REDDIT_NATIVE_POSTING_UNAVAILABLE",
+      "REDDIT_OAUTH_CONNECTION_UNAVAILABLE",
+      "REDDIT_SCHEDULED_AUTOPOST_UNAVAILABLE",
+      "REDDIT_DISPATCH_UNAVAILABLE",
+      "REDDIT_WRITTEN_APPROVAL_PENDING",
+    ]
+
+    return {
+      id: platform.id,
+      name: platform.name,
+      label: platform.name,
+      external_url: platform.external_url,
+      launch_status: "not_configured" as const,
+      app_configured: false,
+      oauth_configured: false,
+      config_error: null,
+      can_connect: false,
+      user_connected: false,
+      connection_status: "NOT_CONFIGURED",
+      connection_blocker: "REDDIT_OAUTH_CONNECTION_UNAVAILABLE",
+      provider_username: null,
+      provider_account_id: null,
+      connected_at: null,
+      last_refresh_at: null,
+      has_error: false,
+      public_selectable: false,
+      can_schedule: false,
+      supports_real_posting: false,
+      supports_text_posting: false,
+      supports_media_posting: false,
+      supports_async_dispatch: false,
+      supports_assisted_workflow: true,
+      assisted_available: true,
+      native_posting_available: false,
+      native_posting_blocker: "REDDIT_NATIVE_POSTING_UNAVAILABLE",
+      status_message: statusMessage,
+      disabled_reason: statusMessage,
+      blockers,
+    }
+  }
+
   const account = getAccountForPlatform(accountsByPlatform, platform.id)
   const userConnected = isConnectedStatus(account?.connection_status)
 

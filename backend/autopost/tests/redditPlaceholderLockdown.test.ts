@@ -153,14 +153,66 @@ await test("route source has no provider, OAuth, token, database, environment, o
 })
 
 await test("Reddit registry and availability remain locked", () => {
-  delete process.env.AUTOPOST_WEBHOOK_REDDIT
-  const reddit = getAutopostPlatformRegistry().find(platform => platform.id === "reddit")
-  assert.ok(reddit)
-  assert.equal(reddit.public_selectable, false)
-  assert.equal(reddit.supports_real_posting, false)
-  const availability = buildUserPlatformStatus(reddit, new Map())
-  for (const key of ["can_connect", "public_selectable", "can_schedule", "supports_real_posting", "supports_text_posting", "supports_media_posting"] as const) assert.equal(availability[key], false)
-  assert.equal((availability as any).native_posting_available ?? false, false)
+  const previous = process.env.AUTOPOST_WEBHOOK_REDDIT
+  const staleAccount = {
+    platform: "reddit",
+    provider_account_id: "historical-provider-id",
+    provider_username: "historical-user",
+    connection_status: "CONNECTED",
+    connected_at: "2025-01-01T00:00:00.000Z",
+    last_refresh_at: "2025-01-02T00:00:00.000Z",
+    last_error: "historical error",
+  }
+
+  try {
+    for (const webhook of [undefined, "https://example.invalid/reddit-webhook"]) {
+      if (webhook === undefined) delete process.env.AUTOPOST_WEBHOOK_REDDIT
+      else process.env.AUTOPOST_WEBHOOK_REDDIT = webhook
+
+      const reddit = getAutopostPlatformRegistry().find(platform => platform.id === "reddit")
+      assert.ok(reddit)
+      assert.equal(reddit.launch_status, "not_configured")
+      assert.equal(reddit.public_selectable, false)
+      assert.equal(reddit.supports_real_posting, false)
+      assert.equal(reddit.supports_async_dispatch, false)
+      assert.equal(reddit.supports_assisted_workflow, true)
+      assert.equal(reddit.env_var, undefined)
+
+      const availability = buildUserPlatformStatus(reddit, new Map([["reddit", staleAccount]] as any))
+      for (const key of [
+        "app_configured", "oauth_configured", "can_connect", "user_connected", "public_selectable",
+        "can_schedule", "supports_real_posting", "supports_text_posting", "supports_media_posting",
+        "supports_async_dispatch", "native_posting_available",
+      ] as const) assert.equal(availability[key], false)
+      assert.equal(availability.launch_status, "not_configured")
+      assert.equal(availability.connection_status, "NOT_CONFIGURED")
+      assert.equal(availability.config_error, null)
+      assert.equal(availability.provider_username, null)
+      assert.equal(availability.provider_account_id, null)
+      assert.equal(availability.connected_at, null)
+      assert.equal(availability.last_refresh_at, null)
+      assert.equal(availability.supports_assisted_workflow, true)
+      assert.equal(availability.assisted_available, true)
+      assert.deepEqual(availability.blockers, [
+        "REDDIT_NATIVE_POSTING_UNAVAILABLE",
+        "REDDIT_OAUTH_CONNECTION_UNAVAILABLE",
+        "REDDIT_SCHEDULED_AUTOPOST_UNAVAILABLE",
+        "REDDIT_DISPATCH_UNAVAILABLE",
+        "REDDIT_WRITTEN_APPROVAL_PENDING",
+      ])
+    }
+  } finally {
+    if (previous === undefined) delete process.env.AUTOPOST_WEBHOOK_REDDIT
+    else process.env.AUTOPOST_WEBHOOK_REDDIT = previous
+  }
+})
+
+await test("no Reddit OAuth endpoint, provider adapter, or provider destination is introduced", () => {
+  const connectRoute = readFileSync("app/api/autopost/connect/route.ts", "utf8")
+  const runner = readFileSync("app/api/autopost/run/route.ts", "utf8")
+  assert.match(connectRoute, /mode: "external_platform"/)
+  assert.doesNotMatch(connectRoute, /access_token|refresh_token|oauth\.reddit\.com|reddit\.com\/api/i)
+  assert.doesNotMatch(runner, /reddit/i)
 })
 
 await test("runner excludes Reddit and remains gated only to X", () => {

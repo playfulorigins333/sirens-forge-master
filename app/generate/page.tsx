@@ -2386,7 +2386,7 @@ function OutputPanel(props: {
 
     return {
       source: "generate_pack_builder",
-      action: "prepare_autopost_draft",
+      action: autopostPlatform === "reddit" ? "prepare_manual_reddit_handoff" : "prepare_autopost_draft",
       platform: autopostPlatform,
       platforms: [autopostPlatform],
       pack_name: cleanPackName,
@@ -2410,7 +2410,9 @@ function OutputPanel(props: {
 
     const generationIds = getSelectedGenerationIdsForAutopost();
     if (generationIds.length === 0) {
-      setAutopostError("Select at least one database-backed asset before preparing an Autopost draft.");
+      setAutopostError(autopostPlatform === "reddit"
+        ? "Select at least one database-backed asset before preparing a manual Reddit draft."
+        : "Select at least one database-backed asset before preparing an Autopost draft.");
       return;
     }
 
@@ -2419,6 +2421,19 @@ function OutputPanel(props: {
     try {
       const drafts = getCaptionDraftsForAutopost();
       const payload = buildAutopostPayload();
+
+      if (autopostPlatform === "reddit") {
+        if (captionDrafts.length === 0) {
+          setCaptionDrafts(drafts);
+        }
+
+        window.sessionStorage.setItem(
+          "sirensforge:autopost_pack_prefill",
+          JSON.stringify({ ...payload, created_at: Date.now() })
+        );
+        setAutopostSuccess("Manual Reddit draft prepared. Copy or export the caption, or open Reddit to complete the post manually.");
+        return;
+      }
 
       const response = await fetch("/api/autopost/preview", {
         method: "POST",
@@ -2451,8 +2466,8 @@ function OutputPanel(props: {
 
       setAutopostSuccess("Autopost draft prepared. Open the Autopost dashboard to preview, save, and approve the rule.");
     } catch (err: any) {
-      console.error("Autopost preview error:", err);
-      setAutopostError(err?.message || "Prepare Autopost Draft failed.");
+      console.error(autopostPlatform === "reddit" ? "Manual Reddit handoff error:" : "Autopost preview error:", err);
+      setAutopostError(err?.message || (autopostPlatform === "reddit" ? "Prepare Manual Reddit Draft failed." : "Prepare Autopost Draft failed."));
     } finally {
       setAutopostLoadingAction(null);
     }
@@ -2464,14 +2479,16 @@ function OutputPanel(props: {
 
     const generationIds = getSelectedGenerationIdsForAutopost();
     if (generationIds.length === 0) {
-      setAutopostError("Select at least one database-backed asset before sending this pack to Autopost.");
+      setAutopostError(autopostPlatform === "reddit"
+        ? "Select at least one database-backed asset before opening the manual Reddit tools."
+        : "Select at least one database-backed asset before sending this pack to Autopost.");
       return;
     }
 
     const drafts = getCaptionDraftsForAutopost();
     const payload = {
       ...buildAutopostPayload(),
-      action: "prefill_autopost_builder",
+      action: autopostPlatform === "reddit" ? "open_manual_reddit_tools" : "prefill_autopost_builder",
       created_at: Date.now(),
     };
 
@@ -2486,7 +2503,14 @@ function OutputPanel(props: {
       );
     } catch (storageError) {
       console.warn("Autopost prefill storage failed:", storageError);
-      setAutopostError("Could not prepare the Autopost handoff in this browser session.");
+      setAutopostError(autopostPlatform === "reddit"
+        ? "Could not prepare the manual Reddit handoff in this browser session."
+        : "Could not prepare the Autopost handoff in this browser session.");
+      return;
+    }
+
+    if (autopostPlatform === "reddit") {
+      window.location.href = "https://www.reddit.com/";
       return;
     }
 
@@ -3003,7 +3027,7 @@ function OutputPanel(props: {
                       </h4>
                       <p className="mt-1 text-[11px] leading-5 text-gray-400">
                         {autopostPlatform === "reddit"
-                          ? "Native Reddit posting and scheduling are not configured. Copy or export the prepared caption, open Reddit, and complete the post manually."
+                          ? "Reddit remains manual only. No Autopost rule, schedule, dispatch, or native post is created."
                           : "Prepare this selected pack for the Autopost dashboard, then send it to the builder as a prefilled draft. This does not publish, schedule, or simulate a post."}
                       </p>
                     </div>
@@ -3051,7 +3075,9 @@ function OutputPanel(props: {
                   </div>
 
                   <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-500/10 px-3 py-3 text-[11px] leading-5 text-cyan-100">
-                    Autopost rules still require preview, save as draft, approval, and the scheduler. This panel only hands off selected pack data.
+                    {autopostPlatform === "reddit"
+                      ? "Reddit remains manual only. No Autopost rule, schedule, dispatch, or native post is created."
+                      : "Autopost rules still require preview, save as draft, approval, and the scheduler. This panel only hands off selected pack data."}
                   </div>
 
                   {autopostError && (

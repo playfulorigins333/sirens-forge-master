@@ -108,7 +108,7 @@ const LAUNCH_PLATFORM_IDS = ["x", "reddit", "onlyfans", "fanvue"] as const
 
 const FALLBACK_PLATFORMS: Platform[] = [
   { id: "x", name: "X", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS, reason: "Traffic & Discovery: promote content and drive audiences to a paid destination." },
-  { id: "reddit", name: "Reddit", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS, reason: "Traffic & Discovery: promote content and drive audiences to a paid destination." },
+  { id: "reddit", name: "Reddit", launch_status: "not_configured", public_selectable: false, supports_real_posting: false, supports_assisted_workflow: true, status_message: "Manual Reddit handoff only. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval.", reason: "Manual Reddit handoff only. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval." },
   { id: "onlyfans", name: "OnlyFans", launch_status: "coming_soon", public_selectable: false, status_message: "Assisted/manual publishing destination. Use the internal queue to complete OnlyFans posts safely.", reason: "Paid Content: assisted/manual publishing only; no direct API posting or browser automation." },
   { id: "fanvue", name: "Fanvue", launch_status: "coming_soon", public_selectable: false, status_message: "Paid-content destination remains frozen by safety restrictions.", reason: "Paid Content: native posting, scheduling, media upload, and dispatch are not enabled." },
 ]

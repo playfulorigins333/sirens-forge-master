@@ -106,6 +106,7 @@ test("autopost launch UI filters fallback, cards, new selections, and messaging 
 
   assert.match(fallback, /id: "x"/)
   assert.match(fallback, /id: "reddit"/)
+  assert.match(fallback, /id: "reddit"[\s\S]*?launch_status: "not_configured"[\s\S]*?public_selectable: false[\s\S]*?supports_real_posting: false[\s\S]*?supports_assisted_workflow: true/)
   assert.match(fallback, /id: "onlyfans"/)
   assert.match(fallback, /id: "fanvue"/)
   for (const removed of ["fansly", "loyalfans", "justforfans", "Fansly", "LoyalFans", "JustForFans"]) {
@@ -123,7 +124,7 @@ test("autopost launch UI filters fallback, cards, new selections, and messaging 
   assert.match(src, /return "ASSISTED PUBLISHING"/)
   assert.match(src, /return "FROZEN"/)
   assert.match(src, /Promote your paid content and direct followers to OnlyFans or Fanvue\./)
-  assert.match(src, /Native Reddit posting and scheduling are not configured\. Use caption copy\/export and Open Reddit to complete posting manually\./)
+  assert.match(fallback, /Manual Reddit handoff only\. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval\./)
   assert.match(src, /Prepare and complete posts through the assisted Creator Publishing Queue\./)
   assert.match(src, /Paid-content publishing remains unavailable while safety restrictions are in place\./)
   assert.doesNotMatch(platformTab, /section\.title[\s\S]*rounded-full border border-cyan-300\/30 bg-cyan-300\/10 px-3 py-1/)
@@ -145,7 +146,10 @@ test("Reddit launch handoff is visibly manual-only without changing non-Reddit l
   assert.match(src, /autopostPlatform === "reddit" \? "Manual Reddit Handoff" : "Autopost Handoff"/)
   assert.match(src, /autopostPlatform === "reddit" \? "Prepare Manual Reddit Draft" : "Prepare Autopost Draft"/)
   assert.match(src, /autopostPlatform === "reddit" \? "Open Manual Posting Tools" : "Send to Autopost Builder"/)
-  assert.match(src, /Native Reddit posting and scheduling are not configured\. Copy or export the prepared caption, open Reddit, and complete the post manually\./)
+  assert.match(src, /prepare_manual_reddit_handoff/)
+  assert.match(src, /open_manual_reddit_tools/)
+  assert.match(src, /Manual Reddit draft prepared\. Copy or export the caption, or open Reddit to complete the post manually\./)
+  assert.match(src, /Reddit remains manual only\. No Autopost rule, schedule, dispatch, or native post is created\./)
   assert.match(src, /Copy All Captions/)
   assert.match(src, /Export \.TXT/)
   for (const label of ["Fanvue", "OnlyFans", "Fansly", "ManyVids", "X"]) {
@@ -154,10 +158,23 @@ test("Reddit launch handoff is visibly manual-only without changing non-Reddit l
 
   const autopost = client()
   assert.match(autopost, /if \(platform\.id === "reddit"\) return "MANUAL ONLY"/)
-  assert.match(autopost, /Native Reddit posting and scheduling are not configured\. Use caption copy\/export and Open Reddit to complete posting manually\./)
+  assert.match(autopost, /Manual Reddit handoff only\. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval\./)
   assert.match(autopost, /if \(platform\.id === "reddit"\) return "Open Reddit"/)
   assert.match(autopost, /disabled=\{!selectable\}/)
   assert.match(autopost, /const selectable = isPlatformSelectable\(p\)/)
+})
+
+test("Reddit preparation bypasses preview while non-Reddit keeps the generic preview handoff", () => {
+  const src = generate()
+  const prepare = src.slice(src.indexOf("const handlePrepareAutopostDraft"), src.indexOf("const handleOpenAutopostDashboard"))
+  const redditBranch = prepare.slice(prepare.indexOf('if (autopostPlatform === "reddit")'), prepare.indexOf('const response = await fetch("/api/autopost/preview"'))
+
+  assert.match(redditBranch, /window\.sessionStorage\.setItem/)
+  assert.match(redditBranch, /return;/)
+  assert.doesNotMatch(redditBranch, /fetch\(/)
+  assert.match(prepare, /const response = await fetch\("\/api\/autopost\/preview"/)
+  assert.match(prepare, /Autopost draft prepared\. Open the Autopost dashboard to preview, save, and approve the rule\./)
+  assert.match(src, /autopostPlatform === "reddit" \? "open_manual_reddit_tools" : "prefill_autopost_builder"/)
 })
 
 test("legacy platform ids remain displayable while not entering new creator launch UI", () => {
