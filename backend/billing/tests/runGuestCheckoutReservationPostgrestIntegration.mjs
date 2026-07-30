@@ -19,8 +19,24 @@ const base64url=value=>Buffer.from(JSON.stringify(value)).toString("base64url");
 const unsigned=`${base64url({alg:"HS256",typ:"JWT"})}.${base64url({role:"service_role",exp:Math.floor(Date.now()/1000)+300})}`;
 const token=`${unsigned}.${createHmac("sha256",secret).update(unsigned).digest("base64url")}`;
 const call=async(tier)=>fetch("http://127.0.0.1:3100/rpc/acquire_guest_checkout_capacity_reservation",{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({p_purchaser_token_hash:"\\x"+"01".repeat(32),p_network_hash:"\\x"+"02".repeat(32),p_tier:tier})});
+let startupError=null;server.on("error",error=>{startupError=error;logs+=`${error.message}\n`});
+const sanitizedLogs=()=>[databaseUrl,dbUri,password,secret,token].reduce((value,sensitive)=>value.replaceAll(sensitive,"[REDACTED]"),logs).replaceAll(/postgres(?:ql)?:\/\/[^\s]+/g,"postgres://[REDACTED]").trim()||"(no PostgREST logs captured)";
+const waitForPostgrest=async()=>{
+ const deadline=Date.now()+15_000;
+ while(Date.now()<deadline){
+  if(startupError||server.exitCode!==null)throw new Error(`PostgREST exited before readiness.\n${sanitizedLogs()}`);
+  try{
+   const response=await fetch("http://127.0.0.1:3100/");
+   if(response.status===200)return;
+   const body=await response.json().catch(()=>null);
+   if(response.status!==503||body?.code!=="PGRST002")throw new Error(`Unexpected PostgREST readiness response: HTTP ${response.status}.\n${sanitizedLogs()}`);
+  }catch(error){if(error instanceof Error&&error.message.startsWith("Unexpected PostgREST"))throw error;}
+  await new Promise(resolve=>setTimeout(resolve,100));
+ }
+ throw new Error(`Timed out after 15 seconds waiting for PostgREST readiness.\n${sanitizedLogs()}`);
+};
 try{
- for(let i=0;i<50;i++){try{const r=await fetch("http://127.0.0.1:3100/");if(r.status)break}catch{}await new Promise(r=>setTimeout(r,100));}
+ await waitForPostgrest();
  const first=await call("early_bird");if(first.status!==200)throw new Error(`first RPC failed: ${first.status} ${await first.text()}`);const rows=await first.json();assert.equal(rows.length,1);assert.deepEqual(Object.keys(rows[0]).sort(),["expires_at","reservation_id","stripe_session_id"]);assert.equal(rows[0].stripe_session_id,null);
  const retry=await call("early_bird");if(retry.status!==200)throw new Error(`retry RPC failed: ${retry.status} ${await retry.text()}`);const retried=await retry.json();assert.equal(retried[0].reservation_id,rows[0].reservation_id);
  const conflict=await call("og_throne");assert.equal(conflict.status,400);assert.match(await conflict.text(),/reservation_conflict/);
