@@ -8,7 +8,23 @@ const MIN_RATE_LIMIT_SECRET_LENGTH = 32;
 export function payFirstCheckoutEnabled(value: unknown): boolean {
   return typeof value === "string" && value.trim() === "true";
 }
-export const checkoutSupabaseUrl=(serverUrl?:string,publicUrl?:string)=>serverUrl||publicUrl;
+const localHostname=(hostname:string)=>hostname==="localhost"||hostname==="::1"||(/^127(?:\.\d{1,3}){3}$/.test(hostname)&&hostname.split(".").every(part=>Number(part)<=255));
+function validatedServiceOrigin(value:string):string|null{
+  const trimmed=value.trim();
+  if(!trimmed||/[\u0000-\u0020\u007f]/.test(trimmed))return null;
+  try{
+    const url=new URL(trimmed);
+    if(!["http:","https:"].includes(url.protocol)||url.username||url.password||url.search||url.hash)return null;
+    if(url.protocol==="http:"&&!localHostname(url.hostname))return null;
+    return url.origin;
+  }catch{return null}
+}
+export function checkoutSupabaseUrl(serverUrl?:string,publicUrl?:string):string|null{
+  const server=serverUrl?.trim();
+  if(server)return validatedServiceOrigin(serverUrl!);
+  const fallback=publicUrl?.trim();
+  return fallback?validatedServiceOrigin(publicUrl!):null;
+}
 
 type CanonicalAddress={family:4|6;bytes:Buffer};
 function parseIpv4(value:string):Buffer|null {
@@ -63,7 +79,6 @@ export function networkRateLimitHash(source: string, secret: string): string {
 
 export type CheckoutCreationConfiguration = { priceId:string; baseUrl:string; networkHash:string };
 const unsafeHeaderValue=(value:string)=>value.includes(",")||/[\u0000-\u0020\u007f]/.test(value);
-const localHostname=(hostname:string)=>hostname==="localhost"||hostname==="::1"||/^127(?:\.\d{1,3}){3}$/.test(hostname);
 function validatedBaseUrl(value:string):string|null{
   const trimmed=value.trim();if(!trimmed||/[\u0000-\u001f\u007f]/.test(trimmed))return null;
   try{const url=new URL(trimmed);if(!["http:","https:"].includes(url.protocol)||url.username||url.password||url.search||url.hash)return null;
