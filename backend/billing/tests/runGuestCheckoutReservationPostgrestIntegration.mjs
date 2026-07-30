@@ -26,7 +26,7 @@ const waitForPostgrest=async()=>{
  while(Date.now()<deadline){
   if(startupError||server.exitCode!==null)throw new Error(`PostgREST exited before readiness.\n${sanitizedLogs()}`);
   try{
-   const response=await fetch("http://127.0.0.1:3100/");
+   const response=await fetch("http://127.0.0.1:3100/",{headers:{authorization:`Bearer ${token}`}});
    if(response.status===200)return;
    const body=await response.json().catch(()=>null);
    if(response.status!==503||body?.code!=="PGRST002")throw new Error(`Unexpected PostgREST readiness response: HTTP ${response.status}.\n${sanitizedLogs()}`);
