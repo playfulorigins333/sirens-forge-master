@@ -81,8 +81,8 @@ select pg_temp.assert_true((select pg_typeof(expires_at)='timestamp with time zo
 select pg_temp.assert_true((select pg_typeof(stripe_session_id)='text'::regtype and stripe_session_id is null from first_result),'session result');
 select pg_temp.assert_true((select r.profile_id is null and r.purchaser_token_hash=decode(repeat('01',32),'hex') and r.tier='early_bird' and r.status='active' and r.stripe_session_id is null and r.expires_at=f.expires_at from public.checkout_capacity_reservations r cross join first_result f where r.id=f.reservation_id),'inserted reservation');
 select pg_temp.assert_true((select count(*)=1 from public.checkout_guest_rate_limit_attempts a join first_result f on f.reservation_id=a.reservation_id),'one rate attempt');
-select pg_temp.assert_true((select network_hash=decode(repeat('02',32),'hex') from public.checkout_guest_rate_limit_attempts a join first_result f on f.reservation_id=a.reservation_id),'exact rate-limit network hash');
-select pg_temp.assert_true((select expires_at between now()+interval '23 hours 59 minutes' and now()+interval '24 hours 1 minute' from public.checkout_guest_rate_limit_attempts a join first_result f on f.reservation_id=a.reservation_id),'rate-limit expiration');
+select pg_temp.assert_true((select a.network_hash=decode(repeat('02',32),'hex') from public.checkout_guest_rate_limit_attempts a join first_result f on f.reservation_id=a.reservation_id),'exact rate-limit network hash');
+select pg_temp.assert_true((select a.expires_at between now()+interval '23 hours 59 minutes' and now()+interval '24 hours 1 minute' from public.checkout_guest_rate_limit_attempts a join first_result f on f.reservation_id=a.reservation_id),'rate-limit expiration');
 create temp table reuse_result as select * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'early_bird');
 select pg_temp.assert_true((select r.reservation_id=f.reservation_id from reuse_result r cross join first_result f),'same reservation');
 select pg_temp.assert_true((select r.expires_at=f.expires_at from reuse_result r cross join first_result f),'same expiration');
