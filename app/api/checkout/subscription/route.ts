@@ -8,12 +8,13 @@ import { checkoutCreationConfiguration, checkoutSupabaseUrl, PAY_FIRST_HOLD_SECO
 
 export const runtime="nodejs"; export const dynamic="force-dynamic";
 type Reservation={reservation_id:string;expires_at:string;stripe_session_id?:string|null};
+type ConflictingReservation={id:string;tier:PurchasablePlan;status:"active"|"associated";stripe_session_id:string|null};
 type Referral={code:string|null;affiliateUserId:string|null;commissionPercent:number;destination:string|null;connectOnboarded:boolean;payable:boolean};
 export type CheckoutDependencies={
  enabled():boolean; preflight(plan:PurchasablePlan,req:Request):{priceId:string;baseUrl:string;networkHash:string}|null;
- privileged():Promise<{tier(plan:PurchasablePlan):Promise<{is_active:boolean}|null>;reserve(hash:string,networkHash:string,plan:PurchasablePlan):Promise<Reservation>;release(hash:string,plan:PurchasablePlan,id:string):Promise<void>;associate(hash:string,plan:PurchasablePlan,id:string,session:string):Promise<void>;referral(code:string|null):Promise<Referral>}>;
+ privileged():Promise<{tier(plan:PurchasablePlan):Promise<{is_active:boolean}|null>;reserve(hash:string,networkHash:string,plan:PurchasablePlan):Promise<Reservation>;conflicting(hash:string):Promise<ConflictingReservation|null>;release(hash:string,plan:PurchasablePlan,id:string):Promise<void>;expireAssociated(plan:PurchasablePlan,id:string,session:string):Promise<void>;associate(hash:string,plan:PurchasablePlan,id:string,session:string):Promise<void>;referral(code:string|null):Promise<Referral>}>;
  retrievePrice(id:string):Promise<{unitAmount:number|null}>;
- createSession(input:any,key:string):Promise<{id:string;url:string|null}>; retrieveSession(id:string):Promise<{id:string;url:string|null;status?:string|null}>;
+ createSession(input:any,key:string):Promise<{id:string;url:string|null}>; retrieveSession(id:string):Promise<{id:string;url:string|null;status?:string|null}>; expireSession(id:string):Promise<void>;
  generateToken():string;
 };
 type CheckoutEnvironment={readonly [name:string]:string|undefined};
@@ -23,7 +24,7 @@ export function productionCheckoutConfiguration(environment:CheckoutEnvironment,
 }
 const response=(code:string,status:number)=>NextResponse.json({error:code,code},{status});
 type FailureCategory="activation"|"configuration"|"reservation"|"database"|"provider"|"cleanup";
-type FailureStage="activation_gate"|"preflight"|"database_initialization"|"tier_lookup"|"reservation_acquire"|"reservation_validate"|"referral_lookup"|"price_retrieval"|"session_retrieval"|"session_creation"|"session_validation"|"session_association"|"reservation_release";
+type FailureStage="activation_gate"|"preflight"|"database_initialization"|"tier_lookup"|"reservation_acquire"|"reservation_validate"|"reservation_lookup"|"referral_lookup"|"price_retrieval"|"session_retrieval"|"session_expiration"|"session_creation"|"session_validation"|"session_association"|"reservation_expiration"|"reservation_release";
 class CheckoutFailure extends Error{constructor(readonly category:FailureCategory,readonly stage:FailureStage,readonly code:string,readonly status:number){super(code)}}
 const logFailure=(category:FailureCategory,stage:FailureStage)=>console.error("checkout_creation_failure",{category,stage});
 const boundary=async<T>(category:FailureCategory,stage:FailureStage,code:string,status:number,work:()=>Promise<T>)=>{try{return await work()}catch{throw new CheckoutFailure(category,stage,code,status)}};
@@ -39,7 +40,24 @@ export function createCheckoutHandler(deps:CheckoutDependencies){return async(re
   const existing=readPurchaserCookie(req.headers.get("cookie")); const token=existing||deps.generateToken(); const hash=hashPurchaserToken(token);
   const db=await boundary("database","database_initialization",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,deps.privileged);
   const tier=await boundary("database","tier_lookup",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,()=>db.tier(plan)); if(!tier?.is_active)return response(CHECKOUT_ERROR.PLAN_UNAVAILABLE,409);
-  let reservation:Reservation; try{reservation=await db.reserve(hash,config.networkHash,plan)}catch(e:any){const detail=String(e?.code||e?.message);if(detail.includes("rate_limit_hourly")||detail.includes("rate_limit_daily"))return response(CHECKOUT_ERROR.RATE_LIMITED,429);if(detail.includes("sold_out"))return response(CHECKOUT_ERROR.SOLD_OUT,409);throw new CheckoutFailure("reservation","reservation_acquire",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,503)}
+  const acquire=async()=>db.reserve(hash,config.networkHash,plan);
+  let reservation:Reservation; try{reservation=await acquire()}catch(e:any){
+   const detail=String(e?.code||e?.message);
+   if(detail.includes("rate_limit_hourly")||detail.includes("rate_limit_daily"))return response(CHECKOUT_ERROR.RATE_LIMITED,429);
+   if(detail.includes("sold_out"))return response(CHECKOUT_ERROR.SOLD_OUT,409);
+   if(!detail.includes("reservation_conflict"))throw new CheckoutFailure("reservation","reservation_acquire",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,503);
+   const conflict=await boundary("database","reservation_lookup",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,()=>db.conflicting(hash));
+   if(!conflict||conflict.tier===plan)throw new CheckoutFailure("reservation","reservation_acquire",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,409);
+   if(conflict.status==="active"&&!conflict.stripe_session_id){
+    await boundary("cleanup","reservation_release",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,()=>db.release(hash,conflict.tier,conflict.id));
+   }else if(conflict.status==="associated"&&conflict.stripe_session_id){
+    const prior=await boundary("provider","session_retrieval",CHECKOUT_ERROR.CHECKOUT_PROVIDER_FAILURE,502,()=>deps.retrieveSession(conflict.stripe_session_id!));
+    if(prior.id!==conflict.stripe_session_id||!prior.status||!["open","expired"].includes(prior.status))throw new CheckoutFailure("reservation","reservation_acquire",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,409);
+    if(prior.status==="open")await boundary("provider","session_expiration",CHECKOUT_ERROR.CHECKOUT_PROVIDER_FAILURE,502,()=>deps.expireSession(conflict.stripe_session_id!));
+    await boundary("database","reservation_expiration",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,()=>db.expireAssociated(conflict.tier,conflict.id,conflict.stripe_session_id!));
+   }else throw new CheckoutFailure("reservation","reservation_acquire",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,409);
+   reservation=await boundary("reservation","reservation_acquire",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,503,acquire);
+  }
   const expires=Math.floor(new Date(reservation?.expires_at).getTime()/1000),now=Math.floor(Date.now()/1000);
   if(!reservation||typeof reservation.reservation_id!=="string"||!reservation.reservation_id||!Number.isSafeInteger(expires)||expires<=now||expires>now+PAY_FIRST_HOLD_SECONDS+5)throw new CheckoutFailure("reservation","reservation_validate",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,503);
   held={hash,plan,id:reservation.reservation_id,db};
@@ -62,12 +80,15 @@ function productionDependencies():CheckoutDependencies{let resolvedSupabaseUrl:s
  async privileged(){const url=resolvedSupabaseUrl,key=process.env.SUPABASE_SERVICE_ROLE_KEY;if(!url||!key)throw new Error("unavailable");const db=createClient(url,key);return{
   async tier(plan){const{data,error}=await db.from("subscription_tiers").select("is_active").eq("name",plan).maybeSingle();if(error)throw error;return data},
   async reserve(hash,networkHash,plan){const{data,error}=await db.rpc("acquire_guest_checkout_capacity_reservation",{p_purchaser_token_hash:`\\x${hash}`,p_network_hash:`\\x${networkHash}`,p_tier:plan});if(error||!data?.[0]){const e:any=new Error(error?.message||"reservation");e.code=error?.message||"UNAVAILABLE";throw e}return data[0]},
+  async conflicting(hash){const{data,error}=await db.from("checkout_capacity_reservations").select("id,tier,status,stripe_session_id").eq("purchaser_token_hash",`\\x${hash}`).in("status",["active","associated"]).maybeSingle();if(error)throw error;return data as ConflictingReservation|null},
   async release(hash,plan,id){const{error}=await db.from("checkout_capacity_reservations").update({status:"released"}).eq("id",id).eq("tier",plan).eq("purchaser_token_hash",`\\x${hash}`).eq("status","active").is("stripe_session_id",null);if(error)throw error},
+  async expireAssociated(plan,id,session){const{error}=await db.rpc("expire_guest_checkout_session",{p_reservation_id:id,p_tier:plan,p_session_id:session});if(error)throw error},
   async associate(hash,plan,id,session){const{error}=await db.rpc("bind_guest_checkout_session",{p_reservation_id:id,p_purchaser_token_hash:`\\x${hash}`,p_tier:plan,p_session_id:session});if(error)throw error},
   async referral(code){if(!code)return{code:null,affiliateUserId:null,commissionPercent:0,destination:null,connectOnboarded:false,payable:false};const{data:r,error}=await db.from("referral_codes").select("*").eq("code",code).maybeSingle();if(error)throw error;if(!r)return{code:null,affiliateUserId:null,commissionPercent:0,destination:null,connectOnboarded:false,payable:false};const affiliateUserId=r.affiliate_user_id||r.affiliate_id||r.user_id||r.owner_user_id||null,commissionPercent=clampCommissionPercent(r.commission_percent??r.percent??r.commission_rate);if(!affiliateUserId)return{code,affiliateUserId:null,commissionPercent,destination:null,connectOnboarded:false,payable:false};const{data:a,error:profileError}=await db.from("profiles").select("stripe_connect_account_id,stripe_connect_onboarded").eq("id",affiliateUserId).maybeSingle();if(profileError)throw profileError;const destination=a?.stripe_connect_onboarded&&a?.stripe_connect_account_id?String(a.stripe_connect_account_id):null;return{code,affiliateUserId,commissionPercent,destination,connectOnboarded:Boolean(a?.stripe_connect_onboarded),payable:Boolean(destination)}}}
  },
  async retrievePrice(id){const secret=process.env.STRIPE_SECRET_KEY;if(!secret)throw new Error("unavailable");const p=await new Stripe(secret,{apiVersion:"2025-11-17.clover"}).prices.retrieve(id);return{unitAmount:p.unit_amount}},
  async createSession(input,key){const secret=process.env.STRIPE_SECRET_KEY;if(!secret)throw new Error("unavailable");return new Stripe(secret,{apiVersion:"2025-11-17.clover"}).checkout.sessions.create(input,{idempotencyKey:key})},
- async retrieveSession(id){const secret=process.env.STRIPE_SECRET_KEY;if(!secret)throw new Error("unavailable");return new Stripe(secret,{apiVersion:"2025-11-17.clover"}).checkout.sessions.retrieve(id)}
-}}
+ async retrieveSession(id){const secret=process.env.STRIPE_SECRET_KEY;if(!secret)throw new Error("unavailable");return new Stripe(secret,{apiVersion:"2025-11-17.clover"}).checkout.sessions.retrieve(id)},
+ async expireSession(id){const secret=process.env.STRIPE_SECRET_KEY;if(!secret)throw new Error("unavailable");await new Stripe(secret,{apiVersion:"2025-11-17.clover"}).checkout.sessions.expire(id)}
+ }}
 export async function POST(req:Request){return createCheckoutHandler(productionDependencies())(req)}
