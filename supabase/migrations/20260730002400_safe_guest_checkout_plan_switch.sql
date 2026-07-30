@@ -38,7 +38,8 @@ begin
  select count(*) into daily from public.checkout_guest_rate_limit_attempts a where a.network_hash=p_network_hash and a.created_at>now()-interval '24 hours'; if daily>=10 then raise exception 'rate_limit_daily'; end if;
  select x.* into t from public.subscription_tiers x where x.name=p_tier for update; if not found or not coalesce(t.is_active,false) or t.max_slots is null then raise exception 'plan_unavailable'; end if;
  select count(*) into paid from public.user_subscriptions s where s.tier_name=p_tier and s.status in ('active','trialing') and not (p_tier='og_throne' and coalesce(s.metadata->>'counts_toward_seats','true')='false');
- select count(*) into held from public.checkout_capacity_reservations x where x.tier=p_tier and ((x.status='active' and x.stripe_session_id is null and x.expires_at>now()) or x.status='associated');
+ select count(*) into held from public.checkout_capacity_reservations x where x.tier=p_tier and ((x.status='active' and x.stripe_session_id is null and x.expires_at>now()) or x.status='associated')
+  and (x.profile_id is null or not exists(select 1 from public.user_subscriptions s where s.user_id=x.profile_id and s.tier_name=x.tier and s.status in ('active','trialing')));
  if paid+held>=t.max_slots then raise exception 'sold_out'; end if;
  update public.checkout_capacity_reservations set status='expired',updated_at=now() where id=old.id;
  insert into public.checkout_capacity_reservations as x(profile_id,purchaser_token_hash,tier,expires_at) values(null,p_purchaser_token_hash,p_tier,now()+interval '60 minutes') returning x.* into fresh;

@@ -25,6 +25,11 @@ if (!new Set(["postgres:", "postgresql:"]).has(url.protocol) ||
 const bootstrap = String.raw`
 \set ON_ERROR_STOP on
 create extension if not exists pgcrypto;
+do $$ begin
+ if not exists(select 1 from pg_roles where rolname='anon') then create role anon nologin; end if;
+ if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated nologin; end if;
+ if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role nologin; end if;
+end $$;
 drop schema if exists public cascade;
 create schema public;
 
@@ -90,13 +95,23 @@ select pg_temp.assert_true((select stripe_session_id is null from reuse_result),
 select pg_temp.assert_true((select count(*)=1 from public.checkout_capacity_reservations where purchaser_token_hash=decode(repeat('01',32),'hex')),'no duplicate reservation');
 select pg_temp.assert_true((select count(*)=1 from public.checkout_guest_rate_limit_attempts where purchaser_token_hash=decode(repeat('01',32),'hex')),'no duplicate attempt');
 create temp table switch_offer as select * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'og_throne');
-select pg_temp.assert_true((select reservation_tier='early_bird' and reservation_id=(select reservation_id from first_result) from switch_offer),'cross-tier deterministic offer');
-create temp table switch_result as select * from public.switch_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'og_throne',(select reservation_id from first_result),null);
-select pg_temp.assert_true((select reservation_tier='og_throne' and stripe_session_id is null from switch_result),'early bird to OG switch');
+update public.checkout_capacity_reservations set status='associated',stripe_session_id='cs_test_early' where id=(select reservation_id from first_result);
+drop table switch_offer;
+create temp table switch_offer as select * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'og_throne');
+select pg_temp.assert_true((select reservation_tier='early_bird' and reservation_id=(select reservation_id from first_result) and stripe_session_id='cs_test_early' from switch_offer),'associated Early Bird returned for OG acquisition');
+create temp table switch_result as select * from public.switch_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'og_throne',(select reservation_id from first_result),'cs_test_early');
+select pg_temp.assert_true((select reservation_tier='og_throne' and stripe_session_id is null from switch_result),'associated Early Bird to OG switch');
+select pg_temp.assert_true((select status='expired' and stripe_session_id='cs_test_early' from public.checkout_capacity_reservations where id=(select reservation_id from first_result)),'old Early Bird expired');
 select pg_temp.assert_true((select count(*)=1 from public.checkout_capacity_reservations where purchaser_token_hash=decode(repeat('01',32),'hex') and status in ('active','associated')),'one effective reservation after switch');
 select pg_temp.assert_true((select count(*)=2 from public.checkout_guest_rate_limit_attempts where purchaser_token_hash=decode(repeat('01',32),'hex')),'switch counts toward rate limit');
-create temp table reverse_result as select * from public.switch_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'early_bird',(select reservation_id from switch_result),null);
-select pg_temp.assert_true((select reservation_tier='early_bird' from reverse_result),'OG to early bird switch');
+update public.checkout_capacity_reservations set status='associated',stripe_session_id='cs_test_og' where id=(select reservation_id from switch_result);
+create temp table reverse_offer as select * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'early_bird');
+select pg_temp.assert_true((select reservation_tier='og_throne' and reservation_id=(select reservation_id from switch_result) and stripe_session_id='cs_test_og' from reverse_offer),'associated OG returned for Early Bird acquisition');
+create temp table reverse_result as select * from public.switch_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'early_bird',(select reservation_id from switch_result),'cs_test_og');
+select pg_temp.assert_true((select reservation_tier='early_bird' from reverse_result),'associated OG to Early Bird switch');
+select pg_temp.assert_true((select status='expired' and stripe_session_id='cs_test_og' from public.checkout_capacity_reservations where id=(select reservation_id from switch_result)),'old OG expired');
+select pg_temp.assert_true((select count(*)=1 from public.checkout_capacity_reservations where purchaser_token_hash=decode(repeat('01',32),'hex') and tier='early_bird' and status in ('active','associated')),'one effective Early Bird after reverse switch');
+select pg_temp.assert_true((select count(*)=3 from public.checkout_guest_rate_limit_attempts where purchaser_token_hash=decode(repeat('01',32),'hex')),'reverse switch rate-limit attempt exists');
 
 do $$ declare i integer; begin for i in 10..14 loop perform * from public.acquire_guest_checkout_capacity_reservation(decode(lpad(to_hex(i),64,'0'),'hex'),decode(repeat('20',32),'hex'),'early_bird'); end loop; end $$;
 select pg_temp.assert_true((select count(*)=5 from public.checkout_guest_rate_limit_attempts where network_hash=decode(repeat('20',32),'hex')),'five hourly reservations');
@@ -126,10 +141,23 @@ select pg_temp.assert_true(true,'plan unavailable rejection');
 select pg_temp.assert_true((select not exists(select 1 from public.checkout_capacity_reservations where purchaser_token_hash=decode(repeat('51',32),'hex')) and not exists(select 1 from public.checkout_guest_rate_limit_attempts where purchaser_token_hash=decode(repeat('51',32),'hex'))),'plan unavailable atomic');
 do $$ begin perform * from public.acquire_guest_checkout_capacity_reservation(decode('01','hex'),decode(repeat('61',32),'hex'),'early_bird'); raise exception 'missing expected error'; exception when others then if sqlerrm<>'invalid_request' then raise; end if; end $$;
 select pg_temp.assert_true(true,'invalid purchaser hash');
-do $$ begin perform * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('62',32),'hex'),decode('01','hex'),'early_bird'); raise exception 'missing expected error'; exception when others then if sqlerrm<>'malformed_network_hash' then raise; end if; end $$;
+do $$ begin perform * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('62',32),'hex'),decode('01','hex'),'early_bird'); raise exception 'missing expected error'; exception when others then if sqlerrm<>'invalid_request' then raise; end if; end $$;
 select pg_temp.assert_true(true,'invalid network hash');
+-- Capacity parity: the active entitlement is the paid seat; its profile-owned reservation must not count a second time.
+delete from public.checkout_guest_rate_limit_attempts; delete from public.checkout_capacity_reservations; delete from public.user_subscriptions;
+update public.subscription_tiers set is_active=true,max_slots=2 where name='early_bird';
+insert into public.checkout_capacity_reservations(profile_id,purchaser_token_hash,tier,status,expires_at,stripe_session_id)
+ values('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',null,'early_bird','associated',now()+interval '60 minutes','cs_profile_entitled');
+insert into public.user_subscriptions(user_id,tier_name,status) values('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','early_bird','active');
+create temp table parity_source as select * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('71',32),'hex'),decode(repeat('72',32),'hex'),'og_throne');
+update public.checkout_capacity_reservations set status='associated',stripe_session_id='cs_parity_og' where id=(select reservation_id from parity_source);
+create temp table parity_offer as select * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('71',32),'hex'),decode(repeat('72',32),'hex'),'early_bird');
+create temp table parity_result as select * from public.switch_guest_checkout_capacity_reservation(decode(repeat('71',32),'hex'),decode(repeat('72',32),'hex'),'early_bird',(select reservation_id from parity_offer),'cs_parity_og');
+select pg_temp.assert_true((select reservation_tier='early_bird' from parity_result),'entitlement-represented hold excluded during switch capacity check');
+select pg_temp.assert_true((select count(*)=2 from public.checkout_capacity_reservations where tier='early_bird' and status in ('active','associated')),'paid profile reservation plus switched guest coexist at two-seat capacity');
+select pg_temp.assert_true((select count(*)=1 from public.user_subscriptions where tier_name='early_bird' and status in ('active','trialing')),'capacity parity fixture retains one paid seat');
 select pg_temp.assert_true((select count(*)=1 from first_result),'function executed in PostgreSQL');
-do $$ declare total integer; begin select value into total from assertion_counter; if total<>40 then raise exception 'expected 40 assertions, got %',total; end if; raise notice 'GUEST_CHECKOUT_RESERVATION_ASSERTIONS_PASSED=%',total; end $$;
+do $$ declare total integer; begin select value into total from assertion_counter; if total<>48 then raise exception 'expected 48 assertions, got %',total; end if; raise notice 'GUEST_CHECKOUT_RESERVATION_ASSERTIONS_PASSED=%',total; end $$;
 `;
 
 const sql = `${bootstrap}\n${migrationPaths.map((path) => readFileSync(path, "utf8")).join("\n")}\n${assertions}`;
@@ -138,4 +166,4 @@ appendFileSync(diagnosticsPath, `postgres_version=${spawnSync("psql", [databaseU
 process.stdout.write(result.stdout);
 process.stderr.write(result.stderr);
 if (result.status !== 0) process.exit(result.status ?? 1);
-console.log("GUEST_CHECKOUT_RESERVATION_ASSERTIONS_PASSED=40");
+console.log("GUEST_CHECKOUT_RESERVATION_ASSERTIONS_PASSED=48");
