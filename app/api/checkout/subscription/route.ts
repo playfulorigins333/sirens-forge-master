@@ -8,10 +8,11 @@ import { checkoutCreationConfiguration, checkoutSupabaseUrl, PAY_FIRST_HOLD_SECO
 
 export const runtime="nodejs"; export const dynamic="force-dynamic";
 type Reservation={reservation_id:string;expires_at:string;stripe_session_id?:string|null;reservation_tier?:PurchasablePlan};
+type SwitchResult=Reservation&{switch_outcome:"switched"|"closed_sold_out"|"closed_rate_limited"|"closed_plan_unavailable"|"closed_database_failure"};
 type Referral={code:string|null;affiliateUserId:string|null;commissionPercent:number;destination:string|null;connectOnboarded:boolean;payable:boolean};
 export type CheckoutDependencies={
  enabled():boolean; preflight(plan:PurchasablePlan,req:Request):{priceId:string;baseUrl:string;networkHash:string}|null;
- privileged():Promise<{tier(plan:PurchasablePlan):Promise<{is_active:boolean}|null>;reserve(hash:string,networkHash:string,plan:PurchasablePlan):Promise<Reservation>;switchReservation(hash:string,networkHash:string,plan:PurchasablePlan,id:string,session:string|null):Promise<Reservation>;release(hash:string,plan:PurchasablePlan,id:string):Promise<void>;associate(hash:string,plan:PurchasablePlan,id:string,session:string):Promise<void>;referral(code:string|null):Promise<Referral>}>;
+ privileged():Promise<{tier(plan:PurchasablePlan):Promise<{is_active:boolean}|null>;reserve(hash:string,networkHash:string,plan:PurchasablePlan):Promise<Reservation>;switchReservation(hash:string,networkHash:string,plan:PurchasablePlan,id:string,session:string):Promise<SwitchResult>;release(hash:string,plan:PurchasablePlan,id:string):Promise<void>;associate(hash:string,plan:PurchasablePlan,id:string,session:string):Promise<void>;referral(code:string|null):Promise<Referral>}>;
  retrievePrice(id:string):Promise<{unitAmount:number|null}>;
  createSession(input:any,key:string):Promise<{id:string;url:string|null}>; retrieveSession(id:string):Promise<{id:string;url:string|null;status?:string|null}>; expireSession(id:string):Promise<{id:string;status?:string|null}>;
  generateToken():string;
@@ -42,8 +43,10 @@ export function createCheckoutHandler(deps:CheckoutDependencies){return async(re
   let reservation:Reservation; try{reservation=await db.reserve(hash,config.networkHash,plan)}catch(e:any){const detail=String(e?.code||e?.message);if(detail.includes("rate_limit_hourly")||detail.includes("rate_limit_daily"))return response(CHECKOUT_ERROR.RATE_LIMITED,429);if(detail.includes("sold_out"))return response(CHECKOUT_ERROR.SOLD_OUT,409);throw new CheckoutFailure("reservation","reservation_acquire",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,503)}
   if(reservation.reservation_tier&&reservation.reservation_tier!==plan){
    const oldTier=reservation.reservation_tier; const oldSession=reservation.stripe_session_id||null;
-   if(oldSession){try{const expired=await deps.expireSession(oldSession);if(expired.id!==oldSession||expired.status!=="expired")throw new Error("not_expired")}catch{logFailure("provider","plan_switch_expiration");return response(CHECKOUT_ERROR.PLAN_SWITCH_UNAVAILABLE,409)}}
-   try{reservation=await db.switchReservation(hash,config.networkHash,plan,reservation.reservation_id,oldSession)}catch(e:any){const detail=String(e?.code||e?.message);if(detail.includes("rate_limit_"))return response(CHECKOUT_ERROR.RATE_LIMITED,429);if(detail.includes("sold_out"))return response(CHECKOUT_ERROR.SOLD_OUT,409);logFailure("database","plan_switch_commit");return response(CHECKOUT_ERROR.PLAN_SWITCH_UNAVAILABLE,409)}
+   if(!oldSession)return response(CHECKOUT_ERROR.PLAN_SWITCH_UNAVAILABLE,409);
+   try{const current=await deps.retrieveSession(oldSession);if(current.id!==oldSession||!current.status||!['open','expired','complete'].includes(current.status))throw new Error("unsafe_state");if(current.status==='complete')return response(CHECKOUT_ERROR.PLAN_SWITCH_UNAVAILABLE,409);if(current.status==='open'){const expired=await deps.expireSession(oldSession);if(expired.id!==oldSession||expired.status!=="expired")throw new Error("not_expired")}}catch{logFailure("provider","plan_switch_expiration");return response(CHECKOUT_ERROR.PLAN_SWITCH_UNAVAILABLE,409)}
+   let switched:SwitchResult;try{switched=await db.switchReservation(hash,config.networkHash,plan,reservation.reservation_id,oldSession)}catch{logFailure("database","plan_switch_commit");return response(CHECKOUT_ERROR.PLAN_SWITCH_RETRY,409)}
+   if(switched.switch_outcome==="closed_sold_out")return response(CHECKOUT_ERROR.SOLD_OUT,409);if(switched.switch_outcome==="closed_rate_limited")return response(CHECKOUT_ERROR.RATE_LIMITED,429);if(switched.switch_outcome!=="switched")return response(CHECKOUT_ERROR.PLAN_SWITCH_RETRY,409);reservation=switched;
    console.info("checkout_plan_switch",{outcome:"replaced",from:oldTier,to:plan});
   }
   const expires=Math.floor(new Date(reservation?.expires_at).getTime()/1000),now=Math.floor(Date.now()/1000);
