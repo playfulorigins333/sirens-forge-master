@@ -1,0 +1,28 @@
+name: Checkout Plan Switch
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checkout-plan-switch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact pull request head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci
+      - name: Run checkout plan-switch tests
+        run: npx tsx backend/billing/tests/checkoutPlanSwitch.test.ts
+      - name: TypeScript check
+        run: npx tsc --noEmit
