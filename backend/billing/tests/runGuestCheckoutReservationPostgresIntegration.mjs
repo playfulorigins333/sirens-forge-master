@@ -3,7 +3,7 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const databaseUrl = process.env.GUEST_CHECKOUT_RESERVATION_DATABASE_URL;
 const diagnosticsPath = "/tmp/guest-checkout-reservation-postgres-diagnostics.log";
-const migrationPaths = ["supabase/migrations/20260729002300_fix_guest_checkout_reservation_ambiguity.sql", "supabase/migrations/20260730002400_safe_guest_checkout_plan_switch.sql"];
+const migrationPaths = ["supabase/migrations/20260729002300_fix_guest_checkout_reservation_ambiguity.sql", "supabase/migrations/20260730002400_safe_guest_checkout_plan_switch.sql", "supabase/migrations/20260730002500_reload_checkout_rpc_schema.sql"];
 
 writeFileSync(diagnosticsPath, `Guest checkout reservation PostgreSQL diagnostics\nstarted_at=${new Date().toISOString()}\n`);
 

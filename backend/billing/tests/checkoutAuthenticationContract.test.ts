@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createCheckoutHandler,productionCheckoutConfiguration,type CheckoutDependencies } from "../../../app/api/checkout/subscription/route";
 import { checkoutApplicationBaseUrl, checkoutCreationConfiguration, checkoutSupabaseUrl, networkRateLimitHash, payFirstCheckoutEnabled, trustedSourceNetwork } from "../../../lib/billing/checkoutCreationSecurity";
@@ -94,6 +95,10 @@ reset();response=await createCheckoutHandler(deps({privileged:async()=>({...rese
 reset();response=await createCheckoutHandler(deps({createSession:async()=>{throw new Error("provider payload secret")}}))(request({tierName:"early_bird"}));const sanitizedBody=JSON.stringify(await response.json());equal(response.status,502);equal(sanitizedBody.includes("provider payload secret"),false);equal(state.released,0);
 equal(logged.every(entry=>entry[0]==="checkout_creation_failure"&&Object.keys(entry[1]).sort().join(",")==="category,stage"),true);for(const forbidden of ["secret database detail","8.8.8.8","public-project","service-role","inert-rate","ambiguous provider","association sql","referral sql","cleanup reservation","cs_existing",reservation,token,networkHash])equal(JSON.stringify(logged).includes(forbidden),false);
 const routeSource=readFileSync("app/api/checkout/subscription/route.ts","utf8"),pricingSource=readFileSync("app/pricing/PricingClient.tsx","utf8");equal(routeSource.includes("user-agent"),false);equal(routeSource.includes("NEXT_PUBLIC_PAY_FIRST"),false);equal(pricingSource.includes("Too many checkout attempts. Please try again later."),true);equal(pricingSource.includes("finally"),true);equal(pricingSource.includes("/login?checkout_intent"),false);
+const planSwitchMigration=readFileSync("supabase/migrations/20260730002400_safe_guest_checkout_plan_switch.sql");
+equal(createHash("sha1").update(`blob ${planSwitchMigration.length}\0`).update(planSwitchMigration).digest("hex"),"d65f47c65737d7f9df164cff08c7f24659dfc833");
+const schemaReloadMigration=readFileSync("supabase/migrations/20260730002500_reload_checkout_rpc_schema.sql","utf8");
+equal(schemaReloadMigration.includes("notify pgrst, 'reload schema';"),true);
 equal(state.networks.every(value=>value.length===64),true);equal(JSON.stringify(state.networks).includes("8.8.8.8"),false);equal(routeSource.includes("p_network_hash"),true);
 console.log(`checkoutAuthenticationContract: ${assertions} assertions passed`);
 console.error=originalConsoleError;
