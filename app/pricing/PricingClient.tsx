@@ -228,7 +228,7 @@ export default function PricingClient() {
       const json = await res.json().catch(() => ({} as any));
 
       if (!res.ok) {
-        const messages: Record<string,string> = { UNAUTHENTICATED:"Please sign in to continue.",PROFILE_UNAVAILABLE:"Your profile is not ready yet.",EXISTING_ENTITLEMENT:"An existing launch entitlement prevents another purchase.",PLAN_UNAVAILABLE:"That plan is not available.",SOLD_OUT:"That plan is sold out.",RATE_LIMITED:"Too many checkout attempts. Please try again later.",TEMPORARILY_UNAVAILABLE:"Checkout is temporarily unavailable. Please try again.",PROVIDER_FAILURE:"The payment provider is temporarily unavailable." };
+        const messages: Record<string,string> = { UNAUTHENTICATED:"Please sign in to continue.",PROFILE_UNAVAILABLE:"Your profile is not ready yet.",EXISTING_ENTITLEMENT:"An existing launch entitlement prevents another purchase.",PLAN_UNAVAILABLE:"That plan is not available.",SOLD_OUT:"That plan is sold out.",RATE_LIMITED:"Too many checkout attempts. Please try again later.",PLAN_SWITCH_UNAVAILABLE:"We couldn't safely close your previous checkout. Return to it to finish, or try switching again.",TEMPORARILY_UNAVAILABLE:"Checkout is temporarily unavailable. Please try again.",PROVIDER_FAILURE:"The payment provider is temporarily unavailable." };
         const msg = messages[json?.code] || "Checkout is temporarily unavailable. Please try again.";
         setCheckoutError(msg);
         return;

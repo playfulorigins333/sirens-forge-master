@@ -3,7 +3,7 @@ import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const databaseUrl = process.env.GUEST_CHECKOUT_RESERVATION_DATABASE_URL;
 const diagnosticsPath = "/tmp/guest-checkout-reservation-postgres-diagnostics.log";
-const migrationPath = "supabase/migrations/20260729002300_fix_guest_checkout_reservation_ambiguity.sql";
+const migrationPaths = ["supabase/migrations/20260729002300_fix_guest_checkout_reservation_ambiguity.sql", "supabase/migrations/20260730002400_safe_guest_checkout_plan_switch.sql"];
 
 writeFileSync(diagnosticsPath, `Guest checkout reservation PostgreSQL diagnostics\nstarted_at=${new Date().toISOString()}\n`);
 
@@ -70,7 +70,7 @@ begin if not coalesce(ok,false) then raise exception 'assertion_failed: %',label
 select pg_temp.assert_true(to_regprocedure('public.acquire_guest_checkout_capacity_reservation(bytea,bytea,text)') is not null,'signature');
 select pg_temp.assert_true((select prosecdef from pg_proc where oid='public.acquire_guest_checkout_capacity_reservation(bytea,bytea,text)'::regprocedure),'security definer');
 select pg_temp.assert_true((select proconfig=array['search_path=public, pg_temp'] from pg_proc where oid='public.acquire_guest_checkout_capacity_reservation(bytea,bytea,text)'::regprocedure),'search path');
-select pg_temp.assert_true(pg_get_function_result('public.acquire_guest_checkout_capacity_reservation(bytea,bytea,text)'::regprocedure)='TABLE(reservation_id uuid, expires_at timestamp with time zone, stripe_session_id text)','return shape');
+select pg_temp.assert_true(pg_get_function_result('public.acquire_guest_checkout_capacity_reservation(bytea,bytea,text)'::regprocedure)='TABLE(reservation_id uuid, expires_at timestamp with time zone, stripe_session_id text, reservation_tier text)','return shape');
 insert into public.subscription_tiers(name,is_active,max_slots) values ('early_bird',true,100),('og_throne',true,100);
 select pg_temp.assert_true((select is_active and max_slots>0 from public.subscription_tiers where name='early_bird'),'active Early Bird');
 create temp table first_result as select * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'early_bird');
@@ -78,7 +78,7 @@ select pg_temp.assert_true(true,'acquisition executed without 42702');
 select pg_temp.assert_true((select count(*)=1 from first_result),'one result');
 select pg_temp.assert_true((select reservation_id is not null and pg_typeof(reservation_id)='uuid'::regtype from first_result),'uuid result');
 select pg_temp.assert_true((select pg_typeof(expires_at)='timestamp with time zone'::regtype and expires_at between now()+interval '59 minutes' and now()+interval '61 minutes' from first_result),'expiration result');
-select pg_temp.assert_true((select pg_typeof(stripe_session_id)='text'::regtype and stripe_session_id is null from first_result),'session result');
+select pg_temp.assert_true((select pg_typeof(stripe_session_id)='text'::regtype and stripe_session_id is null and reservation_tier='early_bird' from first_result),'session result');
 select pg_temp.assert_true((select r.profile_id is null and r.purchaser_token_hash=decode(repeat('01',32),'hex') and r.tier='early_bird' and r.status='active' and r.stripe_session_id is null and r.expires_at=f.expires_at from public.checkout_capacity_reservations r cross join first_result f where r.id=f.reservation_id),'inserted reservation');
 select pg_temp.assert_true((select count(*)=1 from public.checkout_guest_rate_limit_attempts a join first_result f on f.reservation_id=a.reservation_id),'one rate attempt');
 select pg_temp.assert_true((select a.network_hash=decode(repeat('02',32),'hex') from public.checkout_guest_rate_limit_attempts a join first_result f on f.reservation_id=a.reservation_id),'exact rate-limit network hash');
@@ -89,8 +89,14 @@ select pg_temp.assert_true((select r.expires_at=f.expires_at from reuse_result r
 select pg_temp.assert_true((select stripe_session_id is null from reuse_result),'same null session');
 select pg_temp.assert_true((select count(*)=1 from public.checkout_capacity_reservations where purchaser_token_hash=decode(repeat('01',32),'hex')),'no duplicate reservation');
 select pg_temp.assert_true((select count(*)=1 from public.checkout_guest_rate_limit_attempts where purchaser_token_hash=decode(repeat('01',32),'hex')),'no duplicate attempt');
-do $$ begin perform * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'og_throne'); raise exception 'missing expected error'; exception when others then if sqlerrm<>'reservation_conflict' then raise; end if; end $$;
-select pg_temp.assert_true(true,'cross-tier conflict');
+create temp table switch_offer as select * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'og_throne');
+select pg_temp.assert_true((select reservation_tier='early_bird' and reservation_id=(select reservation_id from first_result) from switch_offer),'cross-tier deterministic offer');
+create temp table switch_result as select * from public.switch_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'og_throne',(select reservation_id from first_result),null);
+select pg_temp.assert_true((select reservation_tier='og_throne' and stripe_session_id is null from switch_result),'early bird to OG switch');
+select pg_temp.assert_true((select count(*)=1 from public.checkout_capacity_reservations where purchaser_token_hash=decode(repeat('01',32),'hex') and status in ('active','associated')),'one effective reservation after switch');
+select pg_temp.assert_true((select count(*)=2 from public.checkout_guest_rate_limit_attempts where purchaser_token_hash=decode(repeat('01',32),'hex')),'switch counts toward rate limit');
+create temp table reverse_result as select * from public.switch_guest_checkout_capacity_reservation(decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'early_bird',(select reservation_id from switch_result),null);
+select pg_temp.assert_true((select reservation_tier='early_bird' from reverse_result),'OG to early bird switch');
 
 do $$ declare i integer; begin for i in 10..14 loop perform * from public.acquire_guest_checkout_capacity_reservation(decode(lpad(to_hex(i),64,'0'),'hex'),decode(repeat('20',32),'hex'),'early_bird'); end loop; end $$;
 select pg_temp.assert_true((select count(*)=5 from public.checkout_guest_rate_limit_attempts where network_hash=decode(repeat('20',32),'hex')),'five hourly reservations');
@@ -123,13 +129,13 @@ select pg_temp.assert_true(true,'invalid purchaser hash');
 do $$ begin perform * from public.acquire_guest_checkout_capacity_reservation(decode(repeat('62',32),'hex'),decode('01','hex'),'early_bird'); raise exception 'missing expected error'; exception when others then if sqlerrm<>'malformed_network_hash' then raise; end if; end $$;
 select pg_temp.assert_true(true,'invalid network hash');
 select pg_temp.assert_true((select count(*)=1 from first_result),'function executed in PostgreSQL');
-do $$ declare total integer; begin select value into total from assertion_counter; if total<>36 then raise exception 'expected 36 assertions, got %',total; end if; raise notice 'GUEST_CHECKOUT_RESERVATION_ASSERTIONS_PASSED=%',total; end $$;
+do $$ declare total integer; begin select value into total from assertion_counter; if total<>40 then raise exception 'expected 40 assertions, got %',total; end if; raise notice 'GUEST_CHECKOUT_RESERVATION_ASSERTIONS_PASSED=%',total; end $$;
 `;
 
-const sql = `${bootstrap}\n${readFileSync(migrationPath, "utf8")}\n${assertions}`;
+const sql = `${bootstrap}\n${migrationPaths.map((path) => readFileSync(path, "utf8")).join("\n")}\n${assertions}`;
 const result = spawnSync("psql", [databaseUrl, "-X", "-v", "ON_ERROR_STOP=1"], { input: sql, encoding: "utf8" });
 appendFileSync(diagnosticsPath, `postgres_version=${spawnSync("psql", [databaseUrl, "-AtX", "-c", "show server_version"], { encoding: "utf8" }).stdout.trim()}\n${result.stdout}${result.stderr}`);
 process.stdout.write(result.stdout);
 process.stderr.write(result.stderr);
 if (result.status !== 0) process.exit(result.status ?? 1);
-console.log("GUEST_CHECKOUT_RESERVATION_ASSERTIONS_PASSED=36");
+console.log("GUEST_CHECKOUT_RESERVATION_ASSERTIONS_PASSED=40");
