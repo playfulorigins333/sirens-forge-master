@@ -2,11 +2,28 @@ import { createHmac } from "node:crypto";
 
 export const PAY_FIRST_HOLD_SECONDS = 60 * 60;
 export const RATE_LIMIT_RETENTION_HOURS = 25;
-export const TRUSTED_NETWORK_HEADER = "x-vercel-forwarded-for";
+export const TRUSTED_NETWORK_HEADERS = ["x-vercel-forwarded-for", "x-forwarded-for", "x-real-ip"] as const;
 const MIN_RATE_LIMIT_SECRET_LENGTH = 32;
 
 export function payFirstCheckoutEnabled(value: unknown): boolean {
   return typeof value === "string" && value.trim() === "true";
+}
+const localHostname=(hostname:string)=>hostname==="localhost"||hostname==="::1"||(/^127(?:\.\d{1,3}){3}$/.test(hostname)&&hostname.split(".").every(part=>Number(part)<=255));
+function validatedServiceOrigin(value:string):string|null{
+  const trimmed=value.trim();
+  if(!trimmed||/[\u0000-\u0020\u007f]/.test(trimmed))return null;
+  try{
+    const url=new URL(trimmed);
+    if(!["http:","https:"].includes(url.protocol)||url.username||url.password||url.search||url.hash)return null;
+    if(url.protocol==="http:"&&!localHostname(url.hostname))return null;
+    return url.origin;
+  }catch{return null}
+}
+export function checkoutSupabaseUrl(serverUrl?:string,publicUrl?:string):string|null{
+  const server=serverUrl?.trim();
+  if(server)return validatedServiceOrigin(serverUrl!);
+  const fallback=publicUrl?.trim();
+  return fallback?validatedServiceOrigin(publicUrl!):null;
 }
 
 type CanonicalAddress={family:4|6;bytes:Buffer};
@@ -43,10 +60,15 @@ export function isPublicIp(value: string): boolean {
 }
 
 export function trustedSourceNetwork(request: Request): string | null {
-  const raw=request.headers.get(TRUSTED_NETWORK_HEADER);
-  if (!raw || raw.includes(",")) return null;
-  const value=raw.trim();
-  return value && isPublicIp(value) ? value : null;
+  let selected:CanonicalAddress|null=null, selectedText:string|null=null;
+  for(const header of TRUSTED_NETWORK_HEADERS){
+    const raw=request.headers.get(header);if(raw===null)continue;
+    if(!raw.trim()||raw.includes(","))return null;
+    const value=raw.trim(),address=canonicalAddress(value);if(!address||!eligible(address))return null;
+    if(selected&&(selected.family!==address.family||!selected.bytes.equals(address.bytes)))return null;
+    selected=address;selectedText=value;
+  }
+  return selectedText;
 }
 
 export function networkRateLimitHash(source: string, secret: string): string {
@@ -56,12 +78,32 @@ export function networkRateLimitHash(source: string, secret: string): string {
 }
 
 export type CheckoutCreationConfiguration = { priceId:string; baseUrl:string; networkHash:string };
+const unsafeHeaderValue=(value:string)=>value.includes(",")||/[\u0000-\u0020\u007f]/.test(value);
+function validatedBaseUrl(value:string):string|null{
+  const trimmed=value.trim();if(!trimmed||/[\u0000-\u001f\u007f]/.test(trimmed))return null;
+  try{const url=new URL(trimmed);if(!["http:","https:"].includes(url.protocol)||url.username||url.password||url.search||url.hash)return null;
+    if(url.protocol==="http:"&&!localHostname(url.hostname))return null;
+    return url.origin+url.pathname.replace(/\/+$/g,"");
+  }catch{return null}
+}
+export function checkoutApplicationBaseUrl(request:Request,configured?:string):string|null{
+  if(configured!==undefined&&configured.trim()!=="")return validatedBaseUrl(configured);
+  const protoRaw=request.headers.get("x-forwarded-proto"),forwardedHost=request.headers.get("x-forwarded-host"),hostRaw=forwardedHost??request.headers.get("host");
+  if(protoRaw!==null&&unsafeHeaderValue(protoRaw))return null;
+  if(hostRaw!==null&&unsafeHeaderValue(hostRaw))return null;
+  if(hostRaw!==null){
+    const host=hostRaw.trim();if(!host||/[\/?#@]/.test(host))return null;
+    let fallbackProtocol:string;try{fallbackProtocol=new URL(request.url).protocol.replace(":","")}catch{return null}
+    const protocol=(protoRaw?.trim()||fallbackProtocol).toLowerCase();
+    return validatedBaseUrl(`${protocol}://${host}`);
+  }
+  try{return validatedBaseUrl(new URL(request.url).origin)}catch{return null}
+}
 export function checkoutCreationConfiguration(input:{request:Request;rateLimitSecret?:string;supabaseUrl?:string;serviceRoleKey?:string;stripeSecret?:string;priceId?:string;canonicalUrl?:string}):CheckoutCreationConfiguration|null {
   const source=trustedSourceNetwork(input.request);
-  if(!source||!input.rateLimitSecret||!input.supabaseUrl||!input.serviceRoleKey||!input.stripeSecret||!input.priceId||!input.canonicalUrl)return null;
+  const baseUrl=checkoutApplicationBaseUrl(input.request,input.canonicalUrl);
+  if(!source||!input.rateLimitSecret||!input.supabaseUrl||!input.serviceRoleKey||!input.stripeSecret||!input.priceId||!baseUrl)return null;
   try{
-    const canonical=new URL(input.canonicalUrl);
-    if(canonical.protocol!=="https:"||canonical.username||canonical.password||canonical.search||canonical.hash)return null;
-    return{priceId:input.priceId,baseUrl:canonical.origin+canonical.pathname.replace(/\/$/,""),networkHash:networkRateLimitHash(source,input.rateLimitSecret)};
+    return{priceId:input.priceId,baseUrl,networkHash:networkRateLimitHash(source,input.rateLimitSecret)};
   }catch{return null}
 }
