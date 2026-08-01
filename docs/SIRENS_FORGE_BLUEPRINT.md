@@ -29,7 +29,9 @@ The source priority is application code, migrations/schema files, tests, Git his
 
 **Implemented but not live-tested.** Repository pages exist for `/`, `/pricing`, `/faq`, `/contact`, `/terms`, `/privacy`, `/acceptable-use`, `/content-removal`, `/dmca`, `/complaints`, `/community-guidelines`, `/underage-policy`, `/age`, `/blocked-content`, `/2257-exemption`, and `/affiliate-terms`. The proxy’s explicit public allowlist is narrower: `/`, `/login`, `/pricing`, `/faq`, `/contact`, `/content-removal`, `/terms`, `/privacy`, and `/acceptable-use` (plus static/API/auth prefixes). Therefore “a page exists” and “the page is anonymously public” are not interchangeable.
 
-**Unknown / requires verification.** The repository references `sirensforge.vip`, but it does not prove which apex or `www` aliases currently resolve, which deployment each alias serves, or the public response for every policy/contact path. Verify DNS/aliases and HTTP responses separately before calling them live.
+**Verified in Production.** Read-only Vercel inspection verified that deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi`, serving commit `7522c54e83c02b0fff15b7ab57364f711cb1bf67`, owns these aliases: `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`. Safe public GET requests on 2026-08-01 verified that `https://sirensforge.vip/` returns `307` to `www.sirensforge.vip`; `https://www.sirensforge.vip/`, `/pricing`, `/contact`, and `/content-removal` return `200`. The Contact page displays `admin@sirensforge.vip`.
+
+**Unknown / requires verification.** The complete public-policy route matrix remains unverified. In particular, an existing page file does not prove anonymous access when its path is absent from the proxy’s explicit public allowlist.
 
 ## 4. Authentication and account model
 
@@ -119,9 +121,9 @@ Use server-authenticated identity on every privileged route, verify webhook sign
 
 ## 18. Vercel deployment model
 
-**Verified in Production.** The recorded recovery promoted commit `7522c54e83c02b0fff15b7ab57364f711cb1bf67` to Production after the recovery and Connect-security PRs.
+**Verified in Production.** Deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi` serves commit `7522c54e83c02b0fff15b7ab57364f711cb1bf67` after the recovery and Connect-security PRs. It currently owns `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`; the apex redirect and selected `www` responses are verified in Section 3.
 
-**Unknown / requires verification.** Git, a green build, a successful Vercel deployment, a Production-target label, and custom-domain aliases are separate facts. For an authorized promotion, record the Git SHA and deployment identifier, verify the target, explicitly verify apex/`www` aliases, and make safe public GET/HEAD requests. Never use an external mutation as a smoke test.
+For every future authorized promotion, treat Git state, a green build, a successful Vercel deployment, a Production-target label, and custom-domain aliases as separate facts. Record the Git SHA and deployment identifier, verify the target, explicitly verify apex/`www` aliases, and make safe public GET/HEAD requests. Never use an external mutation as a smoke test.
 
 ## 19. Repository structure
 
@@ -158,7 +160,7 @@ For each change, start with diff/scope checks, then run the narrowest relevant t
 - **Offline:** generation pods and all real-compute/post-generation proof.
 - **Planned:** a redesigned payment-first Checkout contract.
 - **Present but inactive:** Reddit placeholder; creator-publishing recurring scheduling at its last documented checkpoint.
-- **Unknown / requires verification:** current custom-domain alias mapping and route responses; remote migration/RLS/cron state beyond the recorded checkout recovery; current provider configuration/scopes; comprehensive API authorization; complete paid Checkout/webhook/entitlement/reconciliation behavior; live Connect onboarding; legal/operational execution of safety policies; provider-by-provider publishing readiness.
+- **Unknown / requires verification:** the complete public-route and policy-route response matrix; anonymous accessibility of routes not explicitly allowlisted; remote migration/RLS/cron state beyond the recorded checkout recovery; current provider configuration/scopes; comprehensive API authorization; complete paid Checkout/webhook/entitlement/reconciliation behavior; live Connect onboarding; legal/operational execution of safety policies; provider-by-provider publishing readiness.
 - **Conflict to preserve:** several policy pages exist, but `proxy.ts` does not explicitly list all of them as public. Public accessibility must be tested rather than inferred.
 
 ## 23. Recommended engineering sequence
