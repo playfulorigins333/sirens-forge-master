@@ -1,73 +1,397 @@
+// app/api/checkout/subscription/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
-import { normalizeReferral } from "@/lib/auth/checkoutContinuation";
-import { CHECKOUT_ERROR, LAUNCH_PLAN_POLICY, checkoutSessionIdempotencyKey, isPurchasablePlan, paymentMethodTypesForLaunchPlan, type PurchasablePlan } from "@/lib/billing/launchCheckoutPolicy";
-import { PAY_FIRST_CHECKOUT_CONTRACT, PURCHASER_COOKIE, generatePurchaserToken, hashPurchaserToken, purchaserCookieOptions, readPurchaserCookie } from "@/lib/billing/payFirstCheckout";
-import { checkoutCreationConfiguration, checkoutSupabaseUrl, PAY_FIRST_HOLD_SECONDS, payFirstCheckoutEnabled } from "@/lib/billing/checkoutCreationSecurity";
+import { supabaseServer } from "@/lib/supabaseServer";
+import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 
-export const runtime="nodejs"; export const dynamic="force-dynamic";
-type Reservation={reservation_id:string;expires_at:string;stripe_session_id?:string|null};
-type Referral={code:string|null;affiliateUserId:string|null;commissionPercent:number;destination:string|null;connectOnboarded:boolean;payable:boolean};
-export type CheckoutDependencies={
- enabled():boolean; preflight(plan:PurchasablePlan,req:Request):{priceId:string;baseUrl:string;networkHash:string}|null;
- privileged():Promise<{tier(plan:PurchasablePlan):Promise<{is_active:boolean}|null>;reserve(hash:string,networkHash:string,plan:PurchasablePlan):Promise<Reservation>;release(hash:string,plan:PurchasablePlan,id:string):Promise<void>;associate(hash:string,plan:PurchasablePlan,id:string,session:string):Promise<void>;referral(code:string|null):Promise<Referral>}>;
- retrievePrice(id:string):Promise<{unitAmount:number|null}>;
- createSession(input:any,key:string):Promise<{id:string;url:string|null}>; retrieveSession(id:string):Promise<{id:string;url:string|null;status?:string|null}>;
- generateToken():string;
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/* ──────────────────────────────────────────────
+   Stripe setup
+────────────────────────────────────────────── */
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
+  apiVersion: "2025-11-17.clover" as any,
+});
+
+/* ──────────────────────────────────────────────
+   Supabase (service role – authoritative)
+────────────────────────────────────────────── */
+const SUPABASE_URL =
+  process.env.SUPABASE_URL ||
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  "";
+
+const SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  "";
+
+const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+/* ──────────────────────────────────────────────
+   Launch rules
+────────────────────────────────────────────── */
+const LAUNCH_TIERS = ["og_throne", "early_bird", "prime_access"] as const;
+type LaunchTier = (typeof LAUNCH_TIERS)[number];
+
+const PRICE_ID_MAP: Record<LaunchTier, string | undefined> = {
+  og_throne: process.env.STRIPE_PRICE_OG_THRONE,
+  early_bird: process.env.STRIPE_PRICE_EARLY_BIRD,
+  prime_access: process.env.STRIPE_PRICE_PRIME_ACCESS,
 };
-type CheckoutEnvironment={readonly [name:string]:string|undefined};
-export function productionCheckoutConfiguration(environment:CheckoutEnvironment,plan:PurchasablePlan,request:Request){
- const supabaseUrl=checkoutSupabaseUrl(environment.SUPABASE_URL,environment.NEXT_PUBLIC_SUPABASE_URL);
- return{enabled:payFirstCheckoutEnabled(environment.PAY_FIRST_CHECKOUT_ENABLED),supabaseUrl,configuration:checkoutCreationConfiguration({request,rateLimitSecret:environment.CHECKOUT_RATE_LIMIT_SECRET,supabaseUrl:supabaseUrl??undefined,serviceRoleKey:environment.SUPABASE_SERVICE_ROLE_KEY,stripeSecret:environment.STRIPE_SECRET_KEY,priceId:environment[LAUNCH_PLAN_POLICY[plan].priceEnvironment],canonicalUrl:environment.NEXT_PUBLIC_APP_URL})};
+
+/* ──────────────────────────────────────────────
+   Helpers
+────────────────────────────────────────────── */
+function safeString(v: unknown) {
+  if (typeof v !== "string") return "";
+  return v.trim();
 }
-const response=(code:string,status:number)=>NextResponse.json({error:code,code},{status});
-type FailureCategory="activation"|"configuration"|"reservation"|"database"|"provider"|"cleanup";
-type FailureStage="activation_gate"|"preflight"|"database_initialization"|"tier_lookup"|"reservation_acquire"|"reservation_validate"|"referral_lookup"|"price_retrieval"|"session_retrieval"|"session_creation"|"session_validation"|"session_association"|"reservation_release";
-class CheckoutFailure extends Error{constructor(readonly category:FailureCategory,readonly stage:FailureStage,readonly code:string,readonly status:number){super(code)}}
-const logFailure=(category:FailureCategory,stage:FailureStage)=>console.error("checkout_creation_failure",{category,stage});
-const boundary=async<T>(category:FailureCategory,stage:FailureStage,code:string,status:number,work:()=>Promise<T>)=>{try{return await work()}catch{throw new CheckoutFailure(category,stage,code,status)}};
-export const clampCommissionPercent=(v:unknown)=>Math.min(100,Math.max(0,Number.isFinite(Number(v))?Number(v):0));
-export function createCheckoutHandler(deps:CheckoutDependencies){return async(req:Request)=>{
- let held:{hash:string;plan:PurchasablePlan;id:string;db:Awaited<ReturnType<CheckoutDependencies["privileged"]>>}|null=null,providerMayExist=false;
- try{
-  if(!deps.enabled())throw new CheckoutFailure("activation","activation_gate",CHECKOUT_ERROR.CHECKOUT_INACTIVE,503);
-  const body=await req.json().catch(()=>({})); const plan=body?.tierName??body?.tier;
-  if(!isPurchasablePlan(plan))return response(CHECKOUT_ERROR.PLAN_UNAVAILABLE,400);
-  const suppliedKeys=Object.keys(body||{}); if(suppliedKeys.some(k=>!["tier","tierName","referral","referralCode"].includes(k)))return response(CHECKOUT_ERROR.PLAN_UNAVAILABLE,400);
-  let config:ReturnType<CheckoutDependencies["preflight"]>;try{config=deps.preflight(plan,req)}catch{throw new CheckoutFailure("configuration","preflight",CHECKOUT_ERROR.CHECKOUT_CONFIGURATION_FAILURE,503)}if(!config)throw new CheckoutFailure("configuration","preflight",CHECKOUT_ERROR.CHECKOUT_CONFIGURATION_FAILURE,503);
-  const existing=readPurchaserCookie(req.headers.get("cookie")); const token=existing||deps.generateToken(); const hash=hashPurchaserToken(token);
-  const db=await boundary("database","database_initialization",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,deps.privileged);
-  const tier=await boundary("database","tier_lookup",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,()=>db.tier(plan)); if(!tier?.is_active)return response(CHECKOUT_ERROR.PLAN_UNAVAILABLE,409);
-  let reservation:Reservation; try{reservation=await db.reserve(hash,config.networkHash,plan)}catch(e:any){const detail=String(e?.code||e?.message);if(detail.includes("rate_limit_hourly")||detail.includes("rate_limit_daily"))return response(CHECKOUT_ERROR.RATE_LIMITED,429);if(detail.includes("sold_out"))return response(CHECKOUT_ERROR.SOLD_OUT,409);throw new CheckoutFailure("reservation","reservation_acquire",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,503)}
-  const expires=Math.floor(new Date(reservation?.expires_at).getTime()/1000),now=Math.floor(Date.now()/1000);
-  if(!reservation||typeof reservation.reservation_id!=="string"||!reservation.reservation_id||!Number.isSafeInteger(expires)||expires<=now||expires>now+PAY_FIRST_HOLD_SECONDS+5)throw new CheckoutFailure("reservation","reservation_validate",CHECKOUT_ERROR.CHECKOUT_RESERVATION_FAILURE,503);
-  held={hash,plan,id:reservation.reservation_id,db};
-  if(reservation.stripe_session_id){providerMayExist=true;const retry=await boundary("provider","session_retrieval",CHECKOUT_ERROR.CHECKOUT_PROVIDER_FAILURE,502,()=>deps.retrieveSession(reservation.stripe_session_id!));if(retry.id===reservation.stripe_session_id&&retry.status==="open"&&retry.url&&/^https:\/\/checkout\.stripe\.com\//.test(retry.url)){const out=NextResponse.json({url:retry.url});out.cookies.set(PURCHASER_COOKIE,token,purchaserCookieOptions(process.env.NODE_ENV==="production"));return out}throw new CheckoutFailure("provider","session_validation",CHECKOUT_ERROR.CHECKOUT_PROVIDER_FAILURE,502)}
-  const referral=await boundary("database","referral_lookup",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,()=>db.referral(normalizeReferral(body?.referralCode??body?.referral))); const commission=clampCommissionPercent(referral.commissionPercent),platform=clampCommissionPercent(100-commission);
-  const connect=referral.payable&&referral.connectOnboarded&&referral.destination?"destination_charge":"none";
-  const metadata={checkout_contract:PAY_FIRST_CHECKOUT_CONTRACT,reservation_id:reservation.reservation_id,tier_name:plan,stripe_price_id:config.priceId,referral_code:referral.code||"",affiliate_user_id:referral.affiliateUserId||"",commission_percent:String(commission),platform_fee_percent:String(platform),connect_destination_account:referral.destination||"",connect_onboarded:referral.connectOnboarded?"true":"false",connect_mode:connect,purchase_mode:LAUNCH_PLAN_POLICY[plan].mode};
-  const input:any={mode:LAUNCH_PLAN_POLICY[plan].mode,customer_creation:plan==="og_throne"?"always":undefined,payment_method_types:paymentMethodTypesForLaunchPlan(plan,process.env.STRIPE_OG_BNPL_METHODS),line_items:[{price:config.priceId,quantity:1}],success_url:`${config.baseUrl}/checkout/complete?session_id={CHECKOUT_SESSION_ID}&reservation=${encodeURIComponent(reservation.reservation_id)}`,cancel_url:`${config.baseUrl}/pricing?checkout=canceled&tier=${plan}`,expires_at:expires,metadata};
-  if(plan==="og_throne"){input.payment_intent_data={metadata};if(connect==="destination_charge"){const price=await boundary("provider","price_retrieval",CHECKOUT_ERROR.CHECKOUT_PROVIDER_FAILURE,502,()=>deps.retrievePrice(config.priceId));if(!Number.isSafeInteger(price.unitAmount)||(price.unitAmount as number)<0)throw new CheckoutFailure("provider","price_retrieval",CHECKOUT_ERROR.CHECKOUT_PROVIDER_FAILURE,502);input.payment_intent_data.application_fee_amount=Math.round((price.unitAmount as number)*platform/100);input.payment_intent_data.transfer_data={destination:referral.destination}}}
-  else{input.subscription_data={metadata};if(connect==="destination_charge"){input.subscription_data.application_fee_percent=platform;input.subscription_data.transfer_data={destination:referral.destination}}}
-  providerMayExist=true;
-  const session=await boundary("provider","session_creation",CHECKOUT_ERROR.CHECKOUT_PROVIDER_FAILURE,502,()=>deps.createSession(input,checkoutSessionIdempotencyKey(reservation.reservation_id)));if(!session.id||!session.url||!/^https:\/\/checkout\.stripe\.com\//.test(session.url))throw new CheckoutFailure("provider","session_validation",CHECKOUT_ERROR.CHECKOUT_PROVIDER_FAILURE,502);
-  await boundary("database","session_association",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503,()=>db.associate(hash,plan,reservation.reservation_id,session.id));held=null;const out=NextResponse.json({url:session.url});out.cookies.set(PURCHASER_COOKIE,token,purchaserCookieOptions(process.env.NODE_ENV==="production"));return out;
- }catch(error){const failure=error instanceof CheckoutFailure?error:new CheckoutFailure("database","database_initialization",CHECKOUT_ERROR.CHECKOUT_DATABASE_FAILURE,503);if(held&&!providerMayExist)try{await held.db.release(held.hash,held.plan,held.id)}catch{logFailure("cleanup","reservation_release")};logFailure(failure.category,failure.stage);return response(failure.code,failure.status)}
-}}
-function productionDependencies():CheckoutDependencies{let resolvedSupabaseUrl:string|null=null;return{
- enabled(){return payFirstCheckoutEnabled(process.env.PAY_FIRST_CHECKOUT_ENABLED)},
- preflight(plan,req){const resolved=productionCheckoutConfiguration(process.env,plan,req);resolvedSupabaseUrl=resolved.supabaseUrl;return resolved.configuration},
- generateToken:generatePurchaserToken,
- async privileged(){const url=resolvedSupabaseUrl,key=process.env.SUPABASE_SERVICE_ROLE_KEY;if(!url||!key)throw new Error("unavailable");const db=createClient(url,key);return{
-  async tier(plan){const{data,error}=await db.from("subscription_tiers").select("is_active").eq("name",plan).maybeSingle();if(error)throw error;return data},
-  async reserve(hash,networkHash,plan){const{data,error}=await db.rpc("acquire_guest_checkout_capacity_reservation",{p_purchaser_token_hash:`\\x${hash}`,p_network_hash:`\\x${networkHash}`,p_tier:plan});if(error||!data?.[0]){const e:any=new Error(error?.message||"reservation");e.code=error?.message||"UNAVAILABLE";throw e}return data[0]},
-  async release(hash,plan,id){const{error}=await db.from("checkout_capacity_reservations").update({status:"released"}).eq("id",id).eq("tier",plan).eq("purchaser_token_hash",`\\x${hash}`).eq("status","active").is("stripe_session_id",null);if(error)throw error},
-  async associate(hash,plan,id,session){const{error}=await db.rpc("bind_guest_checkout_session",{p_reservation_id:id,p_purchaser_token_hash:`\\x${hash}`,p_tier:plan,p_session_id:session});if(error)throw error},
-  async referral(code){if(!code)return{code:null,affiliateUserId:null,commissionPercent:0,destination:null,connectOnboarded:false,payable:false};const{data:r,error}=await db.from("referral_codes").select("*").eq("code",code).maybeSingle();if(error)throw error;if(!r)return{code:null,affiliateUserId:null,commissionPercent:0,destination:null,connectOnboarded:false,payable:false};const affiliateUserId=r.affiliate_user_id||r.affiliate_id||r.user_id||r.owner_user_id||null,commissionPercent=clampCommissionPercent(r.commission_percent??r.percent??r.commission_rate);if(!affiliateUserId)return{code,affiliateUserId:null,commissionPercent,destination:null,connectOnboarded:false,payable:false};const{data:a,error:profileError}=await db.from("profiles").select("stripe_connect_account_id,stripe_connect_onboarded").eq("id",affiliateUserId).maybeSingle();if(profileError)throw profileError;const destination=a?.stripe_connect_onboarded&&a?.stripe_connect_account_id?String(a.stripe_connect_account_id):null;return{code,affiliateUserId,commissionPercent,destination,connectOnboarded:Boolean(a?.stripe_connect_onboarded),payable:Boolean(destination)}}}
- },
- async retrievePrice(id){const secret=process.env.STRIPE_SECRET_KEY;if(!secret)throw new Error("unavailable");const p=await new Stripe(secret,{apiVersion:"2025-11-17.clover"}).prices.retrieve(id);return{unitAmount:p.unit_amount}},
- async createSession(input,key){const secret=process.env.STRIPE_SECRET_KEY;if(!secret)throw new Error("unavailable");return new Stripe(secret,{apiVersion:"2025-11-17.clover"}).checkout.sessions.create(input,{idempotencyKey:key})},
- async retrieveSession(id){const secret=process.env.STRIPE_SECRET_KEY;if(!secret)throw new Error("unavailable");return new Stripe(secret,{apiVersion:"2025-11-17.clover"}).checkout.sessions.retrieve(id)}
-}}
-export async function POST(req:Request){return createCheckoutHandler(productionDependencies())(req)}
+
+function toPercentNumber(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function clampPercent(n: number) {
+  if (!Number.isFinite(n)) return 0;
+  if (n < 0) return 0;
+  if (n > 100) return 100;
+  return n;
+}
+
+function getBaseUrl(req: Request) {
+  // Prefer explicit env (best practice)
+  const env = safeString(process.env.NEXT_PUBLIC_APP_URL);
+  if (env) return env.replace(/\/+$/, "");
+
+  // Fallback: derive from request (prevents deploy-time “undefined URL” issues)
+  const proto = req.headers.get("x-forwarded-proto") || "https";
+  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || "";
+  const derived = host ? `${proto}://${host}` : "";
+  return derived.replace(/\/+$/, "");
+}
+
+function missingEnv(keys: string[]) {
+  return keys.filter((k) => !safeString((process.env as any)[k]));
+}
+
+type ReferralResolution = {
+  ok: boolean;
+  referralCode: string | null;
+  affiliateUserId: string | null;
+  commissionPercent: number; // 0..100
+  connectAccountId: string | null;
+  connectOnboarded: boolean;
+};
+
+async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolution> {
+  const referralCode = safeString(referralCodeRaw);
+
+  if (!referralCode) {
+    return {
+      ok: false,
+      referralCode: null,
+      affiliateUserId: null,
+      commissionPercent: 0,
+      connectAccountId: null,
+      connectOnboarded: false,
+    };
+  }
+
+  const { data: referralRow, error: refErr } = await supabase
+    .from("referral_codes")
+    .select("*")
+    .eq("code", referralCode)
+    .maybeSingle();
+
+  if (refErr || !referralRow) {
+    return {
+      ok: false,
+      referralCode,
+      affiliateUserId: null,
+      commissionPercent: 0,
+      connectAccountId: null,
+      connectOnboarded: false,
+    };
+  }
+
+  const affiliateUserId =
+    safeString((referralRow as any).affiliate_user_id) ||
+    safeString((referralRow as any).affiliate_id) ||
+    safeString((referralRow as any).user_id) ||
+    safeString((referralRow as any).owner_user_id) ||
+    null;
+
+  const maybePercent =
+    toPercentNumber((referralRow as any).commission_percent) ??
+    toPercentNumber((referralRow as any).commissionPercent) ??
+    toPercentNumber((referralRow as any).percent) ??
+    toPercentNumber((referralRow as any).commission_rate) ??
+    null;
+
+  const commissionPercent = clampPercent(maybePercent ?? 0);
+
+  if (!affiliateUserId) {
+    return {
+      ok: true,
+      referralCode,
+      affiliateUserId: null,
+      commissionPercent,
+      connectAccountId: null,
+      connectOnboarded: false,
+    };
+  }
+
+  const { data: profileRow, error: profErr } = await supabase
+    .from("profiles")
+    .select("stripe_connect_account_id, stripe_connect_onboarded")
+    .eq("id", affiliateUserId)
+    .maybeSingle();
+
+  if (profErr || !profileRow) {
+    return {
+      ok: true,
+      referralCode,
+      affiliateUserId,
+      commissionPercent,
+      connectAccountId: null,
+      connectOnboarded: false,
+    };
+  }
+
+  const connectAccountId = safeString((profileRow as any).stripe_connect_account_id) || null;
+  const connectOnboarded = Boolean((profileRow as any).stripe_connect_onboarded);
+
+  const payable = connectOnboarded && !!connectAccountId;
+
+  return {
+    ok: true,
+    referralCode,
+    affiliateUserId,
+    commissionPercent,
+    connectAccountId: payable ? connectAccountId : null,
+    connectOnboarded: payable,
+  };
+}
+
+async function computePlatformFeeAmountCents(
+  priceId: string,
+  platformFeePercent: number
+): Promise<number> {
+  const price = await stripe.prices.retrieve(priceId);
+  const unitAmount = typeof price.unit_amount === "number" ? price.unit_amount : null;
+
+  if (unitAmount == null) {
+    throw new Error("Price unit_amount missing — cannot compute application_fee_amount.");
+  }
+
+  const fee = Math.round((unitAmount * clampPercent(platformFeePercent)) / 100);
+  return fee < 0 ? 0 : fee;
+}
+
+/* ──────────────────────────────────────────────
+   POST /api/checkout/subscription
+────────────────────────────────────────────── */
+export async function POST(req: Request) {
+  try {
+    // Hard guardrails: fail with clear server error (not silent)
+    const missing = [
+      ...missingEnv(["STRIPE_SECRET_KEY"]),
+      ...(SUPABASE_URL ? [] : ["SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL"]),
+      ...(SERVICE_ROLE_KEY ? [] : ["SUPABASE_SERVICE_ROLE_KEY"]),
+    ];
+
+    if (missing.length > 0) {
+      console.error("❌ Missing required env:", missing);
+      return NextResponse.json(
+        { error: `Server misconfigured: missing ${missing.join(", ")}` },
+        { status: 500 }
+      );
+    }
+
+    const authSupabase = await supabaseServer();
+    const {
+      data: { user },
+      error: userError,
+    } = await authSupabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json(
+        { error: "Authentication required", code: "UNAUTHENTICATED", redirectTo: "/login" },
+        { status: 401 }
+      );
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("id, email, stripe_customer_id")
+      .or(`id.eq.${user.id},user_id.eq.${user.id}`)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      console.error("❌ Checkout profile lookup failed:", profileError);
+      return NextResponse.json({ error: "Profile not found" }, { status: 403 });
+    }
+
+    const stripeCustomerId = await getOrCreateStripeCustomer(
+      profile.id,
+      user.email ?? profile.email ?? undefined
+    );
+
+    const body = await req.json().catch(() => ({} as any));
+
+    const tierName = body?.tierName as LaunchTier | undefined;
+    const referralCode = body?.referralCode;
+
+    if (!tierName) {
+      return NextResponse.json({ error: "Missing tierName" }, { status: 400 });
+    }
+
+    if (!LAUNCH_TIERS.includes(tierName)) {
+      return NextResponse.json({ error: "Tier not available for launch" }, { status: 400 });
+    }
+
+    const priceId = PRICE_ID_MAP[tierName];
+    if (!priceId) {
+      console.error("❌ Missing Stripe price env for tier:", tierName);
+      return NextResponse.json({ error: "Stripe price not configured for tier" }, { status: 500 });
+    }
+
+    const baseUrl = getBaseUrl(req);
+    if (!baseUrl) {
+      console.error("❌ Could not determine base URL (NEXT_PUBLIC_APP_URL missing and host unavailable)");
+      return NextResponse.json({ error: "Server misconfigured: app URL missing" }, { status: 500 });
+    }
+
+    const successUrl = `${baseUrl}/billing/success`;
+    const cancelUrl = `${baseUrl}/billing/cancel`;
+
+    /* ──────────────────────────────────────────────
+       1️⃣ Load tier limits
+    ────────────────────────────────────────────── */
+    const { data: tierRow, error: tierErr } = await supabase
+      .from("subscription_tiers")
+      .select("id, name, display_name, stripe_price_id, price_monthly, is_active")
+      .eq("name", tierName)
+      .eq("is_active", true)
+      .single();
+
+    if (tierErr || !tierRow) {
+      return NextResponse.json({ error: "Subscription tier not found" }, { status: 404 });
+    }
+
+    // Seat-cap enforcement intentionally only uses columns present in the live
+    // subscription_tiers schema. Do not query legacy tier_name/max_slots fields here.
+
+    /* ──────────────────────────────────────────────
+       2.5️⃣ Resolve referral (optional)
+    ────────────────────────────────────────────── */
+    const referral = await resolveReferral(referralCode);
+
+    const platformFeePercent = clampPercent(100 - referral.commissionPercent);
+
+    const sharedMetadata: Record<string, string> = {
+      user_id: user.id,
+      profile_id: profile.id,
+      tier_name: tierName,
+      stripe_price_id: priceId,
+      referral_code: referral.referralCode ?? "",
+      affiliate_user_id: referral.affiliateUserId ?? "",
+      commission_percent: String(referral.commissionPercent),
+      platform_fee_percent: String(platformFeePercent),
+      connect_destination_account: referral.connectAccountId ?? "",
+      connect_onboarded: referral.connectOnboarded ? "true" : "false",
+    };
+
+    /* ──────────────────────────────────────────────
+       3️⃣ Create Stripe Checkout Session
+    ────────────────────────────────────────────── */
+
+    // OG = ONE-TIME PAYMENT
+    if (tierName === "og_throne") {
+      if (referral.connectOnboarded && referral.connectAccountId) {
+        const applicationFeeAmount = await computePlatformFeeAmountCents(priceId, platformFeePercent);
+
+        const session = await stripe.checkout.sessions.create({
+          mode: "payment",
+          customer: stripeCustomerId,
+          client_reference_id: profile.id,
+          line_items: [{ price: priceId, quantity: 1 }],
+          success_url: successUrl,
+          cancel_url: cancelUrl,
+          metadata: { ...sharedMetadata, type: "one_time", connect_mode: "destination_charge" },
+          payment_intent_data: {
+            application_fee_amount: applicationFeeAmount,
+            transfer_data: { destination: referral.connectAccountId },
+            metadata: { ...sharedMetadata, type: "one_time", connect_mode: "destination_charge" },
+          },
+        });
+
+        return NextResponse.json({ url: session.url });
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        customer: stripeCustomerId,
+        client_reference_id: profile.id,
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: { ...sharedMetadata, type: "one_time", connect_mode: "none" },
+        payment_intent_data: {
+          metadata: { ...sharedMetadata, type: "one_time", connect_mode: "none" },
+        },
+      });
+
+      return NextResponse.json({ url: session.url });
+    }
+
+    // EARLY BIRD / PRIME = SUBSCRIPTION
+    if (referral.connectOnboarded && referral.connectAccountId) {
+      const session = await stripe.checkout.sessions.create({
+        mode: "subscription",
+        customer: stripeCustomerId,
+        client_reference_id: profile.id,
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata: { ...sharedMetadata, type: "subscription", connect_mode: "destination_charge" },
+        subscription_data: {
+          application_fee_percent: platformFeePercent,
+          transfer_data: { destination: referral.connectAccountId },
+          metadata: { ...sharedMetadata, type: "subscription", connect_mode: "destination_charge" },
+        },
+      });
+
+      return NextResponse.json({ url: session.url });
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      mode: "subscription",
+      customer: stripeCustomerId,
+      client_reference_id: profile.id,
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: { ...sharedMetadata, type: "subscription", connect_mode: "none" },
+      subscription_data: {
+        metadata: { ...sharedMetadata, type: "subscription", connect_mode: "none" },
+      },
+    });
+
+    return NextResponse.json({ url: session.url });
+  } catch (err: any) {
+    console.error("❌ Checkout route error:", err);
+    return NextResponse.json(
+      { error: err?.message ?? "Checkout failed" },
+      { status: 500 }
+    );
+  }
+}
