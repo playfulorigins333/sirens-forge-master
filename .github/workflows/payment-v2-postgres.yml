@@ -1,0 +1,36 @@
+name: Payment V2 PostgreSQL Integration
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/20260801002800_payment_first_v2_contract.sql'
+      - 'backend/payment-v2/tests/**'
+      - '.github/workflows/payment-v2-postgres.yml'
+      - 'package.json'
+  workflow_dispatch:
+jobs:
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      PAYMENT_V2_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Supplemental source contract
+        run: npm run test:payment-v2-contract
+      - name: Disposable PostgreSQL behavior and concurrency
+        run: npm run test:payment-v2-postgres

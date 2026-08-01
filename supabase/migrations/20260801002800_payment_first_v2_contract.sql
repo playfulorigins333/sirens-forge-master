@@ -60,15 +60,20 @@ create table public.payment_v2_allocations (
 
 create table public.payment_v2_reconciliation_evidence (
   id uuid primary key default gen_random_uuid(),
-  purchase_id uuid not null references public.payment_v2_purchases(id),
-  event_kind text not null check (event_kind in ('PAYMENT_CONFIRMED','CLAIMED')),
+  hold_id uuid not null references public.payment_v2_holds(id),
+  purchase_id uuid references public.payment_v2_purchases(id),
+  event_kind text not null check (event_kind in ('PAYMENT_CONFIRMED','SESSION_EXPIRED_UNPAID','PAYMENT_CANCELED_UNPAID','CLAIMED')),
   provider_event_id text,
   occurred_at timestamptz not null,
   recorded_at timestamptz not null default now(),
-  unique (purchase_id, event_kind),
-  check ((event_kind = 'PAYMENT_CONFIRMED' and provider_event_id is not null) or
-         (event_kind = 'CLAIMED' and provider_event_id is null))
+  unique (hold_id, event_kind),
+  check ((event_kind in ('PAYMENT_CONFIRMED','SESSION_EXPIRED_UNPAID','PAYMENT_CANCELED_UNPAID') and provider_event_id is not null) or
+         (event_kind = 'CLAIMED' and provider_event_id is null)),
+  check ((event_kind in ('PAYMENT_CONFIRMED','CLAIMED')) = (purchase_id is not null))
 );
+create unique index payment_v2_one_provider_event
+  on public.payment_v2_reconciliation_evidence(provider_event_id)
+  where provider_event_id is not null;
 
 alter table public.payment_v2_holds enable row level security;
 alter table public.payment_v2_purchases enable row level security;
@@ -82,19 +87,26 @@ declare v_hold public.payment_v2_holds%rowtype; v_limit integer;
 begin
   if octet_length(p_purchaser_hash) <> 32 or p_tier not in ('og_throne','early_bird')
      or p_expires_at <= now() or p_expires_at > now() + interval '2 hours' then raise exception 'invalid_request'; end if;
-  perform pg_advisory_xact_lock(hashtextextended('payment_v2_capacity:' || p_tier, 2800));
+  -- Credential lock precedes tier locks everywhere. Lock both tier keys in lexical
+  -- order so simultaneous cross-tier requests for one purchaser cannot deadlock.
+  perform pg_advisory_xact_lock(hashtextextended('payment_v2_credential:' || encode(p_purchaser_hash,'hex'), 2800));
+  perform pg_advisory_xact_lock(hashtextextended('payment_v2_capacity:early_bird', 2800));
+  perform pg_advisory_xact_lock(hashtextextended('payment_v2_capacity:og_throne', 2800));
+  update public.payment_v2_holds set state = 'EXPIRED_UNPAID', updated_at = now()
+    where purchaser_credential_hash = p_purchaser_hash and state = 'HELD'
+      and stripe_checkout_session_id is null and expires_at <= now();
   select * into v_hold from public.payment_v2_holds
     where purchaser_credential_hash = p_purchaser_hash
-      and state in ('HELD','SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED') for update;
+      and ((state = 'HELD' and expires_at > now()) or state in ('SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED')) for update;
   if found then
     if v_hold.tier <> p_tier then raise exception 'effective_hold_conflict'; end if;
     return query select v_hold.id, v_hold.state, v_hold.expires_at; return;
   end if;
   update public.payment_v2_holds set state = 'EXPIRED_UNPAID', updated_at = now()
-    where tier = p_tier and state = 'HELD' and expires_at <= now();
+    where tier = p_tier and state = 'HELD' and stripe_checkout_session_id is null and expires_at <= now();
   v_limit := case p_tier when 'og_throne' then 50 else 120 end;
   if (select count(*) from public.payment_v2_holds where tier = p_tier
-      and state in ('HELD','SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED')) >= v_limit then raise exception 'sold_out'; end if;
+      and ((state='HELD' and expires_at>now()) or state in ('SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED'))) >= v_limit then raise exception 'sold_out'; end if;
   insert into public.payment_v2_holds(purchaser_credential_hash,tier,expires_at)
     values(p_purchaser_hash,p_tier,p_expires_at) returning * into v_hold;
   return query select v_hold.id, v_hold.state, v_hold.expires_at;
@@ -117,7 +129,7 @@ create function public.payment_v2_record_paid(p_hold_id uuid, p_purchaser_hash b
   p_customer_id text, p_price_id text, p_payment_intent_id text, p_subscription_id text,
   p_provider_event_id text, p_provider_confirmed_at timestamptz)
 returns text language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_hold public.payment_v2_holds%rowtype; v_purchase public.payment_v2_purchases%rowtype;
+declare v_hold public.payment_v2_holds%rowtype; v_purchase public.payment_v2_purchases%rowtype; v_tier public.subscription_tiers%rowtype; v_tier_count bigint;
 begin
   if octet_length(p_purchaser_hash) <> 32 or btrim(coalesce(p_session_id,''))='' or btrim(coalesce(p_customer_id,''))=''
      or btrim(coalesce(p_price_id,''))='' or btrim(coalesce(p_provider_event_id,''))='' or p_provider_confirmed_at is null then raise exception 'invalid_request'; end if;
@@ -134,12 +146,16 @@ begin
        and v_purchase.provider_event_id=p_provider_event_id and v_purchase.provider_confirmed_at=p_provider_confirmed_at then return 'already_recorded'; end if;
     raise exception 'purchase_conflict';
   end if;
+  select count(*) into v_tier_count from public.subscription_tiers where name=v_hold.tier and is_active is true;
+  if v_tier_count<>1 then raise exception 'authoritative_tier_ambiguous_or_inactive'; end if;
+  select * into v_tier from public.subscription_tiers where name=v_hold.tier and is_active is true;
+  if v_tier.stripe_price_id is null or v_tier.stripe_price_id<>p_price_id then raise exception 'price_mismatch'; end if;
   if v_hold.state <> 'SESSION_ASSOCIATED' then raise exception 'invalid_state'; end if;
   insert into public.payment_v2_purchases(hold_id,purchaser_credential_hash,tier,stripe_checkout_session_id,stripe_customer_id,stripe_price_id,stripe_payment_intent_id,stripe_subscription_id,provider_event_id,provider_confirmed_at)
     values(p_hold_id,p_purchaser_hash,v_hold.tier,p_session_id,p_customer_id,p_price_id,p_payment_intent_id,p_subscription_id,p_provider_event_id,p_provider_confirmed_at) returning * into v_purchase;
   update public.payment_v2_holds set state='PAID_UNCLAIMED',updated_at=now() where id=p_hold_id;
-  insert into public.payment_v2_reconciliation_evidence(purchase_id,event_kind,provider_event_id,occurred_at)
-    values(v_purchase.id,'PAYMENT_CONFIRMED',p_provider_event_id,p_provider_confirmed_at);
+  insert into public.payment_v2_reconciliation_evidence(hold_id,purchase_id,event_kind,provider_event_id,occurred_at)
+    values(p_hold_id,v_purchase.id,'PAYMENT_CONFIRMED',p_provider_event_id,p_provider_confirmed_at);
   return 'recorded';
 end $$;
 
@@ -151,26 +167,35 @@ begin
   if not found then raise exception 'hold_not_found'; end if;
   if exists(select 1 from public.payment_v2_purchases where hold_id=p_hold_id) or v_hold.state in ('PAID_UNCLAIMED','CLAIMED','REFUNDED','REVOKED') then raise exception 'paid_purchase_exists'; end if;
   if v_hold.state='EXPIRED_UNPAID' then return 'already_expired'; end if;
-  if v_hold.state not in ('HELD','SESSION_ASSOCIATED') or v_hold.expires_at>now() then raise exception 'not_expirable'; end if;
+  if v_hold.state<>'HELD' or v_hold.stripe_checkout_session_id is not null or v_hold.expires_at>now() then raise exception 'not_expirable'; end if;
   update public.payment_v2_holds set state='EXPIRED_UNPAID',updated_at=now() where id=p_hold_id; return 'expired';
 end $$;
 
-create function public.payment_v2_cancel_unpaid(p_hold_id uuid, p_session_id text)
+create function public.payment_v2_record_session_unpaid_terminal(p_hold_id uuid, p_session_id text, p_event_kind text, p_provider_event_id text, p_provider_occurred_at timestamptz)
 returns text language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_hold public.payment_v2_holds%rowtype;
+declare v_hold public.payment_v2_holds%rowtype; v_evidence public.payment_v2_reconciliation_evidence%rowtype; v_state text;
 begin
-  if btrim(coalesce(p_session_id,''))='' then raise exception 'invalid_request'; end if;
+  if btrim(coalesce(p_session_id,''))='' or p_event_kind not in ('SESSION_EXPIRED_UNPAID','PAYMENT_CANCELED_UNPAID')
+     or btrim(coalesce(p_provider_event_id,''))='' or p_provider_occurred_at is null then raise exception 'invalid_request'; end if;
+  select * into v_evidence from public.payment_v2_reconciliation_evidence where provider_event_id=p_provider_event_id for update;
+  if found then
+    if v_evidence.hold_id=p_hold_id and v_evidence.event_kind=p_event_kind and v_evidence.occurred_at=p_provider_occurred_at then return 'already_recorded'; end if;
+    raise exception 'provider_event_conflict';
+  end if;
   select * into v_hold from public.payment_v2_holds where id=p_hold_id for update;
   if not found or v_hold.stripe_checkout_session_id<>p_session_id then raise exception 'hold_mismatch'; end if;
   if exists(select 1 from public.payment_v2_purchases where hold_id=p_hold_id) or v_hold.state in ('PAID_UNCLAIMED','CLAIMED','REFUNDED','REVOKED') then raise exception 'paid_purchase_exists'; end if;
-  if v_hold.state='CANCELED_UNPAID' then return 'already_canceled'; end if;
-  if v_hold.state<>'SESSION_ASSOCIATED' then raise exception 'not_cancelable'; end if;
-  update public.payment_v2_holds set state='CANCELED_UNPAID',updated_at=now() where id=p_hold_id; return 'canceled';
+  if v_hold.state<>'SESSION_ASSOCIATED' then raise exception 'invalid_state'; end if;
+  v_state := case p_event_kind when 'SESSION_EXPIRED_UNPAID' then 'EXPIRED_UNPAID' else 'CANCELED_UNPAID' end;
+  update public.payment_v2_holds set state=v_state,updated_at=now() where id=p_hold_id;
+  insert into public.payment_v2_reconciliation_evidence(hold_id,event_kind,provider_event_id,occurred_at)
+    values(p_hold_id,p_event_kind,p_provider_event_id,p_provider_occurred_at);
+  return case p_event_kind when 'SESSION_EXPIRED_UNPAID' then 'expired' else 'canceled' end;
 end $$;
 
 create function public.payment_v2_claim(p_purchase_id uuid, p_purchaser_hash bytea, p_profile_id uuid, p_auth_user_id uuid)
 returns text language plpgsql security definer set search_path = public, pg_temp as $$
-declare v_purchase public.payment_v2_purchases%rowtype; v_profile public.profiles%rowtype; v_tier public.subscription_tiers%rowtype; v_entitlement uuid;
+declare v_purchase public.payment_v2_purchases%rowtype; v_profile public.profiles%rowtype; v_tier public.subscription_tiers%rowtype; v_entitlement uuid; v_existing public.user_subscriptions%rowtype; v_existing_count bigint;
 begin
   if octet_length(p_purchaser_hash)<>32 or p_profile_id is null or p_auth_user_id is null then raise exception 'invalid_request'; end if;
   select * into v_purchase from public.payment_v2_purchases where id=p_purchase_id for update;
@@ -186,17 +211,31 @@ begin
   if exists(select 1 from public.payment_v2_allocations where profile_id=p_profile_id and tier=v_purchase.tier) then raise exception 'duplicate_entitlement'; end if;
   select * into v_tier from public.subscription_tiers where name=v_purchase.tier;
   if not found or v_tier.stripe_price_id<>v_purchase.stripe_price_id then raise exception 'price_mismatch'; end if;
-  insert into public.user_subscriptions(user_id,tier_id,tier_name,stripe_customer_id,stripe_subscription_id,status,metadata)
-    values(p_profile_id,v_tier.id,v_purchase.tier,v_purchase.stripe_customer_id,v_purchase.stripe_subscription_id,'active',
-      jsonb_build_object('checkout_contract','sirens_forge_payment_v2','purchase_id',v_purchase.id,'customer_facing_allocation',true)) returning id into v_entitlement;
+  select count(*) into v_existing_count from public.user_subscriptions where user_id=p_profile_id and tier_name=v_purchase.tier and status in ('active','trialing');
+  if v_existing_count>1 then raise exception 'ambiguous_existing_entitlement'; end if;
+  if v_existing_count=1 then
+    select * into v_existing from public.user_subscriptions where user_id=p_profile_id and tier_name=v_purchase.tier and status in ('active','trialing') for update;
+    if v_existing.stripe_customer_id is distinct from v_purchase.stripe_customer_id
+       or v_existing.stripe_subscription_id is distinct from v_purchase.stripe_subscription_id
+       or (v_purchase.tier='og_throne' and v_existing.metadata->>'payment_intent_id' is distinct from v_purchase.stripe_payment_intent_id) then
+      raise exception 'conflicting_existing_entitlement';
+    end if;
+    v_entitlement := v_existing.id;
+  else
+    insert into public.user_subscriptions(user_id,tier_id,tier_name,stripe_customer_id,stripe_subscription_id,status,metadata)
+      values(p_profile_id,v_tier.id,v_purchase.tier,v_purchase.stripe_customer_id,v_purchase.stripe_subscription_id,'active',
+        jsonb_build_object('checkout_contract','sirens_forge_payment_v2','purchase_id',v_purchase.id,'payment_intent_id',v_purchase.stripe_payment_intent_id,'customer_facing_allocation',true)) returning id into v_entitlement;
+  end if;
   insert into public.payment_v2_allocations(purchase_id,tier,profile_id,entitlement_id) values(v_purchase.id,v_purchase.tier,p_profile_id,v_entitlement);
   update public.payment_v2_purchases set state='CLAIMED',claimed_profile_id=p_profile_id,claimed_at=now(),updated_at=now() where id=p_purchase_id;
   update public.payment_v2_holds set state='CLAIMED',updated_at=now() where id=v_purchase.hold_id;
-  insert into public.payment_v2_reconciliation_evidence(purchase_id,event_kind,occurred_at) values(p_purchase_id,'CLAIMED',now());
+  insert into public.payment_v2_reconciliation_evidence(hold_id,purchase_id,event_kind,occurred_at) values(v_purchase.hold_id,p_purchase_id,'CLAIMED',now());
   return 'claimed';
 end $$;
 
 revoke all on table public.payment_v2_holds, public.payment_v2_purchases, public.payment_v2_allocations, public.payment_v2_reconciliation_evidence from public, anon, authenticated;
 grant select, insert, update on table public.payment_v2_holds, public.payment_v2_purchases, public.payment_v2_allocations, public.payment_v2_reconciliation_evidence to service_role;
-revoke execute on function public.payment_v2_acquire_hold(bytea,text,timestamptz), public.payment_v2_associate_session(uuid,bytea,text), public.payment_v2_record_paid(uuid,bytea,text,text,text,text,text,text,timestamptz), public.payment_v2_expire_unpaid(uuid), public.payment_v2_cancel_unpaid(uuid,text), public.payment_v2_claim(uuid,bytea,uuid,uuid) from public, anon, authenticated;
-grant execute on function public.payment_v2_acquire_hold(bytea,text,timestamptz), public.payment_v2_associate_session(uuid,bytea,text), public.payment_v2_record_paid(uuid,bytea,text,text,text,text,text,text,timestamptz), public.payment_v2_expire_unpaid(uuid), public.payment_v2_cancel_unpaid(uuid,text), public.payment_v2_claim(uuid,bytea,uuid,uuid) to service_role;
+revoke execute on function public.payment_v2_acquire_hold(bytea,text,timestamptz), public.payment_v2_associate_session(uuid,bytea,text), public.payment_v2_record_paid(uuid,bytea,text,text,text,text,text,text,timestamptz), public.payment_v2_expire_unpaid(uuid), public.payment_v2_record_session_unpaid_terminal(uuid,text,text,text,timestamptz), public.payment_v2_claim(uuid,bytea,uuid,uuid) from public, anon, authenticated;
+grant execute on function public.payment_v2_acquire_hold(bytea,text,timestamptz), public.payment_v2_associate_session(uuid,bytea,text), public.payment_v2_record_paid(uuid,bytea,text,text,text,text,text,text,timestamptz), public.payment_v2_expire_unpaid(uuid), public.payment_v2_record_session_unpaid_terminal(uuid,text,text,text,timestamptz), public.payment_v2_claim(uuid,bytea,uuid,uuid) to service_role;
+
+select pg_notify('pgrst', 'reload schema');
