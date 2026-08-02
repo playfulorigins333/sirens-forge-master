@@ -6,9 +6,8 @@ export const PAYMENT_V2_HOLD_MINUTES = 60;
 export const PAYMENT_V2_COOKIE_MAX_AGE = 60 * 60 * 24 * 180;
 
 export type PaymentTier = "og_throne" | "early_bird";
-type Hold = { holdId: string; state: string };
+type Hold = { holdId: string; state: string; expiresAt: string };
 type TierRow = { name: string; is_active: boolean; stripe_price_id: string | null };
-type Referral = { destination: string; commissionPercent: number } | null;
 export type Session = {
   id: string; url: string | null; status?: string | null; payment_status?: string | null;
   expires_at?: number | null; metadata?: Record<string, string> | null;
@@ -21,8 +20,6 @@ export interface CheckoutDependencies {
   acquireHold(hash: Uint8Array, tier: PaymentTier, expiresAt: string): Promise<Hold>;
   loadAssociatedSessionId(holdId: string, hash: Uint8Array): Promise<string | null>;
   associateSession(holdId: string, hash: Uint8Array, sessionId: string): Promise<string>;
-  resolveReferral(code: string): Promise<Referral>;
-  retrievePriceUnitAmount(priceId: string): Promise<number | null>;
   createSession(params: Record<string, unknown>, idempotencyKey: string): Promise<Session>;
   retrieveSession(id: string): Promise<Session>;
 }
@@ -65,17 +62,31 @@ function safeSession(session: Session, holdId: string, tier: PaymentTier, now: D
     session.metadata?.checkout_contract_version === PAYMENT_V2_CONTRACT_VERSION);
 }
 
+function trustedOrigin(configured: string | undefined, production: boolean): string | null {
+  if (!configured) return null;
+  try {
+    const parsed = new URL(configured);
+    if ((production && parsed.protocol !== "https:") || (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+        parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname.replace(/\/+$/, "")) return null;
+    return parsed.origin;
+  } catch { return null; }
+}
+
 export function defaultCheckoutDependencies(overrides: Omit<CheckoutDependencies, "now" | "randomCredential">): CheckoutDependencies {
   return { ...overrides, now: () => new Date(), randomCredential: () => randomBytes(32) };
 }
 
 export async function paymentFirstCheckout(input: {
-  enabled: string | undefined; body: unknown; cookie?: string; production: boolean; baseUrl: string;
+  enabled: string | undefined; body: unknown; cookie?: string; production: boolean; configuredOrigin?: string;
 }, deps: CheckoutDependencies): Promise<CheckoutResult> {
   if (input.enabled !== "true") return error(503, "Payment-first Checkout is not active", "PAYMENT_FIRST_CHECKOUT_V2_DISABLED");
   const request = parseBody(input.body);
   if (!request) return error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST");
-  if (!input.baseUrl) return serverError();
+  const origin = trustedOrigin(input.configuredOrigin, input.production);
+  if (!origin) return serverError();
+  // Referral economics are not bound to a V2 hold in migration 02800. Until a
+  // persisted binding exists, proceeding could mutate fixed-idempotency inputs.
+  if (request.referralCode) return error(409, "Referral Checkout is not ready", "PAYMENT_V2_REFERRAL_NOT_READY");
 
   let claim;
   try { claim = credential(input.cookie, deps); } catch { return serverError(); }
@@ -92,11 +103,15 @@ export async function paymentFirstCheckout(input: {
     try { hold = await deps.acquireHold(claim.hash, request.tierName, expiresAt); }
     catch (cause) {
       const code = cause instanceof Error ? cause.message : "";
-      if (code.includes("sold_out")) return error(409, "This tier is sold out", "TIER_SOLD_OUT");
-      if (code.includes("effective_hold_conflict")) return error(409, "A different tier is already reserved", "EFFECTIVE_HOLD_CONFLICT");
-      if (code.includes("invalid_request")) return error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST");
-      return serverError();
+      if (code.includes("sold_out")) return { ...error(409, "This tier is sold out", "TIER_SOLD_OUT"), cookie };
+      if (code.includes("effective_hold_conflict")) return { ...error(409, "A different tier is already reserved", "EFFECTIVE_HOLD_CONFLICT"), cookie };
+      if (code.includes("invalid_request")) return { ...error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST"), cookie };
+      return { ...serverError(), cookie };
     }
+
+    const authoritativeExpirationMs = Date.parse(hold.expiresAt);
+    if (!Number.isFinite(authoritativeExpirationMs) || authoritativeExpirationMs <= deps.now().getTime())
+      return { ...serverError(), cookie };
 
     if (hold.state === "SESSION_ASSOCIATED") {
       const id = await deps.loadAssociatedSessionId(hold.holdId, claim.hash);
@@ -107,28 +122,19 @@ export async function paymentFirstCheckout(input: {
     }
     if (hold.state !== "HELD") return { ...serverError(), cookie };
 
-    const referral = request.referralCode ? await deps.resolveReferral(request.referralCode) : null;
     const metadata = { payment_v2_hold_id: hold.holdId, tier_name: request.tierName,
       checkout_contract_version: PAYMENT_V2_CONTRACT_VERSION };
+    const remainingMs = authoritativeExpirationMs - deps.now().getTime();
+    if (remainingMs < 30 * 60_000) return { ...error(409, "Checkout hold is too close to expiry", "HOLD_TOO_CLOSE_TO_EXPIRY"), cookie };
+    if (remainingMs > 24 * 60 * 60_000) return { ...serverError(), cookie };
     const params: Record<string, unknown> = {
       mode: request.tierName === "og_throne" ? "payment" : "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${input.baseUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${input.baseUrl}/billing/cancel`, metadata,
+      success_url: `${origin}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/billing/cancel`, metadata,
+      expires_at: Math.floor(authoritativeExpirationMs / 1000),
     };
     if (request.tierName === "og_throne") params.customer_creation = "always";
-    if (referral) {
-      if (!referral.destination || !/^acct_[A-Za-z0-9]+$/.test(referral.destination) ||
-          !Number.isFinite(referral.commissionPercent) || referral.commissionPercent < 0 || referral.commissionPercent > 100)
-        return { ...serverError(), cookie };
-      if (request.tierName === "og_throne") {
-        const amount = await deps.retrievePriceUnitAmount(priceId);
-        if (!Number.isInteger(amount) || amount! < 0) return { ...serverError(), cookie };
-        params.payment_intent_data = { application_fee_amount: Math.round(amount! * (100 - referral.commissionPercent) / 100),
-          transfer_data: { destination: referral.destination }, metadata };
-      } else params.subscription_data = { application_fee_percent: 100 - referral.commissionPercent,
-        transfer_data: { destination: referral.destination }, metadata };
-    }
     const idempotencyKey = `payment-v2:${PAYMENT_V2_CONTRACT_VERSION}:hold:${hold.holdId}`;
     const session = await deps.createSession(params, idempotencyKey);
     if (!session.id || !session.url) return { ...serverError(), cookie };
