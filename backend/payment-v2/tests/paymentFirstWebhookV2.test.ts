@@ -91,12 +91,43 @@ function early(overrides: Parameters<typeof harness>[0] = {}) { return harness({
 for (const result of ["recorded", "already_recorded"]) equal((await harness({ db: { recordPaid: async () => result } }).run()).body.status, "received", `${result} accepted`);
 equal((await harness({ db: { recordPaid: async () => "unexpected" } }).run()).status, 500, "unexpected paid RPC result fails");
 {
+  let state = "SESSION_ASSOCIATED"; let purchaseCount = 0; let paidCalls = 0;
+  const replay = harness({ db: {
+    loadHold: async () => [{ id: holdId, state, tier: "og_throne", expires_at: "x", stripe_checkout_session_id: "cs_exact", purchaser_credential_hash: hash }],
+    loadPurchase: async () => purchaseCount ? [{ hold_id: holdId, tier: "og_throne", stripe_checkout_session_id: "cs_exact", stripe_customer_id: "cus_exact", stripe_price_id: "price_og", stripe_payment_intent_id: "pi_exact", stripe_subscription_id: null }] : [],
+    async recordPaid() { paidCalls++; if (state === "SESSION_ASSOCIATED") { state = "PAID_UNCLAIMED"; purchaseCount = 1; return "recorded"; } return "already_recorded"; },
+  } });
+  equal((await replay.run()).body.status, "received", "first paid event records"); equal(state, "PAID_UNCLAIMED", "database models paid hold transition"); equal(purchaseCount, 1, "database models one stored purchase");
+  equal((await replay.run()).body.status, "received", "same paid event replays after state transition"); equal(paidCalls, 2, "replay reaches RPC for database idempotency"); equal(purchaseCount, 1, "replay creates no duplicate purchase");
+  for (const advanced of ["CLAIMED", "REFUNDED", "REVOKED"]) {
+    state = advanced; equal((await replay.run()).body.status, "received", `exact paid replay accepted from ${advanced}`);
+  }
+}
+{
   const expired = harness({ event: { type: "checkout.session.expired" }, session: { status: "expired", payment_status: "unpaid", payment_intent: null } }); equal((await expired.run()).body.status, "received", "expired recorded");
   const a = expired.calls.terminal[0]; equal(a.p_event_kind, "SESSION_EXPIRED_UNPAID", "expiration kind"); equal(a.p_hold_id, holdId, "terminal hold"); equal(a.p_session_id, "cs_exact", "terminal Session"); equal(a.p_provider_event_id, "evt_exact", "terminal event"); equal(a.p_provider_occurred_at, "2026-08-02T00:00:00.000Z", "terminal timestamp");
   const canceled = harness({ event: { type: "checkout.session.async_payment_failed" }, session: { payment_status: "unpaid", payment_intent: null } }); equal((await canceled.run()).body.status, "received", "failure recorded"); equal(canceled.calls.terminal[0].p_event_kind, "PAYMENT_CANCELED_UNPAID", "cancellation kind");
   for (const value of ["expired", "canceled", "already_recorded"]) equal((await harness({ event: { type: "checkout.session.async_payment_failed" }, session: { payment_status: "unpaid", payment_intent: null }, db: { recordTerminal: async () => value } }).run()).body.status, "received", `terminal ${value} accepted`);
-  const paid = harness({ event: { type: "checkout.session.expired" } }); await paid.run(); equal(paid.calls.terminal.length, 0, "paid terminal event never terminalized"); equal(paid.calls.paid.length, 1, "late paid state routed through paid verification");
+  const paid = harness({ event: { type: "checkout.session.expired" } }); equal((await paid.run()).status, 500, "terminal event observing paid without purchase fails closed"); equal(paid.calls.terminal.length, 0, "paid terminal event never terminalized"); equal(paid.calls.paid.length, 0, "terminal event never becomes payment confirmation evidence");
   const existing = harness({ event: { type: "checkout.session.async_payment_failed" }, session: { payment_status: "unpaid", payment_intent: null }, db: { loadPurchase: async () => [{ hold_id: holdId, tier: "og_throne", stripe_checkout_session_id: "cs_exact", stripe_customer_id: "cus_exact", stripe_price_id: "price_og", stripe_payment_intent_id: "pi_exact", stripe_subscription_id: null }] } }); equal((await existing.run()).status, 500, "existing paid purchase prevents terminal mutation"); equal(existing.calls.terminal.length, 0, "existing purchase no terminal RPC");
+}
+
+for (const [type, finalState, firstResult] of [["checkout.session.expired", "EXPIRED_UNPAID", "expired"], ["checkout.session.async_payment_failed", "CANCELED_UNPAID", "canceled"]] as const) {
+  let state = "SESSION_ASSOCIATED"; let terminalCalls = 0;
+  const replay = harness({ event: { type }, session: { status: type === "checkout.session.expired" ? "expired" : "complete", payment_status: "unpaid", payment_intent: null }, db: {
+    loadHold: async () => [{ id: holdId, state, tier: "og_throne", expires_at: "x", stripe_checkout_session_id: "cs_exact", purchaser_credential_hash: hash }],
+    async recordTerminal() { terminalCalls++; if (state === "SESSION_ASSOCIATED") { state = finalState; return firstResult; } return "already_recorded"; },
+  } });
+  equal((await replay.run()).body.status, "received", `${firstResult} first delivery accepted`); equal(state, finalState, `${firstResult} models hold transition`);
+  equal((await replay.run()).body.status, "received", `${firstResult} exact replay accepted`); equal(terminalCalls, 2, `${firstResult} replay reaches terminal RPC`);
+}
+
+{
+  const purchase = { hold_id: holdId, tier: "og_throne", stripe_checkout_session_id: "cs_exact", stripe_customer_id: "cus_exact", stripe_price_id: "price_og", stripe_payment_intent_id: "pi_exact", stripe_subscription_id: null };
+  const exact = harness({ event: { type: "checkout.session.expired" }, db: { loadPurchase: async () => [purchase] } });
+  equal((await exact.run()).body.status, "received", "exact paid purchase acknowledges terminal delivery"); equal(exact.calls.pi, ["pi_exact"], "paid-before-terminal verifies PaymentIntent"); equal(exact.calls.terminal.length, 0, "paid-before-terminal calls no terminal RPC"); equal(exact.calls.paid.length, 0, "paid-before-terminal calls no paid RPC");
+  const missing = harness({ event: { type: "checkout.session.expired" }, session: { customer: null }, db: { loadPurchase: async () => [purchase] } }); equal((await missing.run()).status, 500, "missing current Customer fails reconciliation");
+  const mismatch = harness({ event: { type: "checkout.session.expired" }, session: { customer: "cus_other" }, provider: { retrievePaymentIntent: async () => ({ id: "pi_exact", status: "succeeded", customer: "cus_other", amount: 2500, currency: "usd" }) }, db: { loadPurchase: async () => [purchase] } }); equal((await mismatch.run()).status, 500, "mismatched stored Customer fails reconciliation");
 }
 
 {
@@ -106,5 +137,4 @@ equal((await harness({ db: { recordPaid: async () => "unexpected" } }).run()).st
   check(!/\.from\("payment_v2_[^"]+"\)\.(insert|update|delete)/.test(route), "no direct V2 mutations"); check(!combined.includes("console."), "payload, signature, hash and credentials are not logged");
   equal(harness().calls.session.length, 0, "test harness starts with zero provider network calls");
 }
-while (assertions < 111) check(true, `explicit contract invariant ${assertions + 1}`);
 console.log(`PFC-04 payment-first Webhook V2 tests passed (${assertions} assertions; no external network calls)`);

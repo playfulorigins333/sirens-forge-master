@@ -71,8 +71,8 @@ function metadata(object: { metadata?: Record<string, string> | null }): { kind:
 
 function exactPurchase(row: PurchaseRow, holdId: string, tier: PaymentV2Tier, session: StripeSession, price: string, pi: string | null, sub: string | null) {
   const customer = id(session.customer);
-  return row.hold_id === holdId && row.tier === tier && row.stripe_checkout_session_id === session.id && row.stripe_price_id === price &&
-    (!customer || row.stripe_customer_id === customer) && row.stripe_payment_intent_id === pi && row.stripe_subscription_id === sub;
+  return Boolean(customer) && row.hold_id === holdId && row.tier === tier && row.stripe_checkout_session_id === session.id && row.stripe_price_id === price &&
+    row.stripe_customer_id === customer && row.stripe_payment_intent_id === pi && row.stripe_subscription_id === sub;
 }
 
 function commonSession(session: StripeSession, sessionId: string, holdId: string, tier: PaymentV2Tier, price: string) {
@@ -82,39 +82,52 @@ function commonSession(session: StripeSession, sessionId: string, holdId: string
   return session.id === sessionId && md.kind === "v2" && md.holdId === holdId && md.tier === tier && lines?.length === 1 && line?.quantity === 1 && line.price?.id === price;
 }
 
-async function recordPaid(event: StripeEvent, session: StripeSession, hold: HoldRow, tier: PaymentV2Tier, price: string, hash: Uint8Array, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
-  if (session.status !== "complete") return failed();
+type PaidEvidence = { customer: string; paymentIntent: string | null; subscription: string | null };
+
+async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: string, provider: PaymentV2Provider): Promise<PaidEvidence | null> {
+  if (session.status !== "complete") return null;
   const customer = id(session.customer);
-  if (!customer) return failed();
+  if (!customer || session.payment_status !== "paid") return null;
   let paymentIntent: string | null = null;
   let subscription: string | null = null;
   if (tier === "og_throne") {
     paymentIntent = id(session.payment_intent);
-    if (session.mode !== "payment" || !paymentIntent || id(session.subscription)) return failed();
-    if (session.payment_status !== "paid") return event.type === "checkout.session.completed" ? pending() : failed();
+    if (session.mode !== "payment" || !paymentIntent || id(session.subscription)) return null;
     const pi = await provider.retrievePaymentIntent(paymentIntent);
     const line = session.line_items!.data[0];
     const amount = line.amount_total ?? (typeof line.price?.unit_amount === "number" ? line.price.unit_amount : null);
     const currency = line.price?.currency?.toLowerCase();
     if (pi.id !== paymentIntent || pi.status !== "succeeded" || id(pi.customer) !== customer || amount === null || pi.amount !== amount ||
-        !currency || pi.currency.toLowerCase() !== currency || session.amount_total !== amount || session.currency?.toLowerCase() !== currency) return failed();
+        !currency || pi.currency.toLowerCase() !== currency || session.amount_total !== amount || session.currency?.toLowerCase() !== currency) return null;
   } else {
     subscription = id(session.subscription);
-    if (session.mode !== "subscription" || !subscription || id(session.payment_intent)) return failed();
-    if (session.payment_status !== "paid") return event.type === "checkout.session.completed" ? pending() : failed();
+    if (session.mode !== "subscription" || !subscription || id(session.payment_intent)) return null;
     const sub = await provider.retrieveSubscription(subscription);
     const items = sub.items?.data;
     if (sub.id !== subscription || id(sub.customer) !== customer || !["active", "trialing"].includes(sub.status) ||
-        items?.length !== 1 || items[0].quantity !== 1 || items[0].price?.id !== price) return failed();
+        items?.length !== 1 || items[0].quantity !== 1 || items[0].price?.id !== price) return null;
     if (sub.latest_invoice != null) {
-      if (typeof sub.latest_invoice !== "object") return failed();
+      if (typeof sub.latest_invoice !== "object") return null;
       const invoice = sub.latest_invoice as StripeInvoice;
-      if (!(invoice.paid === true || invoice.status === "paid") || (typeof invoice.amount_due === "number" && typeof invoice.amount_paid === "number" && invoice.amount_paid < invoice.amount_due)) return failed();
+      if (!(invoice.paid === true || invoice.status === "paid") || (typeof invoice.amount_due === "number" && typeof invoice.amount_paid === "number" && invoice.amount_paid < invoice.amount_due)) return null;
     }
   }
+  return { customer, paymentIntent, subscription };
+}
+
+async function recordPaid(event: StripeEvent, session: StripeSession, hold: HoldRow, tier: PaymentV2Tier, price: string, hash: Uint8Array, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
+  if (session.status !== "complete") return failed();
+  if (session.payment_status !== "paid") {
+    const coherent = id(session.customer) && (tier === "og_throne"
+      ? session.mode === "payment" && Boolean(id(session.payment_intent)) && !id(session.subscription)
+      : session.mode === "subscription" && Boolean(id(session.subscription)) && !id(session.payment_intent));
+    return event.type === "checkout.session.completed" && coherent ? pending() : failed();
+  }
+  const evidence = await verifyPaid(session, tier, price, provider);
+  if (!evidence) return failed();
   const confirmed = timestamp(event.created); if (!confirmed) return failed();
-  const result = await db.recordPaid({ p_hold_id: hold.id, p_purchaser_hash: hash, p_session_id: session.id, p_customer_id: customer,
-    p_price_id: price, p_payment_intent_id: paymentIntent, p_subscription_id: subscription, p_provider_event_id: event.id, p_provider_confirmed_at: confirmed });
+  const result = await db.recordPaid({ p_hold_id: hold.id, p_purchaser_hash: hash, p_session_id: session.id, p_customer_id: evidence.customer,
+    p_price_id: price, p_payment_intent_id: evidence.paymentIntent, p_subscription_id: evidence.subscription, p_provider_event_id: event.id, p_provider_confirmed_at: confirmed });
   return result === "recorded" || result === "already_recorded" ? received() : failed();
 }
 
@@ -138,22 +151,27 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
     const holds = await db.loadHold(discriminator.holdId);
     if (holds.length !== 1) return failed();
     const hold = holds[0]; const hash = hashBytes(hold.purchaser_credential_hash);
-    if (hold.id !== discriminator.holdId || hold.tier !== discriminator.tier || hold.stripe_checkout_session_id !== embedded.id || !hash || hold.state !== "SESSION_ASSOCIATED") return failed();
+    if (hold.id !== discriminator.holdId || hold.tier !== discriminator.tier || hold.stripe_checkout_session_id !== embedded.id || !hash) return failed();
     const tiers = await db.loadTier(discriminator.tier);
     if (tiers.length !== 1 || tiers[0].name !== discriminator.tier || tiers[0].is_active !== true || !tiers[0].stripe_price_id?.trim()) return failed();
     const price = tiers[0].stripe_price_id.trim();
     const session = await provider.retrieveSession(embedded.id);
     if (!commonSession(session, embedded.id, hold.id, discriminator.tier, price)) return failed();
-    if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded")
-      return recordPaid(event, session, hold, discriminator.tier, price, hash, provider, db);
-
-    if (session.payment_status === "paid") {
-      if (session.status !== "complete") return failed();
+    if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
+      if (!["SESSION_ASSOCIATED", "PAID_UNCLAIMED", "CLAIMED", "REFUNDED", "REVOKED"].includes(hold.state)) return failed();
       return recordPaid(event, session, hold, discriminator.tier, price, hash, provider, db);
     }
-    if (event.type === "checkout.session.expired" && session.status !== "expired") return failed();
+
+    const terminalState = event.type === "checkout.session.expired" ? "EXPIRED_UNPAID" : "CANCELED_UNPAID";
+    if (hold.state !== "SESSION_ASSOCIATED" && hold.state !== terminalState && !["PAID_UNCLAIMED", "CLAIMED", "REFUNDED", "REVOKED"].includes(hold.state)) return failed();
     const purchases = await db.loadPurchase(hold.id);
-    if (purchases.length > 0) return failed();
+    if (purchases.length > 1) return failed();
+    if (session.payment_status === "paid") {
+      const evidence = await verifyPaid(session, discriminator.tier, price, provider);
+      return evidence && purchases.length === 1 && exactPurchase(purchases[0], hold.id, discriminator.tier, session, price, evidence.paymentIntent, evidence.subscription) ? received() : failed();
+    }
+    if (purchases.length !== 0 || hold.state === "PAID_UNCLAIMED" || hold.state === "CLAIMED" || hold.state === "REFUNDED" || hold.state === "REVOKED") return failed();
+    if (event.type === "checkout.session.expired" && session.status !== "expired") return failed();
     const occurred = timestamp(event.created); if (!occurred) return failed();
     const kind = event.type === "checkout.session.expired" ? "SESSION_EXPIRED_UNPAID" : "PAYMENT_CANCELED_UNPAID";
     let terminal: string;
@@ -161,9 +179,10 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
     catch (cause) {
       if (!(cause instanceof Error) || cause.message !== "paid_purchase_exists") throw cause;
       const raced = await db.loadPurchase(hold.id);
-      const pi = discriminator.tier === "og_throne" ? id(session.payment_intent) : null;
-      const sub = discriminator.tier === "early_bird" ? id(session.subscription) : null;
-      return raced.length === 1 && exactPurchase(raced[0], hold.id, discriminator.tier, session, price, pi, sub) ? received() : failed();
+      const current = await provider.retrieveSession(session.id);
+      if (!commonSession(current, session.id, hold.id, discriminator.tier, price)) return failed();
+      const evidence = await verifyPaid(current, discriminator.tier, price, provider);
+      return evidence && raced.length === 1 && exactPurchase(raced[0], hold.id, discriminator.tier, current, price, evidence.paymentIntent, evidence.subscription) ? received() : failed();
     }
     return ["expired", "canceled", "already_recorded"].includes(terminal) ? received() : failed();
   } catch { return failed(); }
