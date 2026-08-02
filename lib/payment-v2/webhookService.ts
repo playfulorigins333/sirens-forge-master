@@ -125,10 +125,20 @@ async function recordPaid(event: StripeEvent, session: StripeSession, hold: Hold
   }
   const evidence = await verifyPaid(session, tier, price, provider);
   if (!evidence) return failed();
+  const purchases = await db.loadPurchase(hold.id);
+  if (purchases.length > 1) return failed();
+  if (purchases.length === 1) return exactPurchase(purchases[0], hold.id, tier, session, price, evidence.paymentIntent, evidence.subscription) ? received() : failed();
+  if (hold.state !== "SESSION_ASSOCIATED") return failed();
   const confirmed = timestamp(event.created); if (!confirmed) return failed();
-  const result = await db.recordPaid({ p_hold_id: hold.id, p_purchaser_hash: hash, p_session_id: session.id, p_customer_id: evidence.customer,
-    p_price_id: price, p_payment_intent_id: evidence.paymentIntent, p_subscription_id: evidence.subscription, p_provider_event_id: event.id, p_provider_confirmed_at: confirmed });
-  return result === "recorded" || result === "already_recorded" ? received() : failed();
+  try {
+    const result = await db.recordPaid({ p_hold_id: hold.id, p_purchaser_hash: hash, p_session_id: session.id, p_customer_id: evidence.customer,
+      p_price_id: price, p_payment_intent_id: evidence.paymentIntent, p_subscription_id: evidence.subscription, p_provider_event_id: event.id, p_provider_confirmed_at: confirmed });
+    return result === "recorded" || result === "already_recorded" ? received() : failed();
+  } catch (cause) {
+    if (!(cause instanceof Error) || cause.message !== "paid_purchase_conflict") throw cause;
+    const raced = await db.loadPurchase(hold.id);
+    return raced.length === 1 && exactPurchase(raced[0], hold.id, tier, session, price, evidence.paymentIntent, evidence.subscription) ? received() : failed();
+  }
 }
 
 export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookResponse> {
