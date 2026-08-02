@@ -22,6 +22,21 @@ const concurrent = (statements) => Promise.all(statements.map((sql) => new Promi
   child.stderr.on('data', (data) => { err += data })
   child.on('close', (status) => resolve({ ok: status === 0, out: out.trim(), err: err.trim() }))
 })))
+const MAX_CONCURRENT_CONNECTIONS = 20
+const boundedConcurrent = async (statements) => {
+  const results = []
+  for (let offset = 0; offset < statements.length; offset += MAX_CONCURRENT_CONNECTIONS) {
+    results.push(...await concurrent(statements.slice(offset, offset + MAX_CONCURRENT_CONNECTIONS)))
+  }
+  return results
+}
+const assertCapacityResults = (results, successes, label) => {
+  assert.equal(results.length, label === 'OG' ? 75 : 160, `${label} attempt count`); assertions++
+  assert.equal(results.filter((r) => r.ok).length, successes, `${label} successful acquisitions`); assertions++
+  const rejected = results.filter((r) => !r.ok)
+  assert.equal(rejected.length, results.length - successes, `${label} rejected count`); assertions++
+  assert.equal(rejected.every((r) => /ERROR:\s+sold_out\b/.test(r.err)), true, `${label} every rejection is sold_out`); assertions++
+}
 
 const bootstrap = `
 drop schema public cascade; create schema public; grant all on schema public to postgres; grant usage on schema public to public;
@@ -40,6 +55,7 @@ insert into public.profiles values
  ('10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001',null),
  ('10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002',null),
  ('10000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000003',null),
+ ('10000000-0000-0000-0000-000000000004','20000000-0000-0000-0000-000000000004',null),
  ('10000000-0000-0000-0000-000000000099','20000000-0000-0000-0000-000000000099',null);
 insert into public.user_subscriptions(user_id,tier_id,tier_name,status,metadata)
 values('10000000-0000-0000-0000-000000000099','00000000-0000-0000-0000-000000000001','og_throne','active','{"internal_admin":true,"customer_facing_allocation":false}');`
@@ -60,18 +76,21 @@ const freshId = ok(acquire('expired-retry','og_throne').replace("select hold_id|
 assert.notEqual(freshId, expiredId); assertions++
 const crossExpired = ok(acquire('cross-expired','og_throne').replace("select hold_id||'|'||state", 'select hold_id'), 'create cross-tier stale hold')
 ok(`update payment_v2_holds set expires_at=now()-interval '1 second' where id='${crossExpired}'`, 'age cross-tier hold')
-equal(acquire('cross-expired','early_bird').replace("select hold_id||'|'||state", 'select tier'), 'early_bird', 'expired cross-tier hold does not conflict')
+const crossFresh = ok(acquire('cross-expired','early_bird').replace("select hold_id||'|'||state", 'select hold_id'), 'expired cross-tier hold does not conflict')
+equal(`select tier from payment_v2_holds where id='${crossFresh}'`, 'early_bird', 'new cross-tier hold is Early Bird')
+equal(`select state from payment_v2_holds where id='${crossExpired}'`, 'EXPIRED_UNPAID', 'old OG hold is expired')
+equal(`select count(*) from payment_v2_holds where purchaser_credential_hash=${hash('cross-expired')} and ((state='HELD' and expires_at>now()) or state in ('SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED'))`, 1, 'exactly one cross-tier effective hold remains')
 const protectedId = ok(acquire('cross-protected','og_throne').replace("select hold_id||'|'||state", 'select hold_id'), 'create associated cross-tier hold')
 equal(`select payment_v2_associate_session('${protectedId}',${hash('cross-protected')},'cs_protected')`, 'associated', 'associate protected hold')
 fails(acquire('cross-protected','early_bird'), 'associated cross-tier hold remains protected')
 
 ok("truncate payment_v2_reconciliation_evidence,payment_v2_allocations,payment_v2_purchases,payment_v2_holds cascade", 'reset for capacity concurrency')
-const ogBurst = await concurrent(Array.from({length:75},(_,i)=>acquire(`og-${i}`,'og_throne')))
-assert.equal(ogBurst.filter(r=>r.ok).length,50,'75 concurrent OG requests create 50 holds'); assertions++
+const ogBurst = await boundedConcurrent(Array.from({length:75},(_,i)=>acquire(`og-${i}`,'og_throne')))
+assertCapacityResults(ogBurst, 50, 'OG')
 equal("select count(*) from payment_v2_holds where tier='og_throne' and ((state='HELD' and expires_at>now()) or state in ('SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED'))",50,'OG capacity is exactly 50 and never above capacity')
 ok('truncate payment_v2_holds cascade','reset OG holds')
-const ebBurst = await concurrent(Array.from({length:160},(_,i)=>acquire(`eb-${i}`,'early_bird')))
-assert.equal(ebBurst.filter(r=>r.ok).length,120,'160 concurrent Early Bird requests create 120 holds'); assertions++
+const ebBurst = await boundedConcurrent(Array.from({length:160},(_,i)=>acquire(`eb-${i}`,'early_bird')))
+assertCapacityResults(ebBurst, 120, 'Early Bird')
 equal("select count(*) from payment_v2_holds where tier='early_bird' and ((state='HELD' and expires_at>now()) or state in ('SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED'))",120,'Early Bird capacity is exactly 120 and never above capacity')
 ok('truncate payment_v2_holds cascade','reset Early Bird holds')
 const sameCross = await concurrent([acquire('same-cross','og_throne'),acquire('same-cross','early_bird')])
@@ -85,6 +104,10 @@ fails(`select payment_v2_associate_session('${stateHold}',${hash('state')},'cs_o
 fails(`select payment_v2_expire_unpaid('${stateHold}')`,'local expiration cannot expire associated hold')
 equal(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_expire',now())`,'expired','provider-confirmed expiration succeeds')
 equal(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'already_recorded','provider-event exact replay is idempotent')
+fails(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_wrong','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'same provider event with wrong Session conflicts')
+fails(`select payment_v2_record_session_unpaid_terminal(gen_random_uuid(),'cs_state','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'same provider event with wrong hold conflicts')
+fails(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','PAYMENT_CANCELED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'same provider event with wrong kind conflicts')
+fails(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at+interval '1 second' from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'same provider event with changed timestamp conflicts')
 fails(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_other',now())`,'conflicting provider replay fails')
 const cancelHold = ok(acquire('cancel','early_bird').replace("select hold_id||'|'||state",'select hold_id'),'create cancellation hold')
 ok(`select payment_v2_associate_session('${cancelHold}',${hash('cancel')},'cs_cancel')`,'associate cancellation hold')
@@ -114,13 +137,34 @@ const conflictHold=ok(acquire('conflict','early_bird').replace("select hold_id||
 ok(`select payment_v2_associate_session('${conflictHold}',${hash('conflict')},'cs_conflict')`,'associate conflict purchase')
 ok(`select payment_v2_record_paid('${conflictHold}',${hash('conflict')},'cs_conflict','cus_new','price_early',null,'sub_new','evt_conflict',now())`,'record conflict purchase')
 ok("insert into user_subscriptions(user_id,tier_id,tier_name,stripe_customer_id,stripe_subscription_id,status) values('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002','early_bird','cus_old','sub_old','active')",'seed conflicting entitlement')
+ok("update subscription_tiers set stripe_price_id='price_temporarily_missing' where name='early_bird'",'remove claim tier match')
+fails(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'missing or wrong Price claim tier fails')
+equal(`select state||'|'||(select count(*) from payment_v2_allocations where purchase_id=payment_v2_purchases.id) from payment_v2_purchases where hold_id='${conflictHold}'`,'PAID_UNCLAIMED|0','missing tier leaves no partial claim')
+ok("update subscription_tiers set stripe_price_id='price_early' where name='early_bird'; insert into subscription_tiers values('00000000-0000-0000-0000-000000000022','early_bird','price_early',false)",'create duplicate matching tier')
+fails(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'duplicate matching claim tiers fail')
+ok("delete from subscription_tiers where id='00000000-0000-0000-0000-000000000022'",'remove duplicate tier')
 fails(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'conflicting entitlement fails')
 equal("select count(*) from user_subscriptions where user_id='10000000-0000-0000-0000-000000000002' and tier_name='early_bird'",1,'conflict creates no duplicate')
+ok("insert into user_subscriptions(user_id,tier_id,tier_name,stripe_customer_id,stripe_subscription_id,status) values('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002','early_bird','cus_new','sub_new','trialing')",'seed second active entitlement')
+fails(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'multiple existing entitlements fail')
+equal(`select state||'|'||(select count(*) from payment_v2_allocations where purchase_id=payment_v2_purchases.id) from payment_v2_purchases where hold_id='${conflictHold}'`,'PAID_UNCLAIMED|0','entitlement failures leave no partial claim')
+const compatibleHold=ok(acquire('compatible','early_bird').replace("select hold_id||'|'||state",'select hold_id'),'create compatible entitlement purchase')
+ok(`select payment_v2_associate_session('${compatibleHold}',${hash('compatible')},'cs_compatible')`,'associate compatible purchase')
+ok(`select payment_v2_record_paid('${compatibleHold}',${hash('compatible')},'cs_compatible','cus_compatible','price_early',null,'sub_compatible','evt_compatible',now())`,'record compatible purchase')
+ok("insert into user_subscriptions(user_id,tier_id,tier_name,stripe_customer_id,stripe_subscription_id,status) values('10000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000002','early_bird','cus_compatible','sub_compatible','active'); update subscription_tiers set is_active=false where name='early_bird'",'seed compatible entitlement and deactivate launch tier')
+equal(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${compatibleHold}'),${hash('compatible')},'10000000-0000-0000-0000-000000000004','20000000-0000-0000-0000-000000000004')`,'claimed','compatible existing entitlement is reused after tier deactivation')
+equal(`select (select count(*) from user_subscriptions where user_id='10000000-0000-0000-0000-000000000004')||'|'||(select count(*) from payment_v2_allocations where purchase_id=(select id from payment_v2_purchases where hold_id='${compatibleHold}'))`,'1|1','compatible reuse creates one allocation and no duplicate entitlement')
 fails(`select payment_v2_claim(gen_random_uuid(),${hash('none')},'10000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000003')`,'claim before payment fails')
 fails(`select * from payment_v2_acquire_hold(decode('00','hex'),'bad_tier',now()+interval '1 hour')`,'malformed hash and tier fail closed')
 fails('select count(*) from payment_v2_holds','anon cannot read ledgers','anon')
 fails(`select * from payment_v2_acquire_hold(${hash('anon')},'og_throne',now()+interval '1 hour')`,'authenticated cannot execute RPC','authenticated')
-equal("select has_function_privilege('service_role','public.payment_v2_acquire_hold(bytea,text,timestamptz)','EXECUTE') and not has_function_privilege('anon','public.payment_v2_acquire_hold(bytea,text,timestamptz)','EXECUTE')",'t','service_role alone has intended function execution')
+equal("select bool_and(has_function_privilege('service_role',p.oid,'EXECUTE')) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname like 'payment_v2_%'",'t','service_role can execute every V2 RPC')
+equal("select bool_and(not has_function_privilege('anon',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE')) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname like 'payment_v2_%'",'t','browser roles cannot execute any V2 RPC')
+equal("select bool_and(has_table_privilege('service_role',c.oid,'SELECT') and not has_table_privilege('service_role',c.oid,'INSERT,UPDATE,DELETE')) from pg_class c where c.relnamespace='public'::regnamespace and c.relname like 'payment_v2_%' and c.relkind='r'",'t','service_role has read-only ledger access')
+fails("insert into payment_v2_holds(purchaser_credential_hash,tier,expires_at) values(decode(repeat('00',32),'hex'),'og_throne',now()+interval '1 hour')",'service_role cannot directly insert ledger rows','service_role')
+fails("update payment_v2_holds set updated_at=now()",'service_role cannot directly update ledger rows','service_role')
+fails("delete from payment_v2_holds",'service_role cannot directly delete ledger rows','service_role')
+equal("select bool_and(not has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE') and not has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE')) from pg_class c where c.relnamespace='public'::regnamespace and c.relname like 'payment_v2_%' and c.relkind='r'",'t','browser roles cannot read or mutate any ledger')
 equal("select count(*) from user_subscriptions where metadata->>'internal_admin'='true'",1,'internal admin row remains separate from V2 capacity')
 
-console.log(`Payment-first V2 PostgreSQL integration passed (${assertions} assertions)`) 
+console.log(`Payment-first V2 PostgreSQL integration passed (${assertions} assertions; OG attempts=75; Early Bird attempts=160; max simultaneous connections=${MAX_CONCURRENT_CONNECTIONS})`)
