@@ -4,6 +4,8 @@ on:
     paths:
       - 'supabase/migrations/20260801002800_payment_first_v2_contract.sql'
       - 'backend/payment-v2/tests/**'
+      - 'app/api/webhook/payment-v2/**'
+      - 'lib/payment-v2/**'
       - '.github/workflows/payment-v2-postgres.yml'
       - 'package.json'
   workflow_dispatch:
@@ -32,6 +34,8 @@ jobs:
       - run: npm ci
       - name: Payment-first Checkout V2 behavioral contract
         run: npm run test:pfc-03
+      - name: Payment-first Webhook V2 behavioral contract
+        run: npm run test:pfc-04
       - name: Supplemental source contract
         run: npm run test:payment-v2-contract
       - name: Disposable PostgreSQL behavior and concurrency

@@ -23,6 +23,7 @@
     "test:autopost-reddit-lockdown": "tsx backend/autopost/tests/redditPlaceholderLockdown.test.ts",
     "test:payment-v2-contract": "tsx backend/payment-v2/tests/paymentV2Contract.test.ts",
     "test:pfc-03": "tsx backend/payment-v2/tests/paymentFirstCheckoutV2.test.ts",
+    "test:pfc-04": "tsx backend/payment-v2/tests/paymentFirstWebhookV2.test.ts",
     "test:payment-v2-postgres": "node backend/payment-v2/tests/runPaymentV2PostgresIntegration.mjs"
   },
   "repository": {
