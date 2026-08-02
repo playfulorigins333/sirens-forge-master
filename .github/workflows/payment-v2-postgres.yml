@@ -30,6 +30,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Payment-first Checkout V2 behavioral contract
+        run: npm run test:pfc-03
       - name: Supplemental source contract
         run: npm run test:payment-v2-contract
       - name: Disposable PostgreSQL behavior and concurrency
