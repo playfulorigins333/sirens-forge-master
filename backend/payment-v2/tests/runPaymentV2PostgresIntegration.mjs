@@ -13,7 +13,12 @@ const run = (sql, role = null) => {
   return { ok: result.status === 0, out: (result.stdout || '').trim(), err: result.error?.message || (result.stderr || '').trim() }
 }
 const ok = (sql, message, role) => { const r = run(sql, role); assert.equal(r.ok, true, `${message}: ${r.err}`); assertions++; return r.out }
-const fails = (sql, message, role) => { const r = run(sql, role); assert.equal(r.ok, false, message); assertions++ }
+const failsWith = (sql, expected, message, role) => {
+  const r = run(sql, role)
+  assert.equal(r.ok, false, `${message}: command unexpectedly succeeded`)
+  assert.match(r.err, expected, `${message}: unexpected PostgreSQL failure: ${r.err}`)
+  assertions++
+}
 const equal = (sql, expected, message, role) => { const out = ok(sql, message, role); assert.equal(out.split('\n').at(-1), String(expected), message); return out }
 const concurrent = (statements) => Promise.all(statements.map((sql) => new Promise((resolve) => {
   const child = spawn('psql', [url, '-XAt', '-v', 'ON_ERROR_STOP=1', '-c', sql], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -36,6 +41,13 @@ const assertCapacityResults = (results, successes, label) => {
   const rejected = results.filter((r) => !r.ok)
   assert.equal(rejected.length, results.length - successes, `${label} rejected count`); assertions++
   assert.equal(rejected.every((r) => /ERROR:\s+sold_out\b/.test(r.err)), true, `${label} every rejection is sold_out`); assertions++
+}
+const ageUnassociatedHold = (holdId, message) => {
+  ok(`update payment_v2_holds as h
+      set created_at=now()-interval '2 hours', expires_at=now()-interval '1 hour', updated_at=now()
+      where h.id='${holdId}' and h.state='HELD' and h.stripe_checkout_session_id is null`, message)
+  equal(`select (state='HELD' and stripe_checkout_session_id is null and created_at<expires_at and expires_at<=now())::text
+         from payment_v2_holds where id='${holdId}'`, 'true', `${message} preserves expired HELD invariants`)
 }
 
 const bootstrap = `
@@ -71,18 +83,22 @@ assert.match(firstEarly, /^[0-9a-f-]{36}$/); assertions++
 equal(acquire('first-og','og_throne').replace("select hold_id||'|'||state", "select hold_id"), firstOg, 'same live purchaser retry is idempotent')
 
 const expiredId = ok(acquire('expired-retry','og_throne').replace("select hold_id||'|'||state", 'select hold_id'), 'create expiring hold')
-ok(`update payment_v2_holds set expires_at=now()-interval '1 second' where id='${expiredId}'`, 'age disposable hold')
+ageUnassociatedHold(expiredId, 'coherently age same-tier disposable hold')
 const freshId = ok(acquire('expired-retry','og_throne').replace("select hold_id||'|'||state", 'select hold_id'), 'expired retry gets new hold')
 assert.notEqual(freshId, expiredId); assertions++
+equal(`select state from payment_v2_holds where id='${expiredId}'`, 'EXPIRED_UNPAID', 'original same-tier hold is expired')
+equal(`select (state='HELD' and stripe_checkout_session_id is null and expires_at>now())::text from payment_v2_holds where id='${freshId}'`, 'true', 'new same-tier hold is live and unassociated')
+equal(`select count(*) from payment_v2_holds where purchaser_credential_hash=${hash('expired-retry')} and ((state='HELD' and expires_at>now()) or state in ('SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED'))`, 1, 'exactly one same-tier effective hold remains')
 const crossExpired = ok(acquire('cross-expired','og_throne').replace("select hold_id||'|'||state", 'select hold_id'), 'create cross-tier stale hold')
-ok(`update payment_v2_holds set expires_at=now()-interval '1 second' where id='${crossExpired}'`, 'age cross-tier hold')
+ageUnassociatedHold(crossExpired, 'coherently age cross-tier disposable hold')
 const crossFresh = ok(acquire('cross-expired','early_bird').replace("select hold_id||'|'||state", 'select hold_id'), 'expired cross-tier hold does not conflict')
 equal(`select tier from payment_v2_holds where id='${crossFresh}'`, 'early_bird', 'new cross-tier hold is Early Bird')
 equal(`select state from payment_v2_holds where id='${crossExpired}'`, 'EXPIRED_UNPAID', 'old OG hold is expired')
+equal(`select (tier='early_bird' and state='HELD' and stripe_checkout_session_id is null and expires_at>now())::text from payment_v2_holds where id='${crossFresh}'`, 'true', 'new cross-tier hold is live Early Bird')
 equal(`select count(*) from payment_v2_holds where purchaser_credential_hash=${hash('cross-expired')} and ((state='HELD' and expires_at>now()) or state in ('SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED'))`, 1, 'exactly one cross-tier effective hold remains')
 const protectedId = ok(acquire('cross-protected','og_throne').replace("select hold_id||'|'||state", 'select hold_id'), 'create associated cross-tier hold')
 equal(`select payment_v2_associate_session('${protectedId}',${hash('cross-protected')},'cs_protected')`, 'associated', 'associate protected hold')
-fails(acquire('cross-protected','early_bird'), 'associated cross-tier hold remains protected')
+failsWith(acquire('cross-protected','early_bird'), /ERROR:\s+effective_hold_conflict\b/, 'associated cross-tier hold remains protected')
 
 ok("truncate payment_v2_reconciliation_evidence,payment_v2_allocations,payment_v2_purchases,payment_v2_holds cascade", 'reset for capacity concurrency')
 const ogBurst = await boundedConcurrent(Array.from({length:75},(_,i)=>acquire(`og-${i}`,'og_throne')))
@@ -95,58 +111,63 @@ equal("select count(*) from payment_v2_holds where tier='early_bird' and ((state
 ok('truncate payment_v2_holds cascade','reset Early Bird holds')
 const sameCross = await concurrent([acquire('same-cross','og_throne'),acquire('same-cross','early_bird')])
 assert.equal(sameCross.filter(r=>r.ok).length,1,'same-purchaser cross-tier concurrency creates at most one hold'); assertions++
+assert.equal(sameCross.filter(r=>!r.ok).every(r=>/ERROR:\s+effective_hold_conflict\b/.test(r.err)),true,'cross-tier concurrency loser is effective_hold_conflict'); assertions++
 
 ok('truncate payment_v2_holds cascade','reset state tests')
+const localExpireHold = ok(acquire('local-expire','og_throne').replace("select hold_id||'|'||state",'select hold_id'),'create local-expiration hold')
+ageUnassociatedHold(localExpireHold, 'coherently age local-expiration hold')
+equal(`select payment_v2_expire_unpaid('${localExpireHold}')`,'expired','local expiration succeeds for an aged unassociated hold')
+equal(`select payment_v2_expire_unpaid('${localExpireHold}')`,'already_expired','local expiration exact replay is idempotent')
 const stateHold = ok(acquire('state','og_throne').replace("select hold_id||'|'||state",'select hold_id'),'create state hold')
 equal(`select payment_v2_associate_session('${stateHold}',${hash('state')},'cs_state')`,'associated','Session association succeeds')
 equal(`select payment_v2_associate_session('${stateHold}',${hash('state')},'cs_state')`,'already_associated','Session exact replay is idempotent')
-fails(`select payment_v2_associate_session('${stateHold}',${hash('state')},'cs_other')`,'Session replacement fails')
-fails(`select payment_v2_expire_unpaid('${stateHold}')`,'local expiration cannot expire associated hold')
+failsWith(`select payment_v2_associate_session('${stateHold}',${hash('state')},'cs_other')`,/ERROR:\s+session_conflict\b/,'Session replacement fails')
+failsWith(`select payment_v2_expire_unpaid('${stateHold}')`,/ERROR:\s+not_expirable\b/,'local expiration cannot expire associated hold')
 equal(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_expire',now())`,'expired','provider-confirmed expiration succeeds')
 equal(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'already_recorded','provider-event exact replay is idempotent')
-fails(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_wrong','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'same provider event with wrong Session conflicts')
-fails(`select payment_v2_record_session_unpaid_terminal(gen_random_uuid(),'cs_state','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'same provider event with wrong hold conflicts')
-fails(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','PAYMENT_CANCELED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'same provider event with wrong kind conflicts')
-fails(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at+interval '1 second' from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,'same provider event with changed timestamp conflicts')
-fails(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_other',now())`,'conflicting provider replay fails')
+failsWith(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_wrong','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,/ERROR:\s+provider_event_conflict\b/,'same provider event with wrong Session conflicts')
+failsWith(`select payment_v2_record_session_unpaid_terminal(gen_random_uuid(),'cs_state','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,/ERROR:\s+provider_event_conflict\b/,'same provider event with wrong hold conflicts')
+failsWith(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','PAYMENT_CANCELED_UNPAID','evt_expire',(select occurred_at from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,/ERROR:\s+provider_event_conflict\b/,'same provider event with wrong kind conflicts')
+failsWith(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_expire',(select occurred_at+interval '1 second' from payment_v2_reconciliation_evidence where provider_event_id='evt_expire'))`,/ERROR:\s+provider_event_conflict\b/,'same provider event with changed timestamp conflicts')
+failsWith(`select payment_v2_record_session_unpaid_terminal('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_other',now())`,/ERROR:\s+invalid_state\b/,'conflicting provider replay fails')
 const cancelHold = ok(acquire('cancel','early_bird').replace("select hold_id||'|'||state",'select hold_id'),'create cancellation hold')
 ok(`select payment_v2_associate_session('${cancelHold}',${hash('cancel')},'cs_cancel')`,'associate cancellation hold')
 equal(`select payment_v2_record_session_unpaid_terminal('${cancelHold}','cs_cancel','PAYMENT_CANCELED_UNPAID','evt_cancel',now())`,'canceled','provider-confirmed cancellation succeeds')
 
 const paidHold = ok(acquire('paid','og_throne').replace("select hold_id||'|'||state",'select hold_id'),'create paid hold')
 ok(`select payment_v2_associate_session('${paidHold}',${hash('paid')},'cs_paid')`,'associate paid hold')
-fails(`select payment_v2_record_paid('${paidHold}',${hash('paid')},'cs_paid','cus_paid','price_wrong','pi_paid',null,'evt_wrong_price',now())`,'wrong Price cannot create paid state')
+failsWith(`select payment_v2_record_paid('${paidHold}',${hash('paid')},'cs_paid','cus_paid','price_wrong','pi_paid',null,'evt_wrong_price',now())`,/ERROR:\s+price_mismatch\b/,'wrong Price cannot create paid state')
 equal(`select state from payment_v2_holds where id='${paidHold}'`,'SESSION_ASSOCIATED','wrong Price leaves hold unchanged')
-fails(`select payment_v2_record_paid('${paidHold}',${hash('paid')},'cs_paid','cus_paid','price_og',null,null,'evt_no_pi',now())`,'OG requires PaymentIntent')
+failsWith(`select payment_v2_record_paid('${paidHold}',${hash('paid')},'cs_paid','cus_paid','price_og',null,null,'evt_no_pi',now())`,/ERROR:\s+provider_identity_mismatch\b/,'OG requires PaymentIntent')
 const noSubHold=ok(acquire('no-sub','early_bird').replace("select hold_id||'|'||state",'select hold_id'),'create Early Bird identity hold')
 ok(`select payment_v2_associate_session('${noSubHold}',${hash('no-sub')},'cs_no_sub')`,'associate Early Bird identity hold')
-fails(`select payment_v2_record_paid('${noSubHold}',${hash('no-sub')},'cs_no_sub','cus_sub','price_early',null,null,'evt_no_sub',now())`,'Early Bird requires Subscription')
+failsWith(`select payment_v2_record_paid('${noSubHold}',${hash('no-sub')},'cs_no_sub','cus_sub','price_early',null,null,'evt_no_sub',now())`,/ERROR:\s+provider_identity_mismatch\b/,'Early Bird requires Subscription')
 equal(`select payment_v2_record_paid('${paidHold}',${hash('paid')},'cs_paid','cus_paid','price_og','pi_paid',null,'evt_paid',timestamp '2026-08-01 00:00:00+00')`,'recorded','correct evidence creates paid-unclaimed')
 equal(`select count(*) from payment_v2_purchases where hold_id='${paidHold}' and state='PAID_UNCLAIMED'`,1,'exactly one paid-unclaimed purchase exists')
-fails(`select payment_v2_expire_unpaid('${paidHold}')`,'paid purchase cannot be locally expired')
-fails(`select payment_v2_record_session_unpaid_terminal('${paidHold}','cs_paid','PAYMENT_CANCELED_UNPAID','evt_paid_cancel',now())`,'paid purchase cannot be provider-canceled')
+failsWith(`select payment_v2_expire_unpaid('${paidHold}')`,/ERROR:\s+paid_purchase_exists\b/,'paid purchase cannot be locally expired')
+failsWith(`select payment_v2_record_session_unpaid_terminal('${paidHold}','cs_paid','PAYMENT_CANCELED_UNPAID','evt_paid_cancel',now())`,/ERROR:\s+paid_purchase_exists\b/,'paid purchase cannot be provider-canceled')
 equal(`select count(*) from payment_v2_purchases where hold_id='${noSubHold}'`,0,'redirect or absent provider evidence cannot create paid state')
 
 const purchaseId=ok(`select id from payment_v2_purchases where hold_id='${paidHold}'`,'load paid purchase')
 equal(`select payment_v2_claim('${purchaseId}',${hash('paid')},'10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001')`,'claimed','first authenticated claim succeeds')
 equal(`select (select count(*) from payment_v2_allocations where purchase_id='${purchaseId}')||'|'||(select count(*) from user_subscriptions where user_id='10000000-0000-0000-0000-000000000001' and tier_name='og_throne')`,'1|1','claim creates one allocation and entitlement')
 equal(`select payment_v2_claim('${purchaseId}',${hash('paid')},'10000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001')`,'already_claimed','same-profile replay is idempotent')
-fails(`select payment_v2_claim('${purchaseId}',${hash('paid')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'different-profile replay fails')
+failsWith(`select payment_v2_claim('${purchaseId}',${hash('paid')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,/ERROR:\s+claimed_by_other_profile\b/,'different-profile replay fails')
 
 const conflictHold=ok(acquire('conflict','early_bird').replace("select hold_id||'|'||state",'select hold_id'),'create conflicting entitlement purchase')
 ok(`select payment_v2_associate_session('${conflictHold}',${hash('conflict')},'cs_conflict')`,'associate conflict purchase')
 ok(`select payment_v2_record_paid('${conflictHold}',${hash('conflict')},'cs_conflict','cus_new','price_early',null,'sub_new','evt_conflict',now())`,'record conflict purchase')
 ok("insert into user_subscriptions(user_id,tier_id,tier_name,stripe_customer_id,stripe_subscription_id,status) values('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002','early_bird','cus_old','sub_old','active')",'seed conflicting entitlement')
 ok("update subscription_tiers set stripe_price_id='price_temporarily_missing' where name='early_bird'",'remove claim tier match')
-fails(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'missing or wrong Price claim tier fails')
+failsWith(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,/ERROR:\s+claim_tier_ambiguous_or_missing\b/,'missing or wrong Price claim tier fails')
 equal(`select state||'|'||(select count(*) from payment_v2_allocations where purchase_id=payment_v2_purchases.id) from payment_v2_purchases where hold_id='${conflictHold}'`,'PAID_UNCLAIMED|0','missing tier leaves no partial claim')
 ok("update subscription_tiers set stripe_price_id='price_early' where name='early_bird'; insert into subscription_tiers values('00000000-0000-0000-0000-000000000022','early_bird','price_early',false)",'create duplicate matching tier')
-fails(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'duplicate matching claim tiers fail')
+failsWith(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,/ERROR:\s+claim_tier_ambiguous_or_missing\b/,'duplicate matching claim tiers fail')
 ok("delete from subscription_tiers where id='00000000-0000-0000-0000-000000000022'",'remove duplicate tier')
-fails(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'conflicting entitlement fails')
+failsWith(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,/ERROR:\s+conflicting_existing_entitlement\b/,'conflicting entitlement fails')
 equal("select count(*) from user_subscriptions where user_id='10000000-0000-0000-0000-000000000002' and tier_name='early_bird'",1,'conflict creates no duplicate')
 ok("insert into user_subscriptions(user_id,tier_id,tier_name,stripe_customer_id,stripe_subscription_id,status) values('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002','early_bird','cus_new','sub_new','trialing')",'seed second active entitlement')
-fails(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,'multiple existing entitlements fail')
+failsWith(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${conflictHold}'),${hash('conflict')},'10000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000002')`,/ERROR:\s+ambiguous_existing_entitlement\b/,'multiple existing entitlements fail')
 equal(`select state||'|'||(select count(*) from payment_v2_allocations where purchase_id=payment_v2_purchases.id) from payment_v2_purchases where hold_id='${conflictHold}'`,'PAID_UNCLAIMED|0','entitlement failures leave no partial claim')
 const compatibleHold=ok(acquire('compatible','early_bird').replace("select hold_id||'|'||state",'select hold_id'),'create compatible entitlement purchase')
 ok(`select payment_v2_associate_session('${compatibleHold}',${hash('compatible')},'cs_compatible')`,'associate compatible purchase')
@@ -154,16 +175,16 @@ ok(`select payment_v2_record_paid('${compatibleHold}',${hash('compatible')},'cs_
 ok("insert into user_subscriptions(user_id,tier_id,tier_name,stripe_customer_id,stripe_subscription_id,status) values('10000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000002','early_bird','cus_compatible','sub_compatible','active'); update subscription_tiers set is_active=false where name='early_bird'",'seed compatible entitlement and deactivate launch tier')
 equal(`select payment_v2_claim((select id from payment_v2_purchases where hold_id='${compatibleHold}'),${hash('compatible')},'10000000-0000-0000-0000-000000000004','20000000-0000-0000-0000-000000000004')`,'claimed','compatible existing entitlement is reused after tier deactivation')
 equal(`select (select count(*) from user_subscriptions where user_id='10000000-0000-0000-0000-000000000004')||'|'||(select count(*) from payment_v2_allocations where purchase_id=(select id from payment_v2_purchases where hold_id='${compatibleHold}'))`,'1|1','compatible reuse creates one allocation and no duplicate entitlement')
-fails(`select payment_v2_claim(gen_random_uuid(),${hash('none')},'10000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000003')`,'claim before payment fails')
-fails(`select * from payment_v2_acquire_hold(decode('00','hex'),'bad_tier',now()+interval '1 hour')`,'malformed hash and tier fail closed')
-fails('select count(*) from payment_v2_holds','anon cannot read ledgers','anon')
-fails(`select * from payment_v2_acquire_hold(${hash('anon')},'og_throne',now()+interval '1 hour')`,'authenticated cannot execute RPC','authenticated')
+failsWith(`select payment_v2_claim(gen_random_uuid(),${hash('none')},'10000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000003')`,/ERROR:\s+purchase_mismatch\b/,'claim before payment fails')
+failsWith(`select * from payment_v2_acquire_hold(decode('00','hex'),'bad_tier',now()+interval '1 hour')`,/ERROR:\s+invalid_request\b/,'malformed hash and tier fail closed')
+failsWith('select count(*) from payment_v2_holds',/ERROR:\s+permission denied for table payment_v2_holds\b/,'anon cannot read ledgers','anon')
+failsWith(`select * from payment_v2_acquire_hold(${hash('anon')},'og_throne',now()+interval '1 hour')`,/ERROR:\s+permission denied for function payment_v2_acquire_hold\b/,'authenticated cannot execute RPC','authenticated')
 equal("select bool_and(has_function_privilege('service_role',p.oid,'EXECUTE')) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname like 'payment_v2_%'",'t','service_role can execute every V2 RPC')
 equal("select bool_and(not has_function_privilege('anon',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE')) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname like 'payment_v2_%'",'t','browser roles cannot execute any V2 RPC')
 equal("select bool_and(has_table_privilege('service_role',c.oid,'SELECT') and not has_table_privilege('service_role',c.oid,'INSERT,UPDATE,DELETE')) from pg_class c where c.relnamespace='public'::regnamespace and c.relname like 'payment_v2_%' and c.relkind='r'",'t','service_role has read-only ledger access')
-fails("insert into payment_v2_holds(purchaser_credential_hash,tier,expires_at) values(decode(repeat('00',32),'hex'),'og_throne',now()+interval '1 hour')",'service_role cannot directly insert ledger rows','service_role')
-fails("update payment_v2_holds set updated_at=now()",'service_role cannot directly update ledger rows','service_role')
-fails("delete from payment_v2_holds",'service_role cannot directly delete ledger rows','service_role')
+failsWith("insert into payment_v2_holds(purchaser_credential_hash,tier,expires_at) values(decode(repeat('00',32),'hex'),'og_throne',now()+interval '1 hour')",/ERROR:\s+permission denied for table payment_v2_holds\b/,'service_role cannot directly insert ledger rows','service_role')
+failsWith("update payment_v2_holds set updated_at=now()",/ERROR:\s+permission denied for table payment_v2_holds\b/,'service_role cannot directly update ledger rows','service_role')
+failsWith("delete from payment_v2_holds",/ERROR:\s+permission denied for table payment_v2_holds\b/,'service_role cannot directly delete ledger rows','service_role')
 equal("select bool_and(not has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE') and not has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE')) from pg_class c where c.relnamespace='public'::regnamespace and c.relname like 'payment_v2_%' and c.relkind='r'",'t','browser roles cannot read or mutate any ledger')
 equal("select count(*) from user_subscriptions where metadata->>'internal_admin'='true'",1,'internal admin row remains separate from V2 capacity')
 
