@@ -5,6 +5,8 @@ on:
       - 'supabase/migrations/20260801002800_payment_first_v2_contract.sql'
       - 'backend/payment-v2/tests/**'
       - 'app/api/payment-v2/**'
+      - 'app/login/**'
+      - 'app/auth/callback/**'
       - 'app/api/webhook/payment-v2/**'
       - 'app/billing/**'
       - 'lib/payment-v2/**'
@@ -42,6 +44,8 @@ jobs:
         run: npm run test:pfc-05
       - name: Payment-first Billing Result V2 behavioral contract
         run: npm run test:pfc-06a
+      - name: Payment-first Auth Continuation V2 behavioral contract
+        run: npm run test:pfc-06b
       - name: Supplemental source contract
         run: npm run test:payment-v2-contract
       - name: Disposable PostgreSQL behavior and concurrency
