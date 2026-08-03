@@ -1,16 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { browserSuccessDependencies, buildPaymentSuccessLinks, PaymentFirstSuccessFlow, type SuccessState } from "@/lib/payment-v2/successFlow";
 
 export default function PaymentFirstSuccessClient({ sessionId }: { sessionId: string }) {
-  const flow = useMemo(() => new PaymentFirstSuccessFlow(sessionId, browserSuccessDependencies()), [sessionId]);
+  const activeFlow = useRef<PaymentFirstSuccessFlow | null>(null);
   const links = useMemo(() => buildPaymentSuccessLinks(sessionId), [sessionId]);
   const [state, setState] = useState<SuccessState>({ view: "loading", busy: false });
-  useEffect(() => { const unsubscribe = flow.subscribe(setState); flow.start(); return unsubscribe; }, [flow]);
+  useEffect(() => {
+    const flow = new PaymentFirstSuccessFlow(sessionId, browserSuccessDependencies());
+    activeFlow.current = flow;
+    flow.subscribe(setState);
+    flow.start();
+    return () => {
+      flow.dispose();
+      if (activeFlow.current === flow) activeFlow.current = null;
+    };
+  }, [sessionId]);
 
   const content: Record<SuccessState["view"], [string, string]> = {
     loading: ["Verifying your purchase", "We’re securely checking the status of your Checkout."],
@@ -33,7 +42,7 @@ export default function PaymentFirstSuccessClient({ sessionId }: { sessionId: st
         {state.view === "sign_in" && <><Button asChild><Link href={links.signIn}>Sign in</Link></Button><Button asChild variant="outline"><Link href={links.signUp}>Create account</Link></Button></>}
         {state.view === "claimed" && <Button asChild><Link href="/dashboard">Continue to dashboard</Link></Button>}
         {["unavailable", "not_found"].includes(state.view) && <Button asChild><Link href="/pricing">Back to pricing</Link></Button>}
-        {["error", "timed_out"].includes(state.view) && <Button type="button" disabled={state.busy} onClick={() => flow.retry()}>Retry</Button>}
+        {["error", "timed_out"].includes(state.view) && <Button type="button" disabled={state.busy} onClick={() => activeFlow.current?.retry()}>Retry</Button>}
         {["loading", "processing", "claiming", "profile_setup"].includes(state.view) && <span role="status" className="text-sm text-gray-300">Please wait…</span>}
       </CardContent>
     </Card>

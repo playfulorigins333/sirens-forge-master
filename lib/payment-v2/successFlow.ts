@@ -191,7 +191,8 @@ export function browserSuccessDependencies(): SuccessFlowDependencies {
     async isAuthenticated() {
       const { supabaseBrowser } = await import("@/lib/supabase");
       const { data, error } = await supabaseBrowser().auth.getUser();
-      return !error && !!data.user;
+      if (error) throw new Error("Authentication verification failed");
+      return !!data.user;
     },
     now: () => Date.now(),
     setTimer: (callback, delay) => window.setTimeout(callback, delay),
