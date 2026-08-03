@@ -11,6 +11,8 @@ const PUBLIC_PATHS = new Set([
   "/",
   "/login",
   "/pricing",
+  "/billing/success",
+  "/billing/cancel",
   "/faq",
   "/contact",
   "/content-removal",
@@ -24,7 +26,7 @@ const PUBLIC_PATHS = new Set([
 
 const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"];
 
-function isPublicPath(pathname: string): boolean {
+export function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
   return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }

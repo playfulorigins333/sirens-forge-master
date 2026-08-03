@@ -25,6 +25,7 @@
     "test:pfc-03": "tsx backend/payment-v2/tests/paymentFirstCheckoutV2.test.ts",
     "test:pfc-04": "tsx backend/payment-v2/tests/paymentFirstWebhookV2.test.ts",
     "test:pfc-05": "tsx backend/payment-v2/tests/paymentFirstClaimV2.test.ts",
+    "test:pfc-06a": "tsx backend/payment-v2/tests/paymentFirstSuccessV2.test.ts",
     "test:payment-v2-postgres": "node backend/payment-v2/tests/runPaymentV2PostgresIntegration.mjs"
   },
   "repository": {

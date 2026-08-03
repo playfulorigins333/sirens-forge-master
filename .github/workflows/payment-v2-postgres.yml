@@ -6,6 +6,7 @@ on:
       - 'backend/payment-v2/tests/**'
       - 'app/api/payment-v2/**'
       - 'app/api/webhook/payment-v2/**'
+      - 'app/billing/**'
       - 'lib/payment-v2/**'
       - '.github/workflows/payment-v2-postgres.yml'
       - 'package.json'
@@ -39,6 +40,8 @@ jobs:
         run: npm run test:pfc-04
       - name: Payment-first Claim V2 behavioral contract
         run: npm run test:pfc-05
+      - name: Payment-first Billing Result V2 behavioral contract
+        run: npm run test:pfc-06a
       - name: Supplemental source contract
         run: npm run test:payment-v2-contract
       - name: Disposable PostgreSQL behavior and concurrency
