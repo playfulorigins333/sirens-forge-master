@@ -1,8 +1,8 @@
 "use client"
 
-import React, { useEffect, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import React, { useEffect, useState } from "react"
 import { supabaseBrowser } from "@/lib/supabase"
+import { LoginAuthFlow, type LoginAuthState } from "@/lib/payment-v2/loginAuthFlow"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,115 +18,59 @@ type LoginClientProps = {
 }
 
 export default function LoginClient({ initialMode, continuation, authError, callbackUrl }: LoginClientProps) {
-  const supabaseRef = useRef<ReturnType<typeof supabaseBrowser> | null>(null)
-  if (!supabaseRef.current) supabaseRef.current = supabaseBrowser()
-  const supabase = supabaseRef.current
-  const router = useRouter()
-  const mountedRef = useRef(false)
-  const navigatedRef = useRef(false)
-  const destination = continuation ?? "/dashboard"
-  const navigateOnce = (target = destination) => {
-    if (!mountedRef.current || navigatedRef.current) return
-    navigatedRef.current = true
-    router.replace(target)
-  }
-
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
-  const [isLoading, setIsLoading] = useState(false)
-  const [checkingSession, setCheckingSession] = useState(true)
-  const [mode, setMode] = useState<"login" | "signup">(initialMode)
-  const [error, setError] = useState<string | null>(authError)
-  const [checkEmail, setCheckEmail] = useState(false)
+  const [supabase] = useState(() => supabaseBrowser())
+  const [flow] = useState(() => new LoginAuthFlow(initialMode, continuation, callbackUrl, authError, {
+    getUser: () => supabase.auth.getUser(),
+    passwordLogin: (loginEmail, loginPassword) => supabase.auth.signInWithPassword({
+      email: loginEmail, password: loginPassword,
+    }),
+    signup: (signupEmail, signupPassword, emailRedirectTo) => supabase.auth.signUp({
+      email: signupEmail,
+      password: signupPassword,
+      options: emailRedirectTo ? { emailRedirectTo } : undefined,
+    }),
+    startOAuth: (provider, redirectTo) => supabase.auth.signInWithOAuth({
+      provider, options: { redirectTo },
+    }),
+    subscribeAuthState: (callback) => {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(() => callback())
+      return () => subscription.unsubscribe()
+    },
+    navigate: (destination) => window.location.replace(destination),
+  }))
+  const [authState, setAuthState] = useState<LoginAuthState>({
+    mode: initialMode,
+    checkingSession: true,
+    submitting: false,
+    oauthBusy: false,
+    checkEmail: false,
+    error: authError,
+  })
 
   useEffect(() => {
-    mountedRef.current = true
-    const checkSession = async () => {
-      try {
-        const { data: { user }, error: verificationError } = await supabase.auth.getUser()
-        if (!mountedRef.current) return
-        if (verificationError) {
-          setError("We could not verify your current session. Please try again.")
-          setCheckingSession(false)
-          return
-        }
-        if (user) navigateOnce()
-        else setCheckingSession(false)
-      } catch {
-        if (!mountedRef.current) return
-        setError("We could not verify your current session. Please try again.")
-        setCheckingSession(false)
-      }
-    }
-    void checkSession()
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) navigateOnce()
-    })
+    const unsubscribeState = flow.subscribe(setAuthState)
+    flow.start()
     return () => {
-      mountedRef.current = false
-      subscription.unsubscribe()
+      unsubscribeState()
+      flow.dispose()
     }
-  }, [supabase])
+  }, [flow])
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setError(null)
+  useEffect(() => {
+    flow.updateServerValues(continuation, callbackUrl)
+  }, [flow, continuation, callbackUrl])
 
-    try {
-      if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        })
-
-        if (error) {
-          setError("Email or password was not accepted. Please try again.")
-          setIsLoading(false)
-          return
-        }
-
-        navigateOnce()
-        return
-      }
-
-      if (mode === "signup") {
-        const options = continuation && callbackUrl ? { emailRedirectTo: callbackUrl } : undefined
-        const { data, error } = await supabase.auth.signUp({ email, password, options })
-        if (error) {
-          setError("We could not create your account. Please check your details and try again.")
-          setIsLoading(false)
-          return
-        }
-        if (data.session?.user) {
-          navigateOnce()
-          return
-        }
-        setCheckEmail(true)
-        setIsLoading(false)
-        return
-      }
-    } catch {
-      setError("Something went wrong. Please try again.")
-    }
-
-    setIsLoading(false)
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault()
+    if (authState.mode === "login") void flow.passwordLogin(email, password)
+    else void flow.signup(email, password)
   }
-
-  const handleOAuth = async (provider: "google" | "discord") => {
-    setError(null)
-    if (!callbackUrl) {
-      setError("Sign-in is temporarily unavailable. Please try again later.")
-      return
-    }
-    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: callbackUrl } })
-    if (error && mountedRef.current) setError("We could not start sign-in. Please try again.")
-  }
-
-  const handleGoogleLogin = () => void handleOAuth("google")
-  const handleDiscordLogin = () => void handleOAuth("discord")
+  const handleGoogleLogin = () => void flow.startOAuth("google")
+  const handleDiscordLogin = () => void flow.startOAuth("discord")
+  const { mode, checkingSession, submitting: isLoading, oauthBusy, checkEmail, error } = authState
 
   if (checkingSession) {
     return (
@@ -190,10 +134,10 @@ export default function LoginClient({ initialMode, continuation, authError, call
 
             <CardContent className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
-                <Button onClick={handleGoogleLogin} variant="outline" className="bg-white text-gray-900">
+                <Button disabled={oauthBusy} onClick={handleGoogleLogin} variant="outline" className="bg-white text-gray-900">
                   Google
                 </Button>
-                <Button onClick={handleDiscordLogin} variant="outline" className="bg-[#5865F2] text-white">
+                <Button disabled={oauthBusy} onClick={handleDiscordLogin} variant="outline" className="bg-[#5865F2] text-white">
                   Discord
                 </Button>
               </div>
@@ -234,14 +178,22 @@ export default function LoginClient({ initialMode, continuation, authError, call
               </form>
 
               <div className="text-center text-sm text-gray-400">
-                {mode === "login" ? "Don't have an account? " : "Already have an account? "}
-                <button
-                  type="button"
-                  className="text-purple-400 hover:underline"
-                  onClick={() => setMode(mode === "login" ? "signup" : "login")}
-                >
-                  {mode === "login" ? "Sign up" : "Sign in"}
-                </button>
+                {checkEmail ? (
+                  <button type="button" className="text-purple-400 hover:underline" onClick={() => flow.returnToSignIn()}>
+                    Return to sign in
+                  </button>
+                ) : (
+                  <>
+                    {mode === "login" ? "Don't have an account? " : "Already have an account? "}
+                    <button
+                      type="button"
+                      className="text-purple-400 hover:underline"
+                      onClick={() => flow.setMode(mode === "login" ? "signup" : "login")}
+                    >
+                      {mode === "login" ? "Sign up" : "Sign in"}
+                    </button>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>

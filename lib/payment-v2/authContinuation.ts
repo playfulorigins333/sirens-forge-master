@@ -103,10 +103,16 @@ export interface CallbackAuth {
 }
 
 export async function establishCallbackSession(auth: CallbackAuth, credentials: CallbackCredentials): Promise<AuthErrorCode | null> {
-  const result = credentials.kind === "code"
-    ? await auth.exchangeCodeForSession(credentials.code)
-    : await auth.setSession({ access_token: credentials.accessToken, refresh_token: credentials.refreshToken });
+  let result: { error: unknown };
+  try {
+    result = credentials.kind === "code"
+      ? await auth.exchangeCodeForSession(credentials.code)
+      : await auth.setSession({ access_token: credentials.accessToken, refresh_token: credentials.refreshToken });
+  } catch {
+    return credentials.kind === "code" ? "oauth_exchange_failed" : "oauth_session_failed";
+  }
   if (result.error) return credentials.kind === "code" ? "oauth_exchange_failed" : "oauth_session_failed";
-  const verification = await auth.getUser();
+  let verification: Awaited<ReturnType<CallbackAuth["getUser"]>>;
+  try { verification = await auth.getUser(); } catch { return "oauth_session_failed"; }
   return verification.error || !verification.data.user ? "oauth_session_failed" : null;
 }

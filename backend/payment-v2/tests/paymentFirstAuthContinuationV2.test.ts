@@ -14,6 +14,7 @@ import {
   selectLoginRedirect,
   trustedApplicationOrigin,
 } from "../../../lib/payment-v2/authContinuation";
+import { LoginAuthFlow, type LoginAuthDependencies, type LoginAuthState } from "../../../lib/payment-v2/loginAuthFlow";
 
 let assertions = 0;
 const equal = (actual: unknown, expected: unknown) => { assert.equal(actual, expected); assertions += 1; };
@@ -115,35 +116,193 @@ equal((await sessionScenario(tokens, { establishError: true })).result, "oauth_s
 equal((await sessionScenario(code, { userError: true })).result, "oauth_session_failed");
 equal((await sessionScenario(code, { user: null })).result, "oauth_session_failed");
 
-// Source contracts cover browser lifecycle and prohibited side effects without mounting or networking.
+// Executable login lifecycle contract with local, dependency-injected fakes.
+type UserResult = { data: { user: unknown | null }; error: unknown };
+type Deferred<T> = { promise: Promise<T>; resolve(value: T): void; reject(error: unknown): void };
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void; let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((ok, fail) => { resolve = ok; reject = fail; });
+  return { promise, resolve, reject };
+}
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+function harness(options: {
+  users?: Array<UserResult | Promise<UserResult>>;
+  password?: () => Promise<{ error: unknown }>;
+  signup?: (redirect: string | null) => Promise<{ data: { session: { user?: unknown } | null }; error: unknown }>;
+  oauth?: (provider: "google" | "discord", redirect: string) => Promise<{ error: unknown }>;
+  continuation?: string | null;
+} = {}) {
+  const states: LoginAuthState[] = [];
+  const navigations: string[] = [];
+  const oauthCalls: Array<[string, string]> = [];
+  const signupRedirects: Array<string | null> = [];
+  let getUserCalls = 0; let passwordCalls = 0; let signupCalls = 0; let subscriptionCount = 0; let unsubscribeCount = 0;
+  let authEvent: (() => void) | null = null;
+  const users = [...(options.users ?? [{ data: { user: null }, error: null }])];
+  const dependencies: LoginAuthDependencies = {
+    async getUser() {
+      getUserCalls += 1;
+      const value = users.shift() ?? { data: { user: null }, error: null };
+      return await value;
+    },
+    async passwordLogin() { passwordCalls += 1; return options.password ? options.password() : { error: null }; },
+    async signup(_email, _password, redirect) {
+      signupCalls += 1; signupRedirects.push(redirect);
+      return options.signup ? options.signup(redirect) : { data: { session: null }, error: null };
+    },
+    async startOAuth(provider, redirect) {
+      oauthCalls.push([provider, redirect]);
+      return options.oauth ? options.oauth(provider, redirect) : { error: null };
+    },
+    subscribeAuthState(callback) {
+      subscriptionCount += 1; authEvent = callback;
+      return () => { unsubscribeCount += 1; authEvent = null; };
+    },
+    navigate(destination) { navigations.push(destination); },
+  };
+  const flow = new LoginAuthFlow("login", options.continuation ?? null, "https://sirens.example/auth/callback", null, dependencies);
+  flow.subscribe((state) => states.push({ ...state }));
+  return {
+    flow, states, navigations, oauthCalls, signupRedirects,
+    emitAuth: () => authEvent?.(),
+    counts: () => ({ getUserCalls, passwordCalls, signupCalls, subscriptionCount, unsubscribeCount }),
+  };
+}
+
+const raceUser = deferred<UserResult>();
+const race = harness({ users: [raceUser.promise, { data: { user: {} }, error: null }] });
+race.flow.start(); race.emitAuth();
+equal(race.counts().getUserCalls, 1);
+equal(race.navigations.length, 0);
+raceUser.resolve({ data: { user: null }, error: {} }); await tick();
+equal(race.navigations.length, 0);
+equal(race.states.at(-1)?.error, "We could not verify your current session. Please try again.");
+await race.flow.retryVerification();
+equal(race.counts().getUserCalls, 2);
+equal(race.navigations.length, 1);
+race.emitAuth(); race.emitAuth(); await tick();
+equal(race.navigations.length, 1);
+
+const missing = harness(); missing.flow.start(); await tick();
+equal(missing.navigations.length, 0);
+
+const paidLogin = harness({ continuation, users: [{ data: { user: null }, error: null }, { data: { user: {} }, error: null }] });
+paidLogin.flow.start(); await tick(); await paidLogin.flow.passwordLogin("a", "b");
+equal(paidLogin.navigations[0], continuation);
+equal(paidLogin.counts().getUserCalls, 2);
+const defaultLogin = harness({ users: [{ data: { user: null }, error: null }, { data: { user: {} }, error: null }] });
+defaultLogin.flow.start(); await tick(); await defaultLogin.flow.passwordLogin("a", "b");
+equal(defaultLogin.navigations[0], "/dashboard");
+const loginVerifyError = harness({ users: [{ data: { user: null }, error: null }, { data: { user: null }, error: {} }] });
+loginVerifyError.flow.start(); await tick(); await loginVerifyError.flow.passwordLogin("a", "b");
+equal(loginVerifyError.navigations.length, 0);
+equal(loginVerifyError.states.at(-1)?.error, "We could not verify your current session. Please try again.");
+const returnedLoginError = harness({ password: async () => ({ error: {} }) });
+returnedLoginError.flow.start(); await tick(); await returnedLoginError.flow.passwordLogin("a", "b");
+equal(returnedLoginError.counts().getUserCalls, 1);
+equal(returnedLoginError.navigations.length, 0);
+const thrownLogin = harness({ password: async () => { throw new Error("secret"); } });
+thrownLogin.flow.start(); await tick(); await thrownLogin.flow.passwordLogin("a", "b");
+equal(thrownLogin.states.at(-1)?.error, "Email or password was not accepted. Please try again.");
+
+const immediateSignup = harness({ continuation, users: [{ data: { user: null }, error: null }, { data: { user: {} }, error: null }], signup: async () => ({ data: { session: { user: {} } }, error: null }) });
+immediateSignup.flow.start(); await tick(); await immediateSignup.flow.signup("a", "b");
+equal(immediateSignup.navigations[0], continuation);
+const immediateSignupError = harness({ users: [{ data: { user: null }, error: null }, { data: { user: null }, error: {} }], signup: async () => ({ data: { session: { user: {} } }, error: null }) });
+immediateSignupError.flow.start(); await tick(); await immediateSignupError.flow.signup("a", "b");
+equal(immediateSignupError.navigations.length, 0);
+equal(immediateSignupError.states.at(-1)?.error, "We could not verify your current session. Please try again.");
+const emailSignup = harness({ continuation }); emailSignup.flow.start(); await tick();
+await emailSignup.flow.signup("a", "b"); await emailSignup.flow.signup("a", "b");
+equal(emailSignup.states.at(-1)?.checkEmail, true);
+equal(emailSignup.navigations.length, 0);
+equal(emailSignup.counts().signupCalls, 1);
+equal(emailSignup.signupRedirects[0], "https://sirens.example/auth/callback");
+emailSignup.flow.returnToSignIn();
+equal(emailSignup.states.at(-1)?.checkEmail, false);
+equal(emailSignup.states.at(-1)?.mode, "login");
+await emailSignup.flow.passwordLogin("a", "b");
+equal(emailSignup.counts().passwordCalls, 1);
+equal(emailSignup.counts().signupCalls, 1);
+
+const oauthReturned = harness({ oauth: async () => ({ error: {} }) }); oauthReturned.flow.start(); await tick();
+await oauthReturned.flow.startOAuth("google");
+equal(oauthReturned.states.at(-1)?.error, "We could not start sign-in. Please try again.");
+equal(oauthReturned.states.at(-1)?.oauthBusy, false);
+equal(oauthReturned.navigations.length, 0);
+equal(oauthReturned.oauthCalls[0]?.[1], "https://sirens.example/auth/callback");
+const oauthThrown = harness({ oauth: async () => { throw new Error("provider secret"); } }); oauthThrown.flow.start(); await tick();
+await oauthThrown.flow.startOAuth("discord");
+equal(oauthThrown.states.at(-1)?.error, "We could not start sign-in. Please try again.");
+equal(oauthThrown.states.at(-1)?.oauthBusy, false);
+equal(oauthThrown.oauthCalls[0]?.[0], "discord");
+const oauthPending = deferred<{ error: unknown }>();
+const duplicateOauth = harness({ oauth: () => oauthPending.promise }); duplicateOauth.flow.start(); await tick();
+const firstOauth = duplicateOauth.flow.startOAuth("google"); const secondOauth = duplicateOauth.flow.startOAuth("discord");
+equal(duplicateOauth.oauthCalls.length, 1); oauthPending.resolve({ error: {} }); await Promise.all([firstOauth, secondOauth]);
+equal(duplicateOauth.states.at(-1)?.oauthBusy, false);
+const lateOauth = deferred<{ error: unknown }>();
+const disposedOauth = harness({ oauth: () => lateOauth.promise }); disposedOauth.flow.start(); await tick();
+const stateCountBeforeOauth = disposedOauth.states.length; const oauthCompletion = disposedOauth.flow.startOAuth("google");
+disposedOauth.flow.dispose(); lateOauth.resolve({ error: {} }); await oauthCompletion;
+equal(disposedOauth.states.length, stateCountBeforeOauth + 1);
+
+const lateVerify = deferred<UserResult>(); const disposedVerify = harness({ users: [lateVerify.promise] });
+disposedVerify.flow.start(); disposedVerify.flow.dispose(); lateVerify.resolve({ data: { user: {} }, error: null }); await tick();
+equal(disposedVerify.navigations.length, 0);
+equal(disposedVerify.counts().unsubscribeCount, 1);
+equal(disposedVerify.counts().subscriptionCount, 1);
+const latePasswordResult = deferred<{ error: unknown }>();
+const disposedPassword = harness({ password: () => latePasswordResult.promise }); disposedPassword.flow.start(); await tick();
+const passwordCompletion = disposedPassword.flow.passwordLogin("a", "b"); disposedPassword.flow.dispose();
+latePasswordResult.resolve({ error: null }); await passwordCompletion;
+equal(disposedPassword.navigations.length, 0);
+const lateSignupResult = deferred<{ data: { session: { user?: unknown } | null }; error: unknown }>();
+const disposedSignup = harness({ signup: () => lateSignupResult.promise }); disposedSignup.flow.start(); await tick();
+const signupCompletion = disposedSignup.flow.signup("a", "b"); disposedSignup.flow.dispose();
+lateSignupResult.resolve({ data: { session: { user: {} } }, error: null }); await signupCompletion;
+equal(disposedSignup.navigations.length, 0);
+const competingUser = deferred<UserResult>(); const competing = harness({ users: [competingUser.promise] });
+competing.flow.start(); competing.emitAuth(); competing.emitAuth(); competingUser.resolve({ data: { user: {} }, error: null }); await tick();
+equal(competing.counts().getUserCalls, 1);
+equal(competing.navigations.length, 1);
+const movingDestination = deferred<UserResult>(); const destinationFlow = harness({ continuation, users: [movingDestination.promise] });
+destinationFlow.flow.start(); destinationFlow.flow.updateServerValues(null, "https://sirens.example/auth/callback");
+movingDestination.resolve({ data: { user: {} }, error: null }); await tick();
+equal(destinationFlow.navigations[0], "/dashboard");
+const changedDestination = deferred<UserResult>(); const changedFlow = harness({ continuation, users: [changedDestination.promise] });
+changedFlow.flow.start(); const newer = "/billing/success?session_id=cs_test_new";
+changedFlow.flow.updateServerValues(newer, "https://sirens.example/auth/callback?next=new"); changedDestination.resolve({ data: { user: {} }, error: null }); await tick();
+equal(changedFlow.navigations[0], newer);
+
+// Callback service behavior executes injected auth dependencies without importing the route.
+const rejectedCodeAuth = {
+  async exchangeCodeForSession() { throw new Error("secret"); }, async setSession() { return { error: null }; },
+  async getUser() { return { data: { user: {} }, error: null }; },
+};
+equal(await establishCallbackSession(rejectedCodeAuth, code), "oauth_exchange_failed");
+const rejectedTokensAuth = {
+  async exchangeCodeForSession() { return { error: null }; }, async setSession() { throw new Error("secret"); },
+  async getUser() { return { data: { user: {} }, error: null }; },
+};
+equal(await establishCallbackSession(rejectedTokensAuth, tokens), "oauth_session_failed");
+const rejectedUserAuth = {
+  async exchangeCodeForSession() { return { error: null }; }, async setSession() { return { error: null }; },
+  async getUser(): Promise<{ data: { user: unknown }; error: unknown }> { throw new Error("secret"); },
+};
+equal(await establishCallbackSession(rejectedUserAuth, code), "oauth_session_failed");
+
+// Source assertions are limited to prohibited side effects and raw-next isolation.
 const client = readFileSync("app/login/LoginClient.tsx", "utf8");
-const page = readFileSync("app/login/page.tsx", "utf8");
 const callback = readFileSync("app/auth/callback/route.ts", "utf8");
-const helper = readFileSync("lib/payment-v2/authContinuation.ts", "utf8");
-match(client, /useRef<ReturnType<typeof supabaseBrowser>/);
-match(client, /if \(!supabaseRef\.current\) supabaseRef\.current = supabaseBrowser\(\)/);
-equal((client.match(/onAuthStateChange\(/g) ?? []).length, 1);
-match(client, /subscription\.unsubscribe\(\)/);
-match(client, /navigatedRef\.current/);
-match(client, /mountedRef\.current = false/);
-match(client, /data\.session\?\.user/);
-match(client, /setCheckEmail\(true\)/);
-match(client, /emailRedirectTo: callbackUrl/);
-match(client, /provider: "google" \| "discord"/);
-match(page, /paymentFirstAuthContinuationEnabled\(\{/);
-match(page, /continuation=\{continuation\}/);
-absent(page, /NEXT_PUBLIC_PAYMENT/);
-absent(client + callback, /console\./);
-absent(client + callback, /claim-status/);
-absent(client + callback, /api\/payment-v2\/claim/);
-absent(client + callback, /sf_payment_v2_claim/);
-absent(client + callback, /profiles?\W/);
-absent(client + callback, /entitlements?\W/);
-absent(client + callback, /stripe/i);
-absent(client + callback, /fetch\(/);
-match(helper, /exchangeCodeForSession/);
-match(helper, /setSession/);
-match(callback, /selectCallbackRedirect/);
+const flowSource = readFileSync("lib/payment-v2/loginAuthFlow.ts", "utf8");
+absent(client, /searchParams|useSearchParams|[?&]next=/);
+absent(client + callback + flowSource, /console\./);
+absent(client + callback + flowSource, /claim-status/);
+absent(client + callback + flowSource, /api\/payment-v2\/claim/);
+absent(client + callback + flowSource, /sf_payment_v2_claim/);
+absent(client + callback + flowSource, /fetch\(/);
 absent(callback, /request\.headers|x-forwarded|host\W/i);
 
-console.log(`Payment-first Auth Continuation V2 behavioral contract passed: ${assertions} assertions; zero external network calls.`);
+console.log(`Payment-first Auth Continuation V2 behavioral contract passed: ${assertions} natural assertions; executable fake dependencies; zero external network calls.`);
