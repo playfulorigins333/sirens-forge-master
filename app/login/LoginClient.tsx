@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { supabaseBrowser } from "@/lib/supabase"
 import { LoginAuthFlow, type LoginAuthState } from "@/lib/payment-v2/loginAuthFlow"
 import { Button } from "@/components/ui/button"
@@ -22,25 +22,7 @@ export default function LoginClient({ initialMode, continuation, authError, call
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [supabase] = useState(() => supabaseBrowser())
-  const [flow] = useState(() => new LoginAuthFlow(initialMode, continuation, callbackUrl, authError, {
-    getUser: () => supabase.auth.getUser(),
-    passwordLogin: (loginEmail, loginPassword) => supabase.auth.signInWithPassword({
-      email: loginEmail, password: loginPassword,
-    }),
-    signup: (signupEmail, signupPassword, emailRedirectTo) => supabase.auth.signUp({
-      email: signupEmail,
-      password: signupPassword,
-      options: emailRedirectTo ? { emailRedirectTo } : undefined,
-    }),
-    startOAuth: (provider, redirectTo) => supabase.auth.signInWithOAuth({
-      provider, options: { redirectTo },
-    }),
-    subscribeAuthState: (callback) => {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(() => callback())
-      return () => subscription.unsubscribe()
-    },
-    navigate: (destination) => window.location.replace(destination),
-  }))
+  const activeFlowRef = useRef<LoginAuthFlow | null>(null)
   const [authState, setAuthState] = useState<LoginAuthState>({
     mode: initialMode,
     checkingSession: true,
@@ -51,25 +33,43 @@ export default function LoginClient({ initialMode, continuation, authError, call
   })
 
   useEffect(() => {
+    const flow = new LoginAuthFlow(initialMode, continuation, callbackUrl, authError, {
+      getUser: () => supabase.auth.getUser(),
+      passwordLogin: (loginEmail, loginPassword) => supabase.auth.signInWithPassword({
+        email: loginEmail, password: loginPassword,
+      }),
+      signup: (signupEmail, signupPassword, emailRedirectTo) => supabase.auth.signUp({
+        email: signupEmail,
+        password: signupPassword,
+        options: emailRedirectTo ? { emailRedirectTo } : undefined,
+      }),
+      startOAuth: (provider, redirectTo) => supabase.auth.signInWithOAuth({
+        provider, options: { redirectTo },
+      }),
+      subscribeAuthState: (callback) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(() => callback())
+        return () => subscription.unsubscribe()
+      },
+      navigate: (destination) => window.location.replace(destination),
+    })
+    activeFlowRef.current = flow
     const unsubscribeState = flow.subscribe(setAuthState)
     flow.start()
     return () => {
       unsubscribeState()
       flow.dispose()
+      if (activeFlowRef.current === flow) activeFlowRef.current = null
     }
-  }, [flow])
-
-  useEffect(() => {
-    flow.updateServerValues(continuation, callbackUrl)
-  }, [flow, continuation, callbackUrl])
+  }, [supabase, initialMode, continuation, callbackUrl, authError])
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
-    if (authState.mode === "login") void flow.passwordLogin(email, password)
-    else void flow.signup(email, password)
+    const flow = activeFlowRef.current
+    if (authState.mode === "login") void flow?.passwordLogin(email, password)
+    else void flow?.signup(email, password)
   }
-  const handleGoogleLogin = () => void flow.startOAuth("google")
-  const handleDiscordLogin = () => void flow.startOAuth("discord")
+  const handleGoogleLogin = () => void activeFlowRef.current?.startOAuth("google")
+  const handleDiscordLogin = () => void activeFlowRef.current?.startOAuth("discord")
   const { mode, checkingSession, submitting: isLoading, oauthBusy, checkEmail, error } = authState
 
   if (checkingSession) {
@@ -179,7 +179,7 @@ export default function LoginClient({ initialMode, continuation, authError, call
 
               <div className="text-center text-sm text-gray-400">
                 {checkEmail ? (
-                  <button type="button" className="text-purple-400 hover:underline" onClick={() => flow.returnToSignIn()}>
+                  <button type="button" className="text-purple-400 hover:underline" onClick={() => activeFlowRef.current?.returnToSignIn()}>
                     Return to sign in
                   </button>
                 ) : (
@@ -188,7 +188,7 @@ export default function LoginClient({ initialMode, continuation, authError, call
                     <button
                       type="button"
                       className="text-purple-400 hover:underline"
-                      onClick={() => flow.setMode(mode === "login" ? "signup" : "login")}
+                      onClick={() => activeFlowRef.current?.setMode(mode === "login" ? "signup" : "login")}
                     >
                       {mode === "login" ? "Sign up" : "Sign in"}
                     </button>

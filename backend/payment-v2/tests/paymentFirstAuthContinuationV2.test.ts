@@ -276,6 +276,33 @@ changedFlow.flow.start(); const newer = "/billing/success?session_id=cs_test_new
 changedFlow.flow.updateServerValues(newer, "https://sirens.example/auth/callback?next=new"); changedDestination.resolve({ data: { user: {} }, error: null }); await tick();
 equal(changedFlow.navigations[0], newer);
 
+// Lifecycle replay uses a permanently disposed first flow and a fresh active second flow.
+const replayFirstUser = deferred<UserResult>();
+const replayFirst = harness({ continuation, users: [replayFirstUser.promise] });
+replayFirst.flow.start();
+equal(replayFirst.counts().subscriptionCount, 1);
+equal(replayFirst.counts().getUserCalls, 1);
+const replayFirstStateCount = replayFirst.states.length;
+replayFirst.flow.dispose();
+equal(replayFirst.counts().unsubscribeCount, 1);
+
+const replaySecondUser = deferred<UserResult>();
+const replaySecond = harness({ continuation, users: [replaySecondUser.promise] });
+replaySecond.flow.start();
+equal(replaySecond.counts().subscriptionCount, 1);
+equal(replaySecond.counts().unsubscribeCount, 0);
+equal(replaySecond.counts().getUserCalls, 1);
+replaySecondUser.resolve({ data: { user: {} }, error: null }); await tick();
+equal(replaySecond.navigations.length, 1);
+equal(replaySecond.navigations[0], continuation);
+replayFirstUser.resolve({ data: { user: {} }, error: null }); await tick();
+equal(replayFirst.navigations.length, 0);
+equal(replayFirst.states.length, replayFirstStateCount);
+equal(replayFirst.counts().unsubscribeCount, 1);
+equal(replaySecond.counts().unsubscribeCount, 0);
+replaySecond.flow.dispose();
+equal(replaySecond.counts().unsubscribeCount, 1);
+
 // Callback service behavior executes injected auth dependencies without importing the route.
 const rejectedCodeAuth = {
   async exchangeCodeForSession() { throw new Error("secret"); }, async setSession() { return { error: null }; },
@@ -298,6 +325,11 @@ const client = readFileSync("app/login/LoginClient.tsx", "utf8");
 const callback = readFileSync("app/auth/callback/route.ts", "utf8");
 const flowSource = readFileSync("lib/payment-v2/loginAuthFlow.ts", "utf8");
 absent(client, /searchParams|useSearchParams|[?&]next=/);
+absent(client, /use(?:State|Memo)\(\(\) => new LoginAuthFlow/);
+match(client, /const activeFlowRef = useRef<LoginAuthFlow \| null>\(null\)/);
+match(client, /useEffect\(\(\) => \{\s+const flow = new LoginAuthFlow/);
+match(client, /flow\.dispose\(\)\s+if \(activeFlowRef\.current === flow\) activeFlowRef\.current = null/);
+match(client, /activeFlowRef\.current\?\.(?:startOAuth|returnToSignIn|setMode)/);
 absent(client + callback + flowSource, /console\./);
 absent(client + callback + flowSource, /claim-status/);
 absent(client + callback + flowSource, /api\/payment-v2\/claim/);
