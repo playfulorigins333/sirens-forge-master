@@ -13,6 +13,7 @@ type CheckoutTier = "og_throne" | "early_bird";
 interface TierSeats {
   remaining: number;
   total: number;
+  active: boolean;
 }
 
 interface SeatState {
@@ -31,7 +32,6 @@ interface SeatCountApiResponse {
   tiers: {
     og_throne?: SeatCountTier;
     early_bird?: SeatCountTier;
-    prime_access?: SeatCountTier;
     [key: string]: SeatCountTier | undefined;
   };
 }
@@ -156,17 +156,18 @@ export default function PricingClient() {
 
         // Require valid numbers to hydrate/update — prevents accidental drift
         if (
-          !isFiniteNumber(ogRemaining) ||
-          !isFiniteNumber(ogTotal) ||
-          !isFiniteNumber(ebRemaining) ||
-          !isFiniteNumber(ebTotal)
+          !isFiniteNumber(ogRemaining) || ogTotal !== 50 ||
+          !isFiniteNumber(ebRemaining) || ebTotal !== 120 ||
+          !Number.isInteger(ogRemaining) || ogRemaining < 0 || ogRemaining > 50 ||
+          !Number.isInteger(ebRemaining) || ebRemaining < 0 || ebRemaining > 120 ||
+          typeof ogTier?.is_active !== "boolean" || typeof ebTier?.is_active !== "boolean"
         ) {
           throw new Error("Seat numbers missing");
         }
 
         setSeats({
-          og: { remaining: ogRemaining, total: ogTotal },
-          earlyBird: { remaining: ebRemaining, total: ebTotal },
+          og: { remaining: ogRemaining, total: ogTotal, active: ogTier.is_active },
+          earlyBird: { remaining: ebRemaining, total: ebTotal, active: ebTier.is_active },
         });
       } catch {
         // Do nothing — keep last known good state.
@@ -238,56 +239,48 @@ export default function PricingClient() {
     label: string;
     og: string;
     earlyBird: string;
-    prime?: string;
-    highlight?: "og" | "earlybird" | "prime";
+    highlight?: "og" | "earlybird";
   }[] = [
     {
       label: "Pricing",
       og: "$1,333 one-time",
       earlyBird: "$29.99/month",
-      prime: "$59.99/month",
       highlight: "earlybird",
     },
     {
       label: "Availability",
       og: "50 total seats",
-      earlyBird: "150 total seats",
-      prime: "250 total seats",
+      earlyBird: "120 total seats",
       highlight: "og",
     },
     {
       label: "Affiliate % (first 6 months)",
       og: "50%",
       earlyBird: "20%",
-      prime: "10%",
       highlight: "og",
     },
     {
       label: "Affiliate % (lifetime after 6 months)",
       og: "25%",
       earlyBird: "10%",
-      prime: "7.5%",
       highlight: "og",
     },
     {
       label: "Founding Recognition",
       og: "OG Eternal Throne badge, top placement",
       earlyBird: "Founding circle badge",
-      prime: "Early supporter badge",
       highlight: "og",
     },
     {
       label: "Token Boosts & Rewards",
       og: "Highest bonus multipliers and early beta access",
       earlyBird: "Strong boosts and beta access",
-      prime: "Standard boosts after launch",
       highlight: "og",
     },
     {
       label: "Best For",
       og: "Creators serious about scaling and building an empire",
       earlyBird: "Creators ready to go all-in at a flexible monthly rate",
-      prime: "Creators entering after launch at higher pricing",
       highlight: "earlybird",
     },
   ];
@@ -482,7 +475,7 @@ export default function PricingClient() {
         {viewMode === "cards" ? (
           <>
             {/* Cards layout */}
-            <section className="grid gap-6 md:gap-8 md:grid-cols-2 lg:grid-cols-3 items-stretch mb-10">
+            <section className="grid gap-6 md:gap-8 md:grid-cols-2 items-stretch mb-10">
               {/* OG THRONE */}
               <motion.div
                 initial={{ opacity: 0, y: 25, scale: 0.98 }}
@@ -584,7 +577,7 @@ export default function PricingClient() {
                       </div>
 
                       <NeonButton
-                        disabled={!canCheckout || !seats || ogSoldOut}
+                        disabled={!canCheckout || !seats || !seats.og.active || ogSoldOut}
                         loading={checkoutLoading === "og_throne"}
                         label={!seats ? "Loading seats…" : ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
                         sublabel={
@@ -674,21 +667,21 @@ export default function PricingClient() {
                           )}
                         </div>
                         <span className="block text-xs text-gray-400 max-w-xs mx-auto">
-                          Once Early Bird sells out, pricing moves to Prime and then Standard. This is the{" "}
+                          Early Bird is one of two Payment-First launch tiers. This is the{" "}
                           <span className="font-semibold">sweet spot</span> for most creators.
                         </span>
                       </div>
 
                       <div className="flex justify-center">
                         <NeonButton
-                          disabled={!canCheckout || !seats || earlyBirdSoldOut}
+                          disabled={!canCheckout || !seats || !seats.earlyBird.active || earlyBirdSoldOut}
                           loading={checkoutLoading === "early_bird"}
                           label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
                           sublabel={
                             !seats
                               ? "Seat counter is syncing…"
                               : earlyBirdSoldOut
-                              ? "Prime & Standard will open next."
+                              ? "This launch tier is sold out."
                               : "Lock in founding $29.99/month pricing."
                           }
                           onClick={() => seats && !earlyBirdSoldOut && handleCheckout("early_bird")}
@@ -699,78 +692,6 @@ export default function PricingClient() {
                 </Card>
               </motion.div>
 
-              {/* PRIME & FUTURE */}
-              <motion.div
-                initial={{ opacity: 0, y: 25, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ delay: 0.15, duration: 0.7, ease: "easeOut" }}
-                className="transform-gpu"
-              >
-                <Card className="relative h-full border border-slate-700/80 bg-gradient-to-b from-slate-950 via-slate-950/95 to-slate-950/90 rounded-3xl overflow-hidden shadow-[0_0_30px_rgba(15,23,42,0.85)]">
-                  <AnimatedGlow className="bg-cyan-500/25" />
-
-                  <CardHeader className="pt-12">
-                    <div className="flex items-center justify-center gap-3 mb-3">
-                      <div className="relative">
-                        <div className="absolute inset-0 blur-md bg-cyan-500/45" />
-                        <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-cyan-300 shadow-[0_0_24px_rgba(6,182,212,0.9)]">
-                          <Sparkles className="w-5 h-5 text-white drop-shadow-[0_0_18px_rgba(255,255,255,0.95)]" />
-                        </div>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-[11px] uppercase tracking-[0.25em] text-cyan-100/80">Future Tiers</p>
-                        <CardTitle className="text-xl font-bold text-white">
-                          Prime &amp; Standard (Coming Soon)
-                        </CardTitle>
-                      </div>
-                    </div>
-
-                    <CardDescription className="text-sm text-gray-300/95 text-center max-w-xs mx-auto">
-                      These tiers open once OG and Early Bird fill. Pricing will never be this low again.
-                    </CardDescription>
-                  </CardHeader>
-
-                  <CardContent className="space-y-6 pb-6">
-                    <div className="space-y-4 text-sm text-gray-200">
-                      <div className="rounded-2xl border border-slate-700/80 bg-slate-900/60 p-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="font-semibold">Prime</span>
-                          <span className="text-lg font-bold">$59.99/mo</span>
-                        </div>
-                        <p className="text-xs text-gray-400">250 total seats</p>
-                        <p className="text-[11px] mt-1 text-gray-500">
-                          10% commission (6 months) • 7.5% lifetime after launch. Reserved for creators who join once Early Bird is full.
-                        </p>
-                      </div>
-
-                      <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3 flex flex-col gap-2">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-amber-300" />
-                          <span className="text-xs font-semibold text-amber-100 tracking-[0.12em] uppercase">
-                            Why early tiers matter
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-400">
-                          Early tiers lock in better commissions, higher visibility, and stronger influence over the roadmap.
-                          Once we move to Prime and Standard, the economics shift in favor of the platform instead of just early adopters.
-                        </p>
-                      </div>
-
-                      <div className="rounded-2xl border border-slate-800 bg-slate-950/70 p-3">
-                        <p className="text-xs font-semibold text-slate-100">Standard Subscription (Post-Launch)</p>
-                        <p className="text-[11px] text-gray-400 mt-1">
-                          Standard users will pay higher rates with lower commission and fewer perks. OG and Early Bird are{" "}
-                          <span className="font-semibold">intentionally overpowered</span> to reward the first wave of believers.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="pt-1 text-[11px] text-gray-500 text-center">
-                      Prime &amp; Standard will open automatically once Early Bird seats reach capacity.
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
             </section>
 
             {/* Comparison hint */}
@@ -783,7 +704,7 @@ export default function PricingClient() {
           <>
             {/* Comparison table */}
             <section className="mt-8 mb-10 rounded-3xl border border-slate-800/80 bg-slate-950/80 shadow-[0_0_40px_rgba(15,23,42,0.9)] overflow-hidden">
-              <div className="grid grid-cols-[1.3fr,1fr,1fr,1fr] text-xs md:text-sm">
+              <div className="grid grid-cols-[1.3fr,1fr,1fr] text-xs md:text-sm">
                 {/* Header row */}
                 <div className="border-b border-slate-800/80 bg-slate-950/90 px-4 py-3 flex items-center gap-2">
                   <span className="text-[11px] uppercase tracking-[0.25em] text-slate-400">Feature</span>
@@ -796,13 +717,9 @@ export default function PricingClient() {
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-pink-900/90 via-pink-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
                   <span className="text-[10px] uppercase tracking-[0.24em] text-pink-200/80">Early Bird</span>
                   <span className="text-xs font-semibold text-pink-50">$29.99/month</span>
-                  <span className="text-[10px] text-pink-200/80">150 total seats</span>
+                  <span className="text-[10px] text-pink-200/80">120 total seats</span>
                 </div>
-                <div className="border-b border-slate-800/80 bg-gradient-to-br from-cyan-900/80 via-slate-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
-                  <span className="text-[10px] uppercase tracking-[0.24em] text-cyan-200/80">Prime (Coming Soon)</span>
-                  <span className="text-xs font-semibold text-cyan-50">$59.99/month</span>
-                  <span className="text-[10px] text-cyan-200/80">250 total seats</span>
-                </div>
+
 
                 {/* Rows */}
                 {compareRows.map((row, idx) => (
@@ -821,8 +738,6 @@ export default function PricingClient() {
                     {/* Early Bird */}
                     <CompareCell highlight={row.highlight === "earlybird"} value={row.earlyBird} />
 
-                    {/* Prime */}
-                    <CompareCell highlight={row.highlight === "prime"} value={row.prime ?? "Opens after Early Bird fills"} />
                   </div>
                 ))}
               </div>
@@ -840,16 +755,13 @@ export default function PricingClient() {
                     If you want <span className="font-semibold">flexibility</span> with strong commissions and full access, Early Bird is
                     the best monthly option.
                   </li>
-                  <li>
-                    If you plan to join <span className="font-semibold">after</span> launch, you&apos;ll likely end up in Prime or Standard
-                    at higher pricing and lower upside.
-                  </li>
+
                 </ul>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3 md:gap-4 w-full md:w-auto">
                 <NeonButton
-                  disabled={!canCheckout || !seats || ogSoldOut}
+                  disabled={!canCheckout || !seats || !seats.og.active || ogSoldOut}
                   loading={checkoutLoading === "og_throne"}
                   label={!seats ? "Loading seats…" : ogSoldOut ? "OG Sold Out • View Early Bird" : "Claim OG Eternal Throne"}
                   sublabel={
@@ -862,14 +774,14 @@ export default function PricingClient() {
                   onClick={() => seats && !ogSoldOut && handleCheckout("og_throne")}
                 />
                 <NeonButton
-                  disabled={!canCheckout || !seats || earlyBirdSoldOut}
+                  disabled={!canCheckout || !seats || !seats.earlyBird.active || earlyBirdSoldOut}
                   loading={checkoutLoading === "early_bird"}
                   label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
                   sublabel={
                     !seats
                       ? "Seat counter is syncing…"
                       : earlyBirdSoldOut
-                      ? "Prime & Standard will open next."
+                      ? "This launch tier is sold out."
                       : "Founding monthly rate • Limited seats"
                   }
                   onClick={() => seats && !earlyBirdSoldOut && handleCheckout("early_bird")}

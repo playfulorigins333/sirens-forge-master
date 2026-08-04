@@ -12,6 +12,14 @@ on:
       - 'lib/payment-v2/**'
       - '.github/workflows/payment-v2-postgres.yml'
       - 'package.json'
+      - 'app/api/checkout/subscription-v2/**'
+      - 'app/api/subscription/seat-count/**'
+      - 'app/page.tsx'
+      - 'app/pricing/**'
+      - 'instrumentation-client.ts'
+      - 'next.config.mjs'
+      - '.env.example'
+      - 'package-lock.json'
   workflow_dispatch:
 jobs:
   postgres:
@@ -36,6 +44,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Payment-first Checkout Protection and Inventory V2 behavioral contract
+        run: npm run test:pfc-07b1
       - name: Payment-first Checkout V2 behavioral contract
         run: npm run test:pfc-03
       - name: Payment-first Webhook V2 behavioral contract
