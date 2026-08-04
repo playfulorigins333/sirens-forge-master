@@ -18,7 +18,10 @@ import {
 import { useState, useEffect, useRef } from 'react';
 
 export default function HomePage() {
-  const [seatsRemaining, setSeatsRemaining] = useState(87);
+  const [inventory, setInventory] = useState<{
+    og: { remaining: number; active: boolean };
+    earlyBird: { remaining: number; active: boolean };
+  } | null>(null);
   const [mounted, setMounted] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -32,10 +35,26 @@ export default function HomePage() {
 
   useEffect(() => {
     setMounted(true);
-    const interval = setInterval(() => {
-      setSeatsRemaining((prev) => Math.max(0, prev - 1));
-    }, 300000);
-    return () => clearInterval(interval);
+    let active = true;
+    const loadInventory = async () => {
+      try {
+        const response = await fetch("/api/subscription/seat-count", { cache: "no-store" });
+        const data = await response.json();
+        const og = data?.tiers?.og_throne;
+        const earlyBird = data?.tiers?.early_bird;
+        if (!response.ok || data?.success !== true || og?.max_slots !== 50 || earlyBird?.max_slots !== 120 ||
+            !Number.isInteger(og?.slots_remaining) || !Number.isInteger(earlyBird?.slots_remaining) ||
+            typeof og?.is_active !== "boolean" || typeof earlyBird?.is_active !== "boolean" ||
+            og.slots_remaining < 0 || og.slots_remaining > 50 || earlyBird.slots_remaining < 0 || earlyBird.slots_remaining > 120) return;
+        if (active) setInventory({
+          og: { remaining: og.slots_remaining, active: og.is_active },
+          earlyBird: { remaining: earlyBird.slots_remaining, active: earlyBird.is_active },
+        });
+      } catch { /* Retain the last authoritative value, if any. */ }
+    };
+    void loadInventory();
+    const interval = setInterval(loadInventory, 15_000);
+    return () => { active = false; clearInterval(interval); };
   }, []);
 
   return (
@@ -450,7 +469,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
-                    10 OF 35 LEFT
+                    {!inventory ? "Availability loading" : !inventory.og.active ? "Currently unavailable" : inventory.og.remaining === 0 ? "SOLD OUT" : `${inventory.og.remaining}/50 LEFT`}
                   </div>
 
                   <p className="mb-4 text-lg leading-relaxed font-medium text-gray-300">
@@ -489,11 +508,9 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  {mounted && (
-                    <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
-                      {seatsRemaining}/120 LEFT
-                    </div>
-                  )}
+                  <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
+                    {!inventory ? "Availability loading" : !inventory.earlyBird.active ? "Currently unavailable" : inventory.earlyBird.remaining === 0 ? "SOLD OUT" : `${inventory.earlyBird.remaining}/120 LEFT`}
+                  </div>
 
                   <p className="mb-4 text-lg leading-relaxed font-medium text-gray-300">
                     Enter the platform now with live subscription access and grow into stronger image, prompt, and identity workflows.

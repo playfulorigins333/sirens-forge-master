@@ -1,4 +1,5 @@
-﻿/** @type {import('next').NextConfig} */
+import { withBotId } from "botid/next/config";
+/** @type {import('next').NextConfig} */
 const nextConfig = {
   trailingSlash: false,
 
@@ -34,4 +35,4 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withBotId(nextConfig);

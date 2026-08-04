@@ -33,7 +33,9 @@ export type CheckoutResult = {
 const error = (status: number, message: string, code: string): CheckoutResult => ({ status, body: { error: message, code } });
 const serverError = () => error(500, "Unable to start Checkout", "PAYMENT_FIRST_CHECKOUT_V2_ERROR");
 
-function parseBody(body: unknown): { tierName: PaymentTier; referralCode?: string } | null {
+export type ValidatedCheckoutRequest = { tierName: PaymentTier; referralCode?: string };
+
+export function parseCheckoutBody(body: unknown): ValidatedCheckoutRequest | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const record = body as Record<string, unknown>;
   if (!Object.keys(record).every((key) => key === "tierName" || key === "referralCode")) return null;
@@ -80,7 +82,7 @@ export async function paymentFirstCheckout(input: {
   enabled: string | undefined; body: unknown; cookie?: string; production: boolean; configuredOrigin?: string;
 }, deps: CheckoutDependencies): Promise<CheckoutResult> {
   if (input.enabled !== "true") return error(503, "Payment-first Checkout is not active", "PAYMENT_FIRST_CHECKOUT_V2_DISABLED");
-  const request = parseBody(input.body);
+  const request = parseCheckoutBody(input.body);
   if (!request) return error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST");
   const origin = trustedOrigin(input.configuredOrigin, input.production);
   if (!origin) return serverError();

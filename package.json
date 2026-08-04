@@ -27,7 +27,8 @@
     "test:pfc-05": "tsx backend/payment-v2/tests/paymentFirstClaimV2.test.ts",
     "test:pfc-06a": "tsx backend/payment-v2/tests/paymentFirstSuccessV2.test.ts",
     "test:payment-v2-postgres": "node backend/payment-v2/tests/runPaymentV2PostgresIntegration.mjs",
-    "test:pfc-06b": "tsx backend/payment-v2/tests/paymentFirstAuthContinuationV2.test.ts"
+    "test:pfc-06b": "tsx backend/payment-v2/tests/paymentFirstAuthContinuationV2.test.ts",
+    "test:pfc-07b1": "tsx backend/payment-v2/tests/paymentFirstReadinessV2.test.ts"
   },
   "repository": {
     "type": "git",
@@ -44,6 +45,8 @@
     "@supabase/auth-helpers-nextjs": "^0.15.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.87.0",
+    "@vercel/firewall": "1.2.2",
+    "botid": "1.5.11",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.25",
