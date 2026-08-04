@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     checkRateLimit: () => checkRateLimit(PAYMENT_V2_CHECKOUT_RATE_LIMIT_ID, { request: req }),
     checkBotId: () => checkBotId(),
     readBody: () => req.text(),
-    async processCheckout(body) {
+    async processCheckout(request) {
       const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
       const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
       const stripeKey = process.env.STRIPE_SECRET_KEY || "";
@@ -37,7 +37,7 @@ export async function POST(req: Request) {
       });
       return paymentFirstCheckout({
         enabled: process.env.PAYMENT_FIRST_CHECKOUT_V2_ENABLED,
-        body,
+        body: request,
         cookie: req.headers.get("cookie")?.split(";").map((value) => value.trim()).find((value) => value.startsWith(`${PAYMENT_V2_COOKIE}=`))?.slice(PAYMENT_V2_COOKIE.length + 1),
         production: process.env.NODE_ENV === "production",
         configuredOrigin: process.env.PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN,

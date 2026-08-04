@@ -93,6 +93,8 @@ export default function PricingClient() {
 
   const ogSoldOut = seats ? seats.og.remaining <= 0 : false;
   const earlyBirdSoldOut = seats ? seats.earlyBird.remaining <= 0 : false;
+  const ogUnavailable = seats ? !seats.og.active : false;
+  const earlyBirdUnavailable = seats ? !seats.earlyBird.active : false;
 
   // Hydrate referral code from URL (?ref=CODE) or localStorage
   useEffect(() => {
@@ -374,7 +376,7 @@ export default function PricingClient() {
               <div className="text-xs md:text-sm">
                 <p className="font-semibold text-slate-50">Live Founder Seat Tracking</p>
                 <p className="text-slate-400">
-                  OG and Early Bird seat counters sync directly with the database. Numbers update as soon as a tier is claimed.
+                  Availability updates as seats are reserved or purchased.
                 </p>
               </div>
             </div>
@@ -387,6 +389,8 @@ export default function PricingClient() {
                   <span className="font-semibold text-slate-100">
                     {!seats ? (
                       <span className="text-slate-500">Loading…</span>
+                    ) : ogUnavailable ? (
+                      <span className="text-slate-400">Currently unavailable</span>
                     ) : ogSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
                     ) : (
@@ -403,6 +407,8 @@ export default function PricingClient() {
                   <span className="font-semibold text-slate-100">
                     {!seats ? (
                       <span className="text-slate-500">Loading…</span>
+                    ) : earlyBirdUnavailable ? (
+                      <span className="text-slate-400">Currently unavailable</span>
                     ) : earlyBirdSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
                     ) : (
@@ -489,7 +495,7 @@ export default function PricingClient() {
                   <AnimatedGlow className="bg-purple-500/40" />
 
                   {/* Selling fast micro banner when <= 10 and > 0 */}
-                  {seats && seats.og.remaining > 0 && seats.og.remaining <= 10 && (
+                  {seats?.og.active && seats.og.remaining > 0 && seats.og.remaining <= 10 && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -556,6 +562,11 @@ export default function PricingClient() {
                                 Loading…
                               </span>
                             </>
+                          ) : ogUnavailable ? (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                              <span className="font-semibold text-slate-300">Currently unavailable</span>
+                            </>
                           ) : ogSoldOut ? (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
@@ -579,15 +590,17 @@ export default function PricingClient() {
                       <NeonButton
                         disabled={!canCheckout || !seats || !seats.og.active || ogSoldOut}
                         loading={checkoutLoading === "og_throne"}
-                        label={!seats ? "Loading seats…" : ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
+                        label={!seats ? "Loading seats…" : ogUnavailable ? "Currently unavailable" : ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
                         sublabel={
                           !seats
                             ? "Seat counter is syncing…"
+                            : ogUnavailable
+                            ? "This launch tier is inactive."
                             : ogSoldOut
                             ? "Join Early Bird below instead."
                             : "Lifetime elite access • No recurring payment"
                         }
-                        onClick={() => seats && !ogSoldOut && handleCheckout("og_throne")}
+                        onClick={() => seats?.og.active && !ogSoldOut && handleCheckout("og_throne")}
                       />
                     </div>
                   </CardContent>
@@ -651,6 +664,11 @@ export default function PricingClient() {
                                 Loading…
                               </span>
                             </>
+                          ) : earlyBirdUnavailable ? (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+                              <span className="font-semibold text-slate-300">Currently unavailable</span>
+                            </>
                           ) : earlyBirdSoldOut ? (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
@@ -676,15 +694,17 @@ export default function PricingClient() {
                         <NeonButton
                           disabled={!canCheckout || !seats || !seats.earlyBird.active || earlyBirdSoldOut}
                           loading={checkoutLoading === "early_bird"}
-                          label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
+                          label={!seats ? "Loading seats…" : earlyBirdUnavailable ? "Currently unavailable" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
                           sublabel={
                             !seats
                               ? "Seat counter is syncing…"
+                              : earlyBirdUnavailable
+                              ? "This launch tier is inactive."
                               : earlyBirdSoldOut
                               ? "This launch tier is sold out."
                               : "Lock in founding $29.99/month pricing."
                           }
-                          onClick={() => seats && !earlyBirdSoldOut && handleCheckout("early_bird")}
+                          onClick={() => seats?.earlyBird.active && !earlyBirdSoldOut && handleCheckout("early_bird")}
                         />
                       </div>
                     </div>
@@ -763,28 +783,32 @@ export default function PricingClient() {
                 <NeonButton
                   disabled={!canCheckout || !seats || !seats.og.active || ogSoldOut}
                   loading={checkoutLoading === "og_throne"}
-                  label={!seats ? "Loading seats…" : ogSoldOut ? "OG Sold Out • View Early Bird" : "Claim OG Eternal Throne"}
+                  label={!seats ? "Loading seats…" : ogUnavailable ? "Currently unavailable" : ogSoldOut ? "OG Sold Out • View Early Bird" : "Claim OG Eternal Throne"}
                   sublabel={
                     !seats
                       ? "Seat counter is syncing…"
+                      : ogUnavailable
+                      ? "This launch tier is inactive."
                       : ogSoldOut
                       ? "OG seats are gone. Early Bird is now the top tier."
                       : "Lifetime elite access • Highest commissions"
                   }
-                  onClick={() => seats && !ogSoldOut && handleCheckout("og_throne")}
+                  onClick={() => seats?.og.active && !ogSoldOut && handleCheckout("og_throne")}
                 />
                 <NeonButton
                   disabled={!canCheckout || !seats || !seats.earlyBird.active || earlyBirdSoldOut}
                   loading={checkoutLoading === "early_bird"}
-                  label={!seats ? "Loading seats…" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
+                  label={!seats ? "Loading seats…" : earlyBirdUnavailable ? "Currently unavailable" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
                   sublabel={
                     !seats
                       ? "Seat counter is syncing…"
+                      : earlyBirdUnavailable
+                      ? "This launch tier is inactive."
                       : earlyBirdSoldOut
                       ? "This launch tier is sold out."
                       : "Founding monthly rate • Limited seats"
                   }
-                  onClick={() => seats && !earlyBirdSoldOut && handleCheckout("early_bird")}
+                  onClick={() => seats?.earlyBird.active && !earlyBirdSoldOut && handleCheckout("early_bird")}
                 />
               </div>
             </div>
@@ -873,4 +897,3 @@ function NeonButton({
     </button>
   );
 }
-

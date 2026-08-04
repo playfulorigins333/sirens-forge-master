@@ -6,6 +6,7 @@ const STATES = new Set(["HELD", "SESSION_ASSOCIATED", "PAID_UNCLAIMED", "CLAIMED
 const ALWAYS_COUNTED = new Set(["SESSION_ASSOCIATED", "PAID_UNCLAIMED", "CLAIMED"]);
 
 export function calculatePaymentV2Inventory(rows: PaymentV2InventoryRow[], now: Date) {
+  if (!Array.isArray(rows)) throw new Error("inventory_unavailable");
   if (!Number.isFinite(now.getTime())) throw new Error("inventory_unavailable");
   const used: Record<PaymentV2InventoryTier, number> = { og_throne: 0, early_bird: 0 };
   for (const row of rows) {
@@ -20,9 +21,16 @@ export function calculatePaymentV2Inventory(rows: PaymentV2InventoryRow[], now: 
     }
     if (consumes) used[row.tier] += 1;
   }
-  if (used.og_throne > 50 || used.early_bird > 120) throw new Error("inventory_unavailable");
+  if (used.og_throne > PAYMENT_V2_PUBLIC_CAPACITY.og_throne ||
+      used.early_bird > PAYMENT_V2_PUBLIC_CAPACITY.early_bird) throw new Error("inventory_unavailable");
   return {
-    og_throne: { max_slots: 50, slots_remaining: 50 - used.og_throne },
-    early_bird: { max_slots: 120, slots_remaining: 120 - used.early_bird },
+    og_throne: {
+      max_slots: PAYMENT_V2_PUBLIC_CAPACITY.og_throne,
+      slots_remaining: PAYMENT_V2_PUBLIC_CAPACITY.og_throne - used.og_throne,
+    },
+    early_bird: {
+      max_slots: PAYMENT_V2_PUBLIC_CAPACITY.early_bird,
+      slots_remaining: PAYMENT_V2_PUBLIC_CAPACITY.early_bird - used.early_bird,
+    },
   };
 }

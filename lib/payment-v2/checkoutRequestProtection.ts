@@ -1,4 +1,4 @@
-import type { CheckoutResult } from "./checkoutService";
+import { parseCheckoutBody, type CheckoutResult, type ValidatedCheckoutRequest } from "./checkoutService";
 
 export const PAYMENT_V2_CHECKOUT_RATE_LIMIT_ID = "payment-v2-checkout";
 export const PAYMENT_V2_CHECKOUT_BODY_MAX_BYTES = 1024;
@@ -7,10 +7,10 @@ type HeadersLike = { get(name: string): string | null };
 type ProtectedResult = CheckoutResult;
 
 export interface CheckoutProtectionDependencies {
-  checkRateLimit(): Promise<{ rateLimited: boolean }>;
-  checkBotId(): Promise<{ isBot: boolean }>;
+  checkRateLimit(): Promise<unknown>;
+  checkBotId(): Promise<unknown>;
   readBody(): Promise<string>;
-  processCheckout(body: unknown): Promise<CheckoutResult>;
+  processCheckout(request: ValidatedCheckoutRequest): Promise<CheckoutResult>;
 }
 
 const error = (status: number, message: string, code: string): ProtectedResult => ({
@@ -35,7 +35,7 @@ function isJsonContentType(value: string | null): boolean {
   if (!value) return false;
   const parts = value.split(";").map((part) => part.trim());
   if (parts.shift()?.toLowerCase() !== "application/json") return false;
-  return parts.every((parameter) => /^charset\s*=\s*[A-Za-z0-9._-]+$/i.test(parameter));
+  return parts.length === 0 || (parts.length === 1 && /^charset\s*=\s*utf-8$/i.test(parts[0]));
 }
 
 export async function protectPaymentV2Checkout(input: {
@@ -62,15 +62,21 @@ export async function protectPaymentV2Checkout(input: {
     return error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST");
 
   try {
-    if ((await dependencies.checkRateLimit()).rateLimited)
+    const verdict = await dependencies.checkRateLimit();
+    if (!verdict || typeof verdict !== "object" ||
+        typeof (verdict as { rateLimited?: unknown }).rateLimited !== "boolean")
+      throw new Error("untrusted verdict");
+    if ((verdict as { rateLimited: boolean }).rateLimited)
       return error(429, "Too many Checkout requests", "PAYMENT_V2_RATE_LIMITED");
   } catch {
     return error(503, "Checkout request verification is unavailable", "PAYMENT_V2_REQUEST_VERIFICATION_UNAVAILABLE");
   }
   try {
     const verdict = await dependencies.checkBotId();
-    if (!verdict || typeof verdict.isBot !== "boolean") throw new Error("untrusted verdict");
-    if (verdict.isBot)
+    if (!verdict || typeof verdict !== "object" ||
+        typeof (verdict as { isBot?: unknown }).isBot !== "boolean")
+      throw new Error("untrusted verdict");
+    if ((verdict as { isBot: boolean }).isBot)
       return error(403, "Automated Checkout requests are not allowed", "PAYMENT_V2_AUTOMATION_REJECTED");
   } catch {
     return error(503, "Checkout request verification is unavailable", "PAYMENT_V2_REQUEST_VERIFICATION_UNAVAILABLE");
@@ -86,5 +92,7 @@ export async function protectPaymentV2Checkout(input: {
   try { body = JSON.parse(text); } catch {
     return error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST");
   }
-  return dependencies.processCheckout(body);
+  const request = parseCheckoutBody(body);
+  if (!request) return error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST");
+  return dependencies.processCheckout(request);
 }
