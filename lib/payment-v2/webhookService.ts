@@ -1,3 +1,5 @@
+import { lifecycleEventEnvelope, responseForInboxStatus, type InboxStatus, type PaymentV2InboxDatabase } from "./eventInboxService";
+
 export const PAYMENT_V2_WEBHOOK_CONTRACT = "pfc-03-v2";
 
 export type PaymentV2Tier = "og_throne" | "early_bird";
@@ -23,7 +25,7 @@ export type TierRow = { name: string; is_active: boolean; stripe_price_id: strin
 export type PurchaseRow = { hold_id: string; tier: string; stripe_checkout_session_id: string; stripe_customer_id: string; stripe_price_id: string; stripe_payment_intent_id: string | null; stripe_subscription_id: string | null };
 
 export interface PaymentV2Provider {
-  constructEvent(rawBody: string, signature: string, secret: string): StripeEvent;
+  constructEvent(rawBody: Uint8Array, signature: string, secret: string): StripeEvent;
   retrieveSession(id: string): Promise<StripeSession>;
   retrievePaymentIntent(id: string): Promise<StripePaymentIntent>;
   retrieveSubscription(id: string): Promise<StripeSubscription>;
@@ -37,17 +39,21 @@ export interface PaymentV2Database {
 }
 export type WebhookResponse = { status: number; body: Record<string, string> };
 export interface WebhookInput {
-  enabled?: string; apiKey?: string; webhookSecret?: string; signature: string | null;
-  readRawBody(): Promise<string>;
+  enabled?: string; inboxEnabled?: string; apiKey?: string; webhookSecret?: string; signature: string | null;
+  readRawBody(): Promise<Uint8Array>;
   createProvider(apiKey: string): PaymentV2Provider;
   createDatabase(): PaymentV2Database;
+  createInboxDatabase?(): PaymentV2InboxDatabase;
 }
 
 const response = (status: number, body: Record<string, string>): WebhookResponse => ({ status, body });
 const disabled = () => response(503, { error: "Payment-first webhook is not active", code: "PAYMENT_FIRST_WEBHOOK_V2_DISABLED" });
 const badSignature = () => response(400, { error: "Invalid webhook signature", code: "INVALID_WEBHOOK_SIGNATURE" });
 const failed = () => response(500, { error: "Unable to process payment event", code: "PAYMENT_FIRST_WEBHOOK_V2_ERROR" });
-const ignored = () => response(200, { status: "ignored" });
+const ignored = () => response(200, { status: "ignored", code: "NON_PAYMENT_V2_EVENT_IGNORED" });
+const inboxNotReady = () => response(503, { error: "Payment V2 event inbox is not ready", code: "PAYMENT_V2_EVENT_INBOX_NOT_READY" });
+const inboxUnavailable = () => response(503, { error: "Payment V2 event inbox is unavailable", code: "PAYMENT_V2_EVENT_INBOX_UNAVAILABLE" });
+const inboxConflict = () => response(503, { error: "Payment V2 event inbox conflict", code: "PAYMENT_V2_EVENT_INBOX_CONFLICT" });
 const pending = () => response(200, { status: "pending" });
 const received = () => response(200, { status: "received" });
 const supported = new Set<string>(["checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.expired", "checkout.session.async_payment_failed"]);
@@ -144,13 +150,31 @@ async function recordPaid(event: StripeEvent, session: StripeSession, hold: Hold
 export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookResponse> {
   if (input.enabled !== "true") return disabled();
   if (!input.apiKey || !input.webhookSecret || !input.signature) return input.signature ? failed() : badSignature();
-  let provider: PaymentV2Provider; let event: StripeEvent;
+  let provider: PaymentV2Provider; let event: StripeEvent; let raw: Uint8Array;
   try {
     provider = input.createProvider(input.apiKey);
-    const raw = await input.readRawBody();
+    raw = await input.readRawBody();
     event = provider.constructEvent(raw, input.signature, input.webhookSecret);
   } catch { return badSignature(); }
-  if (!supported.has(event.type)) return ignored();
+  if (!supported.has(event.type)) {
+    const envelope = lifecycleEventEnvelope(event as any, raw);
+    if (!envelope) return ignored();
+    if (input.inboxEnabled !== "true" || !input.createInboxDatabase) return inboxNotReady();
+    try {
+      const inbox = input.createInboxDatabase();
+      const received = await inbox.receiveEvent(envelope.args);
+      if (received === "RECEIVED") {
+        const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: "RECEIVED", p_new_status: "PENDING_PHASE", p_error_code: null, p_count_attempt: false });
+        return responseForInboxStatus(transitioned as InboxStatus) as WebhookResponse;
+      }
+      if (received === "PENDING_PHASE" || received === "PENDING_PURCHASE" || received === "PENDING_RETRY" || received === "PROCESSED" || received === "IGNORED_NON_V2" || received === "FAILED_TERMINAL") {
+        return responseForInboxStatus(received as InboxStatus, true) as WebhookResponse;
+      }
+      return inboxUnavailable();
+    } catch (cause) {
+      return cause instanceof Error && cause.message === "inbox_event_conflict" ? inboxConflict() : inboxUnavailable();
+    }
+  }
   const embedded = event.data?.object;
   if (!embedded?.id) return failed();
   const discriminator = metadata(embedded);

@@ -3,11 +3,13 @@ on:
   pull_request:
     paths:
       - 'supabase/migrations/20260801002800_payment_first_v2_contract.sql'
+      - 'supabase/migrations/20260805002900_payment_v2_lifecycle_foundation.sql'
       - 'backend/payment-v2/tests/**'
       - 'app/api/payment-v2/**'
       - 'app/login/**'
       - 'app/auth/callback/**'
       - 'app/api/webhook/payment-v2/**'
+      - 'app/api/webhook/route.ts'
       - 'app/billing/**'
       - 'lib/payment-v2/**'
       - '.github/workflows/payment-v2-postgres.yml'
@@ -41,7 +43,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - name: Payment-first Checkout Protection and Inventory V2 behavioral contract
@@ -56,6 +58,8 @@ jobs:
         run: npm run test:pfc-06a
       - name: Payment-first Auth Continuation V2 behavioral contract
         run: npm run test:pfc-06b
+      - name: PFC-07E-A1 dormant lifecycle foundation tests
+        run: npm run test:pfc-07e-a1
       - name: Supplemental source contract
         run: npm run test:payment-v2-contract
       - name: Disposable PostgreSQL behavior and concurrency

@@ -29,7 +29,8 @@
     "test:payment-v2-postgres": "node backend/payment-v2/tests/runPaymentV2PostgresIntegration.mjs",
     "test:pfc-06b": "tsx backend/payment-v2/tests/paymentFirstAuthContinuationV2.test.ts",
     "test:pfc-07b1": "tsx backend/payment-v2/tests/paymentFirstReadinessV2.test.ts",
-    "test:pfc-07d": "tsx backend/affiliate/tests/pfc07dReferralEmailRouteLockdown.test.ts"
+    "test:pfc-07d": "tsx backend/affiliate/tests/pfc07dReferralEmailRouteLockdown.test.ts",
+    "test:pfc-07e-a1": "tsx backend/payment-v2/tests/paymentV2LegacyWebhookIsolation.test.ts && tsx backend/payment-v2/tests/paymentFirstCheckoutV2.test.ts && tsx backend/payment-v2/tests/paymentFirstWebhookV2.test.ts && tsx backend/payment-v2/tests/paymentV2Contract.test.ts"
   },
   "repository": {
     "type": "git",

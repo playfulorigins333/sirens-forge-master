@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { paymentFirstWebhook, PAYMENT_V2_WEBHOOK_CONTRACT, type PaymentV2Database, type PaymentV2Provider, type StripeEvent, type StripeSession, type WebhookInput } from "../../../lib/payment-v2/webhookService";
 
@@ -29,8 +30,8 @@ function harness(overrides: { event?: Partial<StripeEvent>; session?: Partial<St
     async recordTerminal(args) { calls.terminal.push(args); return args.p_event_kind === "SESSION_EXPIRED_UNPAID" ? "expired" : "canceled"; },
     ...overrides.db,
   };
-  const input: WebhookInput = { enabled: "true", apiKey: "sk_test", webhookSecret: "whsec_dedicated", signature: "sig_test",
-    async readRawBody() { calls.body++; return "RAW_BODY_NOT_JSON_PARSED"; },
+  const input: WebhookInput = { enabled: "true", inboxEnabled: undefined, apiKey: "sk_test", webhookSecret: "whsec_dedicated", signature: "sig_test",
+    async readRawBody() { calls.body++; return Buffer.from("RAW_BODY_NOT_JSON_PARSED"); },
     createProvider() { calls.provider++; return provider; }, createDatabase() { calls.database++; return db; }, ...overrides.input };
   return { calls, input, event, session, provider, db, run: () => paymentFirstWebhook(input) };
 }
@@ -45,14 +46,61 @@ for (const enabled of [undefined, "", "TRUE", " true", "false"]) equal((await ha
   const missing = harness({ input: { signature: null } }); equal((await missing.run()).status, 400, "missing signature is 400"); equal(missing.calls.body, 0, "missing signature does not read body");
   const invalid = harness({ provider: { constructEvent() { throw new Error("raw secret error"); }, retrieveSession: async () => { throw new Error("must not retrieve"); } } });
   const result = await invalid.run(); equal(result.status, 400, "invalid signature is 400"); equal(invalid.calls.database, 0, "invalid signature makes no database call"); equal(invalid.calls.session.length, 0, "invalid signature retrieves nothing");
-  const valid = harness(); await valid.run(); equal(valid.calls.construct[0], ["RAW_BODY_NOT_JSON_PARSED", "sig_test", "whsec_dedicated"], "raw body and dedicated secret verify signature"); check(!JSON.stringify(result).includes("raw secret"), "verification error sanitized");
+  const valid = harness(); await valid.run(); equal([Buffer.from(valid.calls.construct[0][0] as Uint8Array).toString(), valid.calls.construct[0][1], valid.calls.construct[0][2]], ["RAW_BODY_NOT_JSON_PARSED", "sig_test", "whsec_dedicated"], "raw body and dedicated secret verify signature"); check(!JSON.stringify(result).includes("raw secret"), "verification error sanitized");
 }
 {
-  const unsupported = harness({ event: { type: "payment_intent.payment_failed" } }); equal((await unsupported.run()).body.status, "ignored", "unsupported event ignored"); equal(unsupported.calls.database, 0, "unsupported event has zero DB calls");
+  const unsupported = harness({ event: { type: "payment_intent.payment_failed" } }); equal((await unsupported.run()).body, { status: "ignored", code: "NON_PAYMENT_V2_EVENT_IGNORED" }, "unsupported event ignored"); equal(unsupported.calls.database, 0, "unsupported event has zero DB calls");
   const legacy = harness({ event: { data: { object: { id: "cs_exact", metadata: {} } } } }); equal((await legacy.run()).body.status, "ignored", "legacy event ignored"); equal(legacy.calls.hold.length, 0, "legacy event reads no hold"); equal(legacy.calls.paid.length, 0, "legacy event calls no RPC");
   const wrong = harness({ event: { data: { object: { id: "cs_exact", metadata: { ...md, checkout_contract_version: "pfc-02" } } } } }); equal((await wrong.run()).body.status, "ignored", "wrong contract ignored");
   for (const [metadata, label] of [[{ ...md, payment_v2_hold_id: "bad" }, "invalid UUID"], [{ ...md, tier_name: "prime" }, "invalid tier"], [{ checkout_contract_version: PAYMENT_V2_WEBHOOK_CONTRACT }, "missing claimed metadata"]] as const)
     equal((await harness({ event: { data: { object: { id: "cs_exact", metadata: metadata as any } } } }).run()).status, 500, `${label} fails closed`);
+}
+
+
+{
+  const raw = Buffer.from("{\"id\":\"evt_refund_created\"}");
+  const calls: string[] = [];
+  const inbox = harness({
+    event: { id: "evt_refund_created", type: "refund.created", data: { object: { id: "re_exact" } } as any },
+    input: { inboxEnabled: "true", async readRawBody() { calls.push("read"); return raw; }, createInboxDatabase: () => ({
+      async receiveEvent(args) { calls.push(`receive:${args.p_lifecycle_phase}:${args.p_provider_object_type}:${args.p_raw_payload_sha256}`); return "RECEIVED" as const; },
+      async transitionStatus(args) { calls.push(`transition:${args.p_expected_status}:${args.p_new_status}`); return "PENDING_PHASE" as const; },
+    }) },
+  });
+  const result = await inbox.run();
+  equal(result, { status: 200, body: { status: "pending", code: "PAYMENT_V2_EVENT_PENDING_PHASE" } }, "recognized lifecycle event is durably pending");
+  equal(calls, ["read", `receive:PFC-07E-A2:refund:${createHash("sha256").update(raw).digest("hex")}`, "transition:RECEIVED:PENDING_PHASE"], "receive happens before lifecycle provider retrieval");
+  equal(inbox.calls.session.length + inbox.calls.pi.length + inbox.calls.sub.length + inbox.calls.hold.length + inbox.calls.tier.length + inbox.calls.purchase.length, 0, "A1 lifecycle inbox path performs no provider or Payment V2 row lookup");
+}
+for (const inboxEnabled of [undefined, "", "TRUE", "1", "false"]) {
+  const gated = harness({ event: { type: "refund.updated", data: { object: { id: "re_gate" } } as any }, input: { inboxEnabled } });
+  equal((await gated.run()).body.code, "PAYMENT_V2_EVENT_INBOX_NOT_READY", `inbox gate rejects ${String(inboxEnabled)}`);
+}
+{
+  const replay = harness({ event: { id: "evt_replay", type: "invoice.paid", data: { object: { id: "in_replay" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "PENDING_PHASE", transitionStatus: async () => { throw new Error("no transition"); } }) } });
+  equal((await replay.run()).body, { status: "received", code: "PAYMENT_V2_EVENT_REPLAYED" }, "safe durable replay is acknowledged");
+}
+{
+  const receivedReplay = harness({ event: { id: "evt_received", type: "customer.subscription.updated", data: { object: { id: "sub_received" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "RECEIVED", transitionStatus: async () => "PENDING_PHASE" }) } });
+  equal((await receivedReplay.run()).body.code, "PAYMENT_V2_EVENT_PENDING_PHASE", "existing RECEIVED replay retries transition");
+}
+{
+  const conflict = harness({ event: { id: "evt_conflict", type: "charge.dispute.created", data: { object: { id: "du_conflict" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => { throw new Error("inbox_event_conflict"); }, transitionStatus: async () => "PENDING_PHASE" }) } });
+  equal((await conflict.run()).body.code, "PAYMENT_V2_EVENT_INBOX_CONFLICT", "immutable inbox conflict is retryable 503 conflict");
+}
+{
+  const failure = harness({ event: { id: "evt_failure", type: "refund.failed", data: { object: { id: "re_failure" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => { throw new Error("db down"); }, transitionStatus: async () => "PENDING_PHASE" }) } });
+  equal((await failure.run()).body.code, "PAYMENT_V2_EVENT_INBOX_UNAVAILABLE", "receive failure is unavailable");
+}
+{
+  const transitionFailure = harness({ event: { id: "evt_transition_failure", type: "customer.subscription.deleted", data: { object: { id: "sub_failure" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "RECEIVED", transitionStatus: async () => { throw new Error("db down"); } }) } });
+  equal((await transitionFailure.run()).body.code, "PAYMENT_V2_EVENT_INBOX_UNAVAILABLE", "transition failure is unavailable and durable row remains RECEIVED");
+}
+for (const [type, phase, object] of [["refund.created","PFC-07E-A2","refund"],["refund.updated","PFC-07E-A2","refund"],["refund.failed","PFC-07E-A2","refund"],["customer.subscription.updated","PFC-07E-A3","subscription"],["customer.subscription.deleted","PFC-07E-A3","subscription"],["invoice.payment_failed","PFC-07E-A3","invoice"],["invoice.paid","PFC-07E-A3","invoice"],["charge.dispute.created","PFC-07E-B","dispute"],["charge.dispute.closed","PFC-07E-B","dispute"]] as const) {
+  let observed: any = null;
+  const h = harness({ event: { id: `evt_${type.replace(/[^a-z]/g,"_")}`, type, data: { object: { id: `obj_${type.replace(/[^a-z]/g,"_")}` } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async (args) => { observed = args; return "RECEIVED"; }, transitionStatus: async () => "PENDING_PHASE" }) } });
+  equal((await h.run()).status, 200, `${type} accepted for durable receipt`);
+  equal([observed.p_lifecycle_phase, observed.p_provider_object_type], [phase, object], `${type} maps to exact phase and object`);
 }
 
 const failures: Array<[string, Partial<PaymentV2Database>, Partial<StripeSession>]> = [

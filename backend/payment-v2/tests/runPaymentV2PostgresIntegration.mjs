@@ -74,6 +74,8 @@ values('10000000-0000-0000-0000-000000000099','00000000-0000-0000-0000-000000000
 ok(bootstrap, 'minimum realistic schema initializes')
 const migration = readFileSync('supabase/migrations/20260801002800_payment_first_v2_contract.sql', 'utf8')
 ok(migration, 'migration 02800 compiles and applies')
+const foundationMigration = readFileSync('supabase/migrations/20260805002900_payment_v2_lifecycle_foundation.sql', 'utf8')
+ok(foundationMigration, 'migration 02900 lifecycle foundation compiles and applies')
 
 const acquire = (who, tier, minutes = 60) => `select hold_id||'|'||state from public.payment_v2_acquire_hold(${hash(who)},${sqlLiteral(tier)},now()+interval '${minutes} minutes')`
 const firstOg = ok(acquire('first-og','og_throne'), 'first OG acquisition succeeds').split('|')[0]
@@ -187,5 +189,49 @@ failsWith("update payment_v2_holds set updated_at=now()",/ERROR:\s+permission de
 failsWith("delete from payment_v2_holds",/ERROR:\s+permission denied for table payment_v2_holds\b/,'service_role cannot directly delete ledger rows','service_role')
 equal("select bool_and(not has_table_privilege('anon',c.oid,'SELECT,INSERT,UPDATE,DELETE') and not has_table_privilege('authenticated',c.oid,'SELECT,INSERT,UPDATE,DELETE')) from pg_class c where c.relnamespace='public'::regnamespace and c.relname like 'payment_v2_%' and c.relkind='r'",'t','browser roles cannot read or mutate any ledger')
 equal("select count(*) from user_subscriptions where metadata->>'internal_admin'='true'",1,'internal admin row remains separate from V2 capacity')
+
+
+
+// PFC-07E-A1 inbox schema, receipt, transition, security and evidence uniqueness.
+equal("select count(*) from information_schema.columns where table_schema='public' and table_name='payment_v2_provider_event_inbox' and column_name in ('id','provider_event_id','provider_event_type','provider_object_id','provider_object_type','provider_created_at','received_at','raw_payload_sha256','lifecycle_phase','processing_status','attempt_count','last_attempt_at','processed_at','last_error_code','lifecycle_version','created_at','updated_at')",17,'inbox table has all required columns')
+failsWith("select raw_payload from payment_v2_provider_event_inbox",/ERROR:\s+column \"raw_payload\" does not exist\b/,'raw payload is not stored','service_role')
+equal("select count(*) from pg_indexes where schemaname='public' and tablename='payment_v2_provider_event_inbox' and indexname in ('payment_v2_provider_event_inbox_provider_event_id_key','payment_v2_inbox_status_received_at','payment_v2_inbox_type_status_received_at','payment_v2_inbox_object')",4,'inbox unique and lookup indexes exist')
+equal("select payment_v2_inbox_receive_event('evt_a1','refund.created','re_a1','refund',timestamp '2026-08-05 00:00:00+00',repeat('a',64),'PFC-07E-A2',1)",'RECEIVED','new inbox event inserts RECEIVED')
+equal("select processing_status from payment_v2_provider_event_inbox where provider_event_id='evt_a1'",'RECEIVED','new inbox row durable status is RECEIVED')
+equal("select payment_v2_inbox_receive_event('evt_a1','refund.created','re_a1','refund',timestamp '2026-08-05 00:00:00+00',repeat('a',64),'PFC-07E-A2',1)",'RECEIVED','exact inbox replay returns durable status')
+failsWith("select payment_v2_inbox_receive_event('evt_a1','refund.updated','re_a1','refund',timestamp '2026-08-05 00:00:00+00',repeat('a',64),'PFC-07E-A2',1)",/ERROR:\s+inbox_event_conflict\b/,'immutable inbox conflict raises stable error')
+equal("select provider_event_type||'|'||raw_payload_sha256 from payment_v2_provider_event_inbox where provider_event_id='evt_a1'",'refund.created|'+ 'a'.repeat(64),'immutable fields remain unchanged after conflict')
+equal("select payment_v2_inbox_transition_status('evt_a1','RECEIVED','PENDING_PHASE',null,false)",'PENDING_PHASE','RECEIVED to PENDING_PHASE succeeds')
+failsWith("select payment_v2_inbox_transition_status('evt_a1','RECEIVED','PROCESSED',null,false)",/ERROR:\s+inbox_status_mismatch\b/,'expected status mismatch fails')
+equal("select payment_v2_inbox_receive_event('evt_retry','invoice.paid','in_retry','invoice',timestamp '2026-08-05 00:01:00+00',repeat('b',64),'PFC-07E-A3',1)",'RECEIVED','insert retry fixture')
+equal("select payment_v2_inbox_transition_status('evt_retry','RECEIVED','PENDING_RETRY','RETRYABLE',true)",'PENDING_RETRY','RECEIVED to PENDING_RETRY succeeds with attempt')
+equal("select (attempt_count=1 and last_attempt_at is not null and processed_at is null)::text from payment_v2_provider_event_inbox where provider_event_id='evt_retry'",'true','attempt_count and last_attempt_at set only for counted attempt')
+equal("select payment_v2_inbox_transition_status('evt_retry','PENDING_RETRY','PENDING_RETRY','RETRYABLE',true)",'PENDING_RETRY','PENDING_RETRY self transition succeeds')
+equal("select attempt_count from payment_v2_provider_event_inbox where provider_event_id='evt_retry'",2,'self transition increments attempts')
+equal("select payment_v2_inbox_transition_status('evt_retry','PENDING_RETRY','PROCESSED',null,false)",'PROCESSED','PENDING_RETRY can become PROCESSED')
+equal("select (processed_at is not null)::text from payment_v2_provider_event_inbox where provider_event_id='evt_retry'",'true','processed_at set for terminal status')
+failsWith("select payment_v2_inbox_transition_status('evt_retry','PROCESSED','FAILED_TERMINAL',null,false)",/ERROR:\s+inbox_terminal_status\b/,'terminal statuses cannot transition')
+failsWith("select payment_v2_inbox_receive_event('evt_bad','invoice.paid','in_bad','invoice',timestamp '2026-08-05 00:01:00+00',repeat('z',64),'PFC-07E-A3',1)",/ERROR:\s+invalid_request\b/,'invalid sha fails validation')
+failsWith("select payment_v2_inbox_receive_event('evt_bad2','invoice.paid','in_bad','invoice',timestamp '2026-08-05 00:01:00+00',repeat('c',64),'PFC-07E-A1',1)",/ERROR:\s+invalid_request\b/,'invalid lifecycle phase fails validation')
+equal("select relrowsecurity::text from pg_class where oid='public.payment_v2_provider_event_inbox'::regclass",'true','inbox RLS enabled')
+equal("select count(*) from pg_policies where schemaname='public' and tablename='payment_v2_provider_event_inbox'",0,'inbox has no public RLS policies')
+failsWith("select count(*) from payment_v2_provider_event_inbox",/ERROR:\s+permission denied for table payment_v2_provider_event_inbox\b/,'anon cannot read inbox','anon')
+failsWith("select count(*) from payment_v2_provider_event_inbox",/ERROR:\s+permission denied for table payment_v2_provider_event_inbox\b/,'authenticated cannot read inbox','authenticated')
+equal("select has_table_privilege('service_role','public.payment_v2_provider_event_inbox','SELECT')::text",'true','service_role can select inbox')
+equal("select has_table_privilege('service_role','public.payment_v2_provider_event_inbox','INSERT,UPDATE,DELETE')::text",'false','service_role has no direct inbox mutation privileges')
+failsWith("insert into payment_v2_provider_event_inbox(provider_event_id,provider_event_type,provider_object_id,provider_object_type,provider_created_at,raw_payload_sha256,lifecycle_phase,processing_status) values('evt_direct','refund.created','re_direct','refund',now(),repeat('d',64),'PFC-07E-A2','RECEIVED')",/ERROR:\s+permission denied for table payment_v2_provider_event_inbox\b/,'service_role cannot directly insert inbox','service_role')
+equal("select bool_and(has_function_privilege('service_role',p.oid,'EXECUTE')) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname in ('payment_v2_inbox_receive_event','payment_v2_inbox_transition_status')",'t','service_role can execute inbox RPCs')
+equal("select bool_and(not has_function_privilege('anon',p.oid,'EXECUTE') and not has_function_privilege('authenticated',p.oid,'EXECUTE')) from pg_proc p where p.pronamespace='public'::regnamespace and p.proname in ('payment_v2_inbox_receive_event','payment_v2_inbox_transition_status')",'t','browser roles cannot execute inbox RPCs')
+equal("select bool_and(r.rolname='postgres' and p.prosecdef and array_to_string(p.proconfig,',') like '%search_path=public, pg_temp%') from pg_proc p join pg_roles r on r.oid=p.proowner where p.pronamespace='public'::regnamespace and p.proname in ('payment_v2_inbox_receive_event','payment_v2_inbox_transition_status')",'t','inbox RPCs are postgres-owned SECURITY DEFINER with fixed search_path')
+equal("select count(*) from pg_constraint c join pg_class t on t.oid=c.conrelid where t.relname='payment_v2_reconciliation_evidence' and c.contype='u' and (select array_agg(a.attname order by x.ord) from unnest(c.conkey) with ordinality as x(attnum,ord) join pg_attribute a on a.attrelid=t.oid and a.attnum=x.attnum)=array['hold_id','event_kind']::name[]",0,'global hold_id event_kind unique constraint no longer exists')
+equal("select count(*) from pg_indexes where schemaname='public' and tablename='payment_v2_reconciliation_evidence' and indexname in ('payment_v2_evidence_one_payment_confirmed_per_hold','payment_v2_evidence_one_session_expired_unpaid_per_hold','payment_v2_evidence_one_payment_canceled_unpaid_per_hold','payment_v2_evidence_one_claimed_per_hold','payment_v2_one_provider_event')",5,'one-time evidence and provider event indexes exist')
+failsWith(`insert into payment_v2_reconciliation_evidence(hold_id,purchase_id,stripe_checkout_session_id,event_kind,provider_event_id,occurred_at) values('${paidHold}','${purchaseId}','cs_paid','PAYMENT_CONFIRMED','evt_paid_dupe',now())`,/ERROR:\s+duplicate key value violates unique constraint "payment_v2_evidence_one_payment_confirmed_per_hold"/,'one PAYMENT_CONFIRMED per hold')
+failsWith(`insert into payment_v2_reconciliation_evidence(hold_id,purchase_id,event_kind,occurred_at) values('${paidHold}','${purchaseId}','CLAIMED',now())`,/ERROR:\s+duplicate key value violates unique constraint "payment_v2_evidence_one_claimed_per_hold"/,'one CLAIMED per hold')
+failsWith(`insert into payment_v2_reconciliation_evidence(hold_id,stripe_checkout_session_id,event_kind,provider_event_id,occurred_at) values('${stateHold}','cs_state','SESSION_EXPIRED_UNPAID','evt_expire_dupe',now())`,/ERROR:\s+duplicate key value violates unique constraint "payment_v2_evidence_one_session_expired_unpaid_per_hold"/,'one SESSION_EXPIRED_UNPAID per hold')
+failsWith(`insert into payment_v2_reconciliation_evidence(hold_id,stripe_checkout_session_id,event_kind,provider_event_id,occurred_at) values('${cancelHold}','cs_cancel','PAYMENT_CANCELED_UNPAID','evt_cancel_dupe',now())`,/ERROR:\s+duplicate key value violates unique constraint "payment_v2_evidence_one_payment_canceled_unpaid_per_hold"/,'one PAYMENT_CANCELED_UNPAID per hold')
+failsWith(`insert into payment_v2_reconciliation_evidence(hold_id,purchase_id,stripe_checkout_session_id,event_kind,provider_event_id,occurred_at) values('${paidHold}','${purchaseId}','cs_paid','PAYMENT_CONFIRMED','evt_paid',now())`,/ERROR:\s+duplicate key value violates unique constraint "payment_v2_one_provider_event"/,'provider_event_id remains unique')
+equal("select count(*) from pg_constraint c join pg_class t on t.oid=c.conrelid where t.relname='payment_v2_reconciliation_evidence' and pg_get_constraintdef(c.oid) like '%REFUND%'",0,'no future lifecycle event kinds added')
+equal("select count(*) >= 4 from payment_v2_reconciliation_evidence",'t','existing evidence rows preserved after migration')
+
 
 console.log(`Payment-first V2 PostgreSQL integration passed (${assertions} assertions; OG attempts=75; Early Bird attempts=160; max simultaneous connections=${MAX_CONCURRENT_CONNECTIONS})`)

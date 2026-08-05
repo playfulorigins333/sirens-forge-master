@@ -281,26 +281,39 @@ async function upsertUserSubscriptionFromStripe(
 // Route
 // ---------------------------------------------------------------------------
 
-export async function POST(req: Request) {
-  const supabaseAdmin = getSupabaseAdmin()
+type LegacyWebhookDependencies = {
+  constructEvent(payload: string, signature: string | null): any
+  getSupabaseAdmin(): ReturnType<typeof getSupabaseAdmin>
+  retrieveSubscription(id: string): Promise<any>
+}
 
-  const signature = req.headers.get("stripe-signature")
-  const payload = await req.text()
+function hasPaymentV2Discriminator(obj: any): boolean {
+  if (obj?.metadata?.checkout_contract_version === "pfc-03-v2") return true
+  if (obj?.subscription && typeof obj.subscription === "object" && obj.subscription.metadata?.checkout_contract_version === "pfc-03-v2") return true
+  if (Array.isArray(obj?.lines?.data)) {
+    return obj.lines.data.some((line: any) => line?.subscription && typeof line.subscription === "object" && line.subscription.metadata?.checkout_contract_version === "pfc-03-v2")
+  }
+  return false
+}
 
+export async function handleLegacyStripeWebhook(payload: string, signature: string | null, deps: LegacyWebhookDependencies) {
   let event: Stripe.Event
 
   try {
-    event = stripe.webhooks.constructEvent(
-      payload,
-      signature!,
-      process.env.STRIPE_WEBHOOK_SECRET!
-    )
+    event = deps.constructEvent(payload, signature)
   } catch (err: any) {
     console.error("❌ Invalid Stripe signature:", err.message)
     return new NextResponse("Invalid signature", { status: 400 })
   }
 
   console.log("🔔 Stripe Event:", event.type)
+
+  const eventObject: any = event.data?.object
+  if (hasPaymentV2Discriminator(eventObject)) {
+    return NextResponse.json({ received: true, ignored: true, code: "PAYMENT_V2_EVENT_IGNORED_BY_LEGACY_WEBHOOK" })
+  }
+
+  const supabaseAdmin = deps.getSupabaseAdmin()
 
   try {
     switch (event.type) {
@@ -335,9 +348,8 @@ export async function POST(req: Request) {
         const session: any = event.data.object
 
         if (session.mode === "subscription" && session.subscription) {
-          const sub = await stripe.subscriptions.retrieve(
-            String(session.subscription)
-          )
+          const sub = await deps.retrieveSubscription(String(session.subscription))
+          if (hasPaymentV2Discriminator(sub)) break
           await upsertUserSubscriptionFromStripe(supabaseAdmin, sub, {
             ...(session.metadata ?? {}),
             profile_id: session.metadata?.profile_id ?? session.client_reference_id ?? null,
@@ -415,6 +427,16 @@ export async function POST(req: Request) {
       { status: 500 }
     )
   }
+}
+
+export async function POST(req: Request) {
+  const signature = req.headers.get("stripe-signature")
+  const payload = await req.text()
+  return handleLegacyStripeWebhook(payload, signature, {
+    constructEvent: (body, sig) => stripe.webhooks.constructEvent(body, sig!, process.env.STRIPE_WEBHOOK_SECRET!),
+    getSupabaseAdmin,
+    retrieveSubscription: (id) => stripe.subscriptions.retrieve(id),
+  })
 }
 
 export async function GET() {
