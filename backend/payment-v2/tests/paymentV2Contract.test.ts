@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process'
 
 const migrationPath = 'supabase/migrations/20260801002800_payment_first_v2_contract.sql'
 const sql = readFileSync(migrationPath, 'utf8')
+const foundationSql = readFileSync('supabase/migrations/20260805002900_payment_v2_lifecycle_foundation.sql', 'utf8')
+const inboxTableSql = foundationSql.slice(foundationSql.indexOf('create table public.payment_v2_provider_event_inbox'), foundationSql.indexOf('create index payment_v2_inbox_status_received_at'))
 const acquireSql = sql.slice(sql.indexOf('create function public.payment_v2_acquire_hold'), sql.indexOf('create function public.payment_v2_associate_session'))
 let assertions = 0
 const matches = (pattern: RegExp, message: string) => { assert.match(sql, pattern, message); assertions++ }
@@ -48,6 +50,21 @@ matches(/authoritative_tier_ambiguous_or_inactive[\s\S]*?price_mismatch/, 'paid 
 matches(/ambiguous_existing_entitlement[\s\S]*?conflicting_existing_entitlement/, 'claim fails closed for unsafe existing entitlements')
 matches(/pg_notify\('pgrst', 'reload schema'\)/, 'migration reloads the PostgREST schema')
 absent(/email|ip_address|raw_payload|token\b/i, 'no email, IP, raw provider dump, or raw token column exists')
+
+assert.match(foundationSql, /create table public\.payment_v2_provider_event_inbox/, 'A1 creates provider event inbox'); assertions++
+assert.match(foundationSql, /provider_event_id text not null unique/, 'inbox provider event id is unique'); assertions++
+assert.match(foundationSql, /raw_payload_sha256 text not null/, 'inbox stores only raw payload hash'); assertions++
+assert.doesNotMatch(inboxTableSql, /raw_payload(?!_sha256)|payload json|purchase_id uuid|hold_id uuid|refund_id|subscription_id|invoice_id|dispute_id/i, 'A1 inbox has no raw payload or lifecycle mapping columns'); assertions++
+assert.match(foundationSql, /payment_v2_inbox_receive_event/, 'A1 receive RPC exists'); assertions++
+assert.match(foundationSql, /payment_v2_inbox_transition_status/, 'A1 transition RPC exists'); assertions++
+assert.match(foundationSql, /inbox_event_conflict/, 'immutable inbox conflicts use stable exception'); assertions++
+assert.match(foundationSql, /RECEIVED[\s\S]*PENDING_PHASE[\s\S]*PENDING_PURCHASE[\s\S]*PENDING_RETRY[\s\S]*PROCESSED[\s\S]*IGNORED_NON_V2[\s\S]*FAILED_TERMINAL/, 'status taxonomy is present'); assertions++
+assert.match(foundationSql, /payment_v2_evidence_one_payment_confirmed_per_hold/, 'payment confirmed one-time evidence index exists'); assertions++
+assert.match(foundationSql, /payment_v2_evidence_one_session_expired_unpaid_per_hold/, 'session expired one-time evidence index exists'); assertions++
+assert.match(foundationSql, /payment_v2_evidence_one_payment_canceled_unpaid_per_hold/, 'payment canceled one-time evidence index exists'); assertions++
+assert.match(foundationSql, /payment_v2_evidence_one_claimed_per_hold/, 'claimed one-time evidence index exists'); assertions++
+assert.doesNotMatch(foundationSql, /REFUND_|INVOICE_|DISPUTE_|ENDED|SUSPENDED/, 'A1 does not add future lifecycle event kinds or terminal states'); assertions++
+
 
 const changedHistorical = execFileSync('git', ['diff', '--name-only', '3b4e77922e5c3b64fc31418df0aeb047b134694f', '--', 'supabase/migrations/20260729002100_checkout_capacity_reservations.sql', 'supabase/migrations/20260729002200_pay_first_checkout_claims.sql', 'supabase/migrations/20260729002300_fix_guest_checkout_reservation_ambiguity.sql', 'supabase/migrations/20260730002400_safe_guest_checkout_plan_switch.sql', 'supabase/migrations/20260730002500_reload_checkout_rpc_schema.sql', 'supabase/migrations/20260730002600_restore_guest_checkout_acquire_contract.sql', 'supabase/migrations/20260731002700_remove_checkout_incident_objects.sql'], { encoding: 'utf8' }).trim()
 assert.equal(changedHistorical, '', 'migrations 02100 through 02700 remain byte-for-byte unchanged'); assertions++

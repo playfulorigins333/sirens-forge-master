@@ -136,7 +136,12 @@ export async function paymentFirstCheckout(input: {
       cancel_url: `${origin}/billing/cancel`, metadata,
       expires_at: Math.floor(authoritativeExpirationMs / 1000),
     };
-    if (request.tierName === "og_throne") params.customer_creation = "always";
+    if (request.tierName === "og_throne") {
+      params.customer_creation = "always";
+      params.payment_intent_data = { metadata };
+    } else {
+      params.subscription_data = { metadata };
+    }
     const idempotencyKey = `payment-v2:${PAYMENT_V2_CONTRACT_VERSION}:hold:${hold.holdId}`;
     const session = await deps.createSession(params, idempotencyKey);
     if (!session.id || !session.url) return { ...serverError(), cookie };

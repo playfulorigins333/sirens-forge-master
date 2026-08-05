@@ -41,6 +41,8 @@ for (const body of [null, {}, { tierName: "prime_access" }, { tierName: "bad" },
   const params = h.calls.create[0][0] as any; equal(params.mode, "payment", "OG payment mode"); equal(params.customer_creation, "always", "OG creates Customer");
   equal(params.line_items.length, 1, "one line item"); equal(params.line_items[0].price, "price_og_throne", "authoritative price"); equal(params.line_items[0].quantity, 1, "quantity one");
   equal(params.metadata, { payment_v2_hold_id: holdId, tier_name: "og_throne", checkout_contract_version: PAYMENT_V2_CONTRACT_VERSION }, "safe metadata only");
+  equal(params.payment_intent_data, { metadata: params.metadata }, "OG propagates Payment V2 discriminator to PaymentIntent metadata");
+  equal(params.subscription_data, undefined, "OG does not receive subscription_data");
   check(!JSON.stringify(params).includes(fixedRaw.toString("base64url")), "raw credential absent from Stripe"); check(!JSON.stringify(params).includes(createHash("sha256").update(fixedRaw).digest("hex")), "hash absent from Stripe");
   equal(result.body, { url: "https://checkout.stripe.test/new" }, "JSON contains URL only"); equal(result.cookie?.name, PAYMENT_V2_COOKIE, "V2 cookie name");
   equal(result.cookie?.httpOnly, true, "HttpOnly cookie"); equal(result.cookie?.sameSite, "lax", "SameSite Lax"); equal(result.cookie?.secure, true, "Secure in production"); equal(result.cookie?.path, "/", "root cookie path"); check((result.cookie?.maxAge || 0) >= 60 * 60 * 24 * 30, "cookie has claim lifetime");
@@ -55,6 +57,9 @@ for (const body of [null, {}, { tierName: "prime_access" }, { tierName: "bad" },
 {
   const h = harness(); const result = await h.run({ tierName: "early_bird" }); equal(result.status, 200, "Early Bird accepted");
   const params = h.calls.create[0][0] as any; equal(params.mode, "subscription", "Early Bird subscription mode"); equal(params.customer_creation, undefined, "subscription lets Stripe create Customer");
+  equal(params.metadata, { payment_v2_hold_id: holdId, tier_name: "early_bird", checkout_contract_version: PAYMENT_V2_CONTRACT_VERSION }, "Early Bird Session metadata contains discriminator");
+  equal(params.subscription_data, { metadata: params.metadata }, "Early Bird propagates Payment V2 discriminator to Subscription metadata");
+  equal(params.payment_intent_data, undefined, "Early Bird does not receive payment_intent_data");
 }
 
 {
