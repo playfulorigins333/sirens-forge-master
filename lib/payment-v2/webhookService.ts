@@ -1,3 +1,4 @@
+import { classifyPaymentV2LifecycleEvent } from "./eventClassification";
 import { lifecycleEventEnvelope, responseForInboxStatus, type InboxStatus, type PaymentV2InboxDatabase } from "./eventInboxService";
 
 export const PAYMENT_V2_WEBHOOK_CONTRACT = "pfc-03-v2";
@@ -54,6 +55,7 @@ const ignored = () => response(200, { status: "ignored", code: "NON_PAYMENT_V2_E
 const inboxNotReady = () => response(503, { error: "Payment V2 event inbox is not ready", code: "PAYMENT_V2_EVENT_INBOX_NOT_READY" });
 const inboxUnavailable = () => response(503, { error: "Payment V2 event inbox is unavailable", code: "PAYMENT_V2_EVENT_INBOX_UNAVAILABLE" });
 const inboxConflict = () => response(503, { error: "Payment V2 event inbox conflict", code: "PAYMENT_V2_EVENT_INBOX_CONFLICT" });
+const invalidLifecycleEnvelope = () => response(503, { error: "Invalid Payment V2 lifecycle event envelope", code: "PAYMENT_V2_EVENT_ENVELOPE_INVALID" });
 const pending = () => response(200, { status: "pending" });
 const received = () => response(200, { status: "received" });
 const supported = new Set<string>(["checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.expired", "checkout.session.async_payment_failed"]);
@@ -157,9 +159,11 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
     event = provider.constructEvent(raw, input.signature, input.webhookSecret);
   } catch { return badSignature(); }
   if (!supported.has(event.type)) {
-    const envelope = lifecycleEventEnvelope(event as any, raw);
-    if (!envelope) return ignored();
+    const classification = classifyPaymentV2LifecycleEvent(event.type);
+    if (!classification) return ignored();
     if (input.inboxEnabled !== "true" || !input.createInboxDatabase) return inboxNotReady();
+    const envelope = lifecycleEventEnvelope(event as any, raw);
+    if (!envelope) return invalidLifecycleEnvelope();
     try {
       const inbox = input.createInboxDatabase();
       const received = await inbox.receiveEvent(envelope.args);
