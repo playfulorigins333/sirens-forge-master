@@ -19,7 +19,7 @@ export type StripeSession = {
 };
 export type StripePaymentIntent = { id: string; status: string; customer: unknown; amount: number; currency: string };
 export type StripeSubscription = { id: string; customer: unknown; status: string; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> }; latest_invoice?: unknown };
-export type StripeInvoice = { status?: string | null; paid?: boolean; amount_due?: number; amount_paid?: number };
+export type StripeInvoice = { status?: string | null; paid?: boolean; amount_due?: number; amount_paid?: number; currency?: string | null };
 
 export type HoldRow = { id: string; state: string; tier: string; expires_at: string; stripe_checkout_session_id: string | null; purchaser_credential_hash: string | Uint8Array };
 export type TierRow = { name: string; is_active: boolean; stripe_price_id: string | null };
@@ -117,11 +117,12 @@ async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: st
     const items = sub.items?.data;
     if (sub.id !== subscription || id(sub.customer) !== customer || !["active", "trialing"].includes(sub.status) ||
         items?.length !== 1 || items[0].quantity !== 1 || items[0].price?.id !== price) return null;
-    if (sub.latest_invoice != null) {
-      if (typeof sub.latest_invoice !== "object") return null;
-      const invoice = sub.latest_invoice as StripeInvoice;
-      if (!(invoice.paid === true || invoice.status === "paid") || (typeof invoice.amount_due === "number" && typeof invoice.amount_paid === "number" && invoice.amount_paid < invoice.amount_due)) return null;
-    }
+    if (!sub.latest_invoice || typeof sub.latest_invoice !== "object" || Array.isArray(sub.latest_invoice)) return null;
+    const invoice = sub.latest_invoice as StripeInvoice;
+    if (invoice.paid !== true || invoice.status !== "paid") return null;
+    if (typeof invoice.currency === "string" && invoice.currency.toLowerCase() !== currency) return null;
+    if (typeof invoice.amount_paid === "number" && invoice.amount_paid !== grossAmountCents) return null;
+    if (typeof invoice.amount_due === "number" && typeof invoice.amount_paid === "number" && invoice.amount_paid < invoice.amount_due) return null;
   }
   return { customer, paymentIntent, subscription, grossAmountCents: grossAmountCents!, currency };
 }
