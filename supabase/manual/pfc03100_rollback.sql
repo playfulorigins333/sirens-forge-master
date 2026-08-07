@@ -42,6 +42,29 @@ lock table public.payment_v2_holds, public.payment_v2_purchases,
 -- deletion, or material update aborts before a schema/function change.
 do $drift$
 begin
+ -- 03100 performs no backfill.  Consequently every 03100-only value on a row
+ -- that existed at backup time must remain NULL.  Checking this separately is
+ -- essential: projecting the new columns away only proves the old values did
+ -- not change and would otherwise permit attributed state to be discarded.
+ if exists(select 1 from public.payment_v2_holds x
+   join public.pfc03100_backup_payment_v2_holds b using(id)
+   where x.referral_code_id is not null or x.referrer_auth_user_id is not null
+      or x.referrer_profile_id is not null or x.referrer_affiliate_tier is not null
+      or x.referral_bound_at is not null or x.stripe_connect_destination is not null)
+   then raise exception 'PFC03100_UNSAFE_DRIFT: payment_v2_holds 03100-only state'; end if;
+ if exists(select 1 from public.payment_v2_purchases x
+   join public.pfc03100_backup_payment_v2_purchases b using(id)
+   where x.referral_code_id is not null or x.referrer_auth_user_id is not null
+      or x.referrer_profile_id is not null or x.referrer_affiliate_tier is not null
+      or x.referral_bound_at is not null or x.gross_amount_cents is not null
+      or x.currency is not null)
+   then raise exception 'PFC03100_UNSAFE_DRIFT: payment_v2_purchases 03100-only state'; end if;
+ if exists(select 1 from public.affiliate_ledger x
+   join public.pfc03100_backup_affiliate_ledger b using(id)
+   where x.payment_v2_purchase_id is not null or x.referral_code_id is not null
+      or x.referrer_affiliate_tier is not null or x.attribution_status is not null
+      or x.void_reason is not null or x.voided_at is not null)
+   then raise exception 'PFC03100_UNSAFE_DRIFT: affiliate_ledger 03100-only state'; end if;
  if exists(
    (select to_jsonb(x)-array['referral_code_id','referrer_auth_user_id','referrer_profile_id','referrer_affiliate_tier','referral_bound_at','stripe_connect_destination'] from public.payment_v2_holds x
     except select to_jsonb(b) from public.pfc03100_backup_payment_v2_holds b)
