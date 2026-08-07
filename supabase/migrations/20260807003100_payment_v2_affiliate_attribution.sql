@@ -2,8 +2,8 @@
 begin;
 
 alter table public.payment_v2_holds
-  add column referral_code_id bigint references public.referral_codes(id),
-  add column referrer_auth_user_id uuid,
+  add column referral_code_id uuid references public.referral_codes(id),
+  add column referrer_auth_user_id uuid references auth.users(id),
   add column referrer_profile_id uuid references public.profiles(id),
   add column referrer_affiliate_tier text,
   add column referral_bound_at timestamptz,
@@ -14,8 +14,8 @@ alter table public.payment_v2_holds add constraint payment_v2_hold_referral_tupl
 );
 
 alter table public.payment_v2_purchases
-  add column referral_code_id bigint references public.referral_codes(id),
-  add column referrer_auth_user_id uuid,
+  add column referral_code_id uuid references public.referral_codes(id),
+  add column referrer_auth_user_id uuid references auth.users(id),
   add column referrer_profile_id uuid references public.profiles(id),
   add column referrer_affiliate_tier text,
   add column referral_bound_at timestamptz,
@@ -32,7 +32,7 @@ alter table public.affiliate_ledger
   add column if not exists gross_amount_cents integer,
   add column if not exists commission_percent numeric,
   add column payment_v2_purchase_id uuid references public.payment_v2_purchases(id),
-  add column referral_code_id bigint references public.referral_codes(id),
+  add column referral_code_id uuid references public.referral_codes(id),
   add column referrer_affiliate_tier text,
   add column attribution_status text,
   add column void_reason text,
@@ -66,33 +66,39 @@ drop function public.payment_v2_acquire_hold(bytea,text,timestamptz);
 create function public.payment_v2_acquire_hold(p_purchaser_hash bytea,p_tier text,p_expires_at timestamptz,p_referral_code text default null)
 returns table(hold_id uuid,state text,expires_at timestamptz,connect_destination text,commission_percent numeric)
 language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
-declare h public.payment_v2_holds%rowtype; lim integer; normalized text; rc public.referral_codes%rowtype; auth_id uuid; profile public.profiles%rowtype; profile_count bigint; entitlement_count bigint; affiliate_tier text; rate numeric; destination text;
+declare h public.payment_v2_holds%rowtype; lim integer; normalized text; rc public.referral_codes%rowtype; submitted_referral_id uuid; referral_count bigint; auth_id uuid; profile public.profiles%rowtype; profile_count bigint; entitlement_count bigint; affiliate_tier text; rate numeric; destination text;
 begin
  if octet_length(p_purchaser_hash)<>32 or p_tier not in ('og_throne','early_bird') or p_expires_at<=now() or p_expires_at>now()+interval '2 hours' then raise exception 'invalid_request'; end if;
  normalized:=case when p_referral_code is null then null else upper(p_referral_code) end;
- if normalized is not null then
-  if normalized !~ '^[A-Z0-9_-]{4,20}$' then raise exception 'invalid_referral'; end if;
-  select * into rc from public.referral_codes r where upper(r.code)=normalized;
-  if not found or rc.is_active is not true or (rc.expires_at is not null and rc.expires_at<=now()) then raise exception 'invalid_referral'; end if;
-  auth_id:=rc.user_id;
-  select count(*) into profile_count from public.profiles p where p.user_id=auth_id;
-  if profile_count<>1 then raise exception 'invalid_referral_profile'; end if;
-  select * into profile from public.profiles p where p.user_id=auth_id;
-  select count(*) into entitlement_count from public.user_subscriptions s where s.user_id=profile.id and s.status in ('active','trialing') and s.tier_name in ('og_throne','early_bird');
-  if entitlement_count<>1 then raise exception 'invalid_referral_entitlement'; end if;
-  select s.tier_name into affiliate_tier from public.user_subscriptions s where s.user_id=profile.id and s.status in ('active','trialing') and s.tier_name in ('og_throne','early_bird');
-  if profile.stripe_connect_onboarded and (profile.stripe_connect_account_id is null or profile.stripe_connect_account_id !~ '^acct_[A-Za-z0-9]+$') then raise exception 'invalid_referral_connect'; end if;
-  destination:=case when profile.stripe_connect_onboarded then profile.stripe_connect_account_id else null end;
-  rate:=case when p_tier='og_throne' and affiliate_tier='og_throne' then 25 when p_tier='og_throne' then 10 when affiliate_tier='og_throne' then 50 else 20 end;
- end if;
+ if normalized is not null and normalized !~ '^[A-Z0-9_-]{4,20}$' then raise exception 'invalid_referral'; end if;
  perform pg_advisory_xact_lock(pg_catalog.hashtextextended('payment_v2_credential:'||encode(p_purchaser_hash,'hex'),3100));
  perform pg_advisory_xact_lock(pg_catalog.hashtextextended('payment_v2_capacity:early_bird',3100)); perform pg_advisory_xact_lock(pg_catalog.hashtextextended('payment_v2_capacity:og_throne',3100));
  update public.payment_v2_holds x set state='EXPIRED_UNPAID',updated_at=now() where x.purchaser_credential_hash=p_purchaser_hash and x.state='HELD' and x.stripe_checkout_session_id is null and x.expires_at<=now();
  select * into h from public.payment_v2_holds x where x.purchaser_credential_hash=p_purchaser_hash and ((x.state='HELD' and x.expires_at>now()) or x.state in ('SESSION_ASSOCIATED','PAID_UNCLAIMED','CLAIMED')) for update;
  if found then
   if h.tier<>p_tier then raise exception 'effective_hold_conflict'; end if;
-  if h.referral_code_id is distinct from rc.id or h.referrer_auth_user_id is distinct from auth_id or h.referrer_profile_id is distinct from profile.id or h.referrer_affiliate_tier is distinct from affiliate_tier then raise exception 'attribution_conflict'; end if;
+  if normalized is not null then
+   select count(*),(array_agg(r.id order by r.id))[1] into referral_count,submitted_referral_id from public.referral_codes r where upper(r.code)=normalized;
+   if referral_count<>1 then raise exception 'attribution_conflict'; end if;
+  end if;
+  if h.referral_code_id is distinct from submitted_referral_id then raise exception 'attribution_conflict'; end if;
+  rate:=case when h.referral_code_id is null then null when h.tier='og_throne' and h.referrer_affiliate_tier='og_throne' then 25 when h.tier='og_throne' then 10 when h.referrer_affiliate_tier='og_throne' then 50 else 20 end;
   return query select h.id,h.state,h.expires_at,h.stripe_connect_destination,rate; return;
+ end if;
+ if normalized is not null then
+  select count(*),(array_agg(r.id order by r.id))[1] into referral_count,submitted_referral_id from public.referral_codes r where upper(r.code)=normalized and r.is_active is true and (r.expires_at is null or r.expires_at>now());
+  if referral_count<>1 then raise exception 'invalid_referral'; end if;
+  select * into rc from public.referral_codes r where r.id=submitted_referral_id;
+  auth_id:=rc.user_id;
+  select count(*) into profile_count from public.profiles p where p.user_id=auth_id;
+  if profile_count<>1 then raise exception 'invalid_referral_profile'; end if;
+  select * into profile from public.profiles p where p.user_id=auth_id;
+  select count(*) into entitlement_count from public.user_subscriptions s where s.user_id=profile.id and s.status='active' and s.tier_name in ('og_throne','early_bird');
+  if entitlement_count<>1 then raise exception 'invalid_referral_entitlement'; end if;
+  select s.tier_name into affiliate_tier from public.user_subscriptions s where s.user_id=profile.id and s.status='active' and s.tier_name in ('og_throne','early_bird');
+  if profile.stripe_connect_onboarded and (profile.stripe_connect_account_id is null or profile.stripe_connect_account_id !~ '^acct_[A-Za-z0-9]+$') then raise exception 'invalid_referral_connect'; end if;
+  destination:=case when profile.stripe_connect_onboarded then profile.stripe_connect_account_id else null end;
+  rate:=case when p_tier='og_throne' and affiliate_tier='og_throne' then 25 when p_tier='og_throne' then 10 when affiliate_tier='og_throne' then 50 else 20 end;
  end if;
  update public.payment_v2_holds x set state='EXPIRED_UNPAID',updated_at=now() where x.tier=p_tier and x.state='HELD' and x.stripe_checkout_session_id is null and x.expires_at<=now();
  lim:=case p_tier when 'og_throne' then 50 else 120 end;
@@ -124,8 +130,8 @@ begin
  values(h.id,p_purchaser_hash,h.tier,p_session_id,p_customer_id,p_price_id,p_payment_intent_id,p_subscription_id,p_provider_event_id,p_provider_confirmed_at,h.referral_code_id,h.referrer_auth_user_id,h.referrer_profile_id,h.referrer_affiliate_tier,h.referral_bound_at,p_gross_amount_cents,lower(p_currency)) returning * into p;
  if h.referral_code_id is not null then
   rate:=case when h.tier='og_throne' and h.referrer_affiliate_tier='og_throne' then 25 when h.tier='og_throne' then 10 when h.referrer_affiliate_tier='og_throne' then 50 else 20 end; commission:=round(p_gross_amount_cents*rate/100.0);
-  insert into public.affiliate_ledger(affiliate_user_id,referred_user_id,commission_amount_cents,gross_amount_cents,commission_percent,status,payment_v2_purchase_id,referral_code_id,referrer_affiliate_tier,attribution_status,created_at,updated_at)
-  values(h.referrer_profile_id,null,commission,p_gross_amount_cents,rate,'pending',p.id,h.referral_code_id,h.referrer_affiliate_tier,'PURCHASER_UNCLAIMED',now(),now());
+  insert into public.affiliate_ledger(affiliate_user_id,referred_user_id,stripe_event_id,stripe_subscription_id,tier_name,commission_amount_cents,gross_amount_cents,commission_percent,status,payment_v2_purchase_id,referral_code_id,referrer_affiliate_tier,attribution_status,created_at,updated_at)
+  values(h.referrer_profile_id,null,p_provider_event_id,p_subscription_id,h.tier,commission,p_gross_amount_cents,rate,'pending',p.id,h.referral_code_id,h.referrer_affiliate_tier,'PURCHASER_UNCLAIMED',now(),now());
   insert into public.payment_v2_reconciliation_evidence(hold_id,purchase_id,event_kind,occurred_at) values(h.id,p.id,'AFFILIATE_OBLIGATION_CREATED',now());
  end if;
  update public.payment_v2_holds set state='PAID_UNCLAIMED',updated_at=now() where id=h.id;
