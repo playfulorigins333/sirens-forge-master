@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Crown, Star, Sparkles, AlertTriangle, Check } from "lucide-react";
+import { captureReferral, clearStoredReferral, normalizeReferralCode, readCurrentReferral } from "@/lib/referralAttribution";
 
 type ViewMode = "cards" | "compare";
 type CheckoutTier = "og_throne" | "early_bird";
@@ -126,19 +127,11 @@ export default function PricingClient() {
           searchParams?.get("code") ||
           "")?.trim();
 
-      const fromStorage =
-        (typeof window !== "undefined" && window.localStorage.getItem("sf_referral_code")) || "";
-
-      const pick = (fromUrl || fromStorage || "").trim();
-      if (!pick) return;
-
-      const normalized = pick.toUpperCase().replace(/\s+/g, "");
-      setReferralCode(normalized);
-
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem("sf_referral_code", normalized);
-        setReferralSaved(true);
-      }
+      if (typeof window === "undefined") return;
+      const supplied = fromUrl ? captureReferral(window.localStorage, fromUrl, Date.now()) : null;
+      const current = supplied || readCurrentReferral(window.localStorage, Date.now());
+      setReferralCode(current || "");
+      setReferralSaved(Boolean(current));
     } catch {
       // ignore
     }
@@ -226,7 +219,7 @@ export default function PricingClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
-        body: JSON.stringify({ tierName, ...(referralCode ? { referralCode: referralCode.trim().toUpperCase() } : {}) }),
+        body: JSON.stringify({ tierName, ...(normalizeReferralCode(referralCode) ? { referralCode: normalizeReferralCode(referralCode)! } : {}) }),
       });
 
       const json = await res.json().catch(() => ({} as any));
@@ -459,8 +452,9 @@ export default function PricingClient() {
                       const v = e.target.value.toUpperCase().replace(/\s+/g, "");
                       setReferralCode(v);
                       try {
-                        window.localStorage.setItem("sf_referral_code", v);
-                        setReferralSaved(true);
+                        const saved = captureReferral(window.localStorage, v, Date.now());
+                        if (!v) clearStoredReferral(window.localStorage);
+                        setReferralSaved(Boolean(saved));
                       } catch {
                         // ignore
                       }

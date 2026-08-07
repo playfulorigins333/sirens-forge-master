@@ -22,6 +22,7 @@ export async function POST(request: Request) {
         retrieveSession: (id) => stripe.checkout.sessions.retrieve(id, { expand: ["line_items.data.price"] }) as any,
         retrievePaymentIntent: (id) => stripe.paymentIntents.retrieve(id) as any,
         retrieveSubscription: (id) => stripe.subscriptions.retrieve(id, { expand: ["items.data.price", "latest_invoice.payment_intent"] }) as any,
+        async updateSubscriptionApplicationFeePercent(id, applicationFeePercent) { await stripe.subscriptions.update(id, { application_fee_percent: applicationFeePercent }); },
       };
     },
     createDatabase(): PaymentV2Database {
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
         loadPurchase: (holdId) => rows(db.from("payment_v2_purchases").select("hold_id,tier,stripe_checkout_session_id,stripe_customer_id,stripe_price_id,stripe_payment_intent_id,stripe_subscription_id").eq("hold_id", holdId)) as any,
         async recordPaid(args) { const { data, error } = await db.rpc("payment_v2_record_paid", { ...args, p_purchaser_hash: `\\x${Buffer.from(args.p_purchaser_hash as Uint8Array).toString("hex")}` }); if (error) throw new Error(error.message.includes("purchase_conflict") ? "paid_purchase_conflict" : "paid recording failed"); return data; },
         async recordTerminal(args) { const { data, error } = await db.rpc("payment_v2_record_session_unpaid_terminal", args); if (error) throw new Error(error.message.includes("paid_purchase_exists") ? "paid_purchase_exists" : "terminal recording failed"); return data; },
+        async recordRecurringInvoice(args) { const { data, error } = await db.rpc("payment_v2_record_paid_recurring_invoice", args); if (error) throw new Error("recurring invoice recording failed"); return data as Record<string, unknown>; },
       };
     },
     createInboxDatabase(): PaymentV2InboxDatabase {

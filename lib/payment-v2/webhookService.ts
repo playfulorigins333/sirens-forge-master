@@ -18,8 +18,9 @@ export type StripeSession = {
   line_items?: { data: Array<{ quantity?: number | null; amount_total?: number | null; price?: { id?: string; unit_amount?: number | null; currency?: string | null } | null }> };
 };
 export type StripePaymentIntent = { id: string; status: string; customer: unknown; amount: number; currency: string };
-export type StripeSubscription = { id: string; customer: unknown; status: string; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> }; latest_invoice?: unknown };
+export type StripeSubscription = { id: string; customer: unknown; status: string; metadata?: Record<string,string> | null; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> }; latest_invoice?: unknown };
 export type StripeInvoice = { status?: string | null; paid?: boolean; amount_due?: number; amount_paid?: number; currency?: string | null };
+export type StripeRecurringInvoice = StripeInvoice & { id: string; customer?: unknown; subscription?: unknown; billing_reason?: string | null; status_transitions?: { paid_at?: number | null } | null };
 
 export type HoldRow = { id: string; state: string; tier: string; expires_at: string; stripe_checkout_session_id: string | null; purchaser_credential_hash: string | Uint8Array };
 export type TierRow = { name: string; is_active: boolean; stripe_price_id: string | null };
@@ -30,6 +31,7 @@ export interface PaymentV2Provider {
   retrieveSession(id: string): Promise<StripeSession>;
   retrievePaymentIntent(id: string): Promise<StripePaymentIntent>;
   retrieveSubscription(id: string): Promise<StripeSubscription>;
+  updateSubscriptionApplicationFeePercent?(id: string, applicationFeePercent: number): Promise<void>;
 }
 export interface PaymentV2Database {
   loadHold(id: string): Promise<HoldRow[]>;
@@ -37,6 +39,7 @@ export interface PaymentV2Database {
   loadPurchase(holdId: string): Promise<PurchaseRow[]>;
   recordPaid(args: Record<string, unknown>): Promise<string>;
   recordTerminal(args: Record<string, unknown>): Promise<string>;
+  recordRecurringInvoice?(args: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 export type WebhookResponse = { status: number; body: Record<string, string> };
 export interface WebhookInput {
@@ -62,6 +65,30 @@ const supported = new Set<string>(["checkout.session.completed", "checkout.sessi
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const id = (value: unknown): string | null => typeof value === "string" && value.trim() ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : null;
 const timestamp = (created: number) => Number.isInteger(created) && created >= 0 ? new Date(created * 1000).toISOString() : null;
+
+async function recurringInvoice(event: StripeEvent, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
+  const invoice = event.data.object as StripeRecurringInvoice;
+  const subscriptionId = id(invoice.subscription); const customerId = id(invoice.customer);
+  const paidAt = timestamp(invoice.status_transitions?.paid_at ?? event.created);
+  if (!invoice.id || invoice.status !== "paid" || invoice.paid !== true || !subscriptionId || !customerId || !paidAt ||
+      !["subscription_create", "subscription_cycle"].includes(invoice.billing_reason || "") ||
+      !Number.isInteger(invoice.amount_paid) || invoice.amount_paid! < 0 || invoice.amount_due !== invoice.amount_paid ||
+      typeof invoice.currency !== "string" || !/^[a-z]{3}$/.test(invoice.currency.toLowerCase())) return failed();
+  const subscription = await provider.retrieveSubscription(subscriptionId);
+  const md = metadata(subscription);
+  if (subscription.id !== subscriptionId || id(subscription.customer) !== customerId || !["active", "trialing"].includes(subscription.status) ||
+      md.kind !== "v2" || md.tier !== "early_bird" || !db.recordRecurringInvoice || !provider.updateSubscriptionApplicationFeePercent) return failed();
+  const recorded = await db.recordRecurringInvoice({ p_hold_id: md.holdId, p_subscription_id: subscriptionId, p_customer_id: customerId, p_invoice_id: invoice.id,
+    p_provider_event_id: event.id, p_billing_reason: invoice.billing_reason, p_paid_at: paidAt,
+    p_gross_amount_cents: invoice.amount_paid, p_currency: invoice.currency.toLowerCase() });
+  if (!["recorded", "already_recorded", "no_attribution"].includes(String(recorded.status))) return failed();
+  if (recorded.nextCommissionPercent !== null && recorded.nextCommissionPercent !== undefined) {
+    const commission = Number(recorded.nextCommissionPercent);
+    if (![0,10,20,25,50].includes(commission)) return failed();
+    await provider.updateSubscriptionApplicationFeePercent(subscriptionId, 100 - commission);
+  }
+  return received();
+}
 
 function hashBytes(value: HoldRow["purchaser_credential_hash"]): Uint8Array | null {
   if (value instanceof Uint8Array) return value.length === 32 ? value : null;
@@ -163,6 +190,11 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
     raw = await input.readRawBody();
     event = provider.constructEvent(raw, input.signature, input.webhookSecret);
   } catch { return badSignature(); }
+  const invoiceCandidate = event.data.object as StripeRecurringInvoice;
+  if (event.type === "invoice.paid" && id(invoiceCandidate.subscription) && id(invoiceCandidate.customer) &&
+      ["subscription_create", "subscription_cycle"].includes(invoiceCandidate.billing_reason || "")) {
+    try { return await recurringInvoice(event, provider, input.createDatabase()); } catch { return failed(); }
+  }
   if (!supported.has(event.type)) {
     const classification = classifyPaymentV2LifecycleEvent(event.type);
     if (!classification) return ignored();

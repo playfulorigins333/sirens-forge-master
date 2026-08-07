@@ -261,7 +261,7 @@ for (const [type, finalState, firstResult] of [["checkout.session.expired", "EXP
 {
   const route = readFileSync("app/api/webhook/payment-v2/route.ts", "utf8"); const service = readFileSync("lib/payment-v2/webhookService.ts", "utf8"); const combined = route + service;
   check(route.includes('runtime = "nodejs"') && route.includes('dynamic = "force-dynamic"'), "route runtime contract"); check(!route.includes("export async function GET"), "no GET handler"); check(route.includes("STRIPE_PAYMENT_V2_WEBHOOK_SECRET") && !route.includes("STRIPE_WEBHOOK_SECRET"), "dedicated secret only");
-  for (const forbidden of ["payment_v2_claim", "payment_v2_expire_unpaid", "user_subscriptions", "profiles", "payment_v2_allocations", "grantOg", "commission", "app/api/webhook/route"]) check(!combined.includes(forbidden), `${forbidden} prohibited`);
+  for (const forbidden of ["payment_v2_claim", "payment_v2_expire_unpaid", "user_subscriptions", "profiles", "payment_v2_allocations", "grantOg", "app/api/webhook/route"]) check(!combined.includes(forbidden), `${forbidden} prohibited`);
   check(!/\.from\("payment_v2_[^"]+"\)\.(insert|update|delete)/.test(route), "no direct V2 mutations"); check(!combined.includes("console."), "payload, signature, hash and credentials are not logged");
   equal(harness().calls.session.length, 0, "test harness starts with zero provider network calls");
 }

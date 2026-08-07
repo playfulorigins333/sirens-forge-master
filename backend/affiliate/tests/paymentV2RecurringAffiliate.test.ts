@@ -1,0 +1,17 @@
+import assert from "node:assert/strict";
+import { paymentFirstWebhook, PAYMENT_V2_WEBHOOK_CONTRACT, type PaymentV2Database, type PaymentV2Provider } from "../../../lib/payment-v2/webhookService";
+let assertions=0;const equal=(a:unknown,b:unknown,m:string)=>{assert.deepEqual(a,b,m);assertions++};
+const hold="10000000-0000-4000-8000-000000000004";
+function harness(overrides:{invoice?:Record<string,unknown>,result?:Record<string,unknown>,sub?:Record<string,unknown>}={}){
+ const calls={rpc:[] as any[],updates:[] as any[]};
+ const invoice={id:"in_cycle",status:"paid",paid:true,customer:"cus",subscription:"sub",billing_reason:"subscription_cycle",amount_paid:1000,amount_due:1000,currency:"usd",status_transitions:{paid_at:1785628800},...overrides.invoice};
+ const provider:PaymentV2Provider={constructEvent:()=>({id:"evt_cycle",type:"invoice.paid",created:1785628800,data:{object:invoice as any}}),retrieveSession:async()=>{throw 0},retrievePaymentIntent:async()=>{throw 0},retrieveSubscription:async()=>({id:"sub",customer:"cus",status:"active",metadata:{checkout_contract_version:PAYMENT_V2_WEBHOOK_CONTRACT,payment_v2_hold_id:hold,tier_name:"early_bird"},...overrides.sub}),async updateSubscriptionApplicationFeePercent(id,fee){calls.updates.push([id,fee])}};
+ const db:PaymentV2Database={loadHold:async()=>[],loadTier:async()=>[],loadPurchase:async()=>[],recordPaid:async()=>"",recordTerminal:async()=>"",async recordRecurringInvoice(args){calls.rpc.push(args);return overrides.result??{status:"recorded",paidMonth:6,commissionPercent:50,nextCommissionPercent:25,commissionCreated:true}}};
+ return {calls,run:()=>paymentFirstWebhook({enabled:"true",inboxEnabled:"false",apiKey:"sk_test",webhookSecret:"whsec",signature:"sig",readRawBody:async()=>Buffer.from("signed"),createProvider:()=>provider,createDatabase:()=>db})};
+}
+{const h=harness();equal((await h.run()).body.status,"received","verified recurring invoice accepted");equal(h.calls.rpc.length,1,"paid invoice recorded once");equal(h.calls.updates,[['sub',75]],"month six explicitly steps future destination commission to 25 percent");}
+{const h=harness({result:{status:"already_recorded",paidMonth:6,commissionPercent:50,nextCommissionPercent:25,commissionCreated:true}});equal((await h.run()).body.status,"received","duplicate accepted");equal(h.calls.updates,[['sub',75]],"duplicate repairs/verifies future Stripe rate idempotently");}
+for(const invoice of [{paid:false,status:"open"},{amount_paid:999},{billing_reason:"manual"}]){const h=harness({invoice});assert.notEqual((await h.run()).status,200,"unpaid or unverified invoice fails closed");assertions++;equal(h.calls.rpc.length,0,"unpaid or unverified invoice creates no commission");}
+{const h=harness({result:{status:"no_attribution",paidMonth:null,commissionPercent:null,nextCommissionPercent:null}});equal((await h.run()).body.status,"received","no-referral lifecycle earns nothing");equal(h.calls.updates.length,0,"no-referral subscription has no destination rate mutation");}
+{const h=harness({result:{status:"recorded",paidMonth:2,commissionPercent:null,nextCommissionPercent:0,commissionCreated:false}});equal((await h.run()).body.status,"received","self-referral earns no recurring commission");equal(h.calls.updates,[['sub',100]],"self-referral future destination economics are zero commission");}
+console.log(`PFC-CORE-03D recurring webhook passed (${assertions} assertions).`);
