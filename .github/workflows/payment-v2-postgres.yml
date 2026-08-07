@@ -4,6 +4,10 @@ on:
     paths:
       - 'supabase/migrations/20260801002800_payment_first_v2_contract.sql'
       - 'supabase/migrations/20260805002900_payment_v2_lifecycle_foundation.sql'
+      - 'supabase/migrations/20260807003100_payment_v2_affiliate_attribution.sql'
+      - 'backend/affiliate/tests/**'
+      - 'app/api/affiliate/**'
+      - 'app/api/stripe/connect/**'
       - 'backend/payment-v2/tests/**'
       - 'app/api/payment-v2/**'
       - 'app/login/**'
@@ -60,7 +64,11 @@ jobs:
         run: npm run test:pfc-06b
       - name: PFC-07E-A1 dormant lifecycle foundation tests
         run: npm run test:pfc-07e-a1
+      - name: Payment V2 affiliate restoration contract
+        run: npm run test:pfc-core-03b
       - name: Supplemental source contract
         run: npm run test:payment-v2-contract
+      - name: Production-equivalent Payment V2 affiliate PostgreSQL behavior
+        run: npm run test:pfc-core-03b-postgres
       - name: Disposable PostgreSQL behavior and concurrency
         run: npm run test:payment-v2-postgres
