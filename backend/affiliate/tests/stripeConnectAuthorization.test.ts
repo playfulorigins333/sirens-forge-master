@@ -79,6 +79,7 @@ function harness(options: {
   }
 
   const dependencies = {
+    cutoverEnabled: () => false,
     getAuthenticatedUserId: async () => options.userId === undefined ? AUTH_USER : options.userId,
     getAdminClient: () => {
       calls.adminConstructions += 1

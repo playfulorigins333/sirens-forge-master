@@ -4,8 +4,14 @@ export default function AffiliateTermsPage() {
   return (
     <LegalPageLayout
       title="Affiliate Terms and Conditions"
-      lastUpdated="April 27, 2026"
+      lastUpdated="August 6, 2026"
     >
+      <section>
+        <h2 className="text-xl font-semibold">Program Pause During Payment-First Launch</h2>
+        <p>The affiliate program is currently paused during the Payment-First launch phase. New referral links and codes are not being accepted or tracked while paused, and purchases during the pause do not create new affiliate attribution through the paused system.</p>
+        <p>Historical records and previously eligible obligations remain preserved. Stripe Connect onboarding is unavailable during the pause. Historical payment and commission obligations remain subject to the existing verification, threshold, fraud, refund, chargeback, and policy terms below. No reopening date is promised.</p>
+      </section>
+
       <section>
         <p>
           These Affiliate Terms and Conditions govern participation in the

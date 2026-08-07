@@ -9,6 +9,8 @@ import { Crown, Star, Sparkles, AlertTriangle, Check } from "lucide-react";
 
 type ViewMode = "cards" | "compare";
 type CheckoutTier = "og_throne" | "early_bird";
+type PublicTierState = "available" | "unavailable" | "sold_out";
+type PublicPurchaseState = { checkoutMode: "legacy" | "payment_v2"; tiers?: Record<CheckoutTier, PublicTierState> };
 
 interface TierSeats {
   remaining: number;
@@ -85,19 +87,44 @@ export default function PricingClient() {
 
   const [checkoutLoading, setCheckoutLoading] = useState<CheckoutTier | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [publicPurchase, setPublicPurchase] = useState<PublicPurchaseState | null>(null);
 
   // Referral / affiliate code
   const searchParams = useSearchParams();
   const [referralCode, setReferralCode] = useState<string>("");
   const [referralSaved, setReferralSaved] = useState<boolean>(false);
 
-  const ogSoldOut = seats ? seats.og.remaining <= 0 : false;
-  const earlyBirdSoldOut = seats ? seats.earlyBird.remaining <= 0 : false;
-  const ogUnavailable = seats ? !seats.og.active : false;
-  const earlyBirdUnavailable = seats ? !seats.earlyBird.active : false;
+  const paymentV2 = publicPurchase?.checkoutMode === "payment_v2";
+  const ogSoldOut = paymentV2 ? publicPurchase.tiers?.og_throne === "sold_out" : seats ? seats.og.remaining <= 0 : false;
+  const earlyBirdSoldOut = paymentV2 ? publicPurchase.tiers?.early_bird === "sold_out" : seats ? seats.earlyBird.remaining <= 0 : false;
+  const ogUnavailable = paymentV2 ? publicPurchase.tiers?.og_throne === "unavailable" : seats ? !seats.og.active : false;
+  const earlyBirdUnavailable = paymentV2 ? publicPurchase.tiers?.early_bird === "unavailable" : seats ? !seats.earlyBird.active : false;
+  const ogActive = paymentV2 ? publicPurchase.tiers?.og_throne === "available" : Boolean(seats?.og.active);
+  const earlyBirdActive = paymentV2 ? publicPurchase.tiers?.early_bird === "available" : Boolean(seats?.earlyBird.active);
+  const availabilityLoaded = paymentV2 ? Boolean(publicPurchase.tiers) : publicPurchase?.checkoutMode === "legacy" && seats !== null;
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/payment-v2/readiness", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() : Promise.reject())
+      .then((value: unknown) => {
+        if (!active || !value || typeof value !== "object") return;
+        const state = value as PublicPurchaseState;
+        if (state.checkoutMode === "legacy" || state.checkoutMode === "payment_v2") setPublicPurchase(state);
+      })
+      .catch(() => { /* Loading remains fail closed. */ });
+    return () => { active = false; };
+  }, []);
 
   // Hydrate referral code from URL (?ref=CODE) or localStorage
   useEffect(() => {
+    if (!publicPurchase) return;
+    if (publicPurchase.checkoutMode === "payment_v2") {
+      setReferralCode("");
+      setReferralSaved(false);
+      try { window.localStorage.removeItem("sf_referral_code"); } catch { /* fail closed */ }
+      return;
+    }
     try {
       const fromUrl =
         (searchParams?.get("ref") ||
@@ -122,10 +149,11 @@ export default function PricingClient() {
       // ignore
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, publicPurchase]);
 
   // ✅ Live seat polling – wired to /api/subscription/seat-count (authoritative)
   useEffect(() => {
+    if (publicPurchase?.checkoutMode !== "legacy") return;
     let active = true;
 
     const fetchSeats = async () => {
@@ -189,21 +217,24 @@ export default function PricingClient() {
       active = false;
       clearInterval(interval);
     };
-  }, []);
+  }, [publicPurchase?.checkoutMode]);
 
   const handleCheckout = async (tierName: CheckoutTier) => {
     try {
       setCheckoutError(null);
       setCheckoutLoading(tierName);
 
-      const res = await fetch("/api/checkout/subscription", {
+      if (!publicPurchase) throw new Error("Checkout is unavailable.");
+      const endpoint = publicPurchase.checkoutMode === "payment_v2"
+        ? "/api/checkout/subscription-v2"
+        : "/api/checkout/subscription";
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
-        body: JSON.stringify({
-          tierName,
-          referralCode: referralCode ? referralCode.trim().toUpperCase() : undefined,
-        }),
+        body: JSON.stringify(publicPurchase.checkoutMode === "payment_v2"
+          ? { tierName }
+          : { tierName, referralCode: referralCode ? referralCode.trim().toUpperCase() : undefined }),
       });
 
       const json = await res.json().catch(() => ({} as any));
@@ -287,7 +318,7 @@ export default function PricingClient() {
     },
   ];
 
-  const canCheckout = seats !== null && checkoutLoading === null;
+  const canCheckout = availabilityLoaded && checkoutLoading === null;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-slate-950 to-black text-white relative overflow-hidden">
@@ -387,14 +418,14 @@ export default function PricingClient() {
                   <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
                   <span>OG: </span>
                   <span className="font-semibold text-slate-100">
-                    {!seats ? (
+                    {!availabilityLoaded ? (
                       <span className="text-slate-500">Loading…</span>
                     ) : ogUnavailable ? (
                       <span className="text-slate-400">Currently unavailable</span>
                     ) : ogSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
                     ) : (
-                      <SeatCounterText tier={seats.og} />
+                      paymentV2 ? <span>Available</span> : <SeatCounterText tier={seats!.og} />
                     )}
                   </span>
                 </div>
@@ -405,14 +436,14 @@ export default function PricingClient() {
                   <span className="inline-flex h-1.5 w-1.5 rounded-full bg-pink-400 animate-pulse shadow-[0_0_12px_rgba(244,114,182,0.8)]" />
                   <span>Early Bird: </span>
                   <span className="font-semibold text-slate-100">
-                    {!seats ? (
+                    {!availabilityLoaded ? (
                       <span className="text-slate-500">Loading…</span>
                     ) : earlyBirdUnavailable ? (
                       <span className="text-slate-400">Currently unavailable</span>
                     ) : earlyBirdSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
                     ) : (
-                      <SeatCounterText tier={seats.earlyBird} />
+                      paymentV2 ? <span>Available</span> : <SeatCounterText tier={seats!.earlyBird} />
                     )}
                   </span>
                 </div>
@@ -424,6 +455,12 @@ export default function PricingClient() {
             </div>
 
             <div className="w-full sm:w-auto sm:min-w-[280px]">
+              {paymentV2 ? (
+                <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-3 py-3 text-xs text-amber-100">
+                  <p className="font-semibold">Affiliate program paused</p>
+                  <p className="mt-1">Referral codes are not accepted or tracked for Payment-First Checkout. Existing historical affiliate records and eligible obligations remain preserved.</p>
+                </div>
+              ) : publicPurchase?.checkoutMode === "legacy" ? (
               <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
                   Referral / affiliate code
@@ -462,6 +499,9 @@ export default function PricingClient() {
                   If you&apos;re supporting an affiliate, enter their code before checkout. No code = no commission.
                 </p>
               </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-700 bg-slate-950/60 px-3 py-3 text-xs text-slate-400">Affiliate controls are unavailable while Checkout mode is loading.</div>
+              )}
             </div>
           </div>
         </motion.section>
@@ -495,7 +535,7 @@ export default function PricingClient() {
                   <AnimatedGlow className="bg-purple-500/40" />
 
                   {/* Selling fast micro banner when <= 10 and > 0 */}
-                  {seats?.og.active && seats.og.remaining > 0 && seats.og.remaining <= 10 && (
+                  {!paymentV2 && seats?.og.active && seats.og.remaining > 0 && seats.og.remaining <= 10 && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -554,7 +594,7 @@ export default function PricingClient() {
 
                       <div className="flex flex-col items-center gap-1.5 text-xs text-gray-300">
                         <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/90 border border-purple-500/70 px-3 py-1 shadow-[0_0_25px_rgba(168,85,247,0.9)]">
-                          {!seats ? (
+                          {!availabilityLoaded ? (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
                               <span className="font-semibold text-slate-300">
@@ -577,7 +617,7 @@ export default function PricingClient() {
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse" />
                               <span className="font-semibold text-amber-100">
                                 <span className="uppercase tracking-[0.18em] text-[9px] mr-1">OG Seats</span>
-                                {seatText(seats.og)}
+                                {paymentV2 ? "Available" : seatText(seats!.og)}
                               </span>
                             </>
                           )}
@@ -588,11 +628,11 @@ export default function PricingClient() {
                       </div>
 
                       <NeonButton
-                        disabled={!canCheckout || !seats || !seats.og.active || ogSoldOut}
+                        disabled={!canCheckout || !ogActive || ogSoldOut}
                         loading={checkoutLoading === "og_throne"}
-                        label={!seats ? "Loading seats…" : ogUnavailable ? "Currently unavailable" : ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
+                        label={!availabilityLoaded ? "Loading availability…" : ogUnavailable ? "Currently unavailable" : ogSoldOut ? "OG Seats Sold Out" : "Claim OG Throne"}
                         sublabel={
-                          !seats
+                          !availabilityLoaded
                             ? "Seat counter is syncing…"
                             : ogUnavailable
                             ? "This launch tier is inactive."
@@ -600,7 +640,7 @@ export default function PricingClient() {
                             ? "Join Early Bird below instead."
                             : "Lifetime elite access • No recurring payment"
                         }
-                        onClick={() => seats?.og.active && !ogSoldOut && handleCheckout("og_throne")}
+                        onClick={() => ogActive && !ogSoldOut && handleCheckout("og_throne")}
                       />
                     </div>
                   </CardContent>
@@ -656,7 +696,7 @@ export default function PricingClient() {
 
                       <div className="flex flex-col items-center gap-1.5 text-xs text-gray-300">
                         <div className="inline-flex items-center gap-2 rounded-full bg-slate-900/90 border border-pink-500/70 px-3 py-1 shadow-[0_0_25px_rgba(236,72,153,0.9)]">
-                          {!seats ? (
+                          {!availabilityLoaded ? (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
                               <span className="font-semibold text-slate-300">
@@ -679,7 +719,7 @@ export default function PricingClient() {
                               <span className="w-1.5 h-1.5 rounded-full bg-pink-300 animate-pulse" />
                               <span className="font-semibold text-pink-100">
                                 <span className="uppercase tracking-[0.18em] text-[9px] mr-1">Early Bird</span>
-                                {seatText(seats.earlyBird)}
+                                {paymentV2 ? "Available" : seatText(seats!.earlyBird)}
                               </span>
                             </>
                           )}
@@ -692,11 +732,11 @@ export default function PricingClient() {
 
                       <div className="flex justify-center">
                         <NeonButton
-                          disabled={!canCheckout || !seats || !seats.earlyBird.active || earlyBirdSoldOut}
+                          disabled={!canCheckout || !earlyBirdActive || earlyBirdSoldOut}
                           loading={checkoutLoading === "early_bird"}
-                          label={!seats ? "Loading seats…" : earlyBirdUnavailable ? "Currently unavailable" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
+                          label={!availabilityLoaded ? "Loading availability…" : earlyBirdUnavailable ? "Currently unavailable" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
                           sublabel={
-                            !seats
+                            !availabilityLoaded
                               ? "Seat counter is syncing…"
                               : earlyBirdUnavailable
                               ? "This launch tier is inactive."
@@ -704,7 +744,7 @@ export default function PricingClient() {
                               ? "This launch tier is sold out."
                               : "Lock in founding $29.99/month pricing."
                           }
-                          onClick={() => seats?.earlyBird.active && !earlyBirdSoldOut && handleCheckout("early_bird")}
+                          onClick={() => earlyBirdActive && !earlyBirdSoldOut && handleCheckout("early_bird")}
                         />
                       </div>
                     </div>
@@ -781,11 +821,11 @@ export default function PricingClient() {
 
               <div className="flex flex-col sm:flex-row gap-3 md:gap-4 w-full md:w-auto">
                 <NeonButton
-                  disabled={!canCheckout || !seats || !seats.og.active || ogSoldOut}
+                  disabled={!canCheckout || !ogActive || ogSoldOut}
                   loading={checkoutLoading === "og_throne"}
-                  label={!seats ? "Loading seats…" : ogUnavailable ? "Currently unavailable" : ogSoldOut ? "OG Sold Out • View Early Bird" : "Claim OG Eternal Throne"}
+                  label={!availabilityLoaded ? "Loading availability…" : ogUnavailable ? "Currently unavailable" : ogSoldOut ? "OG Sold Out • View Early Bird" : "Claim OG Eternal Throne"}
                   sublabel={
-                    !seats
+                    !availabilityLoaded
                       ? "Seat counter is syncing…"
                       : ogUnavailable
                       ? "This launch tier is inactive."
@@ -793,14 +833,14 @@ export default function PricingClient() {
                       ? "OG seats are gone. Early Bird is now the top tier."
                       : "Lifetime elite access • Highest commissions"
                   }
-                  onClick={() => seats?.og.active && !ogSoldOut && handleCheckout("og_throne")}
+                  onClick={() => ogActive && !ogSoldOut && handleCheckout("og_throne")}
                 />
                 <NeonButton
-                  disabled={!canCheckout || !seats || !seats.earlyBird.active || earlyBirdSoldOut}
+                  disabled={!canCheckout || !earlyBirdActive || earlyBirdSoldOut}
                   loading={checkoutLoading === "early_bird"}
-                  label={!seats ? "Loading seats…" : earlyBirdUnavailable ? "Currently unavailable" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
+                  label={!availabilityLoaded ? "Loading availability…" : earlyBirdUnavailable ? "Currently unavailable" : earlyBirdSoldOut ? "Early Bird Sold Out" : "Join Early Bird"}
                   sublabel={
-                    !seats
+                    !availabilityLoaded
                       ? "Seat counter is syncing…"
                       : earlyBirdUnavailable
                       ? "This launch tier is inactive."
@@ -808,7 +848,7 @@ export default function PricingClient() {
                       ? "This launch tier is sold out."
                       : "Founding monthly rate • Limited seats"
                   }
-                  onClick={() => seats?.earlyBird.active && !earlyBirdSoldOut && handleCheckout("early_bird")}
+                  onClick={() => earlyBirdActive && !earlyBirdSoldOut && handleCheckout("early_bird")}
                 />
               </div>
             </div>

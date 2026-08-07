@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { paymentFirstCheckout, PAYMENT_V2_CONTRACT_VERSION, PAYMENT_V2_COOKIE, PAYMENT_V2_HOLD_MINUTES, type CheckoutDependencies } from "../../../lib/payment-v2/checkoutService";
+import { LOCKED_PAYMENT_V2_PRICES } from "../../../lib/payment-v2/publicPurchaseReadiness";
 
 let assertions = 0;
 const check = (value: unknown, message: string) => { assert.ok(value, message); assertions++; };
@@ -13,7 +14,7 @@ function harness(overrides: Partial<CheckoutDependencies> = {}) {
   const calls = { tier: [] as unknown[], acquire: [] as unknown[], create: [] as unknown[], associate: [] as unknown[], retrieve: [] as unknown[] };
   const deps: CheckoutDependencies = {
     now: () => new Date("2026-08-02T00:00:00Z"), randomCredential: () => Buffer.from(fixedRaw),
-    async loadTier(name) { calls.tier.push(name); return [{ name, is_active: true, stripe_price_id: `price_${name}` }]; },
+    async loadTier(name) { calls.tier.push(name); return [{ name, is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES[name] }]; },
     async acquireHold(hash, tier, expiresAt) { calls.acquire.push([Buffer.from(hash), tier, expiresAt]); return { holdId, state: "HELD", expiresAt: "2026-08-02T01:00:00.000Z" }; },
     async loadAssociatedSessionId() { return "cs_existing"; },
     async associateSession(id, hash, session) { calls.associate.push([id, Buffer.from(hash), session]); return "associated"; },
@@ -39,7 +40,7 @@ for (const body of [null, {}, { tierName: "prime_access" }, { tierName: "bad" },
 {
   const h = harness(); const result = await h.run(); equal(result.status, 200, "OG accepted");
   const params = h.calls.create[0][0] as any; equal(params.mode, "payment", "OG payment mode"); equal(params.customer_creation, "always", "OG creates Customer");
-  equal(params.line_items.length, 1, "one line item"); equal(params.line_items[0].price, "price_og_throne", "authoritative price"); equal(params.line_items[0].quantity, 1, "quantity one");
+  equal(params.line_items.length, 1, "one line item"); equal(params.line_items[0].price, LOCKED_PAYMENT_V2_PRICES.og_throne, "authoritative price"); equal(params.line_items[0].quantity, 1, "quantity one");
   equal(params.metadata, { payment_v2_hold_id: holdId, tier_name: "og_throne", checkout_contract_version: PAYMENT_V2_CONTRACT_VERSION }, "safe metadata only");
   equal(params.payment_intent_data, { metadata: params.metadata }, "OG propagates Payment V2 discriminator to PaymentIntent metadata");
   equal(params.subscription_data, undefined, "OG does not receive subscription_data");
@@ -134,8 +135,8 @@ for (const [message, code] of [["sold_out", "TIER_SOLD_OUT"], ["effective_hold_c
 {
   const h = harness();
   const result = await h.run({ tierName: "og_throne", referralCode: " safe_code " });
-  equal(result.status, 409, "referral fails closed");
-  equal(result.body.code, "PAYMENT_V2_REFERRAL_NOT_READY", "referral has stable not-ready code");
+  equal(result.status, 400, "referral fails closed");
+  equal(result.body.code, "INVALID_CHECKOUT_REQUEST", "referral has stable invalid-request code");
   equal(h.calls.acquire.length, 0, "referral acquires no hold");
   equal(h.calls.create.length, 0, "referral creates no Stripe Session or related provider operation");
   check(!JSON.stringify(h.calls.create).includes("destination"), "referral constructs no destination");

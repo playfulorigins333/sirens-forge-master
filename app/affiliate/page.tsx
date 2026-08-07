@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { supabaseBrowser } from "@/lib/supabase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -45,6 +44,8 @@ type AffiliateSummary = {
     referred_user_id?: string | null
     referral_id?: string | null
   }>
+  stripe_connect_onboarded: boolean
+  payouts: PayoutItem[]
 }
 
 type PayoutBatch = {
@@ -144,17 +145,15 @@ function MetricCard(props: {
 }
 
 export default function AffiliateDashboard() {
-  const supabase = supabaseBrowser()
-
   const [loading, setLoading] = useState(true)
   const [connecting, setConnecting] = useState(false)
 
-  const [profile, setProfile] = useState<any>(null)
   const [tierName, setTierName] = useState<string>("Standard")
   const [summary, setSummary] = useState<AffiliateSummary | null>(null)
   const [payouts, setPayouts] = useState<PayoutItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle")
+  const [checkoutMode, setCheckoutMode] = useState<"legacy" | "payment_v2" | null>(null)
 
   useEffect(() => {
     loadAffiliateData()
@@ -165,40 +164,11 @@ export default function AffiliateDashboard() {
     setError(null)
 
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        setError("You must be logged in to view affiliate details.")
-        setLoading(false)
-        return
-      }
-
-      const { data: p, error: profileError } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("user_id", user.id)
-        .single()
-
-      if (profileError) throw profileError
-      setProfile(p)
-
-      const { data: sub } = await supabase
-        .from("user_subscriptions")
-        .select("tier_name")
-        .eq("user_id", user.id)
-        .eq("status", "active")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      setTierName(sub?.tier_name ?? p?.tier ?? "Standard")
-
-      const summaryRes = await fetch("/api/affiliate/summary", {
+      const [summaryRes, modeRes] = await Promise.all([fetch("/api/affiliate/summary", {
         method: "GET",
         credentials: "include",
-      })
+        cache: "no-store",
+      }), fetch("/api/payment-v2/readiness", { cache: "no-store" })])
 
       const summaryJson = await summaryRes.json()
 
@@ -207,22 +177,9 @@ export default function AffiliateDashboard() {
       }
 
       setSummary(summaryJson)
-
-      const { data: payoutItems, error: payoutError } = await supabase
-        .from("affiliate_payout_items")
-        .select(`
-          amount_cents,
-          created_at,
-          affiliate_payout_batches (
-            status,
-            created_at
-          )
-        `)
-        .eq("affiliate_user_id", user.id)
-        .order("created_at", { ascending: false })
-
-      if (payoutError) throw payoutError
-      setPayouts((payoutItems || []) as PayoutItem[])
+      setTierName(summaryJson?.tier ?? "Standard")
+      setPayouts(Array.isArray(summaryJson?.payouts) ? summaryJson.payouts : [])
+      if (modeRes.ok) { const mode = await modeRes.json(); if (mode?.checkoutMode === "legacy" || mode?.checkoutMode === "payment_v2") setCheckoutMode(mode.checkoutMode) }
     } catch (err: any) {
       setError(err?.message ?? "Failed to load affiliate dashboard.")
     } finally {
@@ -231,11 +188,12 @@ export default function AffiliateDashboard() {
   }
 
   const referralCode = summary?.referral_code || ""
-  const referralLink = referralCode
+  const affiliateActive = checkoutMode === "legacy"
+  const referralLink = affiliateActive && referralCode
     ? `https://sirensforge.vip?ref=${referralCode}`
     : ""
 
-  const stripeConnected = Boolean(profile?.stripe_connect_onboarded)
+  const stripeConnected = summary?.stripe_connect_onboarded === true
   const pendingAmount = Number(summary?.pending ?? 0)
   const paidAmount = Number(summary?.paid ?? 0)
   const totalEarnedAmount = Number(summary?.total_earnings ?? 0)
@@ -265,7 +223,7 @@ export default function AffiliateDashboard() {
   }, [summary])
 
   function copyLink() {
-    if (!referralLink) return
+    if (!affiliateActive || !referralLink) return
     navigator.clipboard.writeText(referralLink)
     setCopyState("copied")
     window.setTimeout(() => setCopyState("idle"), 1600)
@@ -275,13 +233,7 @@ export default function AffiliateDashboard() {
     try {
       setConnecting(true)
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        throw new Error("Not authenticated")
-      }
+      if (!affiliateActive) throw new Error("Affiliate program is unavailable")
 
       const res = await fetch("/api/stripe/connect/create", {
         method: "POST",
@@ -351,7 +303,17 @@ export default function AffiliateDashboard() {
           </Card>
         ) : null}
 
-        {!stripeConnected ? (
+        {checkoutMode !== "legacy" ? (
+          <Card className="border-amber-500/40 bg-amber-500/10 mb-10">
+            <CardHeader><CardTitle className="text-amber-200">Affiliate program paused — historical activity is read-only</CardTitle></CardHeader>
+            <CardContent className="text-sm text-amber-100 space-y-2">
+              <p>Affiliate referrals are currently paused during the Payment-First launch phase. New referral links and codes are not being accepted or tracked. Existing historical records and eligible obligations remain preserved.</p>
+              <p>Stripe Connect onboarding is unavailable during the pause. No reopening date is currently promised.</p>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {affiliateActive && !stripeConnected ? (
           <Card className="border-amber-500/40 bg-amber-500/10 mb-10">
             <CardHeader>
               <CardTitle className="flex items-center gap-3 text-amber-200">
@@ -382,7 +344,7 @@ export default function AffiliateDashboard() {
               </Button>
             </CardContent>
           </Card>
-        ) : (
+        ) : affiliateActive ? (
           <Card className="border-emerald-500/40 bg-emerald-500/10 mb-10">
             <CardHeader>
               <CardTitle className="flex items-center gap-3 text-emerald-200">
@@ -396,13 +358,13 @@ export default function AffiliateDashboard() {
               </p>
             </CardContent>
           </Card>
-        )}
+        ) : null}
 
         <Card className="border-gray-700 bg-gray-800/60 backdrop-blur-sm mb-10">
           <CardHeader>
             <CardTitle className="flex items-center gap-3 text-white">
               <Gift className="w-5 h-5 text-pink-400" />
-              Your Referral Link
+              {affiliateActive ? "Your Referral Link" : "Historical Referral Record"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -411,7 +373,7 @@ export default function AffiliateDashboard() {
                 Referral Code
               </div>
               <div className="text-lg font-semibold text-white">
-                {referralCode || "No referral code found"}
+                {affiliateActive ? (referralCode || "No referral code found") : "Referral sharing is paused"}
               </div>
             </div>
 
@@ -420,13 +382,13 @@ export default function AffiliateDashboard() {
                 Share Link
               </div>
               <div className="text-sm text-gray-200">
-                {referralLink || "No referral link available"}
+                {referralLink || "No active referral link while the program is paused"}
               </div>
             </div>
 
             <Button
               onClick={copyLink}
-              disabled={!referralLink}
+              disabled={!affiliateActive || !referralLink}
               className="flex items-center gap-2"
             >
               <Copy className="w-4 h-4" />
