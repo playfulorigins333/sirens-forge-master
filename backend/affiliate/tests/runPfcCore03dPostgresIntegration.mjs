@@ -9,7 +9,7 @@ const file=(path)=>{const r=spawnSync('psql',[url,'-XAt','-v','ON_ERROR_STOP=1',
 const equal=(sql,value,msg)=>{assert.equal(run(sql).split('\n').at(-1),String(value),msg);assertions++}
 run(`drop schema public cascade;create schema public;grant all on schema public to postgres;grant usage on schema public to public;
 do $$begin if not exists(select from pg_roles where rolname='anon')then create role anon;end if;if not exists(select from pg_roles where rolname='authenticated')then create role authenticated;end if;if not exists(select from pg_roles where rolname='service_role')then create role service_role bypassrls;end if;end$$;
-create schema if not exists auth;create or replace function auth.uid()returns uuid language sql stable as 'select null::uuid';create table auth.users(id uuid primary key);
+drop schema if exists auth cascade;create schema auth;create function auth.uid()returns uuid language sql stable as 'select null::uuid';create table auth.users(id uuid primary key);
 create table profiles(id uuid primary key,user_id uuid not null references auth.users(id),stripe_customer_id text,stripe_connect_account_id text,stripe_connect_onboarded boolean not null default false);
 create table subscription_tiers(id uuid primary key,name text not null,stripe_price_id text,is_active boolean not null);
 create table user_subscriptions(id uuid primary key default gen_random_uuid(),user_id uuid not null,tier_id uuid,tier_name text,stripe_customer_id text,stripe_subscription_id text,status text,metadata jsonb default '{}');
