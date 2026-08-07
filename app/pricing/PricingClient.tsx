@@ -119,12 +119,6 @@ export default function PricingClient() {
   // Hydrate referral code from URL (?ref=CODE) or localStorage
   useEffect(() => {
     if (!publicPurchase) return;
-    if (publicPurchase.checkoutMode === "payment_v2") {
-      setReferralCode("");
-      setReferralSaved(false);
-      try { window.localStorage.removeItem("sf_referral_code"); } catch { /* fail closed */ }
-      return;
-    }
     try {
       const fromUrl =
         (searchParams?.get("ref") ||
@@ -232,9 +226,7 @@ export default function PricingClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
-        body: JSON.stringify(publicPurchase.checkoutMode === "payment_v2"
-          ? { tierName }
-          : { tierName, referralCode: referralCode ? referralCode.trim().toUpperCase() : undefined }),
+        body: JSON.stringify({ tierName, ...(referralCode ? { referralCode: referralCode.trim().toUpperCase() } : {}) }),
       });
 
       const json = await res.json().catch(() => ({} as any));
@@ -455,12 +447,7 @@ export default function PricingClient() {
             </div>
 
             <div className="w-full sm:w-auto sm:min-w-[280px]">
-              {paymentV2 ? (
-                <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-3 py-3 text-xs text-amber-100">
-                  <p className="font-semibold">Affiliate program paused</p>
-                  <p className="mt-1">Referral codes are not accepted or tracked for Payment-First Checkout. Existing historical affiliate records and eligible obligations remain preserved.</p>
-                </div>
-              ) : publicPurchase?.checkoutMode === "legacy" ? (
+              {publicPurchase?.checkoutMode === "legacy" || paymentV2 ? (
               <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
                   Referral / affiliate code

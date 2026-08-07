@@ -90,7 +90,7 @@ function commonSession(session: StripeSession, sessionId: string, holdId: string
   return session.id === sessionId && md.kind === "v2" && md.holdId === holdId && md.tier === tier && lines?.length === 1 && line?.quantity === 1 && line.price?.id === price;
 }
 
-type PaidEvidence = { customer: string; paymentIntent: string | null; subscription: string | null };
+type PaidEvidence = { customer: string; paymentIntent: string | null; subscription: string | null; grossAmountCents: number; currency: string };
 
 async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: string, provider: PaymentV2Provider): Promise<PaidEvidence | null> {
   if (session.status !== "complete") return null;
@@ -98,11 +98,14 @@ async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: st
   if (!customer || session.payment_status !== "paid") return null;
   let paymentIntent: string | null = null;
   let subscription: string | null = null;
+  const line = session.line_items!.data[0];
+  const grossAmountCents = line.amount_total ?? (typeof line.price?.unit_amount === "number" ? line.price.unit_amount : null);
+  const currency = (line.price?.currency || session.currency || "").toLowerCase();
+  if (!Number.isInteger(grossAmountCents) || grossAmountCents! < 0 || !/^[a-z]{3}$/.test(currency) || session.amount_total !== grossAmountCents) return null;
   if (tier === "og_throne") {
     paymentIntent = id(session.payment_intent);
     if (session.mode !== "payment" || !paymentIntent || id(session.subscription)) return null;
     const pi = await provider.retrievePaymentIntent(paymentIntent);
-    const line = session.line_items!.data[0];
     const amount = line.amount_total ?? (typeof line.price?.unit_amount === "number" ? line.price.unit_amount : null);
     const currency = line.price?.currency?.toLowerCase();
     if (pi.id !== paymentIntent || pi.status !== "succeeded" || id(pi.customer) !== customer || amount === null || pi.amount !== amount ||
@@ -120,7 +123,7 @@ async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: st
       if (!(invoice.paid === true || invoice.status === "paid") || (typeof invoice.amount_due === "number" && typeof invoice.amount_paid === "number" && invoice.amount_paid < invoice.amount_due)) return null;
     }
   }
-  return { customer, paymentIntent, subscription };
+  return { customer, paymentIntent, subscription, grossAmountCents: grossAmountCents!, currency };
 }
 
 async function recordPaid(event: StripeEvent, session: StripeSession, hold: HoldRow, tier: PaymentV2Tier, price: string, hash: Uint8Array, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
@@ -140,7 +143,8 @@ async function recordPaid(event: StripeEvent, session: StripeSession, hold: Hold
   const confirmed = timestamp(event.created); if (!confirmed) return failed();
   try {
     const result = await db.recordPaid({ p_hold_id: hold.id, p_purchaser_hash: hash, p_session_id: session.id, p_customer_id: evidence.customer,
-      p_price_id: price, p_payment_intent_id: evidence.paymentIntent, p_subscription_id: evidence.subscription, p_provider_event_id: event.id, p_provider_confirmed_at: confirmed });
+      p_price_id: price, p_payment_intent_id: evidence.paymentIntent, p_subscription_id: evidence.subscription, p_provider_event_id: event.id, p_provider_confirmed_at: confirmed,
+      p_gross_amount_cents: evidence.grossAmountCents, p_currency: evidence.currency });
     return result === "recorded" || result === "already_recorded" ? received() : failed();
   } catch (cause) {
     if (!(cause instanceof Error) || cause.message !== "paid_purchase_conflict") throw cause;

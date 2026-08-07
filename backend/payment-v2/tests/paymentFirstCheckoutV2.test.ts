@@ -63,6 +63,32 @@ for (const body of [null, {}, { tierName: "prime_access" }, { tierName: "bad" },
   equal(params.payment_intent_data, undefined, "Early Bird does not receive payment_intent_data");
 }
 
+for (const [tierName, commissionPercent, expectedFee] of [["og_throne", 25, 7499], ["og_throne", 10, 8999]] as const) {
+  const h = harness({
+    acquireHold: async (_hash, _tier, _expires, code) => { equal(code, "SAFE_CODE", "normalized referral reaches authoritative hold RPC"); return { holdId, state: "HELD", expiresAt: "2026-08-02T01:00:00.000Z", connectDestination: "acct_authoritative", commissionPercent }; },
+    loadPriceUnitAmount: async () => 9999,
+  });
+  const result = await h.run({ tierName, referralCode: "safe_code" }); equal(result.status, 200, "connected one-time referral starts Checkout");
+  const params = h.calls.create[0][0] as any;
+  equal(params.payment_intent_data.transfer_data.destination, "acct_authoritative", "destination comes from authoritative hold result");
+  equal(params.payment_intent_data.application_fee_amount, expectedFee, "one-time platform fee leaves locked affiliate share");
+  equal(Object.keys(params.metadata).sort(), ["checkout_contract_version", "payment_v2_hold_id", "tier_name"], "affiliate truth is absent from Stripe metadata");
+}
+
+for (const [commissionPercent, expectedPlatform] of [[50, 50], [20, 80]] as const) {
+  const h = harness({ acquireHold: async () => ({ holdId, state: "HELD", expiresAt: "2026-08-02T01:00:00.000Z", connectDestination: "acct_authoritative", commissionPercent }) });
+  const result = await h.run({ tierName: "early_bird", referralCode: "CODE-1" }); equal(result.status, 200, "connected subscription referral starts Checkout");
+  const params = h.calls.create[0][0] as any;
+  equal(params.subscription_data.transfer_data.destination, "acct_authoritative", "subscription destination is server controlled");
+  equal(params.subscription_data.application_fee_percent, expectedPlatform, "subscription platform percent leaves locked affiliate share");
+}
+
+{
+  const h = harness({ acquireHold: async () => ({ holdId, state: "HELD", expiresAt: "2026-08-02T01:00:00.000Z", connectDestination: null, commissionPercent: 50 }) });
+  await h.run({ tierName: "early_bird", referralCode: "CODE-1" });
+  equal((h.calls.create[0][0] as any).subscription_data, { metadata: (h.calls.create[0][0] as any).metadata }, "unconnected affiliate preserves attribution without an unsafe destination");
+}
+
 {
   const encoded = Buffer.alloc(32, 9).toString("base64url"); const h = harness(); const result = await h.run(undefined, { cookie: encoded });
   equal(result.cookie?.value, encoded, "valid cookie reused"); equal(h.calls.acquire[0][0], createHash("sha256").update(Buffer.alloc(32, 9)).digest(), "reused cookie hash reaches database");

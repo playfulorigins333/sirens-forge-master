@@ -7,7 +7,7 @@ export const PAYMENT_V2_HOLD_MINUTES = 60;
 export const PAYMENT_V2_COOKIE_MAX_AGE = 60 * 60 * 24 * 180;
 
 export type PaymentTier = "og_throne" | "early_bird";
-type Hold = { holdId: string; state: string; expiresAt: string };
+type Hold = { holdId: string; state: string; expiresAt: string; connectDestination?: string | null; commissionPercent?: number | null };
 type TierRow = { name: string; is_active: boolean; stripe_price_id: string | null };
 export type Session = {
   id: string; url: string | null; status?: string | null; payment_status?: string | null;
@@ -18,11 +18,12 @@ export interface CheckoutDependencies {
   now(): Date;
   randomCredential(): Buffer;
   loadTier(name: PaymentTier): Promise<TierRow[]>;
-  acquireHold(hash: Uint8Array, tier: PaymentTier, expiresAt: string): Promise<Hold>;
+  acquireHold(hash: Uint8Array, tier: PaymentTier, expiresAt: string, referralCode: string | null): Promise<Hold>;
   loadAssociatedSessionId(holdId: string, hash: Uint8Array): Promise<string | null>;
   associateSession(holdId: string, hash: Uint8Array, sessionId: string): Promise<string>;
   createSession(params: Record<string, unknown>, idempotencyKey: string): Promise<Session>;
   retrieveSession(id: string): Promise<Session>;
+  loadPriceUnitAmount?(priceId: string): Promise<number | null>;
 }
 
 export type CheckoutResult = {
@@ -34,14 +35,18 @@ export type CheckoutResult = {
 const error = (status: number, message: string, code: string): CheckoutResult => ({ status, body: { error: message, code } });
 const serverError = () => error(500, "Unable to start Checkout", "PAYMENT_FIRST_CHECKOUT_V2_ERROR");
 
-export type ValidatedCheckoutRequest = { tierName: PaymentTier };
+export type ValidatedCheckoutRequest = { tierName: PaymentTier; referralCode?: string };
 
 export function parseCheckoutBody(body: unknown): ValidatedCheckoutRequest | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const record = body as Record<string, unknown>;
-  if (Object.keys(record).length !== 1 || !Object.hasOwn(record, "tierName")) return null;
+  if (!Object.hasOwn(record, "tierName") || Object.keys(record).some((key) => key !== "tierName" && key !== "referralCode")) return null;
   if (record.tierName !== "og_throne" && record.tierName !== "early_bird") return null;
-  return { tierName: record.tierName };
+  if (record.referralCode === undefined) return { tierName: record.tierName };
+  if (typeof record.referralCode !== "string") return null;
+  const referralCode = record.referralCode.toUpperCase();
+  if (!/^[A-Z0-9_-]{4,20}$/.test(referralCode)) return null;
+  return { tierName: record.tierName, referralCode };
 }
 
 function credential(rawCookie: string | undefined, deps: CheckoutDependencies) {
@@ -96,11 +101,13 @@ export async function paymentFirstCheckout(input: {
     const priceId = tiers[0].stripe_price_id.trim();
     const expiresAt = new Date(deps.now().getTime() + PAYMENT_V2_HOLD_MINUTES * 60_000).toISOString();
     let hold: Hold;
-    try { hold = await deps.acquireHold(claim.hash, request.tierName, expiresAt); }
+    try { hold = await deps.acquireHold(claim.hash, request.tierName, expiresAt, request.referralCode ?? null); }
     catch (cause) {
       const code = cause instanceof Error ? cause.message : "";
       if (code.includes("sold_out")) return { ...error(409, "This tier is sold out", "TIER_SOLD_OUT"), cookie };
       if (code.includes("effective_hold_conflict")) return { ...error(409, "A different tier is already reserved", "EFFECTIVE_HOLD_CONFLICT"), cookie };
+      if (code.includes("attribution_conflict")) return { ...error(409, "This Checkout hold has different referral attribution", "REFERRAL_ATTRIBUTION_CONFLICT"), cookie };
+      if (code.includes("invalid_referral")) return { ...error(400, "Referral code is invalid or unavailable", "INVALID_REFERRAL_CODE"), cookie };
       if (code.includes("invalid_request")) return { ...error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST"), cookie };
       return { ...serverError(), cookie };
     }
@@ -132,9 +139,15 @@ export async function paymentFirstCheckout(input: {
     };
     if (request.tierName === "og_throne") {
       params.customer_creation = "always";
-      params.payment_intent_data = { metadata };
+      const unitAmount = hold.connectDestination ? await deps.loadPriceUnitAmount?.(priceId) : null;
+      if (hold.connectDestination && (!Number.isInteger(unitAmount) || unitAmount! < 0)) return { ...serverError(), cookie };
+      params.payment_intent_data = hold.connectDestination && hold.commissionPercent != null
+        ? { metadata, transfer_data: { destination: hold.connectDestination }, application_fee_amount: Math.round(unitAmount! * (100 - hold.commissionPercent) / 100) }
+        : { metadata };
     } else {
-      params.subscription_data = { metadata };
+      params.subscription_data = hold.connectDestination && hold.commissionPercent != null
+        ? { metadata, transfer_data: { destination: hold.connectDestination }, application_fee_percent: 100 - hold.commissionPercent }
+        : { metadata };
     }
     const idempotencyKey = `payment-v2:${PAYMENT_V2_CONTRACT_VERSION}:hold:${hold.holdId}`;
     const session = await deps.createSession(params, idempotencyKey);

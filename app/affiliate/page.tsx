@@ -188,7 +188,7 @@ export default function AffiliateDashboard() {
   }
 
   const referralCode = summary?.referral_code || ""
-  const affiliateActive = checkoutMode === "legacy"
+  const affiliateActive = checkoutMode === "legacy" || checkoutMode === "payment_v2"
   const referralLink = affiliateActive && referralCode
     ? `https://sirensforge.vip?ref=${referralCode}`
     : ""
@@ -303,15 +303,6 @@ export default function AffiliateDashboard() {
           </Card>
         ) : null}
 
-        {checkoutMode !== "legacy" ? (
-          <Card className="border-amber-500/40 bg-amber-500/10 mb-10">
-            <CardHeader><CardTitle className="text-amber-200">Affiliate program paused — historical activity is read-only</CardTitle></CardHeader>
-            <CardContent className="text-sm text-amber-100 space-y-2">
-              <p>Affiliate referrals are currently paused during the Payment-First launch phase. New referral links and codes are not being accepted or tracked. Existing historical records and eligible obligations remain preserved.</p>
-              <p>Stripe Connect onboarding is unavailable during the pause. No reopening date is currently promised.</p>
-            </CardContent>
-          </Card>
-        ) : null}
 
         {affiliateActive && !stripeConnected ? (
           <Card className="border-amber-500/40 bg-amber-500/10 mb-10">
@@ -364,7 +355,7 @@ export default function AffiliateDashboard() {
           <CardHeader>
             <CardTitle className="flex items-center gap-3 text-white">
               <Gift className="w-5 h-5 text-pink-400" />
-              {affiliateActive ? "Your Referral Link" : "Historical Referral Record"}
+              Your Referral Link
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -373,7 +364,7 @@ export default function AffiliateDashboard() {
                 Referral Code
               </div>
               <div className="text-lg font-semibold text-white">
-                {affiliateActive ? (referralCode || "No referral code found") : "Referral sharing is paused"}
+                {referralCode || "No referral code found"}
               </div>
             </div>
 
@@ -382,7 +373,7 @@ export default function AffiliateDashboard() {
                 Share Link
               </div>
               <div className="text-sm text-gray-200">
-                {referralLink || "No active referral link while the program is paused"}
+                {referralLink || "No referral link available"}
               </div>
             </div>
 
