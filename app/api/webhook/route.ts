@@ -129,6 +129,17 @@ function destinationChargeUsed(obj: any): boolean {
   )
 }
 
+const RELEASE_FAILED = "AFFILIATE_COMMISSION_RELEASE_FAILED"
+async function releaseAffiliateCommissions(admin: ReturnType<typeof getSupabaseAdmin>) {
+  let result: any
+  try { result = await admin.rpc("release_affiliate_commissions") } catch { throw new Error(RELEASE_FAILED) }
+  if (!result || typeof result !== "object" || !Object.hasOwn(result, "error") || result.error != null) throw new Error(RELEASE_FAILED)
+}
+
+function deferAffiliateVoidProcessing(_reason: "subscription_deleted" | "invoice_payment_failed") {
+  // Affiliate cancellation, failed-invoice, and void processing remain deferred.
+}
+
 async function grantOgThroneAccessFromCheckoutSession(
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
   session: any
@@ -373,18 +384,14 @@ export async function handleLegacyStripeWebhook(payload: string, signature: stri
 
         // 🚫 Only release commissions if destination charge confirmed
         if (destinationChargeUsed(sub)) {
-          await supabaseAdmin.rpc("release_affiliate_commissions")
+          await releaseAffiliateCommissions(supabaseAdmin)
         }
 
         break
       }
 
       case "customer.subscription.deleted": {
-        const sub: any = event.data.object
-
-        await supabaseAdmin.rpc("void_affiliate_commissions", {
-          p_stripe_subscription_id: String(sub.id),
-        })
+        deferAffiliateVoidProcessing("subscription_deleted")
 
         break
       }
@@ -397,7 +404,7 @@ export async function handleLegacyStripeWebhook(payload: string, signature: stri
 
         // 🚫 DO NOT release unless destination charge was used
         if (destinationChargeUsed(invoice)) {
-          await supabaseAdmin.rpc("release_affiliate_commissions")
+          await releaseAffiliateCommissions(supabaseAdmin)
         }
 
         break
@@ -407,9 +414,7 @@ export async function handleLegacyStripeWebhook(payload: string, signature: stri
         const invoice: any = event.data.object
 
         if (invoice.subscription) {
-          await supabaseAdmin.rpc("void_affiliate_commissions", {
-            p_stripe_subscription_id: String(invoice.subscription),
-          })
+          deferAffiliateVoidProcessing("invoice_payment_failed")
         }
 
         break
@@ -421,6 +426,12 @@ export async function handleLegacyStripeWebhook(payload: string, signature: stri
 
     return NextResponse.json({ received: true })
   } catch (err: any) {
+    if (err instanceof Error && err.message === RELEASE_FAILED) {
+      return NextResponse.json(
+        { error: "Unable to release affiliate commissions", code: RELEASE_FAILED },
+        { status: 500 },
+      )
+    }
     console.error("🔥 Webhook error:", err)
     return NextResponse.json(
       { error: err?.message ?? "Webhook failed" },

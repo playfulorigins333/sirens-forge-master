@@ -56,7 +56,7 @@ run = await request({ body: "{" }); equal(run.result.body.code, "INVALID_CHECKOU
 run = await request({ body: "é".repeat(513) }); equal(run.result.body.code, "INVALID_CHECKOUT_REQUEST"); equal(run.calls.join(","), "rate,bot,body");
 run = await request({ bodyThrow: true }); equal(run.result.status, 400); equal(run.result.body.code, "INVALID_CHECKOUT_REQUEST"); equal(run.calls.join(","), "rate,bot,body");
 run = await request({ input: { headers: headers({ origin: "https://www.sirensforge.vip", "content-type": "application/json; charset=utf-8" }) } }); equal(run.result.status, 201); equal(run.calls.join(","), "rate,bot,body,checkout"); equal(run.result.cookie?.name, "test");
-run = await request({ body: '{"tierName":"early_bird","referralCode":" safe_code "}' }); equal(run.result.status, 201); equal(run.result.body.value, '{"tierName":"early_bird","referralCode":"SAFE_CODE"}');
+run = await request({ body: '{"tierName":"early_bird","referralCode":" safe_code "}' }); equal(run.result.status, 400); equal(run.result.body.code, "INVALID_CHECKOUT_REQUEST");
 equal(PAYMENT_V2_CHECKOUT_RATE_LIMIT_ID, "payment-v2-checkout");
 
 for (const body of [null, [], "og_throne", 1, true, { tierName: "prime_access" }, { tierName: "og_throne", extra: true }, { tierName: "og_throne", referralCode: 7 }]) {
@@ -117,8 +117,8 @@ includes(homeSource, 'typeof earlyBird?.is_active !== "boolean"');
 includes(homeSource, '"Currently unavailable"');
 includes(pricingSource, 'ogUnavailable ? "Currently unavailable"');
 includes(pricingSource, 'earlyBirdUnavailable ? "Currently unavailable"');
-includes(pricingSource, "seats?.og.active && !ogSoldOut");
-includes(pricingSource, "seats?.earlyBird.active && !earlyBirdSoldOut");
+includes(pricingSource, "ogActive && !ogSoldOut");
+includes(pricingSource, "earlyBirdActive && !earlyBirdSoldOut");
 includes(pricingSource, "Availability updates as seats are reserved or purchased.");
 excludes(pricingSource, "Numbers update as soon as a tier is claimed");
 excludes(homeSource.toLowerCase(), "prime access");

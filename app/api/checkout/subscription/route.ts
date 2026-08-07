@@ -200,6 +200,12 @@ async function computePlatformFeeAmountCents(
    POST /api/checkout/subscription
 ────────────────────────────────────────────── */
 export async function POST(req: Request) {
+  if (process.env.PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED === "true") {
+    return NextResponse.json(
+      { error: "Checkout is unavailable during payment-first cutover", code: "PAYMENT_FIRST_LEGACY_CHECKOUT_CUTOVER" },
+      { status: 503 },
+    );
+  }
   try {
     // Hard guardrails: fail with clear server error (not silent)
     const missing = [

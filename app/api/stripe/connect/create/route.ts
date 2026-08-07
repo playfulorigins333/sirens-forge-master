@@ -2,11 +2,13 @@ import { NextResponse } from "next/server"
 import Stripe from "stripe"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { supabaseServer } from "@/lib/supabaseServer"
+import { paymentFirstPublicCutoverEnabled } from "@/lib/payment-v2/publicPurchaseReadiness"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 type ConnectDependencies = {
+  cutoverEnabled: () => boolean
   getAuthenticatedUserId: () => Promise<string | null>
   getAdminClient: () => any
   createStripeClient: (secretKey: string) => Pick<Stripe, "accounts" | "accountLinks">
@@ -14,6 +16,7 @@ type ConnectDependencies = {
 }
 
 const productionDependencies: ConnectDependencies = {
+  cutoverEnabled: () => paymentFirstPublicCutoverEnabled(process.env.PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED),
   getAuthenticatedUserId: async () => {
     const supabase = await supabaseServer()
     const { data, error } = await supabase.auth.getUser()
@@ -39,6 +42,12 @@ export async function createStripeConnectResponse(
   _req: Request,
   dependencies: ConnectDependencies,
 ) {
+  if (dependencies.cutoverEnabled()) {
+    return NextResponse.json(
+      { error: "Affiliate program is paused", code: "AFFILIATE_PROGRAM_PAUSED" },
+      { status: 503 },
+    )
+  }
   let authenticatedUserId: string | null
 
   try {

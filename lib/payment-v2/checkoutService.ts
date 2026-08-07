@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { LOCKED_PAYMENT_V2_PRICES } from "./publicPurchaseReadiness";
 
 export const PAYMENT_V2_COOKIE = "sf_payment_v2_claim";
 export const PAYMENT_V2_CONTRACT_VERSION = "pfc-03-v2";
@@ -33,17 +34,14 @@ export type CheckoutResult = {
 const error = (status: number, message: string, code: string): CheckoutResult => ({ status, body: { error: message, code } });
 const serverError = () => error(500, "Unable to start Checkout", "PAYMENT_FIRST_CHECKOUT_V2_ERROR");
 
-export type ValidatedCheckoutRequest = { tierName: PaymentTier; referralCode?: string };
+export type ValidatedCheckoutRequest = { tierName: PaymentTier };
 
 export function parseCheckoutBody(body: unknown): ValidatedCheckoutRequest | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const record = body as Record<string, unknown>;
-  if (!Object.keys(record).every((key) => key === "tierName" || key === "referralCode")) return null;
+  if (Object.keys(record).length !== 1 || !Object.hasOwn(record, "tierName")) return null;
   if (record.tierName !== "og_throne" && record.tierName !== "early_bird") return null;
-  if (record.referralCode !== undefined && typeof record.referralCode !== "string") return null;
-  const referralCode = typeof record.referralCode === "string" ? record.referralCode.trim().toUpperCase() : "";
-  if (referralCode.length > 64 || (referralCode && !/^[A-Z0-9_-]+$/.test(referralCode))) return null;
-  return referralCode ? { tierName: record.tierName, referralCode } : { tierName: record.tierName };
+  return { tierName: record.tierName };
 }
 
 function credential(rawCookie: string | undefined, deps: CheckoutDependencies) {
@@ -86,10 +84,6 @@ export async function paymentFirstCheckout(input: {
   if (!request) return error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST");
   const origin = trustedOrigin(input.configuredOrigin, input.production);
   if (!origin) return serverError();
-  // Referral economics are not bound to a V2 hold in migration 02800. Until a
-  // persisted binding exists, proceeding could mutate fixed-idempotency inputs.
-  if (request.referralCode) return error(409, "Referral Checkout is not ready", "PAYMENT_V2_REFERRAL_NOT_READY");
-
   let claim;
   try { claim = credential(input.cookie, deps); } catch { return serverError(); }
   const cookie = { name: PAYMENT_V2_COOKIE, value: claim.encoded, httpOnly: true as const, sameSite: "lax" as const,
@@ -98,7 +92,7 @@ export async function paymentFirstCheckout(input: {
   try {
     const tiers = await deps.loadTier(request.tierName);
     if (tiers.length !== 1 || tiers[0].name !== request.tierName || tiers[0].is_active !== true ||
-        typeof tiers[0].stripe_price_id !== "string" || !tiers[0].stripe_price_id.trim()) return serverError();
+        tiers[0].stripe_price_id !== LOCKED_PAYMENT_V2_PRICES[request.tierName]) return serverError();
     const priceId = tiers[0].stripe_price_id.trim();
     const expiresAt = new Date(deps.now().getTime() + PAYMENT_V2_HOLD_MINUTES * 60_000).toISOString();
     let hold: Hold;
