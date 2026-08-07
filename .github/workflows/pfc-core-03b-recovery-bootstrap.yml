@@ -1,0 +1,109 @@
+name: PFC-CORE-03B Recovery Bootstrap
+
+on:
+  push:
+    branches:
+      - agent/pfc-core-03b-recovery
+    paths:
+      - '.pfc-recovery/**'
+      - '.github/workflows/pfc-core-03b-recovery-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and verify recovery archive
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat .pfc-recovery/chunk-*.b64 > /tmp/pfc-core-03b-recovery.b64
+          test "$(wc -c < /tmp/pfc-core-03b-recovery.b64)" = "64564"
+
+          base64 -d /tmp/pfc-core-03b-recovery.b64 > /tmp/pfc-core-03b-recovery.tar.gz
+          test "$(wc -c < /tmp/pfc-core-03b-recovery.tar.gz)" = "48423"
+          echo "0588f2913aa384139e5fd6e5d8552fbc02cb9a0e9a1446da6f8d89a703d8680e  /tmp/pfc-core-03b-recovery.tar.gz" | sha256sum -c -
+
+          rm -rf /tmp/pfc-core-03b-restored
+          mkdir -p /tmp/pfc-core-03b-restored
+          tar -xzf /tmp/pfc-core-03b-recovery.tar.gz -C /tmp/pfc-core-03b-restored
+
+          find /tmp/pfc-core-03b-restored -type f -printf '%P\n' | sort > /tmp/pfc-actual-manifest
+          cat > /tmp/pfc-expected-manifest <<'EOF'
+          .github/workflows/payment-v2-postgres.yml
+          app/affiliate-terms/page.tsx
+          app/affiliate/page.tsx
+          app/api/affiliate/summary/route.ts
+          app/api/checkout/subscription-v2/route.ts
+          app/api/stripe/connect/create/route.ts
+          app/page.tsx
+          app/pricing/PricingClient.tsx
+          backend/affiliate/tests/paymentFirstAffiliatePauseV2.test.ts
+          backend/affiliate/tests/paymentV2AffiliateAttributionContract.test.ts
+          backend/affiliate/tests/runPaymentV2AffiliatePostgresIntegration.mjs
+          backend/payment-v2/tests/paymentFirstCheckoutV2.test.ts
+          backend/payment-v2/tests/paymentFirstPublicCutoverV2.test.ts
+          lib/payment-v2/checkoutService.ts
+          lib/payment-v2/webhookService.ts
+          package.json
+          supabase/migrations/20260807003100_payment_v2_affiliate_attribution.sql
+          EOF
+          sort -o /tmp/pfc-expected-manifest /tmp/pfc-expected-manifest
+          diff -u /tmp/pfc-expected-manifest /tmp/pfc-actual-manifest
+
+          while read -r expected path; do
+            actual="$(git hash-object "/tmp/pfc-core-03b-restored/$path")"
+            test "$actual" = "$expected" || {
+              echo "Blob mismatch for $path: expected $expected, got $actual" >&2
+              exit 1
+            }
+          done <<'EOF'
+          e6e744e25770f91cbc0c1770dcc0e0659ed182a6 .github/workflows/payment-v2-postgres.yml
+          12bc99aa7c262c9704e1824bb2466e09b52051e7 app/affiliate-terms/page.tsx
+          afe78264695a4b2d6a4d07547b5f9de132a49566 app/affiliate/page.tsx
+          f4ae680ed939e5f244a94493bdb7349b64856e6e app/api/affiliate/summary/route.ts
+          97fe95abd0a2a6c6ea98c426dd83b14e86975697 app/api/checkout/subscription-v2/route.ts
+          1ee1a6baec666c98d034f496c7df5f6af5b46992 app/api/stripe/connect/create/route.ts
+          406ea441d987ba6a493cbd5524c45b70ea12789e app/page.tsx
+          84c8c8d3e1ffc55bcb52f365197426e72fc71572 app/pricing/PricingClient.tsx
+          e0efc134b61734c12d7fb851a8dedf83a3cd0778 backend/affiliate/tests/paymentFirstAffiliatePauseV2.test.ts
+          d50437214cd3a111715c4321c6d5ba01c987171a backend/affiliate/tests/paymentV2AffiliateAttributionContract.test.ts
+          f363c7870dd5257e3042734769b040b30657e0b5 backend/affiliate/tests/runPaymentV2AffiliatePostgresIntegration.mjs
+          a4b704433f1f7f73cd32cc5b6ffd62de5786959b backend/payment-v2/tests/paymentFirstCheckoutV2.test.ts
+          2d31a550b1707938e24bc1bbcb829924896dd30c backend/payment-v2/tests/paymentFirstPublicCutoverV2.test.ts
+          3a7518e9fc4553f3197ebc87aea4a71a277c9354 lib/payment-v2/checkoutService.ts
+          cd655b15eafa30cf66e8adce24cbc1f41821c56a lib/payment-v2/webhookService.ts
+          463bd4f78e3d0546a89a7bb27dbb362ffb3a6d11 package.json
+          8e7ba946663c0e480a29c55a219378ff8a0f57e0 supabase/migrations/20260807003100_payment_v2_affiliate_attribution.sql
+          EOF
+
+      - name: Restore exact implementation and remove temporary recovery files
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -xzf /tmp/pfc-core-03b-recovery.tar.gz -C .
+          rm -rf .pfc-recovery
+          rm -f .github/workflows/pfc-core-03b-recovery-bootstrap.yml
+
+      - name: Commit verified recovery tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "PFC-CORE-03B: restore Payment V2 affiliate attribution"
+
+          git diff --name-only 748dc97318d237003e4aea0e2b8b2ea234127a09 HEAD | sort > /tmp/pfc-final-manifest
+          diff -u /tmp/pfc-expected-manifest /tmp/pfc-final-manifest
+
+          git push origin HEAD:agent/pfc-core-03b-recovery
