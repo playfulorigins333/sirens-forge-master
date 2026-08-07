@@ -52,7 +52,7 @@ equal(`select has_table_privilege('service_role','affiliate_balances','select')`
 equal(`select has_column_privilege('service_role','affiliate_ledger','affiliate_user_id','select')`, 't','server summary path retains scoped ledger read')
 run(`select payment_v2_record_paid_recurring_invoice('${hold}','sub_initial','cus_referred','in_month_1','evt_month_1','subscription_create',now(),900,'usd')`)
 for(let month=2;month<=7;month++) run(`select payment_v2_record_paid_recurring_invoice('${hold}','sub_initial','cus_referred','in_month_${month}','evt_month_${month}','subscription_cycle',now(),1000,'usd')`)
-equal(`select string_agg(commission_percent::text,',' order by r.paid_month_number) from affiliate_ledger l join payment_v2_affiliate_recurring_invoices r on r.id=l.payment_v2_recurring_invoice_id`,'50,50,50,50,50,25','OG recurring months 2-6 are 50 and month 7 is 25')
+equal(`select string_agg(l.commission_percent::text,',' order by r.paid_month_number) from affiliate_ledger l join payment_v2_affiliate_recurring_invoices r on r.id=l.payment_v2_recurring_invoice_id`,'50,50,50,50,50,25','OG recurring months 2-6 are 50 and month 7 is 25')
 equal(`select count(*) from affiliate_ledger where stripe_event_id='evt_month_7'`,1,'recurring invoice creates one commission')
 run(`select payment_v2_record_paid_recurring_invoice('${hold}','sub_initial','cus_referred','in_month_7','evt_month_7','subscription_cycle',now(),1000,'usd')`)
 equal(`select count(*) from affiliate_ledger where stripe_event_id='evt_month_7'`,1,'duplicate invoice is idempotent')
@@ -62,7 +62,7 @@ run(`select payment_v2_associate_session('${earlyHold}',decode(repeat('cd',32),'
 const earlyPurchase=run(`select id from payment_v2_purchases where hold_id='${earlyHold}'`)
 run(`select payment_v2_claim('${earlyPurchase}',decode(repeat('cd',32),'hex'),'10000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000002');select payment_v2_record_paid_recurring_invoice('${earlyHold}','sub_early','cus_early','in_early_1','evt_early_1','subscription_create',now(),900,'usd')`)
 for(let month=2;month<=7;month++) run(`select payment_v2_record_paid_recurring_invoice('${earlyHold}','sub_early','cus_early','in_early_${month}','evt_early_${month}','subscription_cycle',now(),1000,'usd')`)
-equal(`select string_agg(commission_percent::text,',' order by r.paid_month_number) from affiliate_ledger l join payment_v2_affiliate_recurring_invoices r on r.id=l.payment_v2_recurring_invoice_id where r.stripe_subscription_id='sub_early'`,'20,20,20,20,20,10','Early Bird recurring months 2-6 are 20 and month 7 is 10')
+equal(`select string_agg(l.commission_percent::text,',' order by r.paid_month_number) from affiliate_ledger l join payment_v2_affiliate_recurring_invoices r on r.id=l.payment_v2_recurring_invoice_id where r.stripe_subscription_id='sub_early'`,'20,20,20,20,20,10','Early Bird recurring months 2-6 are 20 and month 7 is 10')
 run(`insert into affiliate_ledger(affiliate_user_id,referred_user_id,stripe_event_id,tier_name,commission_amount_cents,gross_amount_cents,commission_percent,status) values
 ('30000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000002','legacy_below','early_bird',4999,4999,20,'available'),
 ('30000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000002','legacy_exact','early_bird',5000,5000,20,'available')`)
