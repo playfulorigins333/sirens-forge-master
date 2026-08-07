@@ -33,7 +33,9 @@
     "test:pfc-core-02b": "tsx backend/affiliate/tests/paymentFirstAffiliatePauseV2.test.ts",
     "test:pfc-core-02c-postgres": "node backend/affiliate/tests/paymentFirstAffiliateSecurityPostgres.test.mjs",
     "test:pfc-07d": "tsx backend/affiliate/tests/pfc07dReferralEmailRouteLockdown.test.ts",
-    "test:pfc-07e-a1": "tsx backend/payment-v2/tests/paymentV2LegacyWebhookIsolation.test.ts && tsx backend/payment-v2/tests/paymentFirstCheckoutV2.test.ts && tsx backend/payment-v2/tests/paymentFirstWebhookV2.test.ts && tsx backend/payment-v2/tests/paymentV2Contract.test.ts"
+    "test:pfc-07e-a1": "tsx backend/payment-v2/tests/paymentV2LegacyWebhookIsolation.test.ts && tsx backend/payment-v2/tests/paymentFirstCheckoutV2.test.ts && tsx backend/payment-v2/tests/paymentFirstWebhookV2.test.ts && tsx backend/payment-v2/tests/paymentV2Contract.test.ts",
+    "test:pfc-core-03b": "tsx backend/affiliate/tests/paymentFirstAffiliatePauseV2.test.ts && tsx backend/affiliate/tests/paymentV2AffiliateAttributionContract.test.ts",
+    "test:pfc-core-03b-postgres": "node backend/affiliate/tests/runPaymentV2AffiliatePostgresIntegration.mjs"
   },
   "repository": {
     "type": "git",

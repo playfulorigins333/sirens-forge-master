@@ -117,11 +117,6 @@ export default function HomePage() {
             transition={{ duration: 1.2, ease: 'easeOut' }}
             className="relative mb-8 text-center"
           >
-            {checkoutMode === "payment_v2" ? (
-              <div className="mx-auto mb-8 max-w-3xl rounded-2xl border border-amber-400/40 bg-amber-500/10 px-5 py-4 text-sm text-amber-100">
-                Affiliate referrals are currently paused during the Payment-First launch phase. New referral links and codes are not being accepted or tracked. Existing historical records and eligible obligations remain preserved.
-              </div>
-            ) : null}
             <motion.div
               animate={{
                 scale: [1, 1.02, 1],

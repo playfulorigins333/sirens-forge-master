@@ -54,7 +54,7 @@ for (const body of ['{"tierName":"og_throne"}', '{"tierName":"early_bird"}', '{"
 const pricing = readFileSync("app/pricing/PricingClient.tsx", "utf8");
 check(pricing.includes('"/api/payment-v2/readiness"'), "Pricing uses one public mode/readiness boundary");
 check(pricing.includes('? "/api/checkout/subscription-v2"') && pricing.includes(': "/api/checkout/subscription"'), "Pricing selects exact route from derived mode");
-check(pricing.includes('? { tierName }'), "Payment V2 body contains tier only");
+check(pricing.includes("...(referralCode ? { referralCode"), "Payment V2 body contains only tier and optional referral code");
 const v2 = readFileSync("app/api/checkout/subscription-v2/route.ts", "utf8");
 check(v2.indexOf("derivePublicPurchaseState") < v2.indexOf("new Stripe(stripeKey"), "direct V2 readiness precedes Stripe construction");
 check(v2.indexOf("derivePublicPurchaseState") < v2.indexOf('req.headers.get("cookie")'), "direct V2 readiness precedes cookie read");
