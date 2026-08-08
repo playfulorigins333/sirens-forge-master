@@ -21,8 +21,10 @@ export async function POST(request: Request) {
         constructEvent: (raw, signature, secret) => stripe.webhooks.constructEvent(Buffer.from(raw), signature, secret) as any,
         retrieveSession: (id) => stripe.checkout.sessions.retrieve(id, { expand: ["line_items.data.price"] }) as any,
         retrievePaymentIntent: (id) => stripe.paymentIntents.retrieve(id, { expand: ["latest_charge"] }) as any,
-        retrieveSubscription: (id) => stripe.subscriptions.retrieve(id, { expand: ["items.data.price", "latest_invoice.payment_intent.latest_charge"] }) as any,
-        async listPaidInvoices(id) { return await stripe.invoices.list({ subscription: id, status: "paid", limit: 100, expand: ["data.payment_intent.latest_charge"] } as any).autoPagingToArray({ limit: 10000 }) as any; },
+        retrieveSubscription: (id) => stripe.subscriptions.retrieve(id, { expand: ["items.data.price", "latest_invoice"] }) as any,
+        retrieveInvoice: (id)=>stripe.invoices.retrieve(id) as any,
+        async listInvoicePayments(id){return await stripe.invoicePayments.list({invoice:id,status:"paid",limit:100}).autoPagingToArray({limit:1000}) as any;},
+        async listPaidInvoices(id) { return await stripe.invoices.list({ subscription: id, status: "paid", limit: 100 }).autoPagingToArray({ limit: 10000 }) as any; },
       };
     },
     createDatabase(): PaymentV2Database {
