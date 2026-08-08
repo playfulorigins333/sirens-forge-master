@@ -139,15 +139,9 @@ export async function paymentFirstCheckout(input: {
     };
     if (request.tierName === "og_throne") {
       params.customer_creation = "always";
-      const unitAmount = hold.connectDestination ? await deps.loadPriceUnitAmount?.(priceId) : null;
-      if (hold.connectDestination && (!Number.isInteger(unitAmount) || unitAmount! < 0)) return { ...serverError(), cookie };
-      params.payment_intent_data = hold.connectDestination && hold.commissionPercent != null
-        ? { metadata, transfer_data: { destination: hold.connectDestination }, application_fee_amount: Math.round(unitAmount! * (100 - hold.commissionPercent) / 100) }
-        : { metadata };
+      params.payment_intent_data = { metadata };
     } else {
-      params.subscription_data = hold.connectDestination && hold.commissionPercent != null
-        ? { metadata, transfer_data: { destination: hold.connectDestination }, application_fee_percent: 100 - hold.commissionPercent }
-        : { metadata };
+      params.subscription_data = { metadata };
     }
     const idempotencyKey = `payment-v2:${PAYMENT_V2_CONTRACT_VERSION}:hold:${hold.holdId}`;
     const session = await deps.createSession(params, idempotencyKey);

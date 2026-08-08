@@ -18,8 +18,8 @@ function harness(overrides: { event?: Partial<StripeEvent>; session?: Partial<St
   const provider: PaymentV2Provider = {
     constructEvent(raw, signature, secret) { calls.construct.push([raw, signature, secret]); return event; },
     async retrieveSession(id) { calls.session.push(id); return session; },
-    async retrievePaymentIntent(id) { calls.pi.push(id); return { id: "pi_exact", status: "succeeded", customer: "cus_exact", amount: 2500, currency: "usd" }; },
-    async retrieveSubscription(id) { calls.sub.push(id); return { id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { status: "paid", paid: true, amount_due: 900, amount_paid: 900, currency: "usd" } }; },
+    async retrievePaymentIntent(id) { calls.pi.push(id); return { id: "pi_exact", status: "succeeded", customer: "cus_exact", amount: 2500, currency: "usd", latest_charge: "ch_exact" }; },
+    async retrieveSubscription(id) { calls.sub.push(id); return { id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { id: "in_exact", status: "paid", paid: true, amount_due: 900, amount_paid: 900, currency: "usd", payment_intent: { id: "pi_invoice", status: "succeeded", customer: "cus_exact", amount: 900, currency: "usd", latest_charge: "ch_invoice" } } }; },
     ...overrides.provider,
   };
   const db: PaymentV2Database = {
@@ -161,7 +161,7 @@ function early(overrides: Parameters<typeof harness>[0] = {}) { return harness({
   const pending = early({ session: { payment_status: "unpaid" } }); equal((await pending.run()).body.status, "pending", "Early Bird pending"); equal(pending.calls.paid.length, 0, "Early Bird pending no RPC");
   for (const [session, label] of [[{ mode: "payment" }, "mode"], [{ status: "open" }, "status"], [{ customer: null }, "Customer"], [{ subscription: null }, "Subscription"], [{ payment_intent: "pi_bad" }, "PI identity"]] as const) equal((await early({ session: session as any }).run()).status, 500, `Early Bird rejects ${label}`);
   for (const [sub, label] of [[{ customer: "wrong" }, "customer"], [{ status: "canceled" }, "status"], [{ items: { data: [] } }, "item count"], [{ items: { data: [{ quantity: 2, price: { id: "price_early" } }] } }, "quantity"], [{ items: { data: [{ quantity: 1, price: { id: "wrong" } }] } }, "Price"], [{ latest_invoice: undefined }, "missing expanded invoice"], [{ latest_invoice: "in_unexpanded" }, "unexpanded invoice"], [{ latest_invoice: { paid: false, status: "open" } }, "unpaid invoice"], [{ latest_invoice: { paid: true, status: "paid", amount_paid: 899 } }, "invoice amount"], [{ latest_invoice: { paid: true, status: "paid", currency: "eur" } }, "invoice currency"]] as const)
-    equal((await early({ provider: { retrieveSubscription: async () => ({ id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { paid: true, status: "paid", amount_paid: 900, currency: "usd" }, ...sub }) } }).run()).status, 500, `Early Bird rejects ${label}`);
+    equal((await early({ provider: { retrieveSubscription: async () => ({ id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { id: "in_exact", paid: true, status: "paid", amount_paid: 900, currency: "usd", payment_intent: { id: "pi_invoice", status: "succeeded", customer: "cus_exact", amount: 900, currency: "usd", latest_charge: "ch_invoice" } }, ...sub }) } }).run()).status, 500, `Early Bird rejects ${label}`);
 }
 
 for (const result of ["recorded", "already_recorded"]) equal((await harness({ db: { recordPaid: async () => result } }).run()).body.status, "received", `${result} accepted`);

@@ -20,9 +20,9 @@ export async function POST(request: Request) {
       return {
         constructEvent: (raw, signature, secret) => stripe.webhooks.constructEvent(Buffer.from(raw), signature, secret) as any,
         retrieveSession: (id) => stripe.checkout.sessions.retrieve(id, { expand: ["line_items.data.price"] }) as any,
-        retrievePaymentIntent: (id) => stripe.paymentIntents.retrieve(id) as any,
-        retrieveSubscription: (id) => stripe.subscriptions.retrieve(id, { expand: ["items.data.price", "latest_invoice.payment_intent"] }) as any,
-        async updateSubscriptionApplicationFeePercent(id, applicationFeePercent) { await stripe.subscriptions.update(id, { application_fee_percent: applicationFeePercent }); },
+        retrievePaymentIntent: (id) => stripe.paymentIntents.retrieve(id, { expand: ["latest_charge"] }) as any,
+        retrieveSubscription: (id) => stripe.subscriptions.retrieve(id, { expand: ["items.data.price", "latest_invoice.payment_intent.latest_charge"] }) as any,
+        async listPaidInvoices(id) { return await stripe.invoices.list({ subscription: id, status: "paid", limit: 100, expand: ["data.payment_intent.latest_charge"] } as any).autoPagingToArray({ limit: 10000 }) as any; },
       };
     },
     createDatabase(): PaymentV2Database {
@@ -35,9 +35,9 @@ export async function POST(request: Request) {
         loadHold: (id) => rows(db.from("payment_v2_holds").select("id,state,tier,expires_at,stripe_checkout_session_id,purchaser_credential_hash").eq("id", id)) as any,
         loadTier: (name: PaymentV2Tier) => rows(db.from("subscription_tiers").select("name,is_active,stripe_price_id").eq("name", name)) as any,
         loadPurchase: (holdId) => rows(db.from("payment_v2_purchases").select("hold_id,tier,stripe_checkout_session_id,stripe_customer_id,stripe_price_id,stripe_payment_intent_id,stripe_subscription_id").eq("hold_id", holdId)) as any,
-        async recordPaid(args) { const { data, error } = await db.rpc("payment_v2_record_paid", { ...args, p_purchaser_hash: `\\x${Buffer.from(args.p_purchaser_hash as Uint8Array).toString("hex")}` }); if (error) throw new Error(error.message.includes("purchase_conflict") ? "paid_purchase_conflict" : "paid recording failed"); return data; },
+        async recordPaid(args) { const { data, error } = await db.rpc("payment_v2_record_paid_with_charge", { ...args, p_purchaser_hash: `\\x${Buffer.from(args.p_purchaser_hash as Uint8Array).toString("hex")}` }); if (error) throw new Error(error.message.includes("purchase_conflict") ? "paid_purchase_conflict" : "paid recording failed"); return data; },
         async recordTerminal(args) { const { data, error } = await db.rpc("payment_v2_record_session_unpaid_terminal", args); if (error) throw new Error(error.message.includes("paid_purchase_exists") ? "paid_purchase_exists" : "terminal recording failed"); return data; },
-        async recordRecurringInvoice(args) { const { data, error } = await db.rpc("payment_v2_record_paid_recurring_invoice", args); if (error) throw new Error("recurring invoice recording failed"); return data as Record<string, unknown>; },
+        async reconcilePaidInvoices(args) { const { data, error } = await db.rpc("payment_v2_reconcile_paid_invoices", args); if (error) throw new Error("recurring invoice reconciliation failed"); return data; },
       };
     },
     createInboxDatabase(): PaymentV2InboxDatabase {

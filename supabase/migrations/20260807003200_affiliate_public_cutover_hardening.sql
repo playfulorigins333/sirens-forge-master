@@ -1,168 +1,103 @@
--- Forward-only affiliate public-cutover hardening.
+-- Forward-only affiliate public-cutover hardening (unmerged PFC-CORE-03D).
 begin;
+do $acl$ begin
+ if to_regclass('public.affiliate_balances') is null then raise exception 'PFC_CORE_03D_CATALOG_MISMATCH: missing public.affiliate_balances'; end if;
+ execute 'revoke all privileges on table public.affiliate_balances from public, anon, authenticated, service_role';
+end $acl$;
 
--- affiliate_balances is an aggregate SECURITY DEFINER view in the deployed
--- schema. It is server-only: browser roles must never be able to scan it.
-do $acl$
-begin
-  if to_regclass('public.affiliate_balances') is null then
-    raise exception 'PFC_CORE_03D_CATALOG_MISMATCH: missing public.affiliate_balances';
-  end if;
-  execute 'revoke all privileges on table public.affiliate_balances from public, anon, authenticated, service_role';
-end
-$acl$;
+alter table public.payment_v2_purchases add column stripe_source_charge_id text, add column stripe_source_payment_intent_id text, add column stripe_initial_invoice_id text;
+create unique index payment_v2_purchase_source_charge on public.payment_v2_purchases(stripe_source_charge_id) where stripe_source_charge_id is not null;
 
-create table public.payment_v2_affiliate_subscription_lifecycles (
-  payment_v2_purchase_id uuid primary key references public.payment_v2_purchases(id),
-  stripe_subscription_id text not null unique,
-  paid_month_count integer not null default 0 check (paid_month_count >= 0),
-  last_paid_invoice_id text,
-  target_commission_percent numeric not null check (target_commission_percent in (10,20,25,50)),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+create table public.payment_v2_affiliate_recurring_invoices(
+ id uuid primary key default gen_random_uuid(), payment_v2_purchase_id uuid not null references public.payment_v2_purchases(id),
+ stripe_subscription_id text not null, stripe_invoice_id text not null unique, stripe_event_id text unique,
+ stripe_payment_intent_id text not null, stripe_source_charge_id text not null unique, stripe_price_id text not null,
+ billing_reason text not null check(billing_reason in('subscription_create','subscription_cycle')),
+ service_period_start timestamptz not null, service_period_end timestamptz not null,
+ paid_month_number integer not null check(paid_month_number>0), gross_amount_cents integer not null check(gross_amount_cents>=0),
+ currency text not null check(currency~'^[a-z]{3}$'), commission_percent numeric, commission_amount_cents integer,
+ reconciliation_status text not null default 'RECONCILED' check(reconciliation_status in('RECONCILED','STALE')), created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+ check(service_period_end>service_period_start), unique(payment_v2_purchase_id,service_period_start,service_period_end)
 );
-
-create table public.payment_v2_affiliate_recurring_invoices (
-  id uuid primary key default gen_random_uuid(),
-  payment_v2_purchase_id uuid not null references public.payment_v2_purchases(id),
-  stripe_subscription_id text not null,
-  stripe_invoice_id text not null unique,
-  stripe_event_id text not null unique,
-  paid_month_number integer not null check (paid_month_number > 0),
-  gross_amount_cents integer not null check (gross_amount_cents >= 0),
-  currency text not null check (currency ~ '^[a-z]{3}$'),
-  commission_percent numeric,
-  commission_amount_cents integer,
-  commission_created boolean not null,
-  created_at timestamptz not null default now(),
-  check ((commission_created and commission_percent in (10,20,25,50) and commission_amount_cents >= 0)
-      or (not commission_created and commission_percent is null and commission_amount_cents is null))
-);
-
-alter table public.affiliate_ledger add column payment_v2_recurring_invoice_id uuid
-  references public.payment_v2_affiliate_recurring_invoices(id);
+alter table public.affiliate_ledger add column payment_v2_recurring_invoice_id uuid references public.payment_v2_affiliate_recurring_invoices(id);
 alter table public.affiliate_ledger drop constraint affiliate_ledger_payment_v2_attribution;
-alter table public.affiliate_ledger add constraint affiliate_ledger_payment_v2_attribution check (
-  (payment_v2_purchase_id is null and payment_v2_recurring_invoice_id is null and attribution_status is null and referrer_affiliate_tier is null)
-  or (payment_v2_purchase_id is not null and payment_v2_recurring_invoice_id is null and referral_code_id is not null and referrer_affiliate_tier in ('og_throne','early_bird') and attribution_status in ('PURCHASER_UNCLAIMED','PURCHASER_ATTACHED','VOID_SELF_REFERRAL'))
-  or (payment_v2_purchase_id is null and payment_v2_recurring_invoice_id is not null and referral_code_id is not null and referrer_affiliate_tier in ('og_throne','early_bird') and attribution_status='PURCHASER_ATTACHED')
-);
-create unique index affiliate_ledger_one_payment_v2_recurring_commission
-  on public.affiliate_ledger(payment_v2_recurring_invoice_id)
-  where payment_v2_recurring_invoice_id is not null;
-
-alter table public.payment_v2_affiliate_subscription_lifecycles enable row level security;
+alter table public.affiliate_ledger add constraint affiliate_ledger_payment_v2_attribution check(
+ (payment_v2_purchase_id is null and payment_v2_recurring_invoice_id is null and attribution_status is null and referrer_affiliate_tier is null)
+ or(payment_v2_purchase_id is not null and payment_v2_recurring_invoice_id is null and referral_code_id is not null and referrer_affiliate_tier in('og_throne','early_bird') and attribution_status in('PURCHASER_UNCLAIMED','PURCHASER_ATTACHED','VOID_SELF_REFERRAL'))
+ or(payment_v2_purchase_id is null and payment_v2_recurring_invoice_id is not null and referral_code_id is not null and referrer_affiliate_tier in('og_throne','early_bird') and attribution_status in('PURCHASER_UNCLAIMED','PURCHASER_ATTACHED','VOID_SELF_REFERRAL')));
+create unique index affiliate_ledger_one_recurring on public.affiliate_ledger(payment_v2_recurring_invoice_id) where payment_v2_recurring_invoice_id is not null;
 alter table public.payment_v2_affiliate_recurring_invoices enable row level security;
-revoke all privileges on public.payment_v2_affiliate_subscription_lifecycles,
-  public.payment_v2_affiliate_recurring_invoices from public,anon,authenticated,service_role;
+revoke all on public.payment_v2_affiliate_recurring_invoices from public,anon,authenticated,service_role;
 
-create function public.payment_v2_record_paid_recurring_invoice(
-  p_hold_id uuid, p_subscription_id text, p_customer_id text, p_invoice_id text, p_provider_event_id text,
-  p_billing_reason text, p_paid_at timestamptz, p_gross_amount_cents integer, p_currency text
-) returns jsonb language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
-declare
-  purchase public.payment_v2_purchases%rowtype;
-  initial_ledger public.affiliate_ledger%rowtype;
-  lifecycle public.payment_v2_affiliate_subscription_lifecycles%rowtype;
-  invoice public.payment_v2_affiliate_recurring_invoices%rowtype;
-  month_number integer;
-  rate numeric;
-  amount integer;
-  created_commission boolean := false;
-begin
-  if btrim(coalesce(p_subscription_id,''))='' or btrim(coalesce(p_customer_id,''))=''
-    or btrim(coalesce(p_invoice_id,''))='' or btrim(coalesce(p_provider_event_id,''))=''
-    or p_billing_reason not in ('subscription_create','subscription_cycle')
-    or p_paid_at is null or p_paid_at > now()+interval '5 minutes'
-    or p_gross_amount_cents < 0 or lower(p_currency) !~ '^[a-z]{3}$' then
-    raise exception 'invalid_recurring_invoice';
-  end if;
-  perform pg_advisory_xact_lock(pg_catalog.hashtextextended('payment_v2_subscription:'||p_subscription_id,3200));
-  select * into purchase from public.payment_v2_purchases p
-    where p.hold_id=p_hold_id and p.stripe_subscription_id=p_subscription_id and p.tier='early_bird' and p.stripe_customer_id=p_customer_id;
-  if not found then raise exception 'subscription_purchase_missing'; end if;
-  select * into initial_ledger from public.affiliate_ledger l where l.payment_v2_purchase_id=purchase.id;
-  if not found then
-    return jsonb_build_object('status','no_attribution','paidMonth',null,'commissionPercent',null,'nextCommissionPercent',null);
-  end if;
-  select * into invoice from public.payment_v2_affiliate_recurring_invoices i where i.stripe_invoice_id=p_invoice_id or i.stripe_event_id=p_provider_event_id;
-  if found then
-    if invoice.stripe_invoice_id<>p_invoice_id or invoice.stripe_event_id<>p_provider_event_id or invoice.stripe_subscription_id<>p_subscription_id
-      or invoice.gross_amount_cents<>p_gross_amount_cents or invoice.currency<>lower(p_currency) then raise exception 'recurring_invoice_conflict'; end if;
-    select * into lifecycle from public.payment_v2_affiliate_subscription_lifecycles x where x.payment_v2_purchase_id=purchase.id;
-    return jsonb_build_object('status','already_recorded','paidMonth',invoice.paid_month_number,'commissionPercent',invoice.commission_percent,
-      'nextCommissionPercent',case when initial_ledger.status='void' then 0 else lifecycle.target_commission_percent end,'commissionCreated',invoice.commission_created);
-  end if;
-  select * into lifecycle from public.payment_v2_affiliate_subscription_lifecycles x where x.payment_v2_purchase_id=purchase.id for update;
-  if not found then
-    if p_billing_reason<>'subscription_create' then raise exception 'initial_invoice_missing'; end if;
-    rate:=case when purchase.referrer_affiliate_tier='og_throne' then 50 else 20 end;
-    insert into public.payment_v2_affiliate_subscription_lifecycles(payment_v2_purchase_id,stripe_subscription_id,paid_month_count,last_paid_invoice_id,target_commission_percent)
-      values(purchase.id,p_subscription_id,1,p_invoice_id,rate) returning * into lifecycle;
-    month_number:=1;
-  else
-    if p_billing_reason='subscription_create' then raise exception 'unexpected_initial_invoice'; end if;
-    month_number:=lifecycle.paid_month_count+1;
-    rate:=case when purchase.referrer_affiliate_tier='og_throne' then (case when month_number<=6 then 50 else 25 end)
-      else (case when month_number<=6 then 20 else 10 end) end;
-    update public.payment_v2_affiliate_subscription_lifecycles set paid_month_count=month_number,last_paid_invoice_id=p_invoice_id,
-      target_commission_percent=case when purchase.referrer_affiliate_tier='og_throne' then (case when month_number>=6 then 25 else 50 end)
-        else (case when month_number>=6 then 10 else 20 end) end,updated_at=now()
-      where payment_v2_purchase_id=purchase.id returning * into lifecycle;
-  end if;
-  amount:=round(p_gross_amount_cents*rate/100.0);
-  if month_number>1 and initial_ledger.attribution_status='PURCHASER_ATTACHED' and initial_ledger.referred_user_id is not null
-     and initial_ledger.status<>'void' then created_commission:=true; end if;
-  insert into public.payment_v2_affiliate_recurring_invoices(payment_v2_purchase_id,stripe_subscription_id,stripe_invoice_id,stripe_event_id,
-    paid_month_number,gross_amount_cents,currency,commission_percent,commission_amount_cents,commission_created)
-  values(purchase.id,p_subscription_id,p_invoice_id,p_provider_event_id,month_number,p_gross_amount_cents,lower(p_currency),
-    case when created_commission then rate end,case when created_commission then amount end,created_commission) returning * into invoice;
-  if created_commission then
-    insert into public.affiliate_ledger(affiliate_user_id,referred_user_id,stripe_event_id,stripe_subscription_id,tier_name,
-      commission_amount_cents,gross_amount_cents,commission_percent,status,referral_code_id,referrer_affiliate_tier,attribution_status,payment_v2_recurring_invoice_id,created_at,updated_at)
-    values(purchase.referrer_profile_id,initial_ledger.referred_user_id,p_provider_event_id,p_subscription_id,'early_bird',amount,
-      p_gross_amount_cents,rate,'pending',purchase.referral_code_id,purchase.referrer_affiliate_tier,'PURCHASER_ATTACHED',invoice.id,now(),now());
-  end if;
-  return jsonb_build_object('status','recorded','paidMonth',month_number,'commissionPercent',case when created_commission then rate end,
-    'nextCommissionPercent',case when initial_ledger.status='void' then 0 else lifecycle.target_commission_percent end,'commissionCreated',created_commission);
-end $$;
+create function public.payment_v2_record_paid_with_charge(p_hold_id uuid,p_purchaser_hash bytea,p_session_id text,p_customer_id text,p_price_id text,p_payment_intent_id text,p_subscription_id text,p_provider_event_id text,p_provider_confirmed_at timestamptz,p_gross_amount_cents integer,p_currency text,p_source_payment_intent_id text,p_source_charge_id text,p_initial_invoice_id text)
+returns text language plpgsql security definer set search_path=pg_catalog,pg_temp as $$ declare result text; begin
+ if p_source_payment_intent_id!~'^pi_[A-Za-z0-9]+$' or p_source_charge_id!~'^ch_[A-Za-z0-9]+$' or (p_subscription_id is not null)<>(p_initial_invoice_id is not null) or (p_initial_invoice_id is not null and p_initial_invoice_id!~'^in_[A-Za-z0-9]+$') then raise exception 'invalid_source_charge'; end if;
+ result:=public.payment_v2_record_paid(p_hold_id,p_purchaser_hash,p_session_id,p_customer_id,p_price_id,p_payment_intent_id,p_subscription_id,p_provider_event_id,p_provider_confirmed_at,p_gross_amount_cents,p_currency);
+ update public.payment_v2_purchases set stripe_source_payment_intent_id=p_source_payment_intent_id,stripe_source_charge_id=p_source_charge_id,stripe_initial_invoice_id=p_initial_invoice_id where hold_id=p_hold_id and (stripe_source_charge_id is null or stripe_source_charge_id=p_source_charge_id) and (stripe_source_payment_intent_id is null or stripe_source_payment_intent_id=p_source_payment_intent_id) and (stripe_initial_invoice_id is null or stripe_initial_invoice_id is not distinct from p_initial_invoice_id);
+ if not found then raise exception 'source_charge_conflict'; end if; return result; end $$;
 
-create or replace function public.create_affiliate_payout_batch(p_notes text default null) returns uuid
-language plpgsql security invoker set search_path=pg_catalog,pg_temp as $$
-declare batch uuid; inserted_ids uuid[];
-begin
- perform pg_advisory_xact_lock(pg_catalog.hashtextextended('affiliate_payout_batch',3200));
- insert into public.affiliate_payout_batches(notes) values(p_notes) returning id into batch;
- with qualifying_affiliates as (
-   select l.affiliate_user_id from public.affiliate_ledger l
-   where l.status='available' and (l.payment_v2_purchase_id is null or (l.attribution_status='PURCHASER_ATTACHED' and l.referred_user_id is not null))
-   group by l.affiliate_user_id having sum(l.commission_amount_cents)>=5000
- ), eligible as (
-   select l.* from public.affiliate_ledger l join qualifying_affiliates q using(affiliate_user_id)
-   where l.status='available' and (l.payment_v2_purchase_id is null or (l.attribution_status='PURCHASER_ATTACHED' and l.referred_user_id is not null))
-   for update of l
- ), ins as (
-   insert into public.affiliate_payout_items(batch_id,ledger_id,affiliate_user_id,amount_cents)
-   select batch,id,affiliate_user_id,commission_amount_cents from eligible on conflict(ledger_id) do nothing returning ledger_id
- ) select array_agg(ledger_id) into inserted_ids from ins;
- update public.affiliate_ledger set status='paid',updated_at=now() where id=any(coalesce(inserted_ids,array[]::uuid[]));
- return batch;
-end $$;
+create function public.payment_v2_reconcile_paid_invoices(p_hold_id uuid,p_subscription_id text,p_customer_id text,p_price_id text,p_provider_event_id text,p_invoices jsonb)
+returns text language plpgsql security definer set search_path=pg_catalog,pg_temp as $$
+declare purchase public.payment_v2_purchases%rowtype; initial_l public.affiliate_ledger%rowtype; x jsonb; n int:=0; inv_id uuid; rate numeric; amount int; previous_end timestamptz; begin
+ if jsonb_typeof(p_invoices)<>'array' or jsonb_array_length(p_invoices)=0 then raise exception 'invalid_invoice_history'; end if;
+ perform pg_advisory_xact_lock(pg_catalog.hashtextextended('payment_v2_subscription:'||p_subscription_id,3200));
+ select * into purchase from public.payment_v2_purchases p where p.hold_id=p_hold_id and p.stripe_subscription_id=p_subscription_id and p.stripe_customer_id=p_customer_id and p.stripe_price_id=p_price_id and p.tier='early_bird';
+ if not found then raise exception 'subscription_purchase_missing'; end if;
+ select * into initial_l from public.affiliate_ledger l where l.payment_v2_purchase_id=purchase.id;
+ if not found then return 'no_attribution'; end if;
+ update public.payment_v2_affiliate_recurring_invoices set reconciliation_status='STALE',updated_at=now() where payment_v2_purchase_id=purchase.id;
+ for x in select value from jsonb_array_elements(p_invoices) order by (value->>'periodStart')::timestamptz,(value->>'invoiceId') loop
+  n:=n+1;
+  if x->>'billingReason' not in('subscription_create','subscription_cycle') or x->>'priceId'<>p_price_id or x->>'subscriptionId'<>p_subscription_id or x->>'customerId'<>p_customer_id
+   or (x->>'invoiceId')!~'^in_[A-Za-z0-9]+$' or (x->>'paymentIntentId')!~'^pi_[A-Za-z0-9]+$' or (x->>'sourceChargeId')!~'^ch_[A-Za-z0-9]+$'
+   or (x->>'periodEnd')::timestamptz<=(x->>'periodStart')::timestamptz or (previous_end is not null and (x->>'periodStart')::timestamptz<previous_end) or (x->>'grossAmountCents')::int<0 or (x->>'currency')!~'^[a-z]{3}$'
+   or (n=1)<>(x->>'billingReason'='subscription_create') then raise exception 'invalid_invoice_history'; end if;
+  if n=1 and ((x->>'invoiceId')<>purchase.stripe_initial_invoice_id or (x->>'paymentIntentId')<>purchase.stripe_source_payment_intent_id or (x->>'sourceChargeId')<>purchase.stripe_source_charge_id) then raise exception 'initial_invoice_conflict'; end if; previous_end:=(x->>'periodEnd')::timestamptz;
+  if exists(select 1 from public.payment_v2_affiliate_recurring_invoices i where i.stripe_invoice_id=x->>'invoiceId' and (i.payment_v2_purchase_id<>purchase.id or i.stripe_payment_intent_id<>x->>'paymentIntentId' or i.stripe_source_charge_id<>x->>'sourceChargeId' or i.stripe_price_id<>p_price_id or i.billing_reason<>x->>'billingReason' or i.service_period_start<>(x->>'periodStart')::timestamptz or i.service_period_end<>(x->>'periodEnd')::timestamptz or i.gross_amount_cents<>(x->>'grossAmountCents')::int or i.currency<>x->>'currency')) then raise exception 'invoice_evidence_conflict'; end if;
+  rate:=case when purchase.referrer_affiliate_tier='og_throne' then case when n<=6 then 50 else 25 end else case when n<=6 then 20 else 10 end end;
+  amount:=round((x->>'grossAmountCents')::int*rate/100.0);
+  insert into public.payment_v2_affiliate_recurring_invoices(payment_v2_purchase_id,stripe_subscription_id,stripe_invoice_id,stripe_event_id,stripe_payment_intent_id,stripe_source_charge_id,stripe_price_id,billing_reason,service_period_start,service_period_end,paid_month_number,gross_amount_cents,currency,commission_percent,commission_amount_cents)
+  values(purchase.id,p_subscription_id,x->>'invoiceId',x->>'providerEventId',x->>'paymentIntentId',x->>'sourceChargeId',p_price_id,x->>'billingReason',(x->>'periodStart')::timestamptz,(x->>'periodEnd')::timestamptz,n,(x->>'grossAmountCents')::int,x->>'currency',case when n>1 then rate end,case when n>1 then amount end)
+  on conflict(stripe_invoice_id) do update set stripe_event_id=coalesce(payment_v2_affiliate_recurring_invoices.stripe_event_id,excluded.stripe_event_id),paid_month_number=excluded.paid_month_number,commission_percent=excluded.commission_percent,commission_amount_cents=excluded.commission_amount_cents,reconciliation_status='RECONCILED',updated_at=now()
+  returning id into inv_id;
+  if n>1 then
+   insert into public.affiliate_ledger(affiliate_user_id,referred_user_id,stripe_event_id,stripe_subscription_id,tier_name,commission_amount_cents,gross_amount_cents,commission_percent,status,referral_code_id,referrer_affiliate_tier,attribution_status,payment_v2_recurring_invoice_id,created_at,updated_at)
+   values(purchase.referrer_profile_id,initial_l.referred_user_id,'invoice:'||(x->>'invoiceId'),p_subscription_id,'early_bird',amount,(x->>'grossAmountCents')::int,rate,'pending',purchase.referral_code_id,purchase.referrer_affiliate_tier,initial_l.attribution_status,inv_id,now(),now())
+   on conflict(payment_v2_recurring_invoice_id) where payment_v2_recurring_invoice_id is not null do update set commission_amount_cents=excluded.commission_amount_cents,commission_percent=excluded.commission_percent,attribution_status=excluded.attribution_status,referred_user_id=excluded.referred_user_id,updated_at=now();
+  end if;
+ end loop; return 'reconciled'; end $$;
 
-alter function public.payment_v2_record_paid_recurring_invoice(uuid,text,text,text,text,text,timestamptz,integer,text) owner to postgres;
-alter function public.create_affiliate_payout_batch(text) owner to postgres;
-revoke all on function public.payment_v2_record_paid_recurring_invoice(uuid,text,text,text,text,text,timestamptz,integer,text) from public,anon,authenticated;
-grant execute on function public.payment_v2_record_paid_recurring_invoice(uuid,text,text,text,text,text,timestamptz,integer,text) to service_role;
+create function public.payment_v2_sync_recurring_attribution() returns trigger language plpgsql security definer set search_path=pg_catalog,pg_temp as $$ begin
+ if new.payment_v2_purchase_id is not null and new.attribution_status is distinct from old.attribution_status then
+  update public.affiliate_ledger l set referred_user_id=new.referred_user_id,attribution_status=new.attribution_status,status=case when new.attribution_status='VOID_SELF_REFERRAL' then 'void' else l.status end,void_reason=case when new.attribution_status='VOID_SELF_REFERRAL' then 'SELF_REFERRAL' end,voided_at=case when new.attribution_status='VOID_SELF_REFERRAL' then now() end,updated_at=now()
+  from public.payment_v2_affiliate_recurring_invoices i where l.payment_v2_recurring_invoice_id=i.id and i.payment_v2_purchase_id=new.payment_v2_purchase_id and l.status<>'paid';
+ end if; return new; end $$;
+create trigger payment_v2_sync_recurring_attribution after update of attribution_status on public.affiliate_ledger for each row execute function public.payment_v2_sync_recurring_attribution();
+
+alter table public.affiliate_payout_items add column currency text,add column source_charge_id text,add column connect_destination text,add column transfer_id text,add column transfer_idempotency_key text,add column execution_status text not null default 'pending',add column attempt_count integer not null default 0,add column last_error_code text,add column updated_at timestamptz not null default now();
+create unique index affiliate_payout_transfer_idempotency on public.affiliate_payout_items(transfer_idempotency_key) where transfer_idempotency_key is not null;
+create or replace function public.create_affiliate_payout_batch(p_notes text default null) returns uuid language plpgsql security invoker set search_path=pg_catalog,pg_temp as $$ declare batch uuid; begin
+ perform pg_advisory_xact_lock(pg_catalog.hashtextextended('affiliate_payout_batch',3200)); insert into public.affiliate_payout_batches(notes) values(p_notes) returning id into batch;
+ with eligible as(select l.*,coalesce(p.currency,i.currency) cur,coalesce(p.stripe_source_charge_id,i.stripe_source_charge_id) charge,coalesce(h.stripe_connect_destination,pr.stripe_connect_account_id) destination from public.affiliate_ledger l left join public.payment_v2_affiliate_recurring_invoices i on i.id=l.payment_v2_recurring_invoice_id left join public.payment_v2_purchases p on p.id=coalesce(l.payment_v2_purchase_id,i.payment_v2_purchase_id) left join public.payment_v2_holds h on h.id=p.hold_id left join public.profiles pr on pr.id=l.affiliate_user_id where l.status='available' and (l.payment_v2_purchase_id is null or(l.attribution_status='PURCHASER_ATTACHED' and l.referred_user_id is not null)) and (l.payment_v2_recurring_invoice_id is null or(l.attribution_status='PURCHASER_ATTACHED' and l.referred_user_id is not null and i.reconciliation_status='RECONCILED'))), qualified as(select affiliate_user_id from eligible where charge is not null group by affiliate_user_id having sum(commission_amount_cents)>=5000)
+ insert into public.affiliate_payout_items(batch_id,ledger_id,affiliate_user_id,amount_cents,currency,source_charge_id,connect_destination,transfer_idempotency_key,execution_status)
+ select batch,e.id,e.affiliate_user_id,e.commission_amount_cents,e.cur,e.charge,e.destination,'pfc03d:'||e.id,'pending' from eligible e join qualified q using(affiliate_user_id) where e.charge is not null on conflict(ledger_id) do nothing;
+ return batch; end $$;
+
+create function public.complete_affiliate_payout_item(p_item_id uuid,p_transfer_id text) returns boolean language plpgsql security definer set search_path=pg_catalog,pg_temp as $$ declare lid uuid; begin
+ if p_transfer_id!~'^tr_[A-Za-z0-9]+$' then raise exception 'invalid_transfer'; end if;
+ update public.affiliate_payout_items set transfer_id=p_transfer_id,execution_status='succeeded',updated_at=now() where id=p_item_id and execution_status='pending' and transfer_id is null returning ledger_id into lid;
+ if lid is null then return exists(select 1 from public.affiliate_payout_items where id=p_item_id and transfer_id=p_transfer_id and execution_status='succeeded'); end if;
+ update public.affiliate_ledger set status='paid',updated_at=now() where id=lid and status='available'; if not found then raise exception 'ledger_not_available'; end if; return true; end $$;
+create function public.fail_affiliate_payout_item(p_item_id uuid,p_error_code text) returns boolean language plpgsql security definer set search_path=pg_catalog,pg_temp as $$ begin
+ if p_error_code is null or length(p_error_code)>100 then raise exception 'invalid_error_code'; end if;
+ update public.affiliate_payout_items set attempt_count=attempt_count+1,last_error_code=p_error_code,updated_at=now() where id=p_item_id and execution_status='pending' and transfer_id is null; return found; end $$;
+
+alter function public.payment_v2_record_paid_with_charge(uuid,bytea,text,text,text,text,text,text,timestamptz,integer,text,text,text,text) owner to postgres;
+alter function public.payment_v2_reconcile_paid_invoices(uuid,text,text,text,text,jsonb) owner to postgres;alter function public.complete_affiliate_payout_item(uuid,text) owner to postgres;alter function public.fail_affiliate_payout_item(uuid,text) owner to postgres;
+alter function public.payment_v2_sync_recurring_attribution() owner to postgres;revoke all on function public.payment_v2_sync_recurring_attribution() from public,anon,authenticated,service_role;
+revoke all on function public.payment_v2_record_paid_with_charge(uuid,bytea,text,text,text,text,text,text,timestamptz,integer,text,text,text,text),public.payment_v2_reconcile_paid_invoices(uuid,text,text,text,text,jsonb),public.complete_affiliate_payout_item(uuid,text),public.fail_affiliate_payout_item(uuid,text) from public,anon,authenticated;
+grant execute on function public.payment_v2_record_paid_with_charge(uuid,bytea,text,text,text,text,text,text,timestamptz,integer,text,text,text,text),public.payment_v2_reconcile_paid_invoices(uuid,text,text,text,text,jsonb),public.complete_affiliate_payout_item(uuid,text),public.fail_affiliate_payout_item(uuid,text) to service_role;
+grant select(payment_v2_recurring_invoice_id) on public.affiliate_ledger to service_role;
 revoke all on function public.create_affiliate_payout_batch(text) from public,anon,authenticated,service_role;
-grant select(id,affiliate_user_id,referred_user_id,commission_amount_cents,gross_amount_cents,commission_percent,status,created_at,updated_at,payment_v2_purchase_id,referral_code_id,referrer_affiliate_tier,attribution_status,void_reason,voided_at,payment_v2_recurring_invoice_id) on public.affiliate_ledger to service_role;
-
-do $assert$
-begin
- if has_table_privilege('anon','public.affiliate_balances','SELECT') then raise exception 'anon affiliate_balances exposure'; end if;
- if has_table_privilege('authenticated','public.affiliate_balances','SELECT') then raise exception 'authenticated affiliate_balances exposure'; end if;
- if not has_column_privilege('service_role','public.affiliate_ledger','affiliate_user_id','SELECT') then raise exception 'server affiliate summary access missing'; end if;
- if has_table_privilege('service_role','public.affiliate_ledger','INSERT,UPDATE,DELETE') then raise exception 'affiliate_ledger service write exposure'; end if;
-end
-$assert$;
-select pg_notify('pgrst','reload schema');
-commit;
+do $assert$ begin if has_table_privilege('anon','public.affiliate_balances','SELECT') or has_table_privilege('authenticated','public.affiliate_balances','SELECT') then raise exception 'affiliate_balances exposure'; end if; end $assert$;
+select pg_notify('pgrst','reload schema');commit;

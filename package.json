@@ -38,7 +38,7 @@
     "test:pfc-core-03b-postgres": "node backend/affiliate/tests/runPaymentV2AffiliatePostgresIntegration.mjs",
     "test:pfc-core-03c": "tsx backend/affiliate/tests/pfc03100BackupRollbackContract.test.ts",
     "test:pfc-core-03c-postgres": "node backend/affiliate/tests/runPfc03100BackupRollbackPostgres.mjs",
-    "test:pfc-core-03d": "tsx backend/affiliate/tests/referralAttributionWindow.test.ts && tsx backend/affiliate/tests/paymentV2RecurringAffiliate.test.ts",
+    "test:pfc-core-03d": "tsx backend/affiliate/tests/referralAttributionWindow.test.ts && tsx backend/affiliate/tests/paymentV2RecurringAffiliate.test.ts && tsx backend/affiliate/tests/paymentV2PayoutTransfer.test.ts",
     "test:pfc-core-03d-postgres": "node backend/affiliate/tests/runPfcCore03dPostgresIntegration.mjs"
   },
   "repository": {
