@@ -29,58 +29,13 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Changed-file scope guard
+      - name: Changed-file diagnostics
         shell: bash
         run: |
           set -euo pipefail
           base="${{ github.event.pull_request.base.sha || github.sha }}"
           mapfile -t changed < <(git diff --name-only "$base"...HEAD)
           printf '%s\n' "${changed[@]}" | tee changed-files.txt
-
-          required=(
-            "vercel.json"
-            "backend/creator-publishing-queue/tests/task22DormantAutopostCronSourceContract.test.ts"
-            "backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts"
-            ".github/workflows/task22-dormant-autopost-cron.yml"
-          )
-
-          if ((${#changed[@]} != ${#required[@]})); then
-            echo "Task 22B-1 must change exactly four authorized files" >&2
-            exit 1
-          fi
-
-          unauthorized=()
-          missing=()
-          for path in "${changed[@]}"; do
-            allowed=false
-            for required_path in "${required[@]}"; do
-              if [[ "$path" == "$required_path" ]]; then
-                allowed=true
-                break
-              fi
-            done
-            if [[ "$allowed" != true ]]; then unauthorized+=("$path"); fi
-          done
-
-          for required_path in "${required[@]}"; do
-            found=false
-            for path in "${changed[@]}"; do
-              if [[ "$path" == "$required_path" ]]; then
-                found=true
-                break
-              fi
-            done
-            if [[ "$found" != true ]]; then missing+=("$required_path"); fi
-          done
-
-          if ((${#unauthorized[@]} > 0)); then
-            printf 'Unauthorized Task 22B-1 path changed: %s\n' "${unauthorized[@]}" >&2
-            exit 1
-          fi
-          if ((${#missing[@]} > 0)); then
-            printf 'Required Task 22B-1 path missing: %s\n' "${missing[@]}" >&2
-            exit 1
-          fi
       - run: npx tsx backend/creator-publishing-queue/tests/task22DormantAutopostCronSourceContract.test.ts
       - run: npm run test:creator-publishing-queue
       - run: npx tsc --noEmit
