@@ -345,7 +345,7 @@ export default function AffiliateDashboard() {
             </CardHeader>
             <CardContent>
               <p className="text-emerald-100 text-sm">
-                Your Stripe account is connected. Commissions are routed directly to you.
+                Your Stripe account is connected. Eligible commissions can be sent to your connected account during scheduled payout runs.
               </p>
             </CardContent>
           </Card>

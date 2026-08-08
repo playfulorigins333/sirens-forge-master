@@ -12,7 +12,7 @@ const equal = (actual: unknown, expected: unknown, message: string) => { assert.
 const files = (path: string) => readFileSync(path, "utf8");
 
 let adminConstructions = 0;
-let response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => null, getAdminClient: () => { adminConstructions++; return {}; } });
+let response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => null, getAuthenticatedClient: async () => { throw new Error("must not construct auth data client"); }, getAdminClient: () => { adminConstructions++; return {}; } });
 equal(response.status, 401, "unauthenticated summary is 401"); equal(adminConstructions, 0, "admin is not constructed before authentication");
 
 const queryLog: Array<{ table: string; columns: string; filters: Array<[string,string]> }> = [];
@@ -21,7 +21,6 @@ const data: Record<string, any[]> = {
   user_subscriptions: [{ tier_name: "early_bird", status: "active", created_at: "2026-01-01" }],
   referrals: [{ referred_user_id: "other", used_at: "2026-01-02", status: "complete" }],
   commission_earnings: [{ id: "earning", commission_amount: 12, status: "pending", created_at: "2026-01-03", payout_date: null, referred_user_id: "other", referral_id: "ref" }],
-  affiliate_ledger: [{ id: "ledger", referred_user_id: null, commission_amount_cents: 600, gross_amount_cents: 2999, commission_percent: 20, status: "pending", created_at: "2026-01-04", payment_v2_purchase_id: "purchase", attribution_status: "PURCHASER_UNCLAIMED" }],
   referral_codes: [{ total_uses: 3, user_id: "user-1" }],
   affiliate_payout_items: [{ amount_cents: 500, created_at: "2026-01-04", affiliate_payout_batches: [{ status: "paid", created_at: "2026-01-05" }] }],
 };
@@ -29,16 +28,31 @@ const admin = { from(table: string) { const entry = { table, columns: "", filter
   select(columns: string) { entry.columns = columns; return chain; }, eq(column: string, value: string) { entry.filters.push([column, value]); return chain; }, order() { return chain; }, limit() { return chain; },
   then(resolve: any) { return Promise.resolve({ data: data[table] ?? [], error: null }).then(resolve); },
 }; return chain; } };
-response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAdminClient: () => { adminConstructions++; return admin; } });
+const rpcLog: string[] = [];
+const ledgerRows = [
+  { id: "ledger-pending", commission_amount_cents: 600, status: "pending", created_at: "2026-01-04", is_initial_purchase: true, is_void_self_referral: false },
+  { id: "ledger-paid", commission_amount_cents: 250, status: "paid", created_at: "2026-01-05", is_initial_purchase: false, is_void_self_referral: false },
+  { id: "ledger-self", commission_amount_cents: 9999, status: "void", created_at: "2026-01-06", is_initial_purchase: true, is_void_self_referral: true },
+];
+const authenticatedClient = { async rpc(name: string) { rpcLog.push(name); return { data: ledgerRows, error: null }; } };
+response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAuthenticatedClient: async () => authenticatedClient, getAdminClient: () => { adminConstructions++; return admin; } });
 equal(response.status, 200, "authenticated summary succeeds");
 equal(response.headers.get("cache-control"), "no-store", "summary is no-store");
 const summary = await response.json();
-equal(summary.pending, 18, "legacy and Payment V2 pending totals remain visible"); equal(summary.clicks, 4, "paid V2 usage is derived without mutating the code counter"); equal(summary.total_referrals, 2, "verified Payment V2 referral is counted"); equal(summary.payouts.length, 1, "payout history remains visible"); equal(summary.stripe_connect_onboarded, true, "Connect boolean remains visible");
+equal(summary.pending, 18, "legacy and Payment V2 pending totals remain visible"); equal(summary.paid, 2.5, "Payment V2 paid totals remain visible"); equal(summary.total_earnings, 2.5, "Payment V2 paid earnings remain visible"); equal(summary.clicks, 4, "paid V2 usage is derived without mutating the code counter"); equal(summary.total_referrals, 2, "initial non-self Payment V2 referral is counted"); equal(rpcLog, ["get_my_payment_v2_affiliate_ledger"], "ledger uses the authenticated self-scoped RPC"); equal(summary.commissions.find((item: any) => item.id === "ledger-pending")?.commission_amount, 6, "Payment V2 cents normalize to dashboard dollars"); check(!JSON.stringify(summary).includes("commission_amount_cents"), "raw Payment V2 cents are not serialized"); equal(summary.payouts.length, 1, "payout history remains visible"); equal(summary.stripe_connect_onboarded, true, "Connect boolean remains visible");
 for (const prohibited of ["email", "stripe_customer_id", "stripe_subscription_id", "stripe_connect_account_id", "tokens", "role", "seat_number", "is_tester"]) check(!JSON.stringify(summary).includes(prohibited), `summary omits ${prohibited}`);
 for (const query of queryLog) { check(query.columns !== "*" && query.columns.length > 0, `${query.table} uses explicit columns`); check(query.filters.length > 0, `${query.table} is owner scoped`); }
-equal(queryLog.map((q) => q.table), ["profiles", "user_subscriptions", "referrals", "commission_earnings", "affiliate_ledger", "referral_codes", "affiliate_payout_items"], "summary reads only exact manifest tables");
+equal(queryLog.map((q) => q.table), ["profiles", "user_subscriptions", "referrals", "commission_earnings", "referral_codes", "affiliate_payout_items"], "summary reads only exact manifest tables");
 check(!queryLog.find((q) => q.table === "referrals")?.columns.includes("used_at"), "summary avoids nonexistent referrals.used_at");
 check(!queryLog.find((q) => q.table === "commission_earnings")?.columns.includes("payout_date"), "summary avoids nonexistent commission payout_date");
+check(!queryLog.some((q) => q.table === "affiliate_ledger"), "admin never directly reads affiliate_ledger");
+equal(summary.commissions.find((item: any) => item.id === "earning"), data.commission_earnings[0], "legacy commission history remains unchanged");
+equal(summary.payouts, data.affiliate_payout_items, "payout history remains unchanged");
+const serializedV2 = JSON.stringify(summary.commissions.find((item: any) => item.id === "ledger-pending"));
+for (const secret of ["payment_v2_purchase_id", "stripe_event_id", "stripe_customer_id", "stripe_subscription_id", "referral_code_id", "referred_user_id"]) check(!serializedV2.includes(secret), `normalized V2 commission omits raw identifier ${secret}`);
+response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAuthenticatedClient: async () => ({ rpc: async () => ({ data: null, error: new Error("database detail") }) }), getAdminClient: () => admin });
+equal(response.status, 500, "RPC failure fails the summary closed");
+equal(await response.json(), { error: "Unable to load affiliate history" }, "RPC failure returns the generic summary error");
 
 const effects = { auth: 0, admin: 0, config: 0, stripe: 0 };
 response = await createStripeConnectResponse(new Request("https://local.test", { method: "POST" }), {
@@ -56,7 +70,7 @@ for (const failure of [{ data: null, error: new Error("database secret") }, new 
 for (const event of [{ type: "customer.subscription.deleted", data: { object: { id: "sub" } } }, { type: "invoice.payment_failed", data: { object: { subscription: "sub" } } }]) { const h = webhook(event); response = await handleLegacyStripeWebhook("{}", "sig", h.deps); equal(response.status, 200, "deferred lifecycle path acknowledges"); equal(h.calls.rpc, [], "deferred lifecycle path invokes no RPC"); equal(h.calls.writes, 0, "deferred lifecycle path performs no affiliate write"); }
 
 const dashboard = files("app/affiliate/page.tsx"); for (const token of ["supabaseBrowser", '.from("profiles")', '.from("user_subscriptions")', '.from("affiliate_payout_items")', 'select("*")']) check(!dashboard.includes(token), `dashboard excludes ${token}`);
-check(dashboard.includes('fetch("/api/affiliate/summary"'), "dashboard uses authenticated summary"); check(!dashboard.includes("Affiliate program paused"), "dashboard pause notice is removed"); check(dashboard.includes('checkoutMode === "payment_v2"'), "referral sharing supports Payment V2");
+check(dashboard.includes('fetch("/api/affiliate/summary"'), "dashboard uses authenticated summary"); check(!dashboard.includes("Affiliate program paused"), "dashboard pause notice is removed"); check(dashboard.includes('checkoutMode === "payment_v2"'), "referral sharing supports Payment V2"); check(dashboard.includes("Eligible commissions can be sent to your connected account during scheduled payout runs."), "dashboard describes scheduled Stripe payouts accurately"); check(dashboard.includes("Number(item.commission_amount || 0)"), "recent activity renders normalized commission_amount");
 const pricing = files("app/pricing/PricingClient.tsx"); check(pricing.includes("if (!publicPurchase) return"), "unresolved mode captures no referral"); check(pricing.includes("...(normalizeReferralCode(referralCode) ? { referralCode"), "V2 request submits only a current normalized referral"); check(!pricing.includes("Referral codes are not accepted or tracked"), "Pricing pause copy is removed");
 const home = files("app/page.tsx"); check(!home.includes("Affiliate referrals are currently paused"), "homepage pause copy is removed");
 const terms = files("app/affiliate-terms/page.tsx"); check(terms.includes('lastUpdated="August 7, 2026"') && terms.includes("Payment-First Affiliate Attribution"), "terms describe restored attribution");
