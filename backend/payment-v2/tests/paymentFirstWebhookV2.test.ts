@@ -20,6 +20,7 @@ function harness(overrides: { event?: Partial<StripeEvent>; session?: Partial<St
     async retrieveSession(id) { calls.session.push(id); return session; },
     async retrievePaymentIntent(id) { calls.pi.push(id); return id === "pi_invoice" ? { id, status: "succeeded", customer: "cus_exact", amount: 900, currency: "usd", latest_charge: "ch_invoice" } : { id: "pi_exact", status: "succeeded", customer: "cus_exact", amount: 2500, currency: "usd", latest_charge: "ch_exact" }; },
     async retrieveSubscription(id) { calls.sub.push(id); return { id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { id: "in_exact", status: "paid", amount_due: 900, amount_paid: 900, currency: "usd" } }; },
+    async retrieveInvoice(id) { return { id, status: "paid", parent: null }; },
     async listInvoicePayments(id) { return [{ id: "ip_exact", invoice: id, status: "paid", amount_paid: 900, currency: "usd", payment: { type: "payment_intent", payment_intent: "pi_invoice" } }]; },
     ...overrides.provider,
   };

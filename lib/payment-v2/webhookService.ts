@@ -20,7 +20,7 @@ export type StripeSession = {
 export type StripePaymentIntent = { id: string; status: string; customer: unknown; amount: number; currency: string; latest_charge?: unknown };
 export type StripeSubscription = { id: string; customer: unknown; status: string; metadata?: Record<string,string> | null; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> }; latest_invoice?: unknown };
 export type StripeInvoicePayment={id:string;invoice:unknown;status:string;amount_paid:number|null;currency:string;payment:{type:string;payment_intent?:unknown}};
-export type StripeInvoice = { id?: string; status?: string | null; amount_due?: number; amount_paid?: number; currency?: string | null; parent?:{type:string;subscription_details?:{subscription:unknown}|null}|null;payments?:unknown };
+export type StripeInvoice = { id?: string; status?: string | null; amount_due?: number; amount_paid?: number; currency?: string | null; parent?:{type:string;subscription_details?:{subscription:unknown;metadata?:Record<string,string>|null}|null}|null;payments?:unknown };
 export type StripeRecurringInvoice = StripeInvoice & { id: string; customer?: unknown; billing_reason?: string | null; lines?: { data: Array<{ amount?: number; quantity?: number | null; pricing?:{type:string;price_details?:{price:unknown}|null}|null; period?: { start?: number; end?: number } }> }; status_transitions?: { paid_at?: number | null } | null };
 
 export type HoldRow = { id: string; state: string; tier: string; expires_at: string; stripe_checkout_session_id: string | null; purchaser_credential_hash: string | Uint8Array };
@@ -77,11 +77,14 @@ export async function recurringInvoice(event: StripeEvent, provider: PaymentV2Pr
       !Number.isInteger(invoice.amount_paid) || invoice.amount_paid! < 0 || invoice.amount_due !== invoice.amount_paid ||
       typeof invoice.currency !== "string" || !/^[a-z]{3}$/.test(invoice.currency.toLowerCase())) return failed();
   const subscription = await provider.retrieveSubscription(subscriptionId);
-  const md = metadata(subscription);
+  const snapshot=invoice.parent?.subscription_details?.metadata;
+  const md = snapshot ? metadata({metadata:snapshot}) : metadata(subscription);
   if (md.kind === "legacy") return ignored();
   if(md.kind==="v2"&&!['subscription_create','subscription_cycle'].includes(invoice.billing_reason||""))return ignored();
-  if (subscription.id !== subscriptionId || id(subscription.customer) !== customerId || !["active", "trialing"].includes(subscription.status) ||
+  const currentMd=metadata(subscription);
+  if (subscription.id !== subscriptionId || id(subscription.customer) !== customerId ||
       md.kind !== "v2" || md.tier !== "early_bird" || !db.reconcilePaidInvoices || !provider.listPaidInvoices||!provider.listInvoicePayments) return failed();
+  if(currentMd.kind==="v2"&&(currentMd.holdId!==md.holdId||currentMd.tier!==md.tier))return failed();
   const items=subscription.items?.data; if(items?.length!==1||items[0].quantity!==1||!items[0].price?.id) return failed();
   const history=await provider.listPaidInvoices(subscriptionId); const normalized=[] as Record<string,unknown>[];
   for(const inv of history){ const line=inv.lines?.data?.[0], price=line?.pricing?.type==="price_details"?id(line.pricing.price_details?.price):null;
@@ -199,10 +202,15 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
     raw = await input.readRawBody();
     event = provider.constructEvent(raw, input.signature, input.webhookSecret);
   } catch { return badSignature(); }
-  const invoiceCandidate = event.data.object as StripeRecurringInvoice;
   if (event.type === "invoice.paid") {
-    if(invoiceCandidate.parent?.type!=="subscription_details"||!id(invoiceCandidate.parent.subscription_details?.subscription))return ignored();
-    try { return await recurringInvoice(event, provider, input.createDatabase()); } catch { return failed(); }
+    const invoiceId=id(event.data.object.id);
+    if(!invoiceId||!provider.retrieveInvoice)return failed();
+    try {
+      const invoice=await provider.retrieveInvoice(invoiceId);
+      if(invoice.id!==invoiceId)return failed();
+      if(invoice.parent?.type!=="subscription_details"||!id(invoice.parent.subscription_details?.subscription))return ignored();
+      return await recurringInvoice({...event,data:{object:invoice}}, provider, input.createDatabase());
+    } catch { return failed(); }
   }
   if (!supported.has(event.type)) {
     const classification = classifyPaymentV2LifecycleEvent(event.type);
