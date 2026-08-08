@@ -14,6 +14,7 @@ export type PublicPurchaseState = {
 
 type TierRow = { name: unknown; is_active: unknown; stripe_price_id: unknown };
 export type PublicReadinessDependencies = {
+  loadAffiliateCapability(): Promise<boolean>;
   loadTiers(): Promise<TierRow[]>;
   loadInventoryRows(): Promise<PaymentV2InventoryRow[]>;
   now(): Date;
@@ -69,6 +70,7 @@ export async function derivePublicPurchaseState(
   if (!site || !returns || site !== returns || !present(env.STRIPE_SECRET_KEY) || !present(env.STRIPE_PAYMENT_V2_WEBHOOK_SECRET) ||
       !serviceOrigin(supabaseUrl, production) || !present(env.SUPABASE_SERVICE_ROLE_KEY) || !present(env.CRON_SECRET)) return unavailable();
   try {
+    if (await dependencies.loadAffiliateCapability() !== true) return unavailable();
     const rows = await dependencies.loadTiers();
     for (const name of ["og_throne", "early_bird"] as const) {
       const matches = rows.filter((row) => row.name === name);

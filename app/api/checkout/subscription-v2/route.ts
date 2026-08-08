@@ -29,6 +29,7 @@ export async function POST(req: Request) {
       const supabase = createClient(url, key, { auth: { persistSession: false } });
       const readiness = await derivePublicPurchaseState(process.env, {
         now: () => new Date(),
+        async loadAffiliateCapability() { const { data, error } = await supabase.rpc("payment_v2_affiliate_public_cutover_ready"); if (error || data !== true) throw new Error("unavailable"); return true; },
         async loadTiers() { const { data, error } = await supabase.from("subscription_tiers").select("name,is_active,stripe_price_id").in("name", ["og_throne", "early_bird"]); if (error || !Array.isArray(data)) throw new Error("unavailable"); return data; },
         async loadInventoryRows() { const { data, error } = await supabase.from("payment_v2_holds").select("tier,state,expires_at"); if (error || !Array.isArray(data)) throw new Error("unavailable"); return data; },
       });
