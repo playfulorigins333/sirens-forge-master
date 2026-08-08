@@ -6,5 +6,7 @@ function harness(opts:{metadata?:Record<string,string>;history?:any[];embedded?:
 {const h=harness({metadata:{}});eq((await h.run()).body.status,"ignored","legacy acknowledged");eq([h.calls.lists,h.calls.rpc.length],[0,0],"legacy zero mutations");}
 {const h=harness({metadata:{checkout_contract_version:PAYMENT_V2_WEBHOOK_CONTRACT,payment_v2_hold_id:"bad",tier_name:"early_bird"}});eq((await h.run()).status,500,"malformed claimed V2 fails closed");}
 {const h=harness({history:[invoice(1),invoice(7),invoice(6)]});eq((await h.run()).body.status,"received","out of order reconciled");}
+{const h=harness({embedded:{id:"in_oneoff",status:"paid",customer:"cus",billing_reason:"manual"}});eq((await h.run()).body.status,"ignored","one-off invoice bypasses dormant inbox");eq(h.calls.rpc.length,0,"one-off zero mutation");}
+{const updated={...invoice(2),billing_reason:"subscription_update"};const h=harness({embedded:updated});eq((await h.run()).body.status,"ignored","V2 subscription update ignored");eq(h.calls.rpc.length,0,"update zero commission mutation");}
 const fullSource=readFileSync("lib/payment-v2/webhookService.ts","utf8");const source=fullSource.slice(fullSource.indexOf("async function recurringInvoice"),fullSource.indexOf("function hashBytes"));for(const removed of ["invoice.paid","invoice.payment_intent","invoice.subscription","line.price"])eq(source.includes(removed),false,`${removed} absent from Clover adapter`);
 console.log(`PFC-CORE-03D recurring webhook passed (${assertions} assertions).`)

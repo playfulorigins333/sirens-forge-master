@@ -95,6 +95,7 @@ for (const inboxEnabled of [undefined, "", "TRUE", "1", "false"]) {
     let inboxCreated = 0; let receiveCalls = 0; let transitionCalls = 0;
     const malformed = harness({ event, input: { inboxEnabled: "true", createInboxDatabase: () => { inboxCreated++; return { receiveEvent: async () => { receiveCalls++; return "RECEIVED" as const; }, transitionStatus: async () => { transitionCalls++; return "PENDING_PHASE" as const; } }; } } });
     const result = await malformed.run();
+    if(event.type==="invoice.paid"){equal(result,{status:200,body:{status:"ignored",code:"NON_PAYMENT_V2_EVENT_IGNORED"}},`${label} bypasses dormant inbox`);continue;}
     equal(result, { status: 503, body: { error: "Invalid Payment V2 lifecycle event envelope", code: "PAYMENT_V2_EVENT_ENVELOPE_INVALID" } }, `${label} fails retryably before durable receipt`);
     equal([inboxCreated, receiveCalls, transitionCalls], [0, 0, 0], `${label} creates no inbox and calls no inbox RPCs`);
     equal(malformed.calls.session.length + malformed.calls.pi.length + malformed.calls.sub.length + malformed.calls.hold.length + malformed.calls.tier.length + malformed.calls.purchase.length + malformed.calls.paid.length + malformed.calls.terminal.length, 0, `${label} performs no provider retrieval or Payment V2 database effect`);
@@ -107,7 +108,7 @@ for (const inboxEnabled of [undefined, "", "TRUE", "1", "false"]) {
 
 {
   const replay = harness({ event: { id: "evt_replay", type: "invoice.paid", data: { object: { id: "in_replay" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "PENDING_PHASE", transitionStatus: async () => { throw new Error("no transition"); } }) } });
-  equal((await replay.run()).body, { status: "received", code: "PAYMENT_V2_EVENT_REPLAYED" }, "safe durable replay is acknowledged");
+  equal((await replay.run()).body, { status: "ignored", code: "NON_PAYMENT_V2_EVENT_IGNORED" }, "unrelated invoice replay bypasses inbox");
 }
 {
   const receivedReplay = harness({ event: { id: "evt_received", type: "customer.subscription.updated", data: { object: { id: "sub_received" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "RECEIVED", transitionStatus: async () => "PENDING_PHASE" }) } });
@@ -125,7 +126,7 @@ for (const inboxEnabled of [undefined, "", "TRUE", "1", "false"]) {
   const transitionFailure = harness({ event: { id: "evt_transition_failure", type: "customer.subscription.deleted", data: { object: { id: "sub_failure" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "RECEIVED", transitionStatus: async () => { throw new Error("db down"); } }) } });
   equal((await transitionFailure.run()).body.code, "PAYMENT_V2_EVENT_INBOX_UNAVAILABLE", "transition failure is unavailable and durable row remains RECEIVED");
 }
-for (const [type, phase, object] of [["refund.created","PFC-07E-A2","refund"],["refund.updated","PFC-07E-A2","refund"],["refund.failed","PFC-07E-A2","refund"],["customer.subscription.updated","PFC-07E-A3","subscription"],["customer.subscription.deleted","PFC-07E-A3","subscription"],["invoice.payment_failed","PFC-07E-A3","invoice"],["invoice.paid","PFC-07E-A3","invoice"],["charge.dispute.created","PFC-07E-B","dispute"],["charge.dispute.closed","PFC-07E-B","dispute"]] as const) {
+for (const [type, phase, object] of [["refund.created","PFC-07E-A2","refund"],["refund.updated","PFC-07E-A2","refund"],["refund.failed","PFC-07E-A2","refund"],["customer.subscription.updated","PFC-07E-A3","subscription"],["customer.subscription.deleted","PFC-07E-A3","subscription"],["invoice.payment_failed","PFC-07E-A3","invoice"],["charge.dispute.created","PFC-07E-B","dispute"],["charge.dispute.closed","PFC-07E-B","dispute"]] as const) {
   let observed: any = null;
   const h = harness({ event: { id: `evt_${type.replace(/[^a-z]/g,"_")}`, type, data: { object: { id: `obj_${type.replace(/[^a-z]/g,"_")}` } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async (args) => { observed = args; return "RECEIVED"; }, transitionStatus: async () => "PENDING_PHASE" }) } });
   equal((await h.run()).status, 200, `${type} accepted for durable receipt`);

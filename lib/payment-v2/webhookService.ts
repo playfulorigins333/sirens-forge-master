@@ -69,17 +69,17 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const id = (value: unknown): string | null => typeof value === "string" && value.trim() ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : null;
 const timestamp = (created: number) => Number.isInteger(created) && created >= 0 ? new Date(created * 1000).toISOString() : null;
 
-async function recurringInvoice(event: StripeEvent, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
+export async function recurringInvoice(event: StripeEvent, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
   const invoice = event.data.object as StripeRecurringInvoice;
   const subscriptionId = invoice.parent?.type==="subscription_details"?id(invoice.parent.subscription_details?.subscription):null; const customerId = id(invoice.customer);
   const paidAt = timestamp(invoice.status_transitions?.paid_at ?? event.created);
   if (!invoice.id || invoice.status !== "paid" || !subscriptionId || !customerId || !paidAt ||
-      !["subscription_create", "subscription_cycle"].includes(invoice.billing_reason || "") ||
       !Number.isInteger(invoice.amount_paid) || invoice.amount_paid! < 0 || invoice.amount_due !== invoice.amount_paid ||
       typeof invoice.currency !== "string" || !/^[a-z]{3}$/.test(invoice.currency.toLowerCase())) return failed();
   const subscription = await provider.retrieveSubscription(subscriptionId);
   const md = metadata(subscription);
   if (md.kind === "legacy") return ignored();
+  if(md.kind==="v2"&&!['subscription_create','subscription_cycle'].includes(invoice.billing_reason||""))return ignored();
   if (subscription.id !== subscriptionId || id(subscription.customer) !== customerId || !["active", "trialing"].includes(subscription.status) ||
       md.kind !== "v2" || md.tier !== "early_bird" || !db.reconcilePaidInvoices || !provider.listPaidInvoices||!provider.listInvoicePayments) return failed();
   const items=subscription.items?.data; if(items?.length!==1||items[0].quantity!==1||!items[0].price?.id) return failed();
@@ -200,8 +200,8 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
     event = provider.constructEvent(raw, input.signature, input.webhookSecret);
   } catch { return badSignature(); }
   const invoiceCandidate = event.data.object as StripeRecurringInvoice;
-  if (event.type === "invoice.paid" && invoiceCandidate.parent?.type==="subscription_details" && id(invoiceCandidate.parent.subscription_details?.subscription) && id(invoiceCandidate.customer) &&
-      ["subscription_create", "subscription_cycle"].includes(invoiceCandidate.billing_reason || "")) {
+  if (event.type === "invoice.paid") {
+    if(invoiceCandidate.parent?.type!=="subscription_details"||!id(invoiceCandidate.parent.subscription_details?.subscription))return ignored();
     try { return await recurringInvoice(event, provider, input.createDatabase()); } catch { return failed(); }
   }
   if (!supported.has(event.type)) {

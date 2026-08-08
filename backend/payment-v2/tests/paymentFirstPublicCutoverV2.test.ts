@@ -5,9 +5,9 @@ import { derivePublicPurchaseState, LOCKED_PAYMENT_V2_PRICES, paymentFirstPublic
 let assertions = 0;
 const equal = (actual: unknown, expected: unknown, message: string) => { assert.deepEqual(actual, expected, message); assertions++; };
 const check = (value: unknown, message: string) => { assert.ok(value, message); assertions++; };
-const gates = ["PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED", "PAYMENT_FIRST_WEBHOOK_V2_ENABLED", "PAYMENT_FIRST_CLAIM_V2_ENABLED", "PAYMENT_FIRST_SUCCESS_V2_ENABLED", "PAYMENT_FIRST_AUTH_CONTINUATION_V2_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_PROTECTION_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_ENABLED"];
+const gates = ["PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED", "PAYMENT_FIRST_WEBHOOK_V2_ENABLED", "PAYMENT_FIRST_CLAIM_V2_ENABLED", "PAYMENT_FIRST_SUCCESS_V2_ENABLED", "PAYMENT_FIRST_AUTH_CONTINUATION_V2_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_PROTECTION_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_ENABLED", "PAYMENT_V2_PAYOUT_EXECUTION_ENABLED"];
 const env: Record<string,string> = Object.fromEntries(gates.map((name) => [name, "true"]));
-Object.assign(env, { NODE_ENV: "production", PAYMENT_V2_EVENT_INBOX_ENABLED: "false", NEXT_PUBLIC_SITE_URL: "https://www.sirensforge.vip", PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN: "https://www.sirensforge.vip", STRIPE_SECRET_KEY: "test", STRIPE_PAYMENT_V2_WEBHOOK_SECRET: "test", SUPABASE_URL: "https://project.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test" });
+Object.assign(env, { NODE_ENV: "production", CRON_SECRET: "test", PAYMENT_V2_EVENT_INBOX_ENABLED: "false", NEXT_PUBLIC_SITE_URL: "https://www.sirensforge.vip", PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN: "https://www.sirensforge.vip", STRIPE_SECRET_KEY: "test", STRIPE_PAYMENT_V2_WEBHOOK_SECRET: "test", SUPABASE_URL: "https://project.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test" });
 const effects = { tiers: 0, inventory: 0 };
 const deps: PublicReadinessDependencies = {
   now: () => new Date("2026-08-06T00:00:00Z"),
@@ -54,7 +54,7 @@ for (const body of ['{"tierName":"og_throne"}', '{"tierName":"early_bird"}', '{"
 const pricing = readFileSync("app/pricing/PricingClient.tsx", "utf8");
 check(pricing.includes('"/api/payment-v2/readiness"'), "Pricing uses one public mode/readiness boundary");
 check(pricing.includes('? "/api/checkout/subscription-v2"') && pricing.includes(': "/api/checkout/subscription"'), "Pricing selects exact route from derived mode");
-check(pricing.includes("...(referralCode ? { referralCode"), "Payment V2 body contains only tier and optional referral code");
+check(pricing.includes("...(normalizeReferralCode(referralCode) ? { referralCode"), "Payment V2 body contains only tier and optional referral code");
 const v2 = readFileSync("app/api/checkout/subscription-v2/route.ts", "utf8");
 check(v2.indexOf("derivePublicPurchaseState") < v2.indexOf("new Stripe(stripeKey"), "direct V2 readiness precedes Stripe construction");
 check(v2.indexOf("derivePublicPurchaseState") < v2.indexOf('req.headers.get("cookie")'), "direct V2 readiness precedes cookie read");
