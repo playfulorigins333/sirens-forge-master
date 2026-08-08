@@ -17,9 +17,11 @@ export type StripeSession = {
   metadata?: Record<string, string> | null;
   line_items?: { data: Array<{ quantity?: number | null; amount_total?: number | null; price?: { id?: string; unit_amount?: number | null; currency?: string | null } | null }> };
 };
-export type StripePaymentIntent = { id: string; status: string; customer: unknown; amount: number; currency: string };
-export type StripeSubscription = { id: string; customer: unknown; status: string; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> }; latest_invoice?: unknown };
-export type StripeInvoice = { status?: string | null; paid?: boolean; amount_due?: number; amount_paid?: number; currency?: string | null };
+export type StripePaymentIntent = { id: string; status: string; customer: unknown; amount: number; currency: string; latest_charge?: unknown };
+export type StripeSubscription = { id: string; customer: unknown; status: string; metadata?: Record<string,string> | null; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> }; latest_invoice?: unknown };
+export type StripeInvoicePayment={id:string;invoice:unknown;status:string;amount_paid:number|null;currency:string;payment:{type:string;payment_intent?:unknown}};
+export type StripeInvoice = { id?: string; status?: string | null; amount_due?: number; amount_paid?: number; currency?: string | null; parent?:{type:string;subscription_details?:{subscription:unknown;metadata?:Record<string,string>|null}|null}|null;payments?:unknown };
+export type StripeRecurringInvoice = StripeInvoice & { id: string; customer?: unknown; billing_reason?: string | null; lines?: { data: Array<{ amount?: number; quantity?: number | null; pricing?:{type:string;price_details?:{price:unknown}|null}|null; period?: { start?: number; end?: number } }> }; status_transitions?: { paid_at?: number | null } | null };
 
 export type HoldRow = { id: string; state: string; tier: string; expires_at: string; stripe_checkout_session_id: string | null; purchaser_credential_hash: string | Uint8Array };
 export type TierRow = { name: string; is_active: boolean; stripe_price_id: string | null };
@@ -30,6 +32,9 @@ export interface PaymentV2Provider {
   retrieveSession(id: string): Promise<StripeSession>;
   retrievePaymentIntent(id: string): Promise<StripePaymentIntent>;
   retrieveSubscription(id: string): Promise<StripeSubscription>;
+  retrieveInvoice?(id:string):Promise<StripeRecurringInvoice>;
+  listInvoicePayments?(invoiceId:string):Promise<StripeInvoicePayment[]>;
+  listPaidInvoices?(subscriptionId: string): Promise<StripeRecurringInvoice[]>;
 }
 export interface PaymentV2Database {
   loadHold(id: string): Promise<HoldRow[]>;
@@ -37,6 +42,7 @@ export interface PaymentV2Database {
   loadPurchase(holdId: string): Promise<PurchaseRow[]>;
   recordPaid(args: Record<string, unknown>): Promise<string>;
   recordTerminal(args: Record<string, unknown>): Promise<string>;
+  reconcilePaidInvoices?(args: Record<string, unknown>): Promise<string>;
 }
 export type WebhookResponse = { status: number; body: Record<string, string> };
 export interface WebhookInput {
@@ -62,6 +68,35 @@ const supported = new Set<string>(["checkout.session.completed", "checkout.sessi
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const id = (value: unknown): string | null => typeof value === "string" && value.trim() ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : null;
 const timestamp = (created: number) => Number.isInteger(created) && created >= 0 ? new Date(created * 1000).toISOString() : null;
+
+export async function recurringInvoice(event: StripeEvent, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
+  const invoice = event.data.object as StripeRecurringInvoice;
+  const subscriptionId = invoice.parent?.type==="subscription_details"?id(invoice.parent.subscription_details?.subscription):null; const customerId = id(invoice.customer);
+  const paidAt = timestamp(invoice.status_transitions?.paid_at ?? event.created);
+  if (!invoice.id || invoice.status !== "paid" || !subscriptionId || !customerId || !paidAt ||
+      !Number.isInteger(invoice.amount_paid) || invoice.amount_paid! < 0 || invoice.amount_due !== invoice.amount_paid ||
+      typeof invoice.currency !== "string" || !/^[a-z]{3}$/.test(invoice.currency.toLowerCase())) return failed();
+  const subscription = await provider.retrieveSubscription(subscriptionId);
+  const snapshot=invoice.parent?.subscription_details?.metadata;
+  const md = snapshot ? metadata({metadata:snapshot}) : metadata(subscription);
+  if (md.kind === "legacy") return ignored();
+  if(md.kind==="v2"&&!['subscription_create','subscription_cycle'].includes(invoice.billing_reason||""))return ignored();
+  const currentMd=metadata(subscription);
+  if (subscription.id !== subscriptionId || id(subscription.customer) !== customerId ||
+      md.kind !== "v2" || md.tier !== "early_bird" || !db.reconcilePaidInvoices || !provider.listPaidInvoices||!provider.listInvoicePayments) return failed();
+  if(currentMd.kind==="v2"&&(currentMd.holdId!==md.holdId||currentMd.tier!==md.tier))return failed();
+  const items=subscription.items?.data; if(items?.length!==1||items[0].quantity!==1||!items[0].price?.id) return failed();
+  const history=await provider.listPaidInvoices(subscriptionId); const normalized=[] as Record<string,unknown>[];
+  for(const inv of history){ const line=inv.lines?.data?.[0], price=line?.pricing?.type==="price_details"?id(line.pricing.price_details?.price):null;
+    if(!["subscription_create","subscription_cycle"].includes(inv.billing_reason||"")||price!==items[0].price.id) continue;
+    const payments=await provider.listInvoicePayments(inv.id);if(payments.length!==1||payments[0].status!=="paid"||payments[0].payment.type!=="payment_intent"||id(payments[0].invoice)!==inv.id)return failed();const piId=id(payments[0].payment.payment_intent);if(!piId)return failed();const pi=await provider.retrievePaymentIntent(piId);
+    if(inv.status!=="paid"||inv.lines?.data.length!==1||line?.quantity!==1||!Number.isInteger(line.period?.start)||!Number.isInteger(line.period?.end)||pi.status!=="succeeded"||id(pi.customer)!==customerId||pi.amount!==payments[0].amount_paid||payments[0].amount_paid!==inv.amount_paid||pi.currency?.toLowerCase()!==inv.currency?.toLowerCase()||!id(pi.latest_charge)||!Number.isInteger(inv.amount_paid)||inv.amount_paid!==inv.amount_due||typeof inv.currency!=="string") return failed();
+    normalized.push({invoiceId:inv.id,providerEventId:inv.id===invoice.id?event.id:null,paymentIntentId:pi.id,sourceChargeId:id(pi.latest_charge),subscriptionId,customerId,priceId:items[0].price.id,billingReason:inv.billing_reason,periodStart:timestamp(line.period!.start!),periodEnd:timestamp(line.period!.end!),grossAmountCents:inv.amount_paid,currency:inv.currency.toLowerCase()}); }
+  if(!normalized.some(x=>x.invoiceId===invoice.id)) return failed();
+  const recorded=await db.reconcilePaidInvoices({p_hold_id:md.holdId,p_subscription_id:subscriptionId,p_customer_id:customerId,p_price_id:items[0].price.id,p_provider_event_id:event.id,p_invoices:normalized});
+  if(!["reconciled","no_attribution"].includes(recorded)) return failed();
+  return received();
+}
 
 function hashBytes(value: HoldRow["purchaser_credential_hash"]): Uint8Array | null {
   if (value instanceof Uint8Array) return value.length === 32 ? value : null;
@@ -90,7 +125,7 @@ function commonSession(session: StripeSession, sessionId: string, holdId: string
   return session.id === sessionId && md.kind === "v2" && md.holdId === holdId && md.tier === tier && lines?.length === 1 && line?.quantity === 1 && line.price?.id === price;
 }
 
-type PaidEvidence = { customer: string; paymentIntent: string | null; subscription: string | null; grossAmountCents: number; currency: string };
+type PaidEvidence = { customer: string; paymentIntent: string | null; subscription: string | null; sourcePaymentIntent:string; sourceCharge: string; initialInvoice: string|null; grossAmountCents: number; currency: string };
 
 async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: string, provider: PaymentV2Provider): Promise<PaidEvidence | null> {
   if (session.status !== "complete") return null;
@@ -98,6 +133,7 @@ async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: st
   if (!customer || session.payment_status !== "paid") return null;
   let paymentIntent: string | null = null;
   let subscription: string | null = null;
+  let sourceCharge: string | null = null; let sourcePaymentIntent:string|null=null; let initialInvoice: string|null=null;
   const line = session.line_items!.data[0];
   const grossAmountCents = line.amount_total ?? (typeof line.price?.unit_amount === "number" ? line.price.unit_amount : null);
   const currency = (line.price?.currency || session.currency || "").toLowerCase();
@@ -106,9 +142,11 @@ async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: st
     paymentIntent = id(session.payment_intent);
     if (session.mode !== "payment" || !paymentIntent || id(session.subscription)) return null;
     const pi = await provider.retrievePaymentIntent(paymentIntent);
+    sourcePaymentIntent=pi.id;
+    sourceCharge=id(pi.latest_charge);
     const amount = line.amount_total ?? (typeof line.price?.unit_amount === "number" ? line.price.unit_amount : null);
     const currency = line.price?.currency?.toLowerCase();
-    if (pi.id !== paymentIntent || pi.status !== "succeeded" || id(pi.customer) !== customer || amount === null || pi.amount !== amount ||
+    if (pi.id !== paymentIntent || !sourceCharge || pi.status !== "succeeded" || id(pi.customer) !== customer || amount === null || pi.amount !== amount ||
         !currency || pi.currency.toLowerCase() !== currency || session.amount_total !== amount || session.currency?.toLowerCase() !== currency) return null;
   } else {
     subscription = id(session.subscription);
@@ -119,12 +157,13 @@ async function verifyPaid(session: StripeSession, tier: PaymentV2Tier, price: st
         items?.length !== 1 || items[0].quantity !== 1 || items[0].price?.id !== price) return null;
     if (!sub.latest_invoice || typeof sub.latest_invoice !== "object" || Array.isArray(sub.latest_invoice)) return null;
     const invoice = sub.latest_invoice as StripeInvoice;
-    if (invoice.paid !== true || invoice.status !== "paid") return null;
+    initialInvoice=invoice.id||null;if(!initialInvoice||!provider.listInvoicePayments)return null;const payments=await provider.listInvoicePayments(initialInvoice);if(payments.length!==1||payments[0].status!=="paid"||payments[0].payment.type!=="payment_intent"||id(payments[0].invoice)!==initialInvoice)return null;sourcePaymentIntent=id(payments[0].payment.payment_intent);if(!sourcePaymentIntent)return null;const pi=await provider.retrievePaymentIntent(sourcePaymentIntent);sourceCharge=id(pi.latest_charge);
+    if (invoice.status !== "paid" || !sourceCharge || pi.status!=="succeeded" || id(pi.customer)!==customer || pi.amount!==grossAmountCents || payments[0].amount_paid!==grossAmountCents || pi.currency?.toLowerCase()!==currency) return null;
     if (typeof invoice.currency === "string" && invoice.currency.toLowerCase() !== currency) return null;
     if (typeof invoice.amount_paid === "number" && invoice.amount_paid !== grossAmountCents) return null;
     if (typeof invoice.amount_due === "number" && typeof invoice.amount_paid === "number" && invoice.amount_paid < invoice.amount_due) return null;
   }
-  return { customer, paymentIntent, subscription, grossAmountCents: grossAmountCents!, currency };
+  return { customer, paymentIntent, subscription, sourcePaymentIntent:sourcePaymentIntent!, sourceCharge:sourceCharge!, initialInvoice, grossAmountCents: grossAmountCents!, currency };
 }
 
 async function recordPaid(event: StripeEvent, session: StripeSession, hold: HoldRow, tier: PaymentV2Tier, price: string, hash: Uint8Array, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
@@ -145,7 +184,7 @@ async function recordPaid(event: StripeEvent, session: StripeSession, hold: Hold
   try {
     const result = await db.recordPaid({ p_hold_id: hold.id, p_purchaser_hash: hash, p_session_id: session.id, p_customer_id: evidence.customer,
       p_price_id: price, p_payment_intent_id: evidence.paymentIntent, p_subscription_id: evidence.subscription, p_provider_event_id: event.id, p_provider_confirmed_at: confirmed,
-      p_gross_amount_cents: evidence.grossAmountCents, p_currency: evidence.currency });
+      p_gross_amount_cents: evidence.grossAmountCents, p_currency: evidence.currency, p_source_payment_intent_id:evidence.sourcePaymentIntent,p_source_charge_id:evidence.sourceCharge,p_initial_invoice_id:evidence.initialInvoice });
     return result === "recorded" || result === "already_recorded" ? received() : failed();
   } catch (cause) {
     if (!(cause instanceof Error) || cause.message !== "paid_purchase_conflict") throw cause;
@@ -163,6 +202,16 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
     raw = await input.readRawBody();
     event = provider.constructEvent(raw, input.signature, input.webhookSecret);
   } catch { return badSignature(); }
+  if (event.type === "invoice.paid") {
+    const invoiceId=id(event.data.object.id);
+    if(!invoiceId||!provider.retrieveInvoice)return failed();
+    try {
+      const invoice=await provider.retrieveInvoice(invoiceId);
+      if(invoice.id!==invoiceId)return failed();
+      if(invoice.parent?.type!=="subscription_details"||!id(invoice.parent.subscription_details?.subscription))return ignored();
+      return await recurringInvoice({...event,data:{object:invoice}}, provider, input.createDatabase());
+    } catch { return failed(); }
+  }
   if (!supported.has(event.type)) {
     const classification = classifyPaymentV2LifecycleEvent(event.type);
     if (!classification) return ignored();

@@ -5,12 +5,13 @@ import { derivePublicPurchaseState, LOCKED_PAYMENT_V2_PRICES, paymentFirstPublic
 let assertions = 0;
 const equal = (actual: unknown, expected: unknown, message: string) => { assert.deepEqual(actual, expected, message); assertions++; };
 const check = (value: unknown, message: string) => { assert.ok(value, message); assertions++; };
-const gates = ["PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED", "PAYMENT_FIRST_WEBHOOK_V2_ENABLED", "PAYMENT_FIRST_CLAIM_V2_ENABLED", "PAYMENT_FIRST_SUCCESS_V2_ENABLED", "PAYMENT_FIRST_AUTH_CONTINUATION_V2_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_PROTECTION_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_ENABLED"];
+const gates = ["PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED", "PAYMENT_FIRST_WEBHOOK_V2_ENABLED", "PAYMENT_FIRST_CLAIM_V2_ENABLED", "PAYMENT_FIRST_SUCCESS_V2_ENABLED", "PAYMENT_FIRST_AUTH_CONTINUATION_V2_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_PROTECTION_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_ENABLED", "PAYMENT_V2_PAYOUT_EXECUTION_ENABLED"];
 const env: Record<string,string> = Object.fromEntries(gates.map((name) => [name, "true"]));
-Object.assign(env, { NODE_ENV: "production", PAYMENT_V2_EVENT_INBOX_ENABLED: "false", NEXT_PUBLIC_SITE_URL: "https://www.sirensforge.vip", PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN: "https://www.sirensforge.vip", STRIPE_SECRET_KEY: "test", STRIPE_PAYMENT_V2_WEBHOOK_SECRET: "test", SUPABASE_URL: "https://project.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test" });
-const effects = { tiers: 0, inventory: 0 };
+Object.assign(env, { NODE_ENV: "production", CRON_SECRET: "test", PAYMENT_V2_EVENT_INBOX_ENABLED: "false", NEXT_PUBLIC_SITE_URL: "https://www.sirensforge.vip", PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN: "https://www.sirensforge.vip", STRIPE_SECRET_KEY: "test", STRIPE_PAYMENT_V2_WEBHOOK_SECRET: "test", SUPABASE_URL: "https://project.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test" });
+const effects = { capability: 0, tiers: 0, inventory: 0 };
 const deps: PublicReadinessDependencies = {
   now: () => new Date("2026-08-06T00:00:00Z"),
+  async loadAffiliateCapability() { effects.capability++; return true; },
   async loadTiers() { effects.tiers++; return Object.entries(LOCKED_PAYMENT_V2_PRICES).map(([name, stripe_price_id]) => ({ name, is_active: true, stripe_price_id })); },
   async loadInventoryRows() { effects.inventory++; return []; },
 };
@@ -19,6 +20,11 @@ for (const value of [undefined, "", "false", "TRUE", " true", "true ", "yes", "1
 equal(paymentFirstPublicCutoverEnabled("true"), true, "exact true enables cutover");
 let state = await derivePublicPurchaseState({ ...env, PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED: "false" }, deps);
 equal(state, { checkoutMode: "legacy" }, "disabled cutover derives legacy mode without tiers");
+equal(effects.capability, 0, "legacy mode does not require 03200 capability");
+state = await derivePublicPurchaseState(env, { ...deps, loadAffiliateCapability: async () => false });
+equal(state.tiers?.og_throne, "unavailable", "missing 03200 capability fails closed");
+state = await derivePublicPurchaseState(env, { ...deps, loadAffiliateCapability: async () => { throw new Error("missing RPC"); } });
+equal(state.tiers?.early_bird, "unavailable", "03200 capability error fails closed");
 for (const gate of gates) for (const value of [undefined, "", "false", "TRUE", " true", "true ", "malformed"]) {
   const changed = { ...env, [gate]: value } as Record<string,string|undefined>;
   state = await derivePublicPurchaseState(changed, deps);
@@ -54,7 +60,7 @@ for (const body of ['{"tierName":"og_throne"}', '{"tierName":"early_bird"}', '{"
 const pricing = readFileSync("app/pricing/PricingClient.tsx", "utf8");
 check(pricing.includes('"/api/payment-v2/readiness"'), "Pricing uses one public mode/readiness boundary");
 check(pricing.includes('? "/api/checkout/subscription-v2"') && pricing.includes(': "/api/checkout/subscription"'), "Pricing selects exact route from derived mode");
-check(pricing.includes("...(referralCode ? { referralCode"), "Payment V2 body contains only tier and optional referral code");
+check(pricing.includes("...(normalizeReferralCode(referralCode) ? { referralCode"), "Payment V2 body contains only tier and optional referral code");
 const v2 = readFileSync("app/api/checkout/subscription-v2/route.ts", "utf8");
 check(v2.indexOf("derivePublicPurchaseState") < v2.indexOf("new Stripe(stripeKey"), "direct V2 readiness precedes Stripe construction");
 check(v2.indexOf("derivePublicPurchaseState") < v2.indexOf('req.headers.get("cookie")'), "direct V2 readiness precedes cookie read");
@@ -63,7 +69,7 @@ const readinessRoute = readFileSync("app/api/payment-v2/readiness/route.ts", "ut
 check(readinessRoute.includes('"Cache-Control": "no-store"'), "public response is no-store");
 const publicShape = JSON.stringify(await derivePublicPurchaseState(env, deps));
 for (const secret of ["PAYMENT_FIRST_", "SUPABASE", "STRIPE", "price_", "slots_remaining", "configuration", "diagnostic"]) check(!publicShape.includes(secret), `public response omits ${secret}`);
-check(!readinessRoute.includes(".rpc("), "readiness invokes no mutating or diagnostic RPC");
+check(readinessRoute.includes('.rpc("payment_v2_affiliate_public_cutover_ready")') && readinessRoute.match(/\.rpc\(/g)?.length === 1, "readiness invokes only the boolean 03200 capability RPC");
 const migration = readFileSync("supabase/migrations/20260805002900_payment_v2_lifecycle_foundation.sql", "utf8"); check(migration.length > 0, "02900 remains present for source guard only");
 const status = readFileSync(".env.example", "utf8"); check(status.includes("PAYMENT_V2_EVENT_INBOX_ENABLED=false"), "inbox example remains false");
 console.log(`PFC-CORE-02A focused cutover tests passed (${assertions} assertions; local fakes only, zero external calls).`);

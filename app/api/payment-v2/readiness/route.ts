@@ -11,6 +11,12 @@ export async function GET() {
   const db = url && key ? createClient(url, key, { auth: { persistSession: false } }) : null;
   const state = await derivePublicPurchaseState(process.env, {
     now: () => new Date(),
+    async loadAffiliateCapability() {
+      if (!db) throw new Error("unavailable");
+      const { data, error } = await db.rpc("payment_v2_affiliate_public_cutover_ready");
+      if (error || data !== true) throw new Error("unavailable");
+      return true;
+    },
     async loadTiers() {
       if (!db) throw new Error("unavailable");
       const { data, error } = await db.from("subscription_tiers").select("name,is_active,stripe_price_id").in("name", ["og_throne", "early_bird"]);

@@ -18,8 +18,10 @@ function harness(overrides: { event?: Partial<StripeEvent>; session?: Partial<St
   const provider: PaymentV2Provider = {
     constructEvent(raw, signature, secret) { calls.construct.push([raw, signature, secret]); return event; },
     async retrieveSession(id) { calls.session.push(id); return session; },
-    async retrievePaymentIntent(id) { calls.pi.push(id); return { id: "pi_exact", status: "succeeded", customer: "cus_exact", amount: 2500, currency: "usd" }; },
-    async retrieveSubscription(id) { calls.sub.push(id); return { id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { status: "paid", paid: true, amount_due: 900, amount_paid: 900, currency: "usd" } }; },
+    async retrievePaymentIntent(id) { calls.pi.push(id); return id === "pi_invoice" ? { id, status: "succeeded", customer: "cus_exact", amount: 900, currency: "usd", latest_charge: "ch_invoice" } : { id: "pi_exact", status: "succeeded", customer: "cus_exact", amount: 2500, currency: "usd", latest_charge: "ch_exact" }; },
+    async retrieveSubscription(id) { calls.sub.push(id); return { id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { id: "in_exact", status: "paid", amount_due: 900, amount_paid: 900, currency: "usd" } }; },
+    async retrieveInvoice(id) { return { id, status: "paid", parent: null }; },
+    async listInvoicePayments(id) { return [{ id: "ip_exact", invoice: id, status: "paid", amount_paid: 900, currency: "usd", payment: { type: "payment_intent", payment_intent: "pi_invoice" } }]; },
     ...overrides.provider,
   };
   const db: PaymentV2Database = {
@@ -94,6 +96,7 @@ for (const inboxEnabled of [undefined, "", "TRUE", "1", "false"]) {
     let inboxCreated = 0; let receiveCalls = 0; let transitionCalls = 0;
     const malformed = harness({ event, input: { inboxEnabled: "true", createInboxDatabase: () => { inboxCreated++; return { receiveEvent: async () => { receiveCalls++; return "RECEIVED" as const; }, transitionStatus: async () => { transitionCalls++; return "PENDING_PHASE" as const; } }; } } });
     const result = await malformed.run();
+    if(event.type==="invoice.paid"){equal(result,{status:200,body:{status:"ignored",code:"NON_PAYMENT_V2_EVENT_IGNORED"}},`${label} bypasses dormant inbox`);continue;}
     equal(result, { status: 503, body: { error: "Invalid Payment V2 lifecycle event envelope", code: "PAYMENT_V2_EVENT_ENVELOPE_INVALID" } }, `${label} fails retryably before durable receipt`);
     equal([inboxCreated, receiveCalls, transitionCalls], [0, 0, 0], `${label} creates no inbox and calls no inbox RPCs`);
     equal(malformed.calls.session.length + malformed.calls.pi.length + malformed.calls.sub.length + malformed.calls.hold.length + malformed.calls.tier.length + malformed.calls.purchase.length + malformed.calls.paid.length + malformed.calls.terminal.length, 0, `${label} performs no provider retrieval or Payment V2 database effect`);
@@ -106,7 +109,7 @@ for (const inboxEnabled of [undefined, "", "TRUE", "1", "false"]) {
 
 {
   const replay = harness({ event: { id: "evt_replay", type: "invoice.paid", data: { object: { id: "in_replay" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "PENDING_PHASE", transitionStatus: async () => { throw new Error("no transition"); } }) } });
-  equal((await replay.run()).body, { status: "received", code: "PAYMENT_V2_EVENT_REPLAYED" }, "safe durable replay is acknowledged");
+  equal((await replay.run()).body, { status: "ignored", code: "NON_PAYMENT_V2_EVENT_IGNORED" }, "unrelated invoice replay bypasses inbox");
 }
 {
   const receivedReplay = harness({ event: { id: "evt_received", type: "customer.subscription.updated", data: { object: { id: "sub_received" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "RECEIVED", transitionStatus: async () => "PENDING_PHASE" }) } });
@@ -124,7 +127,7 @@ for (const inboxEnabled of [undefined, "", "TRUE", "1", "false"]) {
   const transitionFailure = harness({ event: { id: "evt_transition_failure", type: "customer.subscription.deleted", data: { object: { id: "sub_failure" } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async () => "RECEIVED", transitionStatus: async () => { throw new Error("db down"); } }) } });
   equal((await transitionFailure.run()).body.code, "PAYMENT_V2_EVENT_INBOX_UNAVAILABLE", "transition failure is unavailable and durable row remains RECEIVED");
 }
-for (const [type, phase, object] of [["refund.created","PFC-07E-A2","refund"],["refund.updated","PFC-07E-A2","refund"],["refund.failed","PFC-07E-A2","refund"],["customer.subscription.updated","PFC-07E-A3","subscription"],["customer.subscription.deleted","PFC-07E-A3","subscription"],["invoice.payment_failed","PFC-07E-A3","invoice"],["invoice.paid","PFC-07E-A3","invoice"],["charge.dispute.created","PFC-07E-B","dispute"],["charge.dispute.closed","PFC-07E-B","dispute"]] as const) {
+for (const [type, phase, object] of [["refund.created","PFC-07E-A2","refund"],["refund.updated","PFC-07E-A2","refund"],["refund.failed","PFC-07E-A2","refund"],["customer.subscription.updated","PFC-07E-A3","subscription"],["customer.subscription.deleted","PFC-07E-A3","subscription"],["invoice.payment_failed","PFC-07E-A3","invoice"],["charge.dispute.created","PFC-07E-B","dispute"],["charge.dispute.closed","PFC-07E-B","dispute"]] as const) {
   let observed: any = null;
   const h = harness({ event: { id: `evt_${type.replace(/[^a-z]/g,"_")}`, type, data: { object: { id: `obj_${type.replace(/[^a-z]/g,"_")}` } } as any }, input: { inboxEnabled: "true", createInboxDatabase: () => ({ receiveEvent: async (args) => { observed = args; return "RECEIVED"; }, transitionStatus: async () => "PENDING_PHASE" }) } });
   equal((await h.run()).status, 200, `${type} accepted for durable receipt`);
@@ -161,7 +164,7 @@ function early(overrides: Parameters<typeof harness>[0] = {}) { return harness({
   const pending = early({ session: { payment_status: "unpaid" } }); equal((await pending.run()).body.status, "pending", "Early Bird pending"); equal(pending.calls.paid.length, 0, "Early Bird pending no RPC");
   for (const [session, label] of [[{ mode: "payment" }, "mode"], [{ status: "open" }, "status"], [{ customer: null }, "Customer"], [{ subscription: null }, "Subscription"], [{ payment_intent: "pi_bad" }, "PI identity"]] as const) equal((await early({ session: session as any }).run()).status, 500, `Early Bird rejects ${label}`);
   for (const [sub, label] of [[{ customer: "wrong" }, "customer"], [{ status: "canceled" }, "status"], [{ items: { data: [] } }, "item count"], [{ items: { data: [{ quantity: 2, price: { id: "price_early" } }] } }, "quantity"], [{ items: { data: [{ quantity: 1, price: { id: "wrong" } }] } }, "Price"], [{ latest_invoice: undefined }, "missing expanded invoice"], [{ latest_invoice: "in_unexpanded" }, "unexpanded invoice"], [{ latest_invoice: { paid: false, status: "open" } }, "unpaid invoice"], [{ latest_invoice: { paid: true, status: "paid", amount_paid: 899 } }, "invoice amount"], [{ latest_invoice: { paid: true, status: "paid", currency: "eur" } }, "invoice currency"]] as const)
-    equal((await early({ provider: { retrieveSubscription: async () => ({ id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { paid: true, status: "paid", amount_paid: 900, currency: "usd" }, ...sub }) } }).run()).status, 500, `Early Bird rejects ${label}`);
+    equal((await early({ provider: { retrieveSubscription: async () => ({ id: "sub_exact", customer: "cus_exact", status: "active", items: { data: [{ quantity: 1, price: { id: "price_early" } }] }, latest_invoice: { id: "in_exact", status: "paid", amount_due: 900, amount_paid: 900, currency: "usd" }, ...sub }) } }).run()).status, 500, `Early Bird rejects ${label}`);
 }
 
 for (const result of ["recorded", "already_recorded"]) equal((await harness({ db: { recordPaid: async () => result } }).run()).body.status, "received", `${result} accepted`);
@@ -261,7 +264,7 @@ for (const [type, finalState, firstResult] of [["checkout.session.expired", "EXP
 {
   const route = readFileSync("app/api/webhook/payment-v2/route.ts", "utf8"); const service = readFileSync("lib/payment-v2/webhookService.ts", "utf8"); const combined = route + service;
   check(route.includes('runtime = "nodejs"') && route.includes('dynamic = "force-dynamic"'), "route runtime contract"); check(!route.includes("export async function GET"), "no GET handler"); check(route.includes("STRIPE_PAYMENT_V2_WEBHOOK_SECRET") && !route.includes("STRIPE_WEBHOOK_SECRET"), "dedicated secret only");
-  for (const forbidden of ["payment_v2_claim", "payment_v2_expire_unpaid", "user_subscriptions", "profiles", "payment_v2_allocations", "grantOg", "commission", "app/api/webhook/route"]) check(!combined.includes(forbidden), `${forbidden} prohibited`);
+  for (const forbidden of ["payment_v2_claim", "payment_v2_expire_unpaid", "user_subscriptions", "profiles", "payment_v2_allocations", "grantOg", "app/api/webhook/route"]) check(!combined.includes(forbidden), `${forbidden} prohibited`);
   check(!/\.from\("payment_v2_[^"]+"\)\.(insert|update|delete)/.test(route), "no direct V2 mutations"); check(!combined.includes("console."), "payload, signature, hash and credentials are not logged");
   equal(harness().calls.session.length, 0, "test harness starts with zero provider network calls");
 }

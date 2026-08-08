@@ -14,6 +14,7 @@ export type PublicPurchaseState = {
 
 type TierRow = { name: unknown; is_active: unknown; stripe_price_id: unknown };
 export type PublicReadinessDependencies = {
+  loadAffiliateCapability(): Promise<boolean>;
   loadTiers(): Promise<TierRow[]>;
   loadInventoryRows(): Promise<PaymentV2InventoryRow[]>;
   now(): Date;
@@ -27,6 +28,7 @@ const REQUIRED_TRUE = [
   "PAYMENT_FIRST_AUTH_CONTINUATION_V2_ENABLED",
   "PAYMENT_FIRST_CHECKOUT_V2_PROTECTION_ENABLED",
   "PAYMENT_FIRST_CHECKOUT_V2_ENABLED",
+  "PAYMENT_V2_PAYOUT_EXECUTION_ENABLED",
 ] as const;
 
 const unavailable = (): PublicPurchaseState => ({ checkoutMode: "payment_v2", tiers: { og_throne: "unavailable", early_bird: "unavailable" } });
@@ -66,8 +68,9 @@ export async function derivePublicPurchaseState(
   const returns = canonicalOrigin(env.PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN, production);
   const supabaseUrl = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL;
   if (!site || !returns || site !== returns || !present(env.STRIPE_SECRET_KEY) || !present(env.STRIPE_PAYMENT_V2_WEBHOOK_SECRET) ||
-      !serviceOrigin(supabaseUrl, production) || !present(env.SUPABASE_SERVICE_ROLE_KEY)) return unavailable();
+      !serviceOrigin(supabaseUrl, production) || !present(env.SUPABASE_SERVICE_ROLE_KEY) || !present(env.CRON_SECRET)) return unavailable();
   try {
+    if (await dependencies.loadAffiliateCapability() !== true) return unavailable();
     const rows = await dependencies.loadTiers();
     for (const name of ["og_throne", "early_bird"] as const) {
       const matches = rows.filter((row) => row.name === name);
