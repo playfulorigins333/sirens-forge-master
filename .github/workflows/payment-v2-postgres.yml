@@ -6,6 +6,7 @@ on:
       - 'supabase/migrations/20260805002900_payment_v2_lifecycle_foundation.sql'
       - 'supabase/migrations/20260807003100_payment_v2_affiliate_attribution.sql'
       - 'supabase/migrations/20260807003200_affiliate_public_cutover_hardening.sql'
+      - 'supabase/migrations/20260807003300_affiliate_summary_payment_v2_read_boundary.sql'
       - 'supabase/manual/**'
       - 'backend/affiliate/tests/**'
       - 'app/api/affiliate/**'
@@ -76,6 +77,8 @@ jobs:
         run: npm run test:pfc-core-03d
       - name: Affiliate public-cutover hardening disposable PostgreSQL behavior
         run: npm run test:pfc-core-03d-postgres
+      - name: Affiliate summary authenticated read-boundary PostgreSQL behavior
+        run: npm run test:pfc-core-03f-postgres
       - name: PRE-03100 backup and rollback static contract
         run: npm run test:pfc-core-03c
       - name: PRE-03100 backup and rollback disposable PostgreSQL integration

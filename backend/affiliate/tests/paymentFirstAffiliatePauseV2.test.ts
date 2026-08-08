@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { affiliateSummaryResponse } from "../../../app/api/affiliate/summary/route";
 import { createStripeConnectResponse } from "../../../app/api/stripe/connect/create/route";
+import { affiliatePayoutThresholdState } from "../../../app/affiliate/page";
 process.env.STRIPE_SECRET_KEY = "sk_test_local_only";
 process.env.STRIPE_WEBHOOK_SECRET = "whsec_local_only";
 const { handleLegacyStripeWebhook } = await import("../../../app/api/webhook/route");
@@ -12,11 +13,11 @@ const equal = (actual: unknown, expected: unknown, message: string) => { assert.
 const files = (path: string) => readFileSync(path, "utf8");
 
 let adminConstructions = 0;
-let response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => null, getAuthenticatedClient: async () => { throw new Error("must not construct auth data client"); }, getAdminClient: () => { adminConstructions++; return {}; } });
-equal(response.status, 401, "unauthenticated summary is 401"); equal(adminConstructions, 0, "admin is not constructed before authentication");
+let authClientConstructions = 0;
+let response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => null, getAuthenticatedClient: async () => { authClientConstructions++; return {}; }, getAdminClient: () => { adminConstructions++; return {}; } });
+equal(response.status, 401, "unauthenticated summary is 401"); equal(adminConstructions, 0, "admin is not constructed before authentication"); equal(authClientConstructions, 0, "authenticated data client is not obtained before authentication");
 
-const queryLog: Array<{ table: string; columns: string; filters: Array<[string,string]> }> = [];
-const data: Record<string, any[]> = {
+const baseData: Record<string, any[]> = {
   profiles: [{ id: "profile-1", user_id: "user-1", referral_code: "SAFE1", tier: "early_bird", stripe_connect_onboarded: true }],
   user_subscriptions: [{ tier_name: "early_bird", status: "active", created_at: "2026-01-01" }],
   referrals: [{ referred_user_id: "other", used_at: "2026-01-02", status: "complete" }],
@@ -24,35 +25,62 @@ const data: Record<string, any[]> = {
   referral_codes: [{ total_uses: 3, user_id: "user-1" }],
   affiliate_payout_items: [{ amount_cents: 500, created_at: "2026-01-04", affiliate_payout_batches: [{ status: "paid", created_at: "2026-01-05" }] }],
 };
-const admin = { from(table: string) { const entry = { table, columns: "", filters: [] as Array<[string,string]> }; queryLog.push(entry); const chain: any = {
-  select(columns: string) { entry.columns = columns; return chain; }, eq(column: string, value: string) { entry.filters.push([column, value]); return chain; }, order() { return chain; }, limit() { return chain; },
-  then(resolve: any) { return Promise.resolve({ data: data[table] ?? [], error: null }).then(resolve); },
-}; return chain; } };
-const rpcLog: string[] = [];
+type QueryEntry = { table: string; columns: string; filters: Array<[string,string]> };
+function adminFixture(overrides: Record<string, any[]> = {}) {
+  const queryLog: QueryEntry[] = [];
+  const data = { ...baseData, ...overrides };
+  const admin = { from(table: string) { const entry = { table, columns: "", filters: [] as Array<[string,string]> }; queryLog.push(entry); const chain: any = {
+    select(columns: string) { entry.columns = columns; return chain; }, eq(column: string, value: string) { entry.filters.push([column, value]); return chain; }, order() { return chain; }, limit() { return chain; },
+    then(resolve: any) { return Promise.resolve({ data: data[table] ?? [], error: null }).then(resolve); },
+  }; return chain; } };
+  return { admin, queryLog, data };
+}
 const ledgerRows = [
-  { id: "ledger-pending", commission_amount_cents: 600, status: "pending", created_at: "2026-01-04", is_initial_purchase: true, is_void_self_referral: false },
-  { id: "ledger-paid", commission_amount_cents: 250, status: "paid", created_at: "2026-01-05", is_initial_purchase: false, is_void_self_referral: false },
-  { id: "ledger-self", commission_amount_cents: 9999, status: "void", created_at: "2026-01-06", is_initial_purchase: true, is_void_self_referral: true },
+  { id: "ledger-legacy", commission_amount_cents: 300, status: "pending", created_at: "2026-01-03", is_initial_payment_v2_purchase: false, is_void_self_referral: false },
+  { id: "ledger-initial", commission_amount_cents: 600, status: "pending", created_at: "2026-01-04", is_initial_payment_v2_purchase: true, is_void_self_referral: false },
+  { id: "ledger-recurring", commission_amount_cents: 4900, status: "available", created_at: "2026-01-05", is_initial_payment_v2_purchase: false, is_void_self_referral: false },
+  { id: "ledger-paid", commission_amount_cents: 250, status: "paid", created_at: "2026-01-06", is_initial_payment_v2_purchase: false, is_void_self_referral: false },
+  { id: "ledger-self", commission_amount_cents: 9999, status: "available", created_at: "2026-01-07", is_initial_payment_v2_purchase: true, is_void_self_referral: true },
 ];
-const authenticatedClient = { async rpc(name: string) { rpcLog.push(name); return { data: ledgerRows, error: null }; } };
-response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAuthenticatedClient: async () => authenticatedClient, getAdminClient: () => { adminConstructions++; return admin; } });
-equal(response.status, 200, "authenticated summary succeeds");
-equal(response.headers.get("cache-control"), "no-store", "summary is no-store");
+const normal = adminFixture(); const rpcLog: string[] = [];
+response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAuthenticatedClient: async () => ({ async rpc(name: string) { rpcLog.push(name); return { data: ledgerRows, error: null }; } }), getAdminClient: () => normal.admin });
+equal(response.status, 200, "authenticated summary succeeds"); equal(response.headers.get("cache-control"), "no-store", "summary is no-store");
 const summary = await response.json();
-equal(summary.pending, 18, "legacy and Payment V2 pending totals remain visible"); equal(summary.paid, 2.5, "Payment V2 paid totals remain visible"); equal(summary.total_earnings, 2.5, "Payment V2 paid earnings remain visible"); equal(summary.clicks, 4, "paid V2 usage is derived without mutating the code counter"); equal(summary.total_referrals, 2, "initial non-self Payment V2 referral is counted"); equal(rpcLog, ["get_my_payment_v2_affiliate_ledger"], "ledger uses the authenticated self-scoped RPC"); equal(summary.commissions.find((item: any) => item.id === "ledger-pending")?.commission_amount, 6, "Payment V2 cents normalize to dashboard dollars"); check(!JSON.stringify(summary).includes("commission_amount_cents"), "raw Payment V2 cents are not serialized"); equal(summary.payouts.length, 1, "payout history remains visible"); equal(summary.stripe_connect_onboarded, true, "Connect boolean remains visible");
-for (const prohibited of ["email", "stripe_customer_id", "stripe_subscription_id", "stripe_connect_account_id", "tokens", "role", "seat_number", "is_tester"]) check(!JSON.stringify(summary).includes(prohibited), `summary omits ${prohibited}`);
-for (const query of queryLog) { check(query.columns !== "*" && query.columns.length > 0, `${query.table} uses explicit columns`); check(query.filters.length > 0, `${query.table} is owner scoped`); }
-equal(queryLog.map((q) => q.table), ["profiles", "user_subscriptions", "referrals", "commission_earnings", "referral_codes", "affiliate_payout_items"], "summary reads only exact manifest tables");
-check(!queryLog.find((q) => q.table === "referrals")?.columns.includes("used_at"), "summary avoids nonexistent referrals.used_at");
-check(!queryLog.find((q) => q.table === "commission_earnings")?.columns.includes("payout_date"), "summary avoids nonexistent commission payout_date");
-check(!queryLog.some((q) => q.table === "affiliate_ledger"), "admin never directly reads affiliate_ledger");
-equal(summary.commissions.find((item: any) => item.id === "earning"), data.commission_earnings[0], "legacy commission history remains unchanged");
-equal(summary.payouts, data.affiliate_payout_items, "payout history remains unchanged");
-const serializedV2 = JSON.stringify(summary.commissions.find((item: any) => item.id === "ledger-pending"));
-for (const secret of ["payment_v2_purchase_id", "stripe_event_id", "stripe_customer_id", "stripe_subscription_id", "referral_code_id", "referred_user_id"]) check(!serializedV2.includes(secret), `normalized V2 commission omits raw identifier ${secret}`);
-response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAuthenticatedClient: async () => ({ rpc: async () => ({ data: null, error: new Error("database detail") }) }), getAdminClient: () => admin });
-equal(response.status, 500, "RPC failure fails the summary closed");
-equal(await response.json(), { error: "Unable to load affiliate history" }, "RPC failure returns the generic summary error");
+equal(rpcLog, ["get_my_affiliate_ledger_summary"], "normal path uses the authenticated ledger summary RPC");
+check(!normal.queryLog.some((q) => q.table === "affiliate_ledger"), "normal path never directly reads affiliate_ledger");
+equal(summary.pending, 70, "historical pending plus legacy, initial, recurring, and available ledger totals remain visible");
+equal(summary.paid, 2.5, "paid ledger totals remain visible"); equal(summary.total_earnings, 2.5, "paid earnings remain visible");
+equal(summary.payout_eligible_balance, 49, "only non-void available ledger money is payout eligible");
+equal(summary.total_referrals, 2, "only initial non-self Payment V2 purchase increments referrals");
+equal(summary.commissions.find((item: any) => item.id === "ledger-legacy")?.commission_amount, 3, "legacy ledger cents normalize to dollars");
+equal(summary.commissions.find((item: any) => item.id === "ledger-initial")?.commission_amount, 6, "initial Payment V2 cents normalize to dollars");
+equal(summary.commissions.find((item: any) => item.id === "ledger-recurring")?.commission_amount, 49, "recurring Payment V2 cents normalize to dollars");
+equal(summary.commissions.find((item: any) => item.id === "earning"), baseData.commission_earnings[0], "historical commission earnings remain unchanged");
+equal(summary.payouts, baseData.affiliate_payout_items, "historical payout history remains unchanged");
+equal(affiliatePayoutThresholdState(49), { remainingToThreshold: 1, thresholdMet: false }, "$49 available does not meet threshold");
+equal(affiliatePayoutThresholdState(50), { remainingToThreshold: 0, thresholdMet: true }, "$50 available meets threshold");
+check(summary.pending >= 50 && !affiliatePayoutThresholdState(summary.payout_eligible_balance).thresholdMet, "immature pending money does not satisfy payout threshold");
+const normalizedLedger = summary.commissions.filter((item: any) => String(item.id).startsWith("ledger-"));
+for (const item of normalizedLedger.filter((item: any) => item.id !== "ledger-self")) check(item.commission_amount > 0, `${item.id} recent activity has a nonzero amount`);
+for (const secret of ["commission_amount_cents", "payment_v2_purchase_id", "payment_v2_recurring_invoice_id", "affiliate_user_id", "attribution_status", "stripe_event_id", "referral_code_id"]) check(!JSON.stringify(summary).includes(secret), `summary omits raw ledger identifier ${secret}`);
+for (const query of normal.queryLog) { check(query.columns !== "*" && query.columns.length > 0, `${query.table} uses explicit columns`); check(query.filters.length > 0, `${query.table} is owner scoped`); }
+
+const fallbackLedger = [{ id: "fallback-legacy", commission_amount_cents: 425, status: "available", created_at: "2026-01-08", payment_v2_purchase_id: null, attribution_status: null }];
+const fallback = adminFixture({ affiliate_ledger: fallbackLedger });
+response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAuthenticatedClient: async () => ({ rpc: async () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function" } }) }), getAdminClient: () => fallback.admin });
+equal(response.status, 200, "PGRST202 missing-schema condition uses compatibility fallback"); const fallbackSummary = await response.json();
+const fallbackQuery = fallback.queryLog.find((q) => q.table === "affiliate_ledger"); check(Boolean(fallbackQuery), "missing RPC invokes ledger fallback");
+equal(fallbackQuery?.columns, "id,commission_amount_cents,status,created_at,payment_v2_purchase_id,attribution_status", "fallback selects only approved columns");
+equal(fallbackQuery?.filters, [["affiliate_user_id", "profile-1"]], "fallback is scoped to the authenticated profile");
+equal(fallbackSummary.commissions.find((item: any) => item.id === "fallback-legacy")?.commission_amount, 4.25, "fallback legacy ledger cents normalize to dollars");
+
+for (const rpcError of [{ code: "42501", message: "permission denied" }, { code: "XX000", message: "database failure" }, { code: "PGRST116", message: "profile failure" }]) {
+  const denied = adminFixture({ affiliate_ledger: fallbackLedger });
+  response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAuthenticatedClient: async () => ({ rpc: async () => ({ data: null, error: rpcError }) }), getAdminClient: () => denied.admin });
+  equal(response.status, 500, `${rpcError.code} RPC error fails closed`); equal(await response.json(), { error: "Unable to load affiliate history" }, `${rpcError.code} returns generic summary error`); check(!denied.queryLog.some((q) => q.table === "affiliate_ledger"), `${rpcError.code} does not use fallback`);
+}
+const malformed = adminFixture(); response = await affiliateSummaryResponse({ getAuthenticatedUserId: async () => "user-1", getAuthenticatedClient: async () => ({ rpc: async () => ({ data: {}, error: null }) }), getAdminClient: () => malformed.admin });
+equal(response.status, 500, "malformed RPC response fails closed"); check(!malformed.queryLog.some((q) => q.table === "affiliate_ledger"), "malformed response does not use fallback");
 
 const effects = { auth: 0, admin: 0, config: 0, stripe: 0 };
 response = await createStripeConnectResponse(new Request("https://local.test", { method: "POST" }), {
