@@ -30,15 +30,11 @@ test("vercel config registers no dormant AutoPost or Creator Publishing cron", (
   const crons = configuredCrons(config)
 
   assert.equal(config.version, 2)
-  assert.equal(crons.length, 0)
-  assert.equal(config.crons, undefined)
-  assert.deepEqual(Object.keys(config).sort(), ["version"])
 
   for (const cron of crons) {
     assert.notEqual(cron.path, "/api/autopost/run")
     assert.notEqual(cron.path, "/api/creator-publishing-queue/scheduler/run")
     assert.doesNotMatch(String(cron.path ?? ""), /autopost|creator-publishing/i)
-    assert.doesNotMatch(String(cron.schedule ?? ""), /\S/)
   }
 })
 

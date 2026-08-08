@@ -1,3 +1,13 @@
 {
-  "version": 2
+  "version": 2,
+  "crons": [
+    {
+      "path": "/api/admin/affiliate-payouts/execute",
+      "schedule": "59 3 * * 0"
+    },
+    {
+      "path": "/api/admin/affiliate-payouts/execute",
+      "schedule": "59 4 * * 0"
+    }
+  ]
 }
