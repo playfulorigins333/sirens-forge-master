@@ -10,6 +10,7 @@ on:
       - 'supabase/manual/**'
       - 'backend/affiliate/tests/**'
       - 'app/api/affiliate/**'
+      - 'app/api/admin/affiliate-payouts/**'
       - 'app/api/stripe/connect/**'
       - 'backend/payment-v2/tests/**'
       - 'app/api/payment-v2/**'

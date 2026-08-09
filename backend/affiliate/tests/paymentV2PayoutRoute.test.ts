@@ -63,6 +63,9 @@ assert.deepEqual(financialCalls, ["prepare", "load"])
 
 const source = readFileSync("app/api/admin/affiliate-payouts/execute/route.ts", "utf8")
 assert.match(source, /result\.status===200&&result\.body\.status==="received"/, "payout-time recurring proof requires received, not ignored")
+assert.doesNotMatch(source, /affiliate_ledger\(payment_v2_recurring_invoice_id\)/, "payout loader does not join affiliate_ledger")
+assert.match(source, /execution_status,recurring_invoice_id"\)\.in/, "payout loader selects recurring_invoice_id from affiliate_payout_items")
+assert.match(source, /payment_v2_recurring_invoice_id:x\.recurring_invoice_id/, "payout item maps the frozen recurring identity directly")
 
 const vercel = JSON.parse(readFileSync("vercel.json", "utf8"))
 assert.equal(vercel.version, 2)

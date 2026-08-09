@@ -15,6 +15,8 @@ const fails = (sql, pattern, message) => { assert.throws(() => run(sql), pattern
 
 const oldColumns = ['id','affiliate_user_id','referred_user_id','commission_amount_cents','gross_amount_cents','commission_percent','status','created_at','updated_at','payment_v2_purchase_id','referral_code_id','referrer_affiliate_tier','attribution_status','void_reason','voided_at','payment_v2_recurring_invoice_id']
 equal(`select bool_and(has_column_privilege('service_role','public.affiliate_ledger',c,'SELECT')) from unnest(array[${oldColumns.map((c) => `'${c}'`).join(',')}]) c`, 't', '03100 and 03200 service-role column grants exist before 03300')
+// The compact 03D fixture does not apply 03000; reproduce its Production payout-item read grant.
+run(`grant select on public.affiliate_payout_items to service_role`)
 
 file('supabase/migrations/20260807003300_affiliate_summary_payment_v2_read_boundary.sql')
 run(`create or replace function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$`)
@@ -54,6 +56,16 @@ equal(`begin; set local role authenticated; set local request.jwt.claim.sub='${a
 equal(`begin; set local role authenticated; set local request.jwt.claim.sub='${affiliateAuth}'; select bool_and(is_initial_payment_v2_purchase) from get_my_affiliate_ledger_summary() where id=any(array[${initialIds}]::uuid[]); rollback`, 't', 'initial Payment V2 rows are flagged true')
 equal(`begin; set local role authenticated; set local request.jwt.claim.sub='${affiliateAuth}'; select count(*)>0 and bool_and(not is_initial_payment_v2_purchase) from get_my_affiliate_ledger_summary() where id=any(array[${recurringIds}]::uuid[]); rollback`, 't', 'recurring Payment V2 rows are flagged false')
 equal(`begin; set local role authenticated; set local request.jwt.claim.sub='${affiliateAuth}'; select count(*)>0 and bool_and(is_void_self_referral) from get_my_affiliate_ledger_summary() where id=any(array[${selfIds}]::uuid[]); rollback`, 't', 'self-referral rows are flagged true')
+
+const runtimeColumns = ['id','ledger_id','amount_cents','currency','source_charge_id','connect_destination','transfer_idempotency_key','execution_status','recurring_invoice_id']
+equal(`begin; set local role service_role; select bool_and(has_column_privilege('service_role','public.affiliate_payout_items',c,'SELECT')) from unnest(array[${runtimeColumns.map((c) => `'${c}'`).join(',')}]) c; rollback`, 't', 'service_role can read every payout-item runtime field')
+equal(`begin; set local role service_role; select count(*)>=1 from public.affiliate_payout_items where execution_status in('pending','dispatching') and recurring_invoice_id is not null; rollback`, 't', 'service_role can load recurring payout items without ledger access')
+const recurringPayoutItem=run(`select i.id from affiliate_payout_items i join affiliate_ledger l on l.id=i.ledger_id where i.execution_status='pending' and i.recurring_invoice_id is not null and i.recurring_invoice_id=l.payment_v2_recurring_invoice_id order by i.id limit 1`)
+assert.ok(recurringPayoutItem, 'hardened batch fixture copied recurring identity onto payout item')
+equal(`select i.recurring_invoice_id=l.payment_v2_recurring_invoice_id from affiliate_payout_items i join affiliate_ledger l on l.id=i.ledger_id where i.id='${recurringPayoutItem}'`, 't', 'payout item carries the ledger recurring invoice identity')
+equal(`begin; set local role service_role; select (payment_v2_get_payout_recurring_context('${recurringPayoutItem}') is not null); rollback`, 't', 'recurring context remains available through SECURITY DEFINER RPC')
+equal(`begin; set local role service_role; select payment_v2_begin_payout_dispatch('${recurringPayoutItem}')->>'execution_status'; rollback`, 'dispatching', 'begin dispatch remains available through SECURITY DEFINER RPC')
+equal(noColumnSelect('service_role'), 't', 'payout runtime proof restores no ledger column privilege')
 
 equal(`select payment_v2_affiliate_public_cutover_ready()`, 't', 'strengthened readiness is true after 03300')
 equal(`select exists(select 1 from pg_constraint where conname='affiliate_ledger_payment_v2_attribution') and exists(select 1 from pg_proc where oid='public.payment_v2_begin_payout_dispatch(uuid)'::regprocedure)`, 't', '03200 payout and reconciliation contracts remain intact')
