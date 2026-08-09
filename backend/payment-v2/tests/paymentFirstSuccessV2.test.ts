@@ -60,6 +60,15 @@ for (const pathname of ["/billing", "/billing/other", "/billing/success/other"])
 check(isPublicPath("/pricing"), "existing public path remains public");
 equal(isPublicPath("/dashboard"), false, "unrelated application route remains protected");
 
+const rateLimitApiPrefix = "/.well-known/vercel/rate-limit-api/";
+const checkoutRateLimitPath = `${rateLimitApiPrefix}payment-v2-checkout`;
+check(isPublicPath(checkoutRateLimitPath), "Payment V2 Firewall rate-limit API path is public to Proxy");
+check(isPublicPath(`${rateLimitApiPrefix}another-rule`), "another Firewall rate-limit identifier is public to Proxy");
+equal(isPublicPath("/.well-known/vercel/rate-limit-apix/payment-v2-checkout"), false, "Firewall namespace lookalike remains protected");
+equal(isPublicPath("/.well-known/example"), false, "unrelated .well-known path remains protected");
+const rateLimitProxyResponse = await proxy({ nextUrl: { pathname: checkoutRateLimitPath } } as unknown as NextRequest);
+equal(rateLimitProxyResponse.headers.get("x-middleware-next"), "1", "unauthenticated Payment V2 Firewall rate-limit request continues without redirect");
+
 const botIdPrefix = "/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/";
 const botIdChallengePath = `${botIdPrefix}a-4-a/c.js`;
 check(isPublicPath(botIdChallengePath), "pinned BotID challenge script is public to Proxy");

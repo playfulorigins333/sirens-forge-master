@@ -30,11 +30,14 @@ const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"];
 // redirect BotID's internal challenge/proxy namespace.
 const BOTID_INTERNAL_PREFIX =
   "/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/";
+const VERCEL_RATE_LIMIT_API_PREFIX =
+  "/.well-known/vercel/rate-limit-api/";
 
 export function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
   return (
     pathname.startsWith(BOTID_INTERNAL_PREFIX) ||
+    pathname.startsWith(VERCEL_RATE_LIMIT_API_PREFIX) ||
     PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   );
 }
