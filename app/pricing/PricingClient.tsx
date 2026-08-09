@@ -79,7 +79,7 @@ function SeatCounterText({ tier }: { tier: TierSeats }) {
 }
 
 export default function PricingClient() {
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = useState<ViewMode>("compare");
 
   // ✅ NO FALLBACK NUMBERS. Seats are authoritative from /api/subscription/seat-count only.
   // null = not yet hydrated
@@ -285,14 +285,14 @@ export default function PricingClient() {
     },
     {
       label: "Founding Recognition",
-      og: "OG Eternal Throne badge, top placement",
-      earlyBird: "Founding circle badge",
+      og: "OG Eternal Throne / permanent OG Founder recognition",
+      earlyBird: "Permanent Early Bird founder recognition",
       highlight: "og",
     },
     {
-      label: "Token Boosts & Rewards",
-      og: "Highest bonus multipliers and early beta access",
-      earlyBird: "Strong boosts and beta access",
+      label: "Access",
+      og: "Lifetime founder access — no recurring subscription",
+      earlyBird: "$29.99/month founder access while subscription remains active",
       highlight: "og",
     },
     {
@@ -336,8 +336,8 @@ export default function PricingClient() {
               Choose your entry tier
             </h1>
             <p className="text-gray-400 text-sm md:text-base max-w-xl mx-auto md:mx-0">
-              Lock in OG or Early Bird benefits before public pricing activates. Seats update in real time
-              as founders join. Founder pricing ends before public launch.
+              Lock in OG or Early Bird founder benefits while seats remain. Seats update in real time as
+              founders join. Founder pricing is available only while these limited founder seats remain.
             </p>
           </div>
 
@@ -545,8 +545,8 @@ export default function PricingClient() {
                     </div>
 
                     <CardDescription className="text-sm text-gray-300/95 text-center max-w-xs mx-auto">
-                      Own a <span className="font-semibold">lifetime</span> stake in SirensForge. Highest commissions,
-                      deepest recognition, and top-tier leverage forever.
+                      Secure <span className="font-semibold">lifetime founder access</span> to SirensForge with
+                      the highest founder commissions, permanent OG Founder recognition, and no recurring subscription.
                     </CardDescription>
                   </CardHeader>
 
@@ -558,8 +558,8 @@ export default function PricingClient() {
                       <li>
                         • <strong>25% lifetime commission</strong> on subscriptions after 6 months
                       </li>
-                      <li>• Highest priority in feature voting and early beta access</li>
-                      <li>• Lifetime OG badge and top-tier platform status</li>
+                      <li>• Permanent OG Founder status and top-tier platform recognition</li>
+                      <li>• Lifetime founder access</li>
                       <li>
                         • Locked-in <strong>lifetime deal</strong> — pay once, never again.
                       </li>
@@ -666,7 +666,7 @@ export default function PricingClient() {
                         • Affiliate: <strong>20%</strong> first 6 months, <strong>10% lifetime</strong>
                       </li>
                       <li>• 10% commission on one-time purchases</li>
-                      <li>• Crowned forever in platform</li>
+                      <li>• Permanent Early Bird founder recognition</li>
                     </ul>
 
                     <div className="space-y-3">
@@ -789,8 +789,8 @@ export default function PricingClient() {
                 <p className="mb-2 font-semibold text-slate-100">How to choose your tier:</p>
                 <ul className="space-y-1.5 list-disc list-inside">
                   <li>
-                    If you want <span className="font-semibold">maximum</span> upside, lifetime perks, and top platform visibility,
-                    OG Eternal Throne is designed for you.
+                    If you want the highest founder referral commissions, lifetime founder access, and permanent OG Founder
+                    recognition, OG Eternal Throne is designed for you.
                   </li>
                   <li>
                     If you want <span className="font-semibold">flexibility</span> with strong commissions and full access, Early Bird is
