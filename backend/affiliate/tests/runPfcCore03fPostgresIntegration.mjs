@@ -60,11 +60,27 @@ equal(`begin; set local role authenticated; set local request.jwt.claim.sub='${a
 const runtimeColumns = ['id','ledger_id','amount_cents','currency','source_charge_id','connect_destination','transfer_idempotency_key','execution_status','recurring_invoice_id']
 equal(`begin; set local role service_role; select bool_and(has_column_privilege('service_role','public.affiliate_payout_items',c,'SELECT')) from unnest(array[${runtimeColumns.map((c) => `'${c}'`).join(',')}]) c; rollback`, 't', 'service_role can read every payout-item runtime field')
 equal(`begin; set local role service_role; select count(*)>=1 from public.affiliate_payout_items where execution_status in('pending','dispatching') and recurring_invoice_id is not null; rollback`, 't', 'service_role can load recurring payout items without ledger access')
-const recurringPayoutItem=run(`select i.id from affiliate_payout_items i join affiliate_ledger l on l.id=i.ledger_id where i.execution_status='pending' and i.recurring_invoice_id is not null and i.recurring_invoice_id=l.payment_v2_recurring_invoice_id order by i.id limit 1`)
-assert.ok(recurringPayoutItem, 'hardened batch fixture copied recurring identity onto payout item')
-equal(`select i.recurring_invoice_id=l.payment_v2_recurring_invoice_id from affiliate_payout_items i join affiliate_ledger l on l.id=i.ledger_id where i.id='${recurringPayoutItem}'`, 't', 'payout item carries the ledger recurring invoice identity')
-equal(`begin; set local role service_role; select (payment_v2_get_payout_recurring_context('${recurringPayoutItem}') is not null); rollback`, 't', 'recurring context remains available through SECURITY DEFINER RPC')
-equal(`begin; set local role service_role; select payment_v2_begin_payout_dispatch('${recurringPayoutItem}')->>'execution_status'; rollback`, 'dispatching', 'begin dispatch remains available through SECURITY DEFINER RPC')
+const dispatchableRecurringItem=run(`select i.id
+from affiliate_payout_items i
+join affiliate_ledger l on l.id=i.ledger_id
+join payment_v2_affiliate_recurring_invoices r on r.id=i.recurring_invoice_id
+join payment_v2_purchases p on p.id=r.payment_v2_purchase_id
+join payment_v2_holds h on h.id=p.hold_id
+left join profiles pr on pr.id=l.affiliate_user_id
+where i.execution_status='pending' and i.attempt_count=0 and i.recurring_invoice_id is not null
+  and l.status='available' and l.attribution_status='PURCHASER_ATTACHED' and l.referred_user_id is not null
+  and l.payment_v2_recurring_invoice_id=i.recurring_invoice_id
+  and r.reconciliation_status='RECONCILED' and r.commission_amount_cents is not distinct from l.commission_amount_cents
+  and r.stripe_source_charge_id~'^ch_[A-Za-z0-9]+$' and r.currency~'^[a-z]{3}$' and r.commission_amount_cents>=0
+  and (h.stripe_connect_destination~'^acct_[A-Za-z0-9]+$' or (h.stripe_connect_destination is null and pr.stripe_connect_onboarded is true and pr.stripe_connect_account_id~'^acct_[A-Za-z0-9]+$'))
+order by r.stripe_subscription_id,r.paid_month_number,i.id limit 1`)
+assert.ok(dispatchableRecurringItem, '03D fixture contains a recurring item satisfying every dispatch precondition')
+equal(`select i.recurring_invoice_id=l.payment_v2_recurring_invoice_id from affiliate_payout_items i join affiliate_ledger l on l.id=i.ledger_id where i.id='${dispatchableRecurringItem}'`, 't', 'payout item carries the ledger recurring invoice identity')
+equal(`begin; set local role service_role; select (payment_v2_get_payout_recurring_context('${dispatchableRecurringItem}') is not null); select payment_v2_begin_payout_dispatch('${dispatchableRecurringItem}')->>'execution_status'; rollback`, 't\ndispatching', 'valid recurring context reaches dispatching through SECURITY DEFINER RPCs')
+
+const staleRecurringItem=run(`select i.id from affiliate_payout_items i join affiliate_ledger l on l.id=i.ledger_id join payment_v2_affiliate_recurring_invoices r on r.id=i.recurring_invoice_id where i.execution_status='pending' and i.attempt_count=0 and i.recurring_invoice_id is not null and r.commission_amount_cents is distinct from l.commission_amount_cents order by i.id limit 1`)
+assert.ok(staleRecurringItem, '03D fixture retains a deliberately mismatched recurring payout item')
+equal(`begin; set local role service_role; select payment_v2_begin_payout_dispatch('${staleRecurringItem}') is null; rollback`, 't', 'financially mismatched recurring item is refused dispatch')
 equal(noColumnSelect('service_role'), 't', 'payout runtime proof restores no ledger column privilege')
 
 equal(`select payment_v2_affiliate_public_cutover_ready()`, 't', 'strengthened readiness is true after 03300')
