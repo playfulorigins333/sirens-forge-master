@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import type { NextRequest } from "next/server";
 import {
   buildPaymentSuccessLinks, paymentFirstSuccessEnabled, PaymentFirstSuccessFlow,
   validateSuccessSearchParams, type SuccessFlowDependencies, type SuccessState,
 } from "../../../lib/payment-v2/successFlow";
-import { isPublicPath } from "../../../proxy";
+import { isPublicPath, proxy } from "../../../proxy";
 
 let assertions = 0;
 const equal = (actual: unknown, expected: unknown, message: string) => { assert.deepEqual(actual, expected, message); assertions++; };
@@ -58,6 +59,16 @@ for (const pathname of ["/billing", "/billing/other", "/billing/success/other"])
   equal(isPublicPath(pathname), false, `${pathname} remains protected`);
 check(isPublicPath("/pricing"), "existing public path remains public");
 equal(isPublicPath("/dashboard"), false, "unrelated application route remains protected");
+
+const botIdPrefix = "/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/";
+const botIdChallengePath = `${botIdPrefix}a-4-a/c.js`;
+check(isPublicPath(botIdChallengePath), "pinned BotID challenge script is public to Proxy");
+check(isPublicPath(`${botIdPrefix}nested/challenge/token`), "nested paths in the pinned BotID namespace are public to Proxy");
+equal(isPublicPath("/249e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js"), false, "different first BotID UUID remains protected");
+equal(isPublicPath("/149e9513-01fa-4fb0-aad4-566afd725d1b/3d206a39-8ed7-437e-a3be-862e0f06eea3/a-4-a/c.js"), false, "different second BotID UUID remains protected");
+equal(isPublicPath("/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3"), false, "namespace without its exact trailing slash remains protected");
+const botIdProxyResponse = await proxy({ nextUrl: { pathname: botIdChallengePath } } as unknown as NextRequest);
+equal(botIdProxyResponse.headers.get("x-middleware-next"), "1", "unauthenticated BotID challenge continues to Next.js routing without redirect");
 
 {
   const h = harness([{ status: 200, body: { status: "processing" } }, { status: 200, body: { status: "claimed" } }]);
@@ -134,6 +145,7 @@ const cancel = readFileSync("app/billing/cancel/page.tsx", "utf8");
 const flowSource = readFileSync("lib/payment-v2/successFlow.ts", "utf8");
 const proxySource = readFileSync("proxy.ts", "utf8");
 check(!proxySource.match(/PUBLIC_PREFIXES\s*=.*billing/), "no broad billing public prefix exists");
+check(proxySource.includes("Next.js Proxy runs before next.config rewrites"), "source documents why the exact BotID namespace bypasses auth redirect");
 check(successPage.indexOf("paymentFirstSuccessEnabled") < successPage.indexOf("await searchParams"), "disabled success gate precedes input reads");
 check(!successPage.includes("supabaseBrowser") && !cancel.includes("supabaseBrowser"), "disabled pages initialize no browser auth client");
 check(!cancel.includes("fetch(") && !cancel.includes("/api/"), "cancel page performs zero API calls");

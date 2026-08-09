@@ -26,9 +26,17 @@ const PUBLIC_PATHS = new Set([
 
 const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"];
 
+// Next.js Proxy runs before next.config rewrites, so the auth proxy must not
+// redirect BotID's internal challenge/proxy namespace.
+const BOTID_INTERNAL_PREFIX =
+  "/149e9513-01fa-4fb0-aad4-566afd725d1b/2d206a39-8ed7-437e-a3be-862e0f06eea3/";
+
 export function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.has(pathname)) return true;
-  return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  return (
+    pathname.startsWith(BOTID_INTERNAL_PREFIX) ||
+    PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix))
+  );
 }
 
 export async function proxy(req: NextRequest) {
