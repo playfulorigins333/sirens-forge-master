@@ -64,9 +64,15 @@ function AnimatedNumber({ value }: { value: number }) {
   return <span>{display.toLocaleString()}</span>;
 }
 
-function SeatCounterText({ tier }: { tier: TierSeats }) {
+function SeatCounterText({
+  tier,
+  fullCapacityLabel = "founder spots remaining",
+}: {
+  tier: TierSeats;
+  fullCapacityLabel?: "founder spots remaining" | "spots remaining";
+}) {
   if (tier.remaining === tier.total) {
-    return <span>{tier.total.toLocaleString()} founder spots remaining</span>;
+    return <span>{tier.total.toLocaleString()} {fullCapacityLabel}</span>;
   }
 
   return (
@@ -74,6 +80,7 @@ function SeatCounterText({ tier }: { tier: TierSeats }) {
       <AnimatedNumber value={tier.remaining} />
       <span className="mx-0.5">/</span>
       <AnimatedNumber value={tier.total} />
+      <span> seats left</span>
     </>
   );
 }
@@ -371,7 +378,7 @@ export default function PricingClient() {
           transition={{ delay: 0.1, duration: 0.7, ease: "easeOut" }}
           className="mt-6 mb-6 md:mb-10"
         >
-          <div className="relative overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 px-4 py-3 md:px-5 md:py-3.5 shadow-[0_0_35px_rgba(15,23,42,0.9)] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="relative grid grid-cols-1 gap-4 overflow-hidden rounded-2xl border border-slate-800/80 bg-slate-950/70 px-4 py-3 shadow-[0_0_35px_rgba(15,23,42,0.9)] md:px-5 md:py-3.5 lg:grid-cols-[minmax(280px,1fr)_minmax(240px,0.8fr)_minmax(300px,1fr)] lg:items-center">
             {/* Glow accent */}
             <div
               aria-hidden
@@ -393,53 +400,49 @@ export default function PricingClient() {
               </div>
             </div>
 
-            <div className="flex flex-col items-start sm:items-end text-[11px] md:text-xs text-slate-400 gap-1.5">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
-                  <span>OG: </span>
-                  <span className="font-semibold text-slate-100">
-                    {!availabilityLoaded ? (
-                      <span className="text-slate-500">Loading…</span>
-                    ) : ogUnavailable ? (
-                      <span className="text-slate-400">Currently unavailable</span>
-                    ) : ogSoldOut ? (
-                      <span className="text-amber-300">SOLD OUT</span>
-                    ) : !seats ? (
-                      <span className="text-slate-500">Loading…</span>
-                    ) : (
-                      <SeatCounterText tier={seats.og} />
-                    )}
-                  </span>
-                </div>
+            <div className="grid grid-cols-[auto_5.5rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5 text-[11px] text-slate-400 md:text-xs">
+              <div className="contents">
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_rgba(52,211,153,0.8)]" />
+                <span className="whitespace-nowrap">OG</span>
+                <span className="font-semibold text-slate-100 lg:whitespace-nowrap">
+                  {!availabilityLoaded ? (
+                    <span className="text-slate-500">Loading…</span>
+                  ) : ogUnavailable ? (
+                    <span className="text-slate-400">Currently unavailable</span>
+                  ) : ogSoldOut ? (
+                    <span className="text-amber-300">SOLD OUT</span>
+                  ) : !seats ? (
+                    <span className="text-slate-500">Loading…</span>
+                  ) : (
+                    <SeatCounterText tier={seats.og} />
+                  )}
+                </span>
               </div>
 
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <span className="inline-flex h-1.5 w-1.5 rounded-full bg-pink-400 animate-pulse shadow-[0_0_12px_rgba(244,114,182,0.8)]" />
-                  <span>Early Bird: </span>
-                  <span className="font-semibold text-slate-100">
-                    {!availabilityLoaded ? (
-                      <span className="text-slate-500">Loading…</span>
-                    ) : earlyBirdUnavailable ? (
-                      <span className="text-slate-400">Currently unavailable</span>
-                    ) : earlyBirdSoldOut ? (
-                      <span className="text-amber-300">SOLD OUT</span>
-                    ) : !seats ? (
-                      <span className="text-slate-500">Loading…</span>
-                    ) : (
-                      <SeatCounterText tier={seats.earlyBird} />
-                    )}
-                  </span>
-                </div>
+              <div className="contents">
+                <span className="inline-flex h-1.5 w-1.5 rounded-full bg-pink-400 animate-pulse shadow-[0_0_12px_rgba(244,114,182,0.8)]" />
+                <span className="whitespace-nowrap">Early Bird</span>
+                <span className="font-semibold text-slate-100 lg:whitespace-nowrap">
+                  {!availabilityLoaded ? (
+                    <span className="text-slate-500">Loading…</span>
+                  ) : earlyBirdUnavailable ? (
+                    <span className="text-slate-400">Currently unavailable</span>
+                  ) : earlyBirdSoldOut ? (
+                    <span className="text-amber-300">SOLD OUT</span>
+                  ) : !seats ? (
+                    <span className="text-slate-500">Loading…</span>
+                  ) : (
+                    <SeatCounterText tier={seats.earlyBird} fullCapacityLabel="spots remaining" />
+                  )}
+                </span>
               </div>
 
               {loadingSeats && (
-                <p className="text-[10px] text-slate-500">Syncing with live seat data…</p>
+                <p className="col-span-3 text-[10px] text-slate-500">Syncing with live seat data…</p>
               )}
             </div>
 
-            <div className="w-full sm:w-auto sm:min-w-[280px]">
+            <div className="w-full min-w-0">
               {publicPurchase?.checkoutMode === "legacy" || paymentV2 ? (
               <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
@@ -710,7 +713,7 @@ export default function PricingClient() {
                               <span className="w-1.5 h-1.5 rounded-full bg-pink-300 animate-pulse" />
                               <span className="font-semibold text-pink-100">
                                 <span className="uppercase tracking-[0.18em] text-[9px] mr-1">Early Bird</span>
-                                <SeatCounterText tier={seats.earlyBird} />
+                                <SeatCounterText tier={seats.earlyBird} fullCapacityLabel="spots remaining" />
                               </span>
                             </>
                           )}
