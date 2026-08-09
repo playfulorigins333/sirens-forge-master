@@ -34,6 +34,7 @@ type AffiliateSummary = {
   total_earnings: number
   pending: number
   paid: number
+  payout_eligible_balance: number
   clicks: number
   commissions: Array<{
     id?: string
@@ -57,6 +58,13 @@ type PayoutItem = {
   amount_cents?: number | null
   created_at?: string | null
   affiliate_payout_batches?: PayoutBatch[] | null
+}
+
+export function affiliatePayoutThresholdState(payoutEligibleBalance: number) {
+  return {
+    remainingToThreshold: Math.max(0, MIN_PAYOUT_THRESHOLD - payoutEligibleBalance),
+    thresholdMet: payoutEligibleBalance >= MIN_PAYOUT_THRESHOLD,
+  }
 }
 
 function formatCurrency(amount: number) {
@@ -197,8 +205,8 @@ export default function AffiliateDashboard() {
   const pendingAmount = Number(summary?.pending ?? 0)
   const paidAmount = Number(summary?.paid ?? 0)
   const totalEarnedAmount = Number(summary?.total_earnings ?? 0)
-  const remainingToThreshold = Math.max(0, MIN_PAYOUT_THRESHOLD - pendingAmount)
-  const thresholdMet = pendingAmount >= MIN_PAYOUT_THRESHOLD
+  const payoutEligibleBalance = Number(summary?.payout_eligible_balance ?? 0)
+  const { remainingToThreshold, thresholdMet } = affiliatePayoutThresholdState(payoutEligibleBalance)
 
   const nextPayoutEstimate = useMemo(() => {
     if (!stripeConnected) {
@@ -345,7 +353,7 @@ export default function AffiliateDashboard() {
             </CardHeader>
             <CardContent>
               <p className="text-emerald-100 text-sm">
-                Your Stripe account is connected. Commissions are routed directly to you.
+                Your Stripe account is connected. Eligible commissions can be sent to your connected account during scheduled payout runs.
               </p>
             </CardContent>
           </Card>
@@ -434,7 +442,7 @@ export default function AffiliateDashboard() {
                 {formatCurrency(MIN_PAYOUT_THRESHOLD)}
               </div>
               <p className="text-sm text-gray-300">
-                Affiliates become payout-eligible once pending commissions reach the minimum threshold.
+                Affiliates become payout-eligible once payout-ready commissions reach the minimum threshold.
               </p>
               <div className="rounded-xl border border-gray-700 bg-gray-900/70 px-4 py-3 text-sm text-gray-300">
                 {thresholdMet
@@ -464,8 +472,8 @@ export default function AffiliateDashboard() {
                 {!stripeConnected
                   ? "Payouts cannot be sent until Stripe Connect is completed."
                   : thresholdMet
-                  ? "You are payout-eligible based on current pending balance."
-                  : "Once your pending balance reaches the threshold, you become eligible for the next payout run."}
+                  ? "You are payout-eligible based on your current payout-ready balance."
+                  : "Once your payout-ready balance reaches the threshold, you become eligible for the next payout run."}
               </div>
             </CardContent>
           </Card>
