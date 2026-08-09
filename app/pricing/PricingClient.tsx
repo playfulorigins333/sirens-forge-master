@@ -96,8 +96,12 @@ export default function PricingClient() {
   const [referralSaved, setReferralSaved] = useState<boolean>(false);
 
   const paymentV2 = publicPurchase?.checkoutMode === "payment_v2";
-  const ogSoldOut = paymentV2 ? publicPurchase.tiers?.og_throne === "sold_out" : seats ? seats.og.remaining <= 0 : false;
-  const earlyBirdSoldOut = paymentV2 ? publicPurchase.tiers?.early_bird === "sold_out" : seats ? seats.earlyBird.remaining <= 0 : false;
+  const ogSoldOut = paymentV2
+    ? publicPurchase.tiers?.og_throne === "sold_out" || (seats ? seats.og.remaining <= 0 : false)
+    : seats ? seats.og.remaining <= 0 : false;
+  const earlyBirdSoldOut = paymentV2
+    ? publicPurchase.tiers?.early_bird === "sold_out" || (seats ? seats.earlyBird.remaining <= 0 : false)
+    : seats ? seats.earlyBird.remaining <= 0 : false;
   const ogUnavailable = paymentV2 ? publicPurchase.tiers?.og_throne === "unavailable" : seats ? !seats.og.active : false;
   const earlyBirdUnavailable = paymentV2 ? publicPurchase.tiers?.early_bird === "unavailable" : seats ? !seats.earlyBird.active : false;
   const ogActive = paymentV2 ? publicPurchase.tiers?.og_throne === "available" : Boolean(seats?.og.active);
@@ -140,7 +144,7 @@ export default function PricingClient() {
 
   // ✅ Live seat polling – wired to /api/subscription/seat-count (authoritative)
   useEffect(() => {
-    if (publicPurchase?.checkoutMode !== "legacy") return;
+    if (!publicPurchase) return;
     let active = true;
 
     const fetchSeats = async () => {
@@ -243,14 +247,6 @@ export default function PricingClient() {
     } finally {
       setCheckoutLoading(null);
     }
-  };
-
-  const seatText = (tier: TierSeats) => {
-    if (tier.remaining === tier.total) {
-      return `${tier.total} founder spots remaining`;
-    }
-
-    return `${tier.remaining}/${tier.total} seats left`;
   };
 
   const compareRows: {
@@ -409,8 +405,10 @@ export default function PricingClient() {
                       <span className="text-slate-400">Currently unavailable</span>
                     ) : ogSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
+                    ) : !seats ? (
+                      <span className="text-slate-500">Loading…</span>
                     ) : (
-                      paymentV2 ? <span>Available</span> : <SeatCounterText tier={seats!.og} />
+                      <SeatCounterText tier={seats.og} />
                     )}
                   </span>
                 </div>
@@ -427,8 +425,10 @@ export default function PricingClient() {
                       <span className="text-slate-400">Currently unavailable</span>
                     ) : earlyBirdSoldOut ? (
                       <span className="text-amber-300">SOLD OUT</span>
+                    ) : !seats ? (
+                      <span className="text-slate-500">Loading…</span>
                     ) : (
-                      paymentV2 ? <span>Available</span> : <SeatCounterText tier={seats!.earlyBird} />
+                      <SeatCounterText tier={seats.earlyBird} />
                     )}
                   </span>
                 </div>
@@ -593,12 +593,17 @@ export default function PricingClient() {
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                               <span className="font-semibold text-amber-200">SOLD OUT</span>
                             </>
+                          ) : !seats ? (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
+                              <span className="font-semibold text-slate-300">Loading…</span>
+                            </>
                           ) : (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-300 animate-pulse" />
                               <span className="font-semibold text-amber-100">
                                 <span className="uppercase tracking-[0.18em] text-[9px] mr-1">OG Seats</span>
-                                {paymentV2 ? "Available" : seatText(seats!.og)}
+                                <SeatCounterText tier={seats.og} />
                               </span>
                             </>
                           )}
@@ -695,12 +700,17 @@ export default function PricingClient() {
                               <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
                               <span className="font-semibold text-amber-200">SOLD OUT</span>
                             </>
+                          ) : !seats ? (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-500 animate-pulse" />
+                              <span className="font-semibold text-slate-300">Loading…</span>
+                            </>
                           ) : (
                             <>
                               <span className="w-1.5 h-1.5 rounded-full bg-pink-300 animate-pulse" />
                               <span className="font-semibold text-pink-100">
                                 <span className="uppercase tracking-[0.18em] text-[9px] mr-1">Early Bird</span>
-                                {paymentV2 ? "Available" : seatText(seats!.earlyBird)}
+                                <SeatCounterText tier={seats.earlyBird} />
                               </span>
                             </>
                           )}
