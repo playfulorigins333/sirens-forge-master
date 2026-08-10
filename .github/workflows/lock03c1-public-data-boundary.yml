@@ -1,0 +1,45 @@
+name: LOCK-03C1 Public Data Boundary
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - supabase/migrations/20260810003400_lock03c1_public_table_rls_boundary.sql
+      - supabase/manual/lock03c1_public_table_rls_rollback.sql
+      - backend/security/tests/lock03c1PublicTableRlsBoundary.test.ts
+      - backend/security/tests/runLock03c1PostgresIntegration.mjs
+      - .github/workflows/lock03c1-public-data-boundary.yml
+
+permissions:
+  contents: read
+
+jobs:
+  lock03c1-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      LOCK03C1_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/lock03c1_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Create disposable database
+        run: psql postgres://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database lock03c1_test'
+      - name: Static source contract
+        run: npx tsx backend/security/tests/lock03c1PublicTableRlsBoundary.test.ts
+      - name: Disposable PostgreSQL behavior
+        run: node backend/security/tests/runLock03c1PostgresIntegration.mjs
