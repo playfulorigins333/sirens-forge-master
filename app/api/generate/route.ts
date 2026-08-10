@@ -5,10 +5,14 @@ export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
-import { resolveLoraStack } from "@/lib/generation/lora-resolver";
-import { ensureActiveSubscription } from "@/lib/subscription-checker";
-import type { BodyMode } from "@/lib/generation/contract";
+import { buildWorkflow } from "../../../lib/comfy/buildWorkflow";
+import { resolveLoraStack } from "../../../lib/generation/lora-resolver";
+import { ensureActiveSubscription } from "../../../lib/subscription-checker";
+import type { BodyMode } from "../../../lib/generation/contract";
+import {
+  requireSirensApiConfig,
+  sirensApiFetch,
+} from "../../../lib/sirensApi";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -180,14 +184,8 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = auth.user.id;
-    const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
-
-    if (!RUNPOD_BASE_URL) {
-      return NextResponse.json(
-        { error: "RUNPOD_BASE_URL_MISSING" },
-        { status: 500 },
-      );
-    }
+    // Fail closed before parsing input or invoking any privileged generation work.
+    const sirensApiConfig = requireSirensApiConfig();
 
     const publicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const publicSupabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -270,15 +268,18 @@ export async function POST(req: NextRequest) {
 
     const startedAt = Date.now();
 
-    const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
+    const upstream = await sirensApiFetch("/gateway/generate", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-    });
+    }, fetch, sirensApiConfig);
 
-    const text = await upstream.text();
+    const text = (await upstream.text()).replaceAll(
+      sirensApiConfig.internalSecret,
+      "[redacted]",
+    );
 
     if (!upstream.ok) {
       const logged = await bestEffortLogGeneration({
@@ -447,12 +448,20 @@ export async function POST(req: NextRequest) {
       { status: 200 },
     );
   } catch (err: any) {
-    console.error("[generate] fatal error:", err);
+    const message = err instanceof Error ? err.message : "";
+    if (
+      message === "SIRENS_API_INTERNAL_SECRET_MISSING" ||
+      message === "SIRENS_API_BASE_URL_MISSING"
+    ) {
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+
+    console.error("[generate] fatal error");
 
     return NextResponse.json(
       {
         error: "INTERNAL_ERROR",
-        message: err?.message ?? "Unknown error",
+        message: "Unknown error",
       },
       { status: 500 },
     );
