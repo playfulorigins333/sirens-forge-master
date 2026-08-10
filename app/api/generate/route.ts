@@ -4,11 +4,10 @@ export const preferredRegion = "home";
 export const maxDuration = 300;
 
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { createClient } from "@supabase/supabase-js";
-import { createServerClient } from "@supabase/ssr";
 import { buildWorkflow } from "@/lib/comfy/buildWorkflow";
 import { resolveLoraStack } from "@/lib/generation/lora-resolver";
+import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import type { BodyMode } from "@/lib/generation/contract";
 
 type GenerateImageRequest = {
@@ -53,41 +52,8 @@ function getAdminClient() {
   });
 }
 
-async function getUserIdFromCookies(): Promise<string | null> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-  if (!url || !anon) return null;
-
-  try {
-    const cookieStore = await cookies();
-
-    const supabase = createServerClient(url, anon, {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
-        set() {},
-        remove() {},
-      },
-    });
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    return user?.id ?? null;
-  } catch (error) {
-    console.warn(
-      "[generate] Could not resolve authenticated user from cookies.",
-      error,
-    );
-    return null;
-  }
-}
-
 async function bestEffortLogGeneration(args: {
-  userId: string | null;
+  userId: string;
   prompt: string;
   negativePrompt: string;
   bodyMode: string;
@@ -201,6 +167,19 @@ async function bestEffortLogGeneration(args: {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await ensureActiveSubscription();
+
+    if (!auth.ok) {
+      return NextResponse.json(
+        {
+          error: auth.error,
+          message: auth.message,
+        },
+        { status: auth.status },
+      );
+    }
+
+    const userId = auth.user.id;
     const RUNPOD_BASE_URL = process.env.RUNPOD_BASE_URL;
 
     if (!RUNPOD_BASE_URL) {
@@ -289,7 +268,6 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    const userId = await getUserIdFromCookies();
     const startedAt = Date.now();
 
     const upstream = await fetch(`${RUNPOD_BASE_URL}/gateway/generate`, {
