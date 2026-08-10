@@ -44,7 +44,7 @@ type Counters = {
 const routeHooks: Record<string, (...args: any[]) => any> = {}
 ;(globalThis as any).__xLiveRoute = routeHooks
 ;(globalThis as any).__xFanvueResolutions = 0
-process.env.AUTOPOST_X_ADMIN_USER_IDS = "AUTHENTICATED_USER_MARKER"
+process.env.AUTOPOST_X_ADMIN_USER_IDS = "44444444-4444-4444-8444-444444444444"
 
 const canary = await import("../../../lib/autopost/xLiveTextCanary.ts")
 const posture = await import("../../../lib/autopost/xStoredPosture.ts")
@@ -62,7 +62,7 @@ const SECRET_MARKERS = [
   "ENCRYPTED_REFRESH_MARKER",
   "PROVIDER_ACCOUNT_MARKER",
   "The_beard0302",
-  "AUTHENTICATED_USER_MARKER",
+  "44444444-4444-4444-8444-444444444444",
   "Bearer DECRYPTED_ACCESS_MARKER",
   "RAW_PROVIDER_BODY_MARKER",
   "RAW_DATABASE_ERROR_MARKER",
@@ -169,12 +169,12 @@ function fakeAccountClient(data: unknown, error: unknown = null) {
 // Exact X-only account read and no mutation capability.
 {
   const fake = fakeAccountClient(validAccount)
-  const result = await canary.createXLiveTextCanaryAccountLoader(fake.client)("AUTHENTICATED_USER_MARKER")
+  const result = await canary.createXLiveTextCanaryAccountLoader(fake.client)("44444444-4444-4444-8444-444444444444")
   assert.deepEqual(result, validAccount)
   assert.deepEqual(fake.operations, [
     ["from", "autopost_accounts"],
     ["select", canary.X_LIVE_CANARY_ACCOUNT_SELECT],
-    ["eq", "user_id", "AUTHENTICATED_USER_MARKER"],
+    ["eq", "user_id", "44444444-4444-4444-8444-444444444444"],
     ["eq", "platform", "x"],
     ["maybeSingle"],
   ])
@@ -183,7 +183,7 @@ function fakeAccountClient(data: unknown, error: unknown = null) {
 // Account lookup errors are sanitized and stop all privileged token/provider work.
 {
   const value = harness({ lookupThrows: true })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_ACCOUNT_LOOKUP_FAILED")
   assert.equal(value.counters.keyCalls, 0)
   assert.equal(value.counters.decryptCalls, 0)
@@ -212,7 +212,7 @@ const postureCases: Array<[string, any]> = [
 for (const [name, patch] of postureCases) {
   const account = patch === null ? null : { ...validAccount, ...patch }
   const value = harness({ account })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_ACCOUNT_NOT_READY", name)
   assert.ok(posture.getXStoredPostureBlocker(account), name)
   assert.equal(value.counters.keyCalls, 0, name)
@@ -224,7 +224,7 @@ for (const [name, patch] of postureCases) {
 // Protected username, key, clock, expiry, decryption and configuration failures stop pre-provider.
 for (const username of ["different", "@The_beard0302"]) {
   const value = harness({ account: { ...validAccount, provider_username: username } })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_PROTECTED_USERNAME_MISMATCH")
   assert.equal(value.counters.keyCalls, 0)
   assert.equal(value.counters.decryptCalls, 0)
@@ -232,21 +232,21 @@ for (const username of ["different", "@The_beard0302"]) {
 }
 for (const keyVersion of [undefined, "7", NaN, Infinity, 7.5, 0, -1]) {
   const value = harness({ keyVersion })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_TOKEN_KEY_VERSION_UNAVAILABLE")
   assert.equal(value.counters.decryptCalls, 0)
   assertPreProviderStopped(value)
 }
 for (const overrides of [{ keyThrows: true }, { keyVersion: 8 }]) {
   const value = harness(overrides)
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, overrides.keyThrows ? "X_LIVE_CANARY_TOKEN_KEY_VERSION_UNAVAILABLE" : "X_LIVE_CANARY_TOKEN_KEY_VERSION_MISMATCH")
   assert.equal(value.counters.decryptCalls, 0)
   assertPreProviderStopped(value)
 }
 for (const overrides of [{ nowThrows: true }, { nowValue: new Date("invalid") }]) {
   const value = harness(overrides)
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_TOKEN_EXPIRED_OR_EXPIRING")
   assert.equal(value.counters.decryptCalls, 0)
   assertPreProviderStopped(value)
@@ -254,20 +254,20 @@ for (const overrides of [{ nowThrows: true }, { nowValue: new Date("invalid") }]
 }
 for (const delta of [0, 59_999, 60_000]) {
   const value = harness({ account: { ...validAccount, token_expires_at: new Date(NOW.getTime() + delta).toISOString() } })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_TOKEN_EXPIRED_OR_EXPIRING")
   assert.equal(value.counters.decryptCalls, 0)
   assertPreProviderStopped(value)
 }
 for (const decrypted of [null, "", "   ", 42, true, { token: "value" }]) {
   const value = harness({ decrypted })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_ACCESS_TOKEN_INVALID")
   assertPreProviderStopped(value)
 }
 {
   const value = harness({ decryptThrows: true })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_ACCESS_TOKEN_DECRYPT_FAILED")
   assertPreProviderStopped(value)
 }
@@ -277,7 +277,7 @@ for (const apiBase of [
   "https://api.x.com#fragment", "https://api.x.com/unexpected",
 ]) {
   const value = harness({ apiBase })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_PROVIDER_CONFIG_INVALID", apiBase)
   assertPreProviderStopped(value)
 }
@@ -293,7 +293,7 @@ for (const apiBase of [
       return new Response(JSON.stringify({ data: { id: " post-id " } }), { status: 201 })
     },
   })
-  const result = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, "X_LIVE_CANARY_SUCCEEDED")
   assert.equal(result.post_id, "post-id")
   assert.deepEqual(value.timeoutValues, [10_000])
@@ -309,7 +309,7 @@ for (const apiBase of [
 
 async function assertProviderFailure(fetchImpl: Fetch, safeCode: string, uncertain: boolean, signal?: AbortSignal) {
   const value = harness({ fetchImpl, ...(signal ? { signal } : {}) })
-  const result: any = await canary.runXLiveTextCanary("AUTHENTICATED_USER_MARKER", value.deps)
+  const result: any = await canary.runXLiveTextCanary("44444444-4444-4444-8444-444444444444", value.deps)
   assert.equal(result.safe_code, safeCode)
   assert.equal(value.counters.fetchCalls, 1)
   assert.equal("post_id" in result, false)
@@ -344,9 +344,9 @@ function poisonRequest(url: string, confirmation?: string) {
 const routeGateCases = [
   { name: "missing user", user: null, confirmation: canary.X_LIVE_CANARY_CONFIRMATION_VALUE, status: 401, code: "X_LIVE_CANARY_UNAUTHENTICATED", url: "https://local.invalid/api" },
   { name: "blank user", user: " ", confirmation: canary.X_LIVE_CANARY_CONFIRMATION_VALUE, status: 401, code: "X_LIVE_CANARY_UNAUTHENTICATED", url: "https://local.invalid/api" },
-  { name: "missing confirmation", user: "AUTHENTICATED_USER_MARKER", confirmation: undefined, status: 400, code: "X_LIVE_CANARY_CONFIRMATION_REQUIRED", url: "https://local.invalid/api" },
-  { name: "wrong confirmation", user: "AUTHENTICATED_USER_MARKER", confirmation: "wrong", status: 400, code: "X_LIVE_CANARY_CONFIRMATION_REQUIRED", url: "https://local.invalid/api" },
-  { name: "query", user: "AUTHENTICATED_USER_MARKER", confirmation: canary.X_LIVE_CANARY_CONFIRMATION_VALUE, status: 400, code: "X_LIVE_CANARY_PARAMETERS_NOT_ALLOWED", url: "https://local.invalid/api?q=1" },
+  { name: "missing confirmation", user: "44444444-4444-4444-8444-444444444444", confirmation: undefined, status: 400, code: "X_LIVE_CANARY_CONFIRMATION_REQUIRED", url: "https://local.invalid/api" },
+  { name: "wrong confirmation", user: "44444444-4444-4444-8444-444444444444", confirmation: "wrong", status: 400, code: "X_LIVE_CANARY_CONFIRMATION_REQUIRED", url: "https://local.invalid/api" },
+  { name: "query", user: "44444444-4444-4444-8444-444444444444", confirmation: canary.X_LIVE_CANARY_CONFIRMATION_VALUE, status: 400, code: "X_LIVE_CANARY_PARAMETERS_NOT_ALLOWED", url: "https://local.invalid/api?q=1" },
 ]
 for (const testCase of routeGateCases) {
   let adminCalls = 0
@@ -395,7 +395,7 @@ async function boundedBodyCase(body: ReadableStream<Uint8Array>) {
   const operation = canary.handleXLiveTextCanaryRequest({
     ...value.deps,
     request: bodyRequest(body),
-    getAuthenticatedUserId: async () => "AUTHENTICATED_USER_MARKER",
+    getAuthenticatedUserId: async () => "44444444-4444-4444-8444-444444444444",
   })
   const result = await Promise.race([
     operation,

@@ -3,6 +3,7 @@ import "server-only"
 import { requireUserId } from "@/lib/supabaseServer"
 
 const X_ADMIN_USER_IDS_ENV = "AUTOPOST_X_ADMIN_USER_IDS"
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 type XAdminAuthorizationDependencies = {
   requireAuthenticatedUserId?: typeof requireUserId
@@ -26,10 +27,15 @@ export async function requireXAdminUserId(
     (readAdminUserIds() ?? "")
       .split(",")
       .map((entry) => entry.trim())
-      .filter((entry) => entry.length > 0)
+      .filter((entry) => CANONICAL_UUID.test(entry))
+      .map((entry) => entry.toLowerCase())
   )
 
-  if (!authenticatedUserId || allowedUserIds.size === 0 || !allowedUserIds.has(authenticatedUserId)) {
+  if (
+    !CANONICAL_UUID.test(authenticatedUserId) ||
+    allowedUserIds.size === 0 ||
+    !allowedUserIds.has(authenticatedUserId.toLowerCase())
+  ) {
     throw new Error("Unauthorized")
   }
 

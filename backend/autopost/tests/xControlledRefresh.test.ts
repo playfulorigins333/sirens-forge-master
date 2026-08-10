@@ -25,7 +25,7 @@ export async function resolve(specifier, context, nextResolve) {
 const hooks: Record<string, (...args: any[]) => any> = {}
 ;(globalThis as any).__xControlledRoute = hooks
 ;(globalThis as any).__xControlledFanvue = 0
-process.env.AUTOPOST_X_ADMIN_USER_IDS = "user"
+process.env.AUTOPOST_X_ADMIN_USER_IDS = "33333333-3333-4333-8333-333333333333"
 const controlled = await import("../../../lib/autopost/xControlledRefresh.ts")
 const route = await import("../../../app/api/admin/autopost/x/controlled-refresh/route.ts")
 assert.equal((globalThis as any).__xControlledFanvue, 0)
@@ -118,9 +118,9 @@ for (const scenario of [
   { name:"missing user", auth:async()=>null, confirmation:controlled.X_CONTROLLED_REFRESH_CONFIRMATION, url:"https://example.invalid/", status:401, code:"X_CONTROLLED_REFRESH_UNAUTHENTICATED" },
   { name:"blank user", auth:async()=>"  ", confirmation:controlled.X_CONTROLLED_REFRESH_CONFIRMATION, url:"https://example.invalid/", status:401, code:"X_CONTROLLED_REFRESH_UNAUTHENTICATED" },
   { name:"authentication throw", auth:async()=>{throw new Error("AUTH_MARKER")}, confirmation:controlled.X_CONTROLLED_REFRESH_CONFIRMATION, url:"https://example.invalid/", status:401, code:"X_CONTROLLED_REFRESH_UNAUTHENTICATED" },
-  { name:"missing confirmation", auth:async()=>" user ", confirmation:undefined, url:"https://example.invalid/", status:400, code:"X_CONTROLLED_REFRESH_CONFIRMATION_REQUIRED" },
-  { name:"wrong confirmation", auth:async()=>" user ", confirmation:"wrong", url:"https://example.invalid/", status:400, code:"X_CONTROLLED_REFRESH_CONFIRMATION_REQUIRED" },
-  { name:"query parameters", auth:async()=>" user ", confirmation:controlled.X_CONTROLLED_REFRESH_CONFIRMATION, url:"https://example.invalid/?x=1", status:400, code:"X_CONTROLLED_REFRESH_PARAMETERS_NOT_ALLOWED" },
+  { name:"missing confirmation", auth:async()=>" 33333333-3333-4333-8333-333333333333 ", confirmation:undefined, url:"https://example.invalid/", status:400, code:"X_CONTROLLED_REFRESH_CONFIRMATION_REQUIRED" },
+  { name:"wrong confirmation", auth:async()=>" 33333333-3333-4333-8333-333333333333 ", confirmation:"wrong", url:"https://example.invalid/", status:400, code:"X_CONTROLLED_REFRESH_CONFIRMATION_REQUIRED" },
+  { name:"query parameters", auth:async()=>" 33333333-3333-4333-8333-333333333333 ", confirmation:controlled.X_CONTROLLED_REFRESH_CONFIRMATION, url:"https://example.invalid/?x=1", status:400, code:"X_CONTROLLED_REFRESH_PARAMETERS_NOT_ALLOWED" },
 ] as const) {
   await test(`real POST rejects ${scenario.name} before body and privilege`, async () => {
     const poison = poisonRequest(scenario.url, scenario.confirmation)
@@ -170,7 +170,7 @@ await test("missing account row is account-not-ready while lookup errors are loo
   ] as const) {
     const response = await controlled.handleXControlledRefreshRequest({
       request: new Request("https://example.invalid/", { method:"POST", headers:{"x-autopost-x-controlled-refresh":controlled.X_CONTROLLED_REFRESH_CONFIRMATION} }),
-      getAuthenticatedUserId: async () => " user ",
+      getAuthenticatedUserId: async () => " 33333333-3333-4333-8333-333333333333 ",
       createPrivilegedAccess: () => ({ load: async () => loaded, writer: async () => { throw new Error("write") } }),
     })
     assert.equal(response.body.safe_code, expected)

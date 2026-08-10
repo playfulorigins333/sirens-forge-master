@@ -34,7 +34,7 @@ type Hooks = Record<string, any>
 const hooks: Hooks = {}
 ;(globalThis as any).__xTest = hooks
 process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED = "false"
-process.env.AUTOPOST_X_ADMIN_USER_IDS = "fake-user"
+process.env.AUTOPOST_X_ADMIN_USER_IDS = "55555555-5555-4555-8555-555555555555"
 hooks.encryptToken = (value: string) => `default-encrypted-${value}`
 hooks.getKeyVersion = () => 1
 hooks.getSupabaseAdmin = () => { throw new Error("unexpected privileged client") }
@@ -44,7 +44,7 @@ const { completeXReauthorization } = await import("../../../lib/autopost/xReauth
 const startRoute = await import("../../../app/api/admin/autopost/x/reauthorize/route")
 const callbackRoute = await import("../../../app/api/autopost/connect/x/callback/route")
 
-const USER = "fake-user", ID = "fake-existing-provider-id", USERNAME = "Fake_Existing_User"
+const USER = "55555555-5555-4555-8555-555555555555", ID = "fake-existing-provider-id", USERNAME = "Fake_Existing_User"
 const ACCESS = "FAKE_ACCESS_TOKEN_MARKER", REFRESH = "FAKE_REFRESH_TOKEN_MARKER"
 const SECRET = "FAKE_CLIENT_SECRET_MARKER", CODE = "FAKE_AUTHORIZATION_CODE_MARKER", VERIFIER = "FAKE_PKCE_VERIFIER_MARKER"
 const RAW = "FAKE_RAW_PROVIDER_RESPONSE_MARKER", DB_ERROR = "FAKE_RAW_DATABASE_ERROR_MARKER", EXCEPTION = "FAKE_EXCEPTION_TEXT_MARKER"

@@ -39,13 +39,22 @@ await denied(NON_ADMIN, ADMIN)
 await denied(ADMIN, undefined)
 await denied(ADMIN, "")
 await denied(ADMIN, "  , \t,  ")
+await denied(ADMIN, "not-a-uuid")
+await denied(ADMIN, "not-a-uuid, also-not-a-uuid, 1234")
+await denied("not-an-authenticated-uuid", ADMIN)
 
 const verified = await requireXAdminUserId({}, {
   requireAuthenticatedUserId: async () => ` ${ADMIN} `,
-  readAdminUserIds: () => ` , ${NON_ADMIN},,  ${ADMIN} , `,
+  readAdminUserIds: () => ` not-a-uuid, ${NON_ADMIN},,  ${ADMIN.toUpperCase()} , malformed `,
 })
 assert.equal(verified, ADMIN)
 await denied("33333333-3333-4333-8333-333333333333", ` , ${NON_ADMIN},, ${ADMIN}, `)
+
+const normalized = await requireXAdminUserId({}, {
+  requireAuthenticatedUserId: async () => ADMIN,
+  readAdminUserIds: () => ` , ${NON_ADMIN},,  ${ADMIN} , `,
+})
+assert.equal(normalized, ADMIN)
 
 const routes = [
   "reauthorize",
