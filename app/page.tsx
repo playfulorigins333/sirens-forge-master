@@ -23,7 +23,7 @@ export default function HomePage() {
     earlyBird: { remaining: number; active: boolean };
   } | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [checkoutMode, setCheckoutMode] = useState<"legacy" | "payment_v2" | null>(null);
+  const [checkoutMode, setCheckoutMode] = useState<"payment_v2" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const { scrollYProgress } = useScroll({
@@ -54,7 +54,7 @@ export default function HomePage() {
       } catch { /* Retain the last authoritative value, if any. */ }
     };
     fetch("/api/payment-v2/readiness", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((value) => {
-      if (active && (value?.checkoutMode === "legacy" || value?.checkoutMode === "payment_v2")) setCheckoutMode(value.checkoutMode);
+      if (active && value?.checkoutMode === "payment_v2") setCheckoutMode(value.checkoutMode);
     }).catch(() => { /* Public controls remain unavailable. */ });
     void loadInventory();
     const interval = setInterval(loadInventory, 15_000);

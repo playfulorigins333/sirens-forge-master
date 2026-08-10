@@ -11,7 +11,7 @@ import { captureReferral, clearStoredReferral, normalizeReferralCode, readCurren
 type ViewMode = "cards" | "compare";
 type CheckoutTier = "og_throne" | "early_bird";
 type PublicTierState = "available" | "unavailable" | "sold_out";
-type PublicPurchaseState = { checkoutMode: "legacy" | "payment_v2"; tiers?: Record<CheckoutTier, PublicTierState> };
+type PublicPurchaseState = { checkoutMode: "payment_v2"; tiers?: Record<CheckoutTier, PublicTierState> };
 
 interface TierSeats {
   remaining: number;
@@ -103,17 +103,13 @@ export default function PricingClient() {
   const [referralSaved, setReferralSaved] = useState<boolean>(false);
 
   const paymentV2 = publicPurchase?.checkoutMode === "payment_v2";
-  const ogSoldOut = paymentV2
-    ? publicPurchase.tiers?.og_throne === "sold_out" || (seats ? seats.og.remaining <= 0 : false)
-    : seats ? seats.og.remaining <= 0 : false;
-  const earlyBirdSoldOut = paymentV2
-    ? publicPurchase.tiers?.early_bird === "sold_out" || (seats ? seats.earlyBird.remaining <= 0 : false)
-    : seats ? seats.earlyBird.remaining <= 0 : false;
-  const ogUnavailable = paymentV2 ? publicPurchase.tiers?.og_throne === "unavailable" : seats ? !seats.og.active : false;
-  const earlyBirdUnavailable = paymentV2 ? publicPurchase.tiers?.early_bird === "unavailable" : seats ? !seats.earlyBird.active : false;
-  const ogActive = paymentV2 ? publicPurchase.tiers?.og_throne === "available" : Boolean(seats?.og.active);
-  const earlyBirdActive = paymentV2 ? publicPurchase.tiers?.early_bird === "available" : Boolean(seats?.earlyBird.active);
-  const availabilityLoaded = paymentV2 ? Boolean(publicPurchase.tiers) : publicPurchase?.checkoutMode === "legacy" && seats !== null;
+  const ogSoldOut = paymentV2 && (publicPurchase.tiers?.og_throne === "sold_out" || (seats ? seats.og.remaining <= 0 : false));
+  const earlyBirdSoldOut = paymentV2 && (publicPurchase.tiers?.early_bird === "sold_out" || (seats ? seats.earlyBird.remaining <= 0 : false));
+  const ogUnavailable = paymentV2 && publicPurchase.tiers?.og_throne === "unavailable";
+  const earlyBirdUnavailable = paymentV2 && publicPurchase.tiers?.early_bird === "unavailable";
+  const ogActive = paymentV2 && publicPurchase.tiers?.og_throne === "available";
+  const earlyBirdActive = paymentV2 && publicPurchase.tiers?.early_bird === "available";
+  const availabilityLoaded = paymentV2 && Boolean(publicPurchase.tiers);
 
   useEffect(() => {
     let active = true;
@@ -122,7 +118,7 @@ export default function PricingClient() {
       .then((value: unknown) => {
         if (!active || !value || typeof value !== "object") return;
         const state = value as PublicPurchaseState;
-        if (state.checkoutMode === "legacy" || state.checkoutMode === "payment_v2") setPublicPurchase(state);
+        if (state.checkoutMode === "payment_v2") setPublicPurchase(state);
       })
       .catch(() => { /* Loading remains fail closed. */ });
     return () => { active = false; };
@@ -222,11 +218,8 @@ export default function PricingClient() {
       setCheckoutError(null);
       setCheckoutLoading(tierName);
 
-      if (!publicPurchase) throw new Error("Checkout is unavailable.");
-      const endpoint = publicPurchase.checkoutMode === "payment_v2"
-        ? "/api/checkout/subscription-v2"
-        : "/api/checkout/subscription";
-      const res = await fetch(endpoint, {
+      if (publicPurchase?.checkoutMode !== "payment_v2") throw new Error("Checkout is unavailable.");
+      const res = await fetch("/api/checkout/subscription-v2", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
@@ -443,7 +436,7 @@ export default function PricingClient() {
             </div>
 
             <div className="w-full min-w-0">
-              {publicPurchase?.checkoutMode === "legacy" || paymentV2 ? (
+              {paymentV2 ? (
               <div className="rounded-2xl border border-slate-800/80 bg-slate-950/60 px-3 py-2">
                 <p className="text-[10px] uppercase tracking-[0.22em] text-slate-400">
                   Referral / affiliate code

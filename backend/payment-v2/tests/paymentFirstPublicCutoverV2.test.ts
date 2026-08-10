@@ -19,8 +19,8 @@ const deps: PublicReadinessDependencies = {
 for (const value of [undefined, "", "false", "TRUE", " true", "true ", "yes", "1"]) equal(paymentFirstPublicCutoverEnabled(value), false, `cutover rejects ${String(value)}`);
 equal(paymentFirstPublicCutoverEnabled("true"), true, "exact true enables cutover");
 let state = await derivePublicPurchaseState({ ...env, PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED: "false" }, deps);
-equal(state, { checkoutMode: "legacy" }, "disabled cutover derives legacy mode without tiers");
-equal(effects.capability, 0, "legacy mode does not require 03200 capability");
+equal(state, { checkoutMode: "payment_v2", tiers: { og_throne: "unavailable", early_bird: "unavailable" } }, "disabled cutover makes Payment V2 unavailable");
+equal(effects.capability, 0, "disabled cutover fails closed before loading dependencies");
 state = await derivePublicPurchaseState(env, { ...deps, loadAffiliateCapability: async () => false });
 equal(state.tiers?.og_throne, "unavailable", "missing 03200 capability fails closed");
 state = await derivePublicPurchaseState(env, { ...deps, loadAffiliateCapability: async () => { throw new Error("missing RPC"); } });
@@ -28,8 +28,7 @@ equal(state.tiers?.early_bird, "unavailable", "03200 capability error fails clos
 for (const gate of gates) for (const value of [undefined, "", "false", "TRUE", " true", "true ", "malformed"]) {
   const changed = { ...env, [gate]: value } as Record<string,string|undefined>;
   state = await derivePublicPurchaseState(changed, deps);
-  if (gate === "PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED") equal(state.checkoutMode, "legacy", `${gate} rejects ${String(value)}`);
-  else equal(state.tiers?.og_throne, "unavailable", `${gate} rejects ${String(value)}`);
+  equal(state, { checkoutMode: "payment_v2", tiers: { og_throne: "unavailable", early_bird: "unavailable" } }, `${gate} rejects ${String(value)}`);
 }
 state = await derivePublicPurchaseState({ ...env, PAYMENT_V2_EVENT_INBOX_ENABLED: "true" }, deps);
 equal(state.tiers?.early_bird, "unavailable", "enabled lifecycle inbox fails closed");
@@ -40,7 +39,9 @@ for (const [key, value] of [["STRIPE_SECRET_KEY", ""], ["STRIPE_PAYMENT_V2_WEBHO
 for (const rows of [[], [{ name: "og_throne", is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.og_throne }], [{ name: "og_throne", is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.og_throne }, { name: "og_throne", is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.og_throne }, { name: "early_bird", is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.early_bird }], [{ name: "og_throne", is_active: false, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.og_throne }, { name: "early_bird", is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.early_bird }], [{ name: "og_throne", is_active: true, stripe_price_id: "" }, { name: "early_bird", is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.early_bird }], [{ name: "og_throne", is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.early_bird }, { name: "early_bird", is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES.og_throne }]]) {
   equal((await derivePublicPurchaseState(env, { ...deps, loadTiers: async () => rows })).tiers?.og_throne, "unavailable", "invalid tier shape/price fails closed");
 }
-state = await derivePublicPurchaseState(env, deps); equal(state.tiers, { og_throne: "available", early_bird: "available" }, "valid runtime state is available");
+state = await derivePublicPurchaseState(env, deps);
+equal(state.checkoutMode, "payment_v2", "exact true cutover with healthy gates selects Payment V2");
+equal(state.tiers, { og_throne: "available", early_bird: "available" }, "valid runtime state is available");
 state = await derivePublicPurchaseState(env, { ...deps, loadInventoryRows: async () => Array.from({ length: 50 }, () => ({ tier: "og_throne", state: "CLAIMED", expires_at: null })) });
 equal(state.tiers?.og_throne, "sold_out", "valid full inventory is sold out");
 state = await derivePublicPurchaseState(env, { ...deps, loadInventoryRows: async () => { throw new Error("schema detail"); } }); equal(state.tiers?.og_throne, "unavailable", "query ambiguity is unavailable");
@@ -59,7 +60,10 @@ for (const body of ['{"tierName":"og_throne"}', '{"tierName":"early_bird"}', '{"
 }
 const pricing = readFileSync("app/pricing/PricingClient.tsx", "utf8");
 check(pricing.includes('"/api/payment-v2/readiness"'), "Pricing uses one public mode/readiness boundary");
-check(pricing.includes('? "/api/checkout/subscription-v2"') && pricing.includes(': "/api/checkout/subscription"'), "Pricing selects exact route from derived mode");
+check(pricing.includes('fetch("/api/checkout/subscription-v2"'), "Pricing selects only the Payment V2 Checkout route");
+check(!pricing.includes('"/api/checkout/subscription"'), "Pricing has no legacy public Checkout fallback");
+check(pricing.includes('publicPurchase?.checkoutMode !== "payment_v2"'), "Pricing fails closed before Checkout for unexpected readiness modes");
+check(!pricing.includes('checkoutMode === "legacy"'), "Unexpected legacy readiness cannot activate pricing controls");
 check(pricing.includes("...(normalizeReferralCode(referralCode) ? { referralCode"), "Payment V2 body contains only tier and optional referral code");
 const v2 = readFileSync("app/api/checkout/subscription-v2/route.ts", "utf8");
 check(v2.indexOf("derivePublicPurchaseState") < v2.indexOf("new Stripe(stripeKey"), "direct V2 readiness precedes Stripe construction");
