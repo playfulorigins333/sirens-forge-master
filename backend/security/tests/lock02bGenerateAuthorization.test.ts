@@ -15,6 +15,7 @@ type AuthResult = {
 const originalFetch = globalThis.fetch
 const originalEnv = {
   RUNPOD_BASE_URL: process.env.RUNPOD_BASE_URL,
+  SIRENS_API_INTERNAL_SECRET: process.env.SIRENS_API_INTERNAL_SECRET,
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -29,6 +30,7 @@ let insertedRecords: Record<string, unknown>[] = []
 let lastResolverArgs: unknown[] = []
 let lastWorkflowArgs: any
 let lastDownstreamPayload: any
+let lastDownstreamHeaders: Headers | undefined
 let upstreamResponse: () => Promise<Response>
 
 mock.module(new URL("../../../lib/subscription-checker.ts", import.meta.url).href, {
@@ -95,6 +97,7 @@ globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
   assert.equal(url, "https://runpod.test/gateway/generate", `unexpected external fetch: ${url}`)
   downstreamCalls += 1
+  lastDownstreamHeaders = new Headers(init?.headers)
   lastDownstreamPayload = JSON.parse(String(init?.body))
   return upstreamResponse()
 }
@@ -132,7 +135,9 @@ function configureAuth(next: AuthResult) {
   lastResolverArgs = []
   lastWorkflowArgs = undefined
   lastDownstreamPayload = undefined
+  lastDownstreamHeaders = undefined
   process.env.RUNPOD_BASE_URL = "https://runpod.test"
+  process.env.SIRENS_API_INTERNAL_SECRET = "mock-internal-secret"
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.test"
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "mock-anon"
   process.env.SUPABASE_SERVICE_ROLE_KEY = "mock-service-role"
@@ -193,6 +198,7 @@ try {
     assert.equal(resolverCalls, 1)
     assert.equal(workflowCalls, 1)
     assert.equal(downstreamCalls, 1)
+    assert.equal(lastDownstreamHeaders?.get("x-sirens-api-internal-secret"), "mock-internal-secret")
     assert.equal(insertedRecords.length, 1)
     assert.equal(insertedRecords[0].user_id, verifiedUserId)
   }
@@ -221,6 +227,13 @@ try {
   response = await invoke(validBody)
   assert.equal(response.status, 500)
   assert.deepEqual(await response.json(), { error: "RUNPOD_BASE_URL_MISSING" })
+  assertNoPrivilegedActivity()
+
+  configureAuth({ ok: true, status: 200, user: { id: "verified-secret-user" } })
+  delete process.env.SIRENS_API_INTERNAL_SECRET
+  response = await invoke(validBody)
+  assert.equal(response.status, 500)
+  assert.deepEqual(await response.json(), { error: "SIRENS_API_INTERNAL_SECRET_MISSING" })
   assertNoPrivilegedActivity()
 
   for (const body of [{}, { prompt: "   " }]) {

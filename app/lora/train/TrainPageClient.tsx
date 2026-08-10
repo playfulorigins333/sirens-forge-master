@@ -139,9 +139,6 @@ type DatasetDoctorApproveResult = {
 };
 
 const POLL_INTERVAL_MS = 5000;
-const DATASET_DOCTOR_BASE_URL =
-  "https://sirens-forge-api-production.up.railway.app/dataset-doctor";
-
 const FloatingParticles = () => {
   const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 });
 
@@ -558,7 +555,7 @@ export default function LoRATrainerPage() {
   const analyzeDataset = async (
     jobId: string
   ): Promise<DatasetDoctorAnalyzeResult> => {
-    const res = await fetch(`${DATASET_DOCTOR_BASE_URL}/jobs/${jobId}/analyze`, {
+    const res = await fetch(`/api/lora/dataset-doctor/jobs/${jobId}/analyze`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -580,7 +577,7 @@ export default function LoRATrainerPage() {
   const fetchDatasetDoctorImages = async (
     jobId: string
   ): Promise<DatasetDoctorImage[]> => {
-    const res = await fetch(`${DATASET_DOCTOR_BASE_URL}/jobs/${jobId}/images`, {
+    const res = await fetch(`/api/lora/dataset-doctor/jobs/${jobId}/images`, {
       cache: "no-store",
     });
 
@@ -597,7 +594,7 @@ export default function LoRATrainerPage() {
     jobId: string,
     imageIds: string[]
   ): Promise<DatasetDoctorApproveResult> => {
-    const res = await fetch(`${DATASET_DOCTOR_BASE_URL}/jobs/${jobId}/approve`, {
+    const res = await fetch(`/api/lora/dataset-doctor/jobs/${jobId}/approve`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
