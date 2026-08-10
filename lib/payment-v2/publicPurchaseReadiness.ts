@@ -5,7 +5,7 @@ export const LOCKED_PAYMENT_V2_PRICES = {
   early_bird: "price_1SRxiNFjcWRhhOnzHVXW0cYi",
 } as const;
 
-export type PublicCheckoutMode = "legacy" | "payment_v2";
+export type PublicCheckoutMode = "payment_v2";
 export type PublicTierState = "available" | "unavailable" | "sold_out";
 export type PublicPurchaseState = {
   checkoutMode: PublicCheckoutMode;
@@ -61,7 +61,7 @@ export async function derivePublicPurchaseState(
   env: Record<string, string | undefined>,
   dependencies: PublicReadinessDependencies,
 ): Promise<PublicPurchaseState> {
-  if (!paymentFirstPublicCutoverEnabled(env.PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED)) return { checkoutMode: "legacy" };
+  if (!paymentFirstPublicCutoverEnabled(env.PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED)) return unavailable();
   if (REQUIRED_TRUE.some((name) => env[name] !== "true") || env.PAYMENT_V2_EVENT_INBOX_ENABLED === "true") return unavailable();
   const production = env.NODE_ENV === "production";
   const site = canonicalOrigin(env.NEXT_PUBLIC_SITE_URL, production);

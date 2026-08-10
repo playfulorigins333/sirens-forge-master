@@ -161,7 +161,7 @@ export default function AffiliateDashboard() {
   const [payouts, setPayouts] = useState<PayoutItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle")
-  const [checkoutMode, setCheckoutMode] = useState<"legacy" | "payment_v2" | null>(null)
+  const [checkoutMode, setCheckoutMode] = useState<"payment_v2" | null>(null)
 
   useEffect(() => {
     loadAffiliateData()
@@ -187,7 +187,7 @@ export default function AffiliateDashboard() {
       setSummary(summaryJson)
       setTierName(summaryJson?.tier ?? "Standard")
       setPayouts(Array.isArray(summaryJson?.payouts) ? summaryJson.payouts : [])
-      if (modeRes.ok) { const mode = await modeRes.json(); if (mode?.checkoutMode === "legacy" || mode?.checkoutMode === "payment_v2") setCheckoutMode(mode.checkoutMode) }
+      if (modeRes.ok) { const mode = await modeRes.json(); if (mode?.checkoutMode === "payment_v2") setCheckoutMode(mode.checkoutMode) }
     } catch (err: any) {
       setError(err?.message ?? "Failed to load affiliate dashboard.")
     } finally {
@@ -196,7 +196,7 @@ export default function AffiliateDashboard() {
   }
 
   const referralCode = summary?.referral_code || ""
-  const affiliateActive = checkoutMode === "legacy" || checkoutMode === "payment_v2"
+  const affiliateActive = checkoutMode === "payment_v2"
   const referralLink = affiliateActive && referralCode
     ? `https://sirensforge.vip?ref=${referralCode}`
     : ""

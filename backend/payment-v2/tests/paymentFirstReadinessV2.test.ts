@@ -171,7 +171,10 @@ includes(pricingSource, "10% commission on one-time purchases");
 includes(pricingSource, 'label: "Access"');
 includes(pricingSource, 'og: "Lifetime founder access — no recurring subscription"');
 includes(pricingSource, 'earlyBird: "$29.99/month founder access while subscription remains active"');
-includes(pricingSource, '? "/api/checkout/subscription-v2"');
+includes(pricingSource, 'fetch("/api/checkout/subscription-v2"');
+excludes(pricingSource, '"/api/checkout/subscription"');
+includes(pricingSource, 'publicPurchase?.checkoutMode !== "payment_v2"');
+excludes(pricingSource, 'checkoutMode === "legacy"');
 
 const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
 const packageLock = JSON.parse(readFileSync("package-lock.json", "utf8"));

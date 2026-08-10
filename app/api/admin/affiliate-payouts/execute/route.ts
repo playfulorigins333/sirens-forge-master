@@ -5,4 +5,4 @@ function defaultDependencies():PayoutDependencies&{prepare():Promise<string>}{co
 export function isNewYorkPayoutHour(now:Date){const parts=new Intl.DateTimeFormat("en-US",{timeZone:"America/New_York",weekday:"short",hour:"2-digit",hourCycle:"h23"}).formatToParts(now),value=(type:string)=>parts.find(part=>part.type===type)?.value;return value("weekday")==="Sat"&&value("hour")==="23"}
 export async function payoutCronResponse(request:Request,deps?:(PayoutDependencies&{prepare():Promise<string>}),now=new Date()){const secret=process.env.CRON_SECRET;if(process.env.PAYMENT_V2_PAYOUT_EXECUTION_ENABLED!=="true")return NextResponse.json({error:"disabled"},{status:503});if(!secret||request.headers.get("authorization")!==`Bearer ${secret}`)return NextResponse.json({error:"unauthorized"},{status:401});if(!isNewYorkPayoutHour(now))return NextResponse.json({status:"skipped",reason:"outside_payout_window"});return payoutExecutionResponse(request,deps)}
 export const GET=(request:Request)=>payoutCronResponse(request);
-export const POST=(request:Request)=>payoutExecutionResponse(request);
+export const POST=(request:Request)=>payoutCronResponse(request);
