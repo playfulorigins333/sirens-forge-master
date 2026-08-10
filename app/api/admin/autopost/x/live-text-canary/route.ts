@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireUserId } from "@/lib/supabaseServer"
+import { requireXAdminUserId } from "@/lib/autopost/xAdminAuthorization"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import {
   createXLiveTextCanaryAccountLoader,
@@ -22,7 +22,7 @@ const SECURITY_HEADERS = {
 export async function POST(request: Request) {
   const gated = await handleXLiveTextCanaryRequest({
     request,
-    getAuthenticatedUserId: () => requireUserId({ request }),
+    getAuthenticatedUserId: () => requireXAdminUserId({ request }),
     // Construction is deliberately deferred until every request gate has passed.
     loadAccount: (userId) => createXLiveTextCanaryAccountLoader(getSupabaseAdmin())(userId),
   })

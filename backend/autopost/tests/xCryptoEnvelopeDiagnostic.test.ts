@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { createCipheriv, randomBytes } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { register } from "node:module"
-register(`data:text/javascript,export async function resolve(s,c,n){return s==='server-only'?{url:'data:text/javascript,export default {}',shortCircuit:true}:n(s,c)}`)
+register(`data:text/javascript,${encodeURIComponent(`export async function resolve(s,c,n){return s==='server-only'?{url:'data:text/javascript,export%20default%20{}',shortCircuit:true}:n(s,c)}`)}`)
 
 const d = await import("../../../lib/autopost/xCryptoEnvelopeDiagnostic.ts")
 const availability = await import("../../../lib/autopost/platformAvailability.ts")

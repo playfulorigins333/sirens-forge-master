@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireUserId } from "@/lib/supabaseServer"
+import { requireXAdminUserId } from "@/lib/autopost/xAdminAuthorization"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import {
   createXControlledRefreshAccountLoader,
@@ -23,7 +23,7 @@ const SECURITY_HEADERS = {
 export async function POST(request: Request) {
   const response = await handleXControlledRefreshRequest({
     request,
-    getAuthenticatedUserId: () => requireUserId({ request }),
+    getAuthenticatedUserId: () => requireXAdminUserId({ request }),
     createPrivilegedAccess: () => {
       const client = getSupabaseAdmin()
       return {

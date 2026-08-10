@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireUserId } from "@/lib/supabaseServer"
+import { requireXAdminUserId } from "@/lib/autopost/xAdminAuthorization"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import {
   createXCryptoDiagnosticAccountLoader, handleXCryptoEnvelopeDiagnosticRequest,
@@ -18,7 +18,7 @@ const headers = {
 export async function POST(request: Request) {
   const response = await handleXCryptoEnvelopeDiagnosticRequest({
     request,
-    getAuthenticatedUserId: (sessionRequest) => requireUserId({ request: sessionRequest }),
+    getAuthenticatedUserId: (sessionRequest) => requireXAdminUserId({ request: sessionRequest }),
     loadAccount: async (userId) => createXCryptoDiagnosticAccountLoader(getSupabaseAdmin())(userId),
   })
   return NextResponse.json(response.body, { status: response.status, headers })
