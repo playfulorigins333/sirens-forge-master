@@ -6,6 +6,7 @@ import {
   type Mode as VaultMode,
 } from "@/prompts/nsfw_gpt/vault_registry"
 import { validateMacroIds } from "@/prompts/nsfw_gpt/macro_registry"
+import { ensureActiveSubscription } from "@/lib/subscription-checker"
 
 export const runtime = "nodejs"
 
@@ -684,6 +685,18 @@ function ensureThreeRefineVariants(
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await ensureActiveSubscription()
+
+    if (!auth.ok) {
+      return NextResponse.json(
+        {
+          error: auth.error ?? "INTERNAL_ERROR",
+          message: auth.message,
+        } satisfies HeadlessError,
+        { status: auth.status ?? 500 }
+      )
+    }
+
     const body = (await req.json().catch(() => null)) as HeadlessBody | null
 
     if (!body) {
