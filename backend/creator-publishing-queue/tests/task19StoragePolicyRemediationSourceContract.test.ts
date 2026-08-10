@@ -81,12 +81,11 @@ test("active LoRA upload and training paths remain R2-only", () => {
     /\.storage\.from\(|createSignedUploadUrl|lora-datasets/i,
   );
 
-  assert.match(uploadDatasetRoute, /S3Client/);
-  assert.match(uploadDatasetRoute, /R2_BUCKET/);
-  assert.match(uploadDatasetRoute, /lora_datasets/);
+  assert.match(uploadDatasetRoute, /LEGACY_LORA_ENDPOINT_DISABLED/);
+  assert.match(uploadDatasetRoute, /status: 410/);
   assert.doesNotMatch(
     uploadDatasetRoute,
-    /supabase\.storage|\.storage\.from\(|lora-datasets/i,
+    /S3Client|PutObjectCommand|ListObjectsV2Command|DeleteObjectCommand|R2_BUCKET|\.send\(/,
   );
 
   assert.match(worker, /R2 STORAGE/);
