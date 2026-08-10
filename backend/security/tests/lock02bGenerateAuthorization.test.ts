@@ -14,7 +14,7 @@ type AuthResult = {
 
 const originalFetch = globalThis.fetch
 const originalEnv = {
-  RUNPOD_BASE_URL: process.env.RUNPOD_BASE_URL,
+  SIRENS_API_BASE_URL: process.env.SIRENS_API_BASE_URL,
   SIRENS_API_INTERNAL_SECRET: process.env.SIRENS_API_INTERNAL_SECRET,
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
@@ -95,7 +95,7 @@ mock.module("@supabase/supabase-js", {
 
 globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
-  assert.equal(url, "https://runpod.test/gateway/generate", `unexpected external fetch: ${url}`)
+  assert.equal(url, "https://railway.test/gateway/generate", `unexpected external fetch: ${url}`)
   downstreamCalls += 1
   lastDownstreamHeaders = new Headers(init?.headers)
   lastDownstreamPayload = JSON.parse(String(init?.body))
@@ -136,7 +136,7 @@ function configureAuth(next: AuthResult) {
   lastWorkflowArgs = undefined
   lastDownstreamPayload = undefined
   lastDownstreamHeaders = undefined
-  process.env.RUNPOD_BASE_URL = "https://runpod.test"
+  process.env.SIRENS_API_BASE_URL = "https://railway.test"
   process.env.SIRENS_API_INTERNAL_SECRET = "mock-internal-secret"
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.test"
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "mock-anon"
@@ -223,10 +223,10 @@ try {
   assert.equal(lastDownstreamPayload.workflow.inputs.workflow_json.mocked_workflow, true)
 
   configureAuth({ ok: true, status: 200, user: { id: "verified-config-user" } })
-  delete process.env.RUNPOD_BASE_URL
+  delete process.env.SIRENS_API_BASE_URL
   response = await invoke(validBody)
   assert.equal(response.status, 500)
-  assert.deepEqual(await response.json(), { error: "RUNPOD_BASE_URL_MISSING" })
+  assert.deepEqual(await response.json(), { error: "SIRENS_API_BASE_URL_MISSING" })
   assertNoPrivilegedActivity()
 
   configureAuth({ ok: true, status: 200, user: { id: "verified-secret-user" } })

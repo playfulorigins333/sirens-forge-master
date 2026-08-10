@@ -1,6 +1,6 @@
 export const SIRENS_API_INTERNAL_SECRET_MISSING =
   "SIRENS_API_INTERNAL_SECRET_MISSING";
-export const RUNPOD_BASE_URL_MISSING = "RUNPOD_BASE_URL_MISSING";
+export const SIRENS_API_BASE_URL_MISSING = "SIRENS_API_BASE_URL_MISSING";
 
 export type SirensApiConfig = {
   baseUrl: string;
@@ -8,8 +8,8 @@ export type SirensApiConfig = {
 };
 
 export function requireSirensApiConfig(): SirensApiConfig {
-  const baseUrl = process.env.RUNPOD_BASE_URL?.trim().replace(/\/+$/, "");
-  if (!baseUrl) throw new Error(RUNPOD_BASE_URL_MISSING);
+  const baseUrl = process.env.SIRENS_API_BASE_URL?.trim().replace(/\/+$/, "");
+  if (!baseUrl) throw new Error(SIRENS_API_BASE_URL_MISSING);
 
   const internalSecret = process.env.SIRENS_API_INTERNAL_SECRET?.trim();
   if (!internalSecret) throw new Error(SIRENS_API_INTERNAL_SECRET_MISSING);

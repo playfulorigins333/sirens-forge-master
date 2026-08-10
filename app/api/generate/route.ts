@@ -451,7 +451,7 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : "";
     if (
       message === "SIRENS_API_INTERNAL_SECRET_MISSING" ||
-      message === "RUNPOD_BASE_URL_MISSING"
+      message === "SIRENS_API_BASE_URL_MISSING"
     ) {
       return NextResponse.json({ error: message }, { status: 500 });
     }

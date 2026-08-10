@@ -10,7 +10,7 @@ const jobId = "11111111-1111-4111-8111-111111111111"
 const secret = "deterministic-test-secret"
 const originalFetch = globalThis.fetch
 const originalEnv = {
-  RUNPOD_BASE_URL: process.env.RUNPOD_BASE_URL,
+  SIRENS_API_BASE_URL: process.env.SIRENS_API_BASE_URL,
   SIRENS_API_INTERNAL_SECRET: process.env.SIRENS_API_INTERNAL_SECRET,
 }
 
@@ -76,7 +76,7 @@ function reset() {
   adminCalls = 0
   ownershipQueries = []
   railwayCalls = []
-  process.env.RUNPOD_BASE_URL = "https://railway.invalid///"
+  process.env.SIRENS_API_BASE_URL = "https://railway.invalid///"
   process.env.SIRENS_API_INTERNAL_SECRET = secret
 }
 
@@ -148,6 +148,20 @@ try {
   assert.deepEqual(await response.json(), { error: "SIRENS_API_INTERNAL_SECRET_MISSING" })
   assert.equal(adminCalls, 0)
   assert.equal(railwayCalls.length, 0)
+
+  reset()
+  delete process.env.SIRENS_API_BASE_URL
+  response = await proxyDatasetDoctorOperation(request("GET"), jobId, "images")
+  assert.equal(response.status, 500)
+  assert.deepEqual(await response.json(), { error: "SIRENS_API_BASE_URL_MISSING" })
+  assert.equal(adminCalls, 0)
+  assert.equal(railwayCalls.length, 0)
+
+  const apiClientSource = await readFile("lib/sirensApi.ts", "utf8")
+  assert.deepEqual(
+    [...apiClientSource.matchAll(/process\.env\.([A-Z0-9_]+)/g)].map((match) => match[1]),
+    ["SIRENS_API_BASE_URL", "SIRENS_API_INTERNAL_SECRET"],
+  )
 
   const clientSource = await readFile("app/lora/train/TrainPageClient.tsx", "utf8")
   assert.doesNotMatch(clientSource, /sirens-forge-api-production\.up\.railway\.app/)
