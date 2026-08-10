@@ -34,6 +34,7 @@ type Hooks = Record<string, any>
 const hooks: Hooks = {}
 ;(globalThis as any).__xTest = hooks
 process.env.AUTOPOST_X_RUN_DISPATCH_ENABLED = "false"
+process.env.AUTOPOST_X_ADMIN_USER_IDS = "fake-user"
 hooks.encryptToken = (value: string) => `default-encrypted-${value}`
 hooks.getKeyVersion = () => 1
 hooks.getSupabaseAdmin = () => { throw new Error("unexpected privileged client") }

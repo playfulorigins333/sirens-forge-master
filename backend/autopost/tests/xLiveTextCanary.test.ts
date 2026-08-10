@@ -44,6 +44,7 @@ type Counters = {
 const routeHooks: Record<string, (...args: any[]) => any> = {}
 ;(globalThis as any).__xLiveRoute = routeHooks
 ;(globalThis as any).__xFanvueResolutions = 0
+process.env.AUTOPOST_X_ADMIN_USER_IDS = "AUTHENTICATED_USER_MARKER"
 
 const canary = await import("../../../lib/autopost/xLiveTextCanary.ts")
 const posture = await import("../../../lib/autopost/xStoredPosture.ts")

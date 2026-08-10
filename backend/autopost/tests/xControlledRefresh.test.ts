@@ -25,6 +25,7 @@ export async function resolve(specifier, context, nextResolve) {
 const hooks: Record<string, (...args: any[]) => any> = {}
 ;(globalThis as any).__xControlledRoute = hooks
 ;(globalThis as any).__xControlledFanvue = 0
+process.env.AUTOPOST_X_ADMIN_USER_IDS = "user"
 const controlled = await import("../../../lib/autopost/xControlledRefresh.ts")
 const route = await import("../../../app/api/admin/autopost/x/controlled-refresh/route.ts")
 assert.equal((globalThis as any).__xControlledFanvue, 0)

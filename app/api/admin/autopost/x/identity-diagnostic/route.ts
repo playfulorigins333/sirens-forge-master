@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireUserId } from "@/lib/supabaseServer"
+import { requireXAdminUserId } from "@/lib/autopost/xAdminAuthorization"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import {
   createXIdentityDiagnosticAccountLoader, handleXIdentityDiagnosticRequest,
@@ -18,7 +18,7 @@ const headers = {
 export async function POST(request: Request) {
   const response = await handleXIdentityDiagnosticRequest({
     request,
-    getAuthenticatedUserId: (sessionRequest) => requireUserId({ request: sessionRequest }),
+    getAuthenticatedUserId: (sessionRequest) => requireXAdminUserId({ request: sessionRequest }),
     loadAccount: async (userId) => {
       const loadAccount = createXIdentityDiagnosticAccountLoader(getSupabaseAdmin())
       return loadAccount(userId)
