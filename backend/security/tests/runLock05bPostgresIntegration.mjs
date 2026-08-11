@@ -28,7 +28,7 @@ insert into public.profiles values('10000000-0000-0000-0000-000000000001','one@e
 const data=()=>psql("select md5(string_agg(row_to_json(p)::text,'|' order by id)) from public.profiles p;").stdout.trim();
 const tableAcl=()=>psql("select coalesce(array_to_string(relacl,','),'') from pg_class where oid='public.profiles'::regclass;").stdout.trim();
 const attrAcl=()=>psql("select string_agg(attname||':'||attacl::text,'|' order by attnum) from pg_attribute where attrelid='public.profiles'::regclass and attacl is not null;").stdout.trim();
-const policy=()=>psql("select polname||'|'||polcmd||'|'||polroles::text||'|'||pg_get_expr(polqual,polrelid) from pg_policy where polrelid='public.profiles'::regclass;").stdout.trim();
+const policy=()=>psql("select polname||'|'||polcmd::text||'|'||polroles::text||'|'||pg_get_expr(polqual,polrelid) from pg_policy where polrelid='public.profiles'::regclass;").stdout.trim();
 const objects=()=>psql("select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('v','m'); select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public';").stdout;
 psql(fixture); const beforeData=data(),beforeTableAcl=tableAcl(),beforeAttrAcl=attrAcl(),beforePolicy=policy(),beforeObjects=objects();
 assert.equal(psql("set role authenticated; set request.jwt.claim.sub='00000000-0000-0000-0000-000000000001'; select password_hash from public.profiles;").stdout.trim(),'hash-one');
