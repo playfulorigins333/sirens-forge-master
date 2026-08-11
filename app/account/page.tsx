@@ -24,7 +24,6 @@ type ProfileRow = {
   email: string | null;
   badge: string | null;
   seat_number: number | null;
-  tokens: number | null;
 };
 
 type SubscriptionRow = {
@@ -102,8 +101,7 @@ export default async function AccountPage() {
       user_id,
       email,
       badge,
-      seat_number,
-      tokens
+      seat_number
     `
     )
     .eq("user_id", authUserId)
@@ -196,14 +194,6 @@ export default async function AccountPage() {
                 </div>
               </div>
 
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">
-                  Token Balance
-                </div>
-                <div className="mt-1 text-gray-200">
-                  {profile?.tokens ?? 0}
-                </div>
-              </div>
             </div>
           </section>
 

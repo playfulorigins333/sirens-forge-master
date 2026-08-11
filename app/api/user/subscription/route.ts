@@ -34,8 +34,7 @@ export async function GET() {
         user_id,
         email,
         badge,
-        seat_number,
-        tokens
+        seat_number
       `
       )
       .eq("user_id", user.id)
@@ -87,7 +86,6 @@ export async function GET() {
             email: profile.email,
             badge: profile.badge,
             seatNumber: profile.seat_number,
-            tokens: profile.tokens,
           },
           error: subscriptionError.message ?? "Failed to load subscription",
         },
@@ -122,7 +120,6 @@ export async function GET() {
           email: profile.email,
           badge: profile.badge,
           seatNumber: profile.seat_number,
-          tokens: profile.tokens,
         },
       },
       { status: 200 }
