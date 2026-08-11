@@ -16,7 +16,7 @@ begin
     left join pg_namespace n on n.nspname = 'public'
     left join pg_proc p on p.pronamespace = n.oid
       and p.proname = target.name
-      and pg_get_function_identity_arguments(p.oid) = target.arguments
+      and oidvectortypes(p.proargtypes) = target.arguments
     left join pg_roles owner_role on owner_role.oid = p.proowner
     where p.oid is null
        or owner_role.rolname <> 'postgres'
@@ -99,7 +99,7 @@ begin
     ) target(name, arguments)
     left join pg_namespace n on n.nspname = 'public'
     left join pg_proc p on p.pronamespace = n.oid and p.proname = target.name
-      and pg_get_function_identity_arguments(p.oid) = target.arguments
+      and oidvectortypes(p.proargtypes) = target.arguments
     left join pg_roles owner_role on owner_role.oid = p.proowner
     where p.oid is null or owner_role.rolname <> 'postgres' or not p.prosecdef
        or has_function_privilege('anon', p.oid, 'EXECUTE')

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import assert from "node:assert/strict";
 
 const databaseUrl = process.env.LOCK03C2B_DATABASE_URL;
 if (!databaseUrl) throw new Error("LOCK03C2B_DATABASE_URL is required; no database was contacted");
@@ -18,7 +19,7 @@ function psql(sql, expectSuccess = true) {
 const functionRows = `
   select p.oid::regprocedure::text, owner_role.rolname, p.prosecdef, coalesce(array_to_string(p.proconfig, ','), '<null>'), md5(pg_get_functiondef(p.oid))
   from pg_proc p join pg_namespace n on n.oid=p.pronamespace join pg_roles owner_role on owner_role.oid=p.proowner
-  where n.nspname='public' and (p.proname, pg_get_function_identity_arguments(p.oid)) in
+  where n.nspname='public' and (p.proname, oidvectortypes(p.proargtypes)) in
    (('add_tokens','uuid, integer, text'),('deduct_tokens','uuid, integer'),('deduct_tokens','uuid, integer, text'),
     ('record_lora_terminal_status',''),('creator_publishing_platform_account_clear_trusted_metadata','')) order by 1;`;
 const triggerRows = `select c.relname, t.tgname, t.tgenabled, p.oid::regprocedure::text, md5(pg_get_triggerdef(t.oid))
@@ -33,9 +34,9 @@ const fixture = `
     alter role service_role bypassrls;
   end $$;
   grant usage on schema public to anon, authenticated, service_role;
-  create function public.add_tokens(uuid, integer, text) returns void language sql security definer as 'select';
-  create function public.deduct_tokens(uuid, integer) returns boolean language sql security definer as 'select true';
-  create function public.deduct_tokens(uuid, integer, text) returns boolean language sql security definer as 'select true';
+  create function public.add_tokens(p_user_id uuid, p_amount integer, p_purchase_type text) returns void language sql security definer as 'select';
+  create function public.deduct_tokens(p_user_id uuid, p_amount integer) returns boolean language sql security definer as 'select true';
+  create function public.deduct_tokens(p_user_id uuid, p_amount integer, p_description text) returns boolean language sql security definer as 'select true';
   create table public.user_loras(id integer primary key, status text not null);
   create table public.lora_terminal_events(lora_id integer, marker text);
   create function public.record_lora_terminal_status() returns trigger language plpgsql security definer as $$
@@ -55,9 +56,9 @@ const fixture = `
   grant select, update on public.user_loras, public.creator_platform_accounts to authenticated;
 `;
 const privilegeQuery = role => `select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public'
-  and (p.proname,pg_get_function_identity_arguments(p.oid)) in (('add_tokens','uuid, integer, text'),('deduct_tokens','uuid, integer'),('deduct_tokens','uuid, integer, text'),('record_lora_terminal_status',''),('creator_publishing_platform_account_clear_trusted_metadata',''))
+  and (p.proname,oidvectortypes(p.proargtypes)) in (('add_tokens','uuid, integer, text'),('deduct_tokens','uuid, integer'),('deduct_tokens','uuid, integer, text'),('record_lora_terminal_status',''),('creator_publishing_platform_account_clear_trusted_metadata',''))
   and has_function_privilege('${role}',p.oid,'EXECUTE');`;
-function publicAclCount() { return psql(`select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace, lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where n.nspname='public' and a.grantee=0 and a.privilege_type='EXECUTE' and (p.proname,pg_get_function_identity_arguments(p.oid)) in (('add_tokens','uuid, integer, text'),('deduct_tokens','uuid, integer'),('deduct_tokens','uuid, integer, text'),('record_lora_terminal_status',''),('creator_publishing_platform_account_clear_trusted_metadata',''));`).stdout.trim(); }
+function publicAclCount() { return psql(`select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace, lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where n.nspname='public' and a.grantee=0 and a.privilege_type='EXECUTE' and (p.proname,oidvectortypes(p.proargtypes)) in (('add_tokens','uuid, integer, text'),('deduct_tokens','uuid, integer'),('deduct_tokens','uuid, integer, text'),('record_lora_terminal_status',''),('creator_publishing_platform_account_clear_trusted_metadata',''));`).stdout.trim(); }
 function expectPrivilege(role, count) { const got=psql(privilegeQuery(role)).stdout.trim(); if(got!==String(count)) throw new Error(`${role} privilege count ${got}, expected ${count}`); }
 function expectDenied(role, call) {
   const result=psql(`\\set VERBOSITY verbose\nset role ${role}; ${call}`, false);
@@ -70,6 +71,13 @@ function assertTriggerBehavior(suffix) {
 }
 
 psql(fixture);
+const tokenSignatureRepresentations = psql(`select p.proname, pg_get_function_identity_arguments(p.oid), oidvectortypes(p.proargtypes)
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('add_tokens','deduct_tokens') order by 1, 3;`).stdout.trim().split('\n');
+assert.deepEqual(tokenSignatureRepresentations, [
+  'add_tokens|p_user_id uuid, p_amount integer, p_purchase_type text|uuid, integer, text',
+  'deduct_tokens|p_user_id uuid, p_amount integer|uuid, integer',
+  'deduct_tokens|p_user_id uuid, p_amount integer, p_description text|uuid, integer, text',
+]);
 for(const role of ['anon','authenticated','service_role']) expectPrivilege(role,5);
 if(publicAclCount()!=='5') throw new Error('precondition PUBLIC ACL count mismatch');
 const beforeFunctions=psql(functionRows).stdout; const beforeTriggers=psql(triggerRows).stdout;
