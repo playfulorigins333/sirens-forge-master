@@ -40,6 +40,15 @@ test("replacement signup preserves audited non-economic behavior only",()=>{
  const replacement=migration.slice(migration.indexOf("CREATE OR REPLACE FUNCTION public.handle_new_user()"),migration.indexOf("ALTER FUNCTION public.handle_new_user() OWNER"));
  assert.doesNotMatch(replacement,/founder|inactive|is_tester|token_only|\btokens\b/i);
 });
+test("profile column ACL backup and rollback use explicit attribute ACL semantics",()=>{
+ const profileAclBackup=backup.slice(backup.indexOf("CREATE TABLE lock05c_backup_20260811_pre_apply.profile_column_grants"),backup.indexOf("CREATE TABLE lock05c_backup_20260811_pre_apply.grants"));
+ assert.match(profileAclBackup,/FROM pg_attribute a/); assert.match(profileAclBackup,/CROSS JOIN LATERAL aclexplode\(a\.attacl\)/);
+ assert.doesNotMatch(profileAclBackup,/information_schema\.column_privileges/);
+ assert.match(profileAclBackup,/grantor\.rolname AS grantor/); assert.match(profileAclBackup,/x\.is_grantable/);
+ assert.match(rollback,/profile_column_grants WHERE column_name<>'tokens'[\s\S]*EXCEPT[\s\S]*aclexplode\(a\.attacl\)/);
+ assert.match(rollback,/aclexplode\(a\.attacl\)[\s\S]*EXCEPT SELECT column_name,grantee,grantor,privilege_type,is_grantable FROM lock05c_backup_20260811_pre_apply\.profile_column_grants/);
+ assert.doesNotMatch(rollback,/GRANT SELECT \([^)]*\) ON public\.profiles TO service_role/i);
+});
 test("rollback is separately guarded and restores from backup identity",()=>{
  assert.match(rollback,/LOCK05C_ROLLBACK_DRIFT/); assert.match(rollback,/LOCK05C_ROLLBACK_POSTCONDITION_FAILED/); assert.doesNotMatch(rollback,/\bCASCADE\b/i); assert.match(rollback,/SET tier=b\.tier,tokens=b\.tokens/);
 });

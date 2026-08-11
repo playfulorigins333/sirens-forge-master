@@ -45,11 +45,14 @@ insert into profiles(id,email,user_id,tier,tokens,password_hash,role,is_og_vip,i
 insert into user_subscriptions values('40000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000022','active','og_throne',now()+interval '1 month');
 insert into generations select ('50000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,1 from generate_series(1,10)g;`;
 const policySemantics=()=>sql(`select c.relname||'|'||p.polname||'|'||p.polpermissive::text||'|'||p.polcmd::text||'|'||array_to_string(array(select case when role_oid=0 then 'PUBLIC' else r.rolname end from unnest(p.polroles) role_oid left join pg_roles r on r.oid=role_oid order by case when role_oid=0 then 'PUBLIC' else r.rolname end),',')||'|'||coalesce(pg_get_expr(p.polqual,p.polrelid),'NULL')||'|'||coalesce(pg_get_expr(p.polwithcheck,p.polrelid),'NULL') from pg_policy p join pg_class c on c.oid=p.polrelid where p.polrelid in ('profiles'::regclass,'token_packs'::regclass,'token_transactions'::regclass) order by c.relname,p.polname`);
+const explicitProfileAcls=()=>sql(`select a.attname||'|'||case when x.grantee=0 then 'PUBLIC' else grantee.rolname end||'|'||grantor.rolname||'|'||x.privilege_type||'|'||x.is_grantable from pg_attribute a cross join lateral aclexplode(a.attacl)x left join pg_roles grantee on grantee.oid=x.grantee join pg_roles grantor on grantor.oid=x.grantor where a.attrelid='profiles'::regclass and a.attnum>0 and not a.attisdropped order by a.attname,case when x.grantee=0 then 'PUBLIC' else grantee.rolname end,grantor.rolname,x.privilege_type,x.is_grantable`);
+const explicitAclCounts=()=>sql(`select count(*)||'|'||count(*)filter(where grantee.rolname='authenticated'and x.privilege_type='SELECT')||'|'||count(*)filter(where grantee.rolname='service_role'and x.privilege_type='UPDATE')||'|'||count(*)filter(where grantee.rolname='service_role'and x.privilege_type='SELECT') from pg_attribute a cross join lateral aclexplode(a.attacl)x left join pg_roles grantee on grantee.oid=x.grantee where a.attrelid='profiles'::regclass and a.attnum>0 and not a.attisdropped`);
 const profileState=()=>sql("select md5(string_agg(id||'|'||user_id||'|'||tier||'|'||tokens,';' order by id))from profiles");
 const hashes=()=>sql("select md5(string_agg(password_hash,',' order by id))from profiles");
 const packs=()=>sql("select md5(string_agg(row_to_json(t)::text,';' order by id))from token_packs t");
 
-sql(fixture); const beforeProfiles=profileState(),beforeHashes=hashes(),beforePacks=packs(),beforePolicies=policySemantics();
+sql(fixture); const beforeProfiles=profileState(),beforeHashes=hashes(),beforePacks=packs(),beforePolicies=policySemantics(),beforeExplicitAcls=explicitProfileAcls();
+assert.equal(explicitAclCounts(),'33|30|3|0');
 sql(file("supabase/manual/lock05c_token_retirement_backup.sql"));
 assert.equal(sql("select has_schema_privilege('anon','lock05c_backup_20260811_pre_apply','USAGE')||'|'||has_schema_privilege('authenticated','lock05c_backup_20260811_pre_apply','USAGE')||'|'||has_schema_privilege('service_role','lock05c_backup_20260811_pre_apply','USAGE')"),'false|false|false');
 assert.equal(sql("select count(*) from information_schema.columns where table_schema='lock05c_backup_20260811_pre_apply'and column_name='password_hash'"),'0');
@@ -63,6 +66,7 @@ assert.equal(sql("select count(*)||'|'||count(*)filter(where tier='og_throne') f
 assert.equal(sql("select count(*) from pg_attrdef where adrelid='profiles'::regclass and adnum=(select attnum from pg_attribute where attrelid='profiles'::regclass and attname='tier')"),'0');
 assert.equal(sql("select has_table_privilege('authenticated','profiles','SELECT')||'|'||has_column_privilege('authenticated','profiles','password_hash','SELECT')"),'false|false');
 assert.equal(sql("select count(*) from pg_attribute a cross join lateral aclexplode(a.attacl)x where a.attrelid='profiles'::regclass and x.grantee=(select oid from pg_roles where rolname='authenticated')and x.privilege_type='SELECT'and not a.attisdropped"),'29');
+assert.equal(explicitAclCounts(),'32|29|3|0');
 assert.equal(hashes(),beforeHashes);
 sql("insert into auth.users values('60000000-0000-0000-0000-000000000001','new@test','{}');");
 assert.equal(sql("select (id='60000000-0000-0000-0000-000000000001')||'|'||(user_id='60000000-0000-0000-0000-000000000001')||'|'||(email='new@test')||'|'||(referral_code is not null)||'|'||(tier is null)||'|'||(badge='Plebian')||'|'||(subscription_status='none')||'|'||(role='user')||'|'||(is_og_vip=false)||'|'||(is_beta_tester=false)||'|'||(must_change_password=false) from profiles where id='60000000-0000-0000-0000-000000000001'"),'true|true|true|true|true|true|true|true|true|true|true');
@@ -75,5 +79,6 @@ assert.equal(sql("select count(*) from pg_proc where oid in ('public.handle_new_
 assert.equal(sql("select count(*) from pg_trigger where not tgisinternal and tgname in ('on_auth_user_created','on_profile_created')"),'2');
 assert.match(sql("select pg_get_expr(adbin,adrelid) from pg_attrdef where adrelid='profiles'::regclass and adnum=(select attnum from pg_attribute where attrelid='profiles'::regclass and attname='tier')"),/token_only/);
 assert.match(sql("select pg_get_expr(adbin,adrelid) from pg_attrdef where adrelid='purchases'::regclass and adnum=(select attnum from pg_attribute where attrelid='purchases'::regclass and attname='purchase_type')"),/tokens/);
+assert.equal(explicitAclCounts(),'33|30|3|0'); assert.equal(explicitProfileAcls(),beforeExplicitAcls);
 assert.equal(policySemantics(),beforePolicies); assert.equal(profileState(),beforeProfiles); assert.equal(packs(),beforePacks); assert.equal(hashes(),beforeHashes);
-console.log("LOCK-05C disposable PostgreSQL integration passed: private backup, semantic policies, forward retirement, exact signup, LOCK-05B privileges, rollback, password hashes, and semantic equality verified");
+console.log("LOCK-05C disposable PostgreSQL integration passed: private backup, semantic policies, forward retirement, exact signup, LOCK-05B privileges, rollback, explicit ACL equality, password hashes, and semantic equality verified");

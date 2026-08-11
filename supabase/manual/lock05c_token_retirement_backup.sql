@@ -62,7 +62,19 @@ FROM pg_policy p
 JOIN pg_class c ON c.oid=p.polrelid
 WHERE p.polrelid IN ('public.profiles'::regclass,'public.token_packs'::regclass,'public.token_transactions'::regclass)
 ORDER BY c.relname,p.polname;
-CREATE TABLE lock05c_backup_20260811_pre_apply.profile_column_grants AS SELECT column_name,grantee,privilege_type,is_grantable FROM information_schema.column_privileges WHERE table_schema='public' AND table_name='profiles';
+CREATE TABLE lock05c_backup_20260811_pre_apply.profile_column_grants AS
+SELECT
+ a.attname AS column_name,
+ CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE grantee.rolname END AS grantee,
+ grantor.rolname AS grantor,
+ x.privilege_type,
+ x.is_grantable
+FROM pg_attribute a
+CROSS JOIN LATERAL aclexplode(a.attacl) x
+LEFT JOIN pg_roles grantee ON grantee.oid=x.grantee
+JOIN pg_roles grantor ON grantor.oid=x.grantor
+WHERE a.attrelid='public.profiles'::regclass AND a.attnum>0 AND NOT a.attisdropped
+ORDER BY a.attname,CASE WHEN x.grantee=0 THEN 'PUBLIC' ELSE grantee.rolname END,grantor.rolname,x.privilege_type,x.is_grantable;
 CREATE TABLE lock05c_backup_20260811_pre_apply.grants AS SELECT table_name,grantee,privilege_type FROM information_schema.role_table_grants WHERE table_schema='public' AND table_name IN ('token_packs','token_transactions');
 CREATE TABLE lock05c_backup_20260811_pre_apply.counts AS SELECT 'profiles' source,count(*) rows FROM public.profiles UNION ALL SELECT 'token_packs',count(*) FROM public.token_packs UNION ALL SELECT 'token_transactions',count(*) FROM public.token_transactions;
 REVOKE ALL ON ALL TABLES IN SCHEMA lock05c_backup_20260811_pre_apply FROM PUBLIC,anon,authenticated,service_role;
@@ -70,6 +82,10 @@ DO $$ BEGIN
  IF (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_packs)<>3 OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_transactions)<>0
  OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.functions)<>7 OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.triggers)<>2
  OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.policies WHERE role_names IS NULL OR cardinality(role_names)=0 OR command NOT IN ('r','a','w','d','*'))
+ OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.profile_column_grants)<>33
+ OR (SELECT array_agg(column_name::text ORDER BY column_name) FROM lock05c_backup_20260811_pre_apply.profile_column_grants WHERE grantee='authenticated' AND privilege_type='SELECT') IS DISTINCT FROM ARRAY['avatar_url','badge','clerk_id','created_at','email','full_name','id','is_beta_tester','is_og_vip','is_tester','last_login_at','metadata','must_change_password','og_seat_number','referral_code','referral_email_sent_at','referred_by','role','seat_number','stripe_connect_account_id','stripe_connect_onboarded','stripe_customer_id','stripe_subscription_id','subscription_status','tier','tokens','total_generations','updated_at','user_id','username']
+ OR (SELECT array_agg(column_name::text ORDER BY column_name) FROM lock05c_backup_20260811_pre_apply.profile_column_grants WHERE grantee='service_role' AND privilege_type='UPDATE') IS DISTINCT FROM ARRAY['stripe_connect_account_id','stripe_connect_onboarded','stripe_customer_id']
+ OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.profile_column_grants WHERE grantor<>'postgres' OR is_grantable OR grantee IN ('anon','PUBLIC') OR (grantee='service_role' AND privilege_type='SELECT') OR (grantee='authenticated' AND column_name='password_hash'))
  OR EXISTS(SELECT FROM information_schema.columns WHERE table_schema='lock05c_backup_20260811_pre_apply' AND column_name='password_hash')
  OR has_schema_privilege('anon','lock05c_backup_20260811_pre_apply','USAGE') OR has_schema_privilege('authenticated','lock05c_backup_20260811_pre_apply','USAGE') OR has_schema_privilege('service_role','lock05c_backup_20260811_pre_apply','USAGE')
  THEN RAISE EXCEPTION 'LOCK05C_POSTCONDITION_FAILED: private backup'; END IF;
