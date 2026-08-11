@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import Stripe from "stripe"
-import { ensureActiveSubscription } from "@/lib/subscription-checker"
-import { getOrCreateStripeCustomer } from "@/lib/stripe/customers"
+import { ensureAuthenticatedProfile } from "@/lib/account-access"
+import { resolveExistingBillingCustomer } from "@/lib/stripe/billingCustomerResolver"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -34,26 +34,19 @@ export async function POST(req: Request) {
     )
   }
 
-  const auth = await ensureActiveSubscription()
+  const auth = await ensureAuthenticatedProfile()
 
-  if (!auth.ok) {
-    const status = auth.status === 401 ? 401 : auth.status === 402 ? 402 : 403
+  if (auth.ok === false) {
     return NextResponse.json(
       {
-        error: auth.error === "UNAUTHENTICATED" ? "Authentication required" : "Active subscription required",
-        code: auth.error ?? "SUBSCRIPTION_REQUIRED",
+        error: auth.error === "UNAUTHENTICATED" ? "Authentication required" : "Profile unavailable",
+        code: auth.error,
       },
-      { status }
+      { status: auth.status }
     )
   }
 
-  const profileId = auth.profile?.id
-  if (!profileId) {
-    return NextResponse.json(
-      { error: "Profile not found", code: "PROFILE_NOT_FOUND" },
-      { status: 403 }
-    )
-  }
+  const profileId = auth.profile.id
 
   const baseUrl = getBaseUrl(req)
   if (!baseUrl) {
@@ -64,13 +57,16 @@ export async function POST(req: Request) {
   }
 
   try {
-    const customer = await getOrCreateStripeCustomer(
-      profileId,
-      auth.user?.email ?? auth.profile?.email ?? undefined
-    )
+    const resolution = await resolveExistingBillingCustomer(profileId)
+    if (resolution.ok === false) {
+      const error = resolution.code === "BILLING_CUSTOMER_NOT_FOUND"
+        ? "No existing Stripe billing account is linked to this profile yet."
+        : "Billing management is temporarily unavailable."
+      return NextResponse.json({ error, code: resolution.code }, { status: 409 })
+    }
 
     const portalSession = await stripe.billingPortal.sessions.create({
-      customer,
+      customer: resolution.customerId,
       return_url: `${baseUrl}/billing`,
     })
 

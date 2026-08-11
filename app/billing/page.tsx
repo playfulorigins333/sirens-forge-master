@@ -10,9 +10,11 @@ import {
   CheckCircle2,
   AlertTriangle,
 } from "lucide-react"
-import { ensureActiveSubscription } from "@/lib/subscription-checker"
+import { ensureAuthenticatedProfile } from "@/lib/account-access"
 import { supabaseServer } from "@/lib/supabaseServer"
 import { ManageBillingPortalButton } from "./ManageBillingPortalButton"
+
+export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Sirens Forge — Billing",
@@ -102,40 +104,17 @@ function InfoCard(props: {
 }
 
 export default async function BillingPage() {
-  const auth = await ensureActiveSubscription()
+  const auth = await ensureAuthenticatedProfile()
 
-  if (!auth.ok) {
-    if (auth.error === "UNAUTHENTICATED") {
-      redirect("/login")
-    } else {
-      redirect("/pricing")
-    }
+  if (auth.ok === false) {
+    if (auth.error === "UNAUTHENTICATED") redirect("/login")
+    throw new Error(auth.message)
   }
 
   const supabase = await supabaseServer()
-  const authUserId = auth.user?.id
-  const authEmail = auth.user?.email ?? null
-
-  if (!authUserId) {
-    redirect("/login")
-  }
-
-  const { data: profileData } = await supabase
-    .from("profiles")
-    .select(
-      `
-      id,
-      user_id,
-      email,
-      badge,
-      seat_number
-    `
-    )
-    .eq("user_id", authUserId)
-    .maybeSingle()
-
-  const profile = (profileData as ProfileRow | null) ?? null
-  const profileId = profile?.id ?? auth.profile?.id ?? null
+  const authEmail = auth.user.email
+  const profile = auth.profile
+  const profileId = profile.id
 
   const { data: subscriptionsData } = await supabase
     .from("user_subscriptions")
@@ -157,16 +136,14 @@ export default async function BillingPage() {
 
   const subscriptions = (subscriptionsData as SubscriptionRow[] | null) ?? []
 
-  const currentSubscription =
-    subscriptions.find((s) =>
-      ["active", "trialing"].includes(String(s.status).toLowerCase())
-    ) ??
-    subscriptions[0] ??
-    null
-
-  const hasActivePlan = !!currentSubscription
-  const currentTier = prettify(currentSubscription?.tier_name) || "No active plan"
-  const currentStatus = prettify(currentSubscription?.status) || "No active plan"
+  const activeSubscription = subscriptions.find((s) =>
+    ["active", "trialing"].includes(String(s.status).trim().toLowerCase())
+  ) ?? null
+  const latestSubscription = subscriptions[0] ?? null
+  const displaySubscription = activeSubscription ?? latestSubscription
+  const hasActivePlan = activeSubscription !== null
+  const currentTier = displaySubscription ? prettify(displaySubscription.tier_name) : "No active plan"
+  const currentStatus = displaySubscription ? prettify(displaySubscription.status) : "No subscription history"
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -206,7 +183,9 @@ export default async function BillingPage() {
               <div>
                 <h2 className="text-xl font-bold text-white">No active plan found</h2>
                 <p className="mt-2 max-w-2xl text-sm text-gray-300">
-                  Your account does not currently show an active paid plan. Choose a plan to unlock access and continue creating.
+                  {latestSubscription
+                    ? `Your latest membership is ${prettify(latestSubscription.status)} and is not active. You can manage an existing billing account or choose a plan.`
+                    : "Your account has no active plan or subscription history. You can manage an existing billing account or choose a plan."}
                 </p>
                 <div className="mt-4">
                   <Link
@@ -226,21 +205,21 @@ export default async function BillingPage() {
           <InfoCard
             title="Current Plan"
             value={currentTier}
-            subtext="Your active membership tier"
+            subtext={hasActivePlan ? "Your active membership tier" : "Latest inactive membership tier"}
             icon={<Crown className="h-6 w-6 text-white" />}
           />
 
           <InfoCard
             title="Status"
             value={currentStatus}
-            subtext="Your current billing and access status"
+            subtext={hasActivePlan ? "Your current billing and access status" : "Latest membership status (not active)"}
             icon={<CheckCircle2 className="h-6 w-6 text-white" />}
           />
 
           <InfoCard
             title="Current Period Ends"
-            value={formatDate(currentSubscription?.current_period_end)}
-            subtext="Your next renewal date"
+            value={formatDate(displaySubscription?.current_period_end)}
+            subtext={hasActivePlan ? "Your next renewal date" : "Latest recorded period end"}
             icon={<CalendarClock className="h-6 w-6 text-white" />}
           />
         </div>
@@ -251,16 +230,16 @@ export default async function BillingPage() {
               <CreditCard className="h-7 w-7 text-white" />
             </div>
 
-            <h2 className="mb-4 text-2xl font-bold text-white">Plan Details</h2>
+            <h2 className="mb-4 text-2xl font-bold text-white">{hasActivePlan ? "Plan Details" : "Latest Membership History"}</h2>
 
-            {currentSubscription ? (
+            {displaySubscription ? (
               <div className="grid gap-5 sm:grid-cols-2">
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">
                     Tier
                   </div>
                   <div className="mt-1 text-base text-gray-200">
-                    {prettify(currentSubscription.tier_name)}
+                    {prettify(displaySubscription.tier_name)}
                   </div>
                 </div>
 
@@ -271,10 +250,10 @@ export default async function BillingPage() {
                   <div className="mt-2">
                     <span
                       className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusPill(
-                        currentSubscription.status
+                        displaySubscription.status
                       )}`}
                     >
-                      {prettify(currentSubscription.status)}
+                      {prettify(displaySubscription.status)}
                     </span>
                   </div>
                 </div>
@@ -284,7 +263,7 @@ export default async function BillingPage() {
                     Current Period Start
                   </div>
                   <div className="mt-1 text-base text-gray-200">
-                    {formatDate(currentSubscription.current_period_start)}
+                    {formatDate(displaySubscription.current_period_start)}
                   </div>
                 </div>
 
@@ -293,7 +272,7 @@ export default async function BillingPage() {
                     Current Period End
                   </div>
                   <div className="mt-1 text-base text-gray-200">
-                    {formatDate(currentSubscription.current_period_end)}
+                    {formatDate(displaySubscription.current_period_end)}
                   </div>
                 </div>
 
@@ -302,7 +281,7 @@ export default async function BillingPage() {
                     Cancel At Period End
                   </div>
                   <div className="mt-1 text-base text-gray-200">
-                    {currentSubscription.cancel_at_period_end ? "Yes" : "No"}
+                    {displaySubscription.cancel_at_period_end ? "Yes" : "No"}
                   </div>
                 </div>
 
@@ -311,9 +290,9 @@ export default async function BillingPage() {
                     Trial Window
                   </div>
                   <div className="mt-1 text-base text-gray-200">
-                    {currentSubscription.trial_start || currentSubscription.trial_end
-                      ? `${formatDate(currentSubscription.trial_start)} → ${formatDate(
-                          currentSubscription.trial_end
+                    {displaySubscription.trial_start || displaySubscription.trial_end
+                      ? `${formatDate(displaySubscription.trial_start)} → ${formatDate(
+                          displaySubscription.trial_end
                         )}`
                       : "—"}
                   </div>
@@ -398,7 +377,9 @@ export default async function BillingPage() {
                 Your subscription controls access to generation, AI Twin training, and the core tools inside Sirens Forge.
               </p>
               <p>
-                Your plan renews automatically based on your billing cycle so your access stays uninterrupted.
+                {hasActivePlan
+                  ? "Your active plan renews based on its recorded billing cycle."
+                  : "No active membership is currently granting creator access."}
               </p>
               <p>
                 Badge: <span className="text-gray-200">{profile?.badge || "—"}</span>
