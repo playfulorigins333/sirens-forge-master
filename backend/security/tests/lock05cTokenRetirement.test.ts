@@ -8,6 +8,7 @@ const targets=["app/account/page.tsx","app/billing/page.tsx","app/api/user/subsc
 const migration=readFileSync("supabase/migrations/20260811070000_lock05c_permanent_token_retirement.sql","utf8");
 const backup=readFileSync("supabase/manual/lock05c_token_retirement_backup.sql","utf8");
 const rollback=readFileSync("supabase/manual/lock05c_token_retirement_rollback.sql","utf8");
+const integration=readFileSync("backend/security/tests/runLock05cPostgresIntegration.mjs","utf8");
 
 test("economic-token routes and modules are permanently absent",()=>{
  for(const file of deleted) assert.equal(existsSync(file),false,file);
@@ -25,6 +26,23 @@ test("forward retirement is transactional, guarded, narrow, and non-cascading",(
 test("backup is private, baseline-pinned, and excludes password hashes",()=>{
  assert.match(backup,/lock05c_backup_20260811_pre_apply/); assert.match(backup,/3b3075c903f292c10dbe8423f85fe4702f6e30c7/); assert.match(backup,/REVOKE ALL ON SCHEMA[\s\S]*PUBLIC,anon,authenticated,service_role/i);
  assert.doesNotMatch(backup,/profile_state AS SELECT[^;]*password_hash/i); assert.match(backup,/column_name='password_hash'/);
+});
+test("token pack backup and rollback omit the generated column from explicit data copies",()=>{
+ const columns="id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,is_active,sort_order,popular,created_at,updated_at";
+ const backupInsert=backup.match(/INSERT INTO lock05c_backup_20260811_pre_apply\.token_packs\s*\(([^)]*)\)\s*SELECT\s+([^;]+?)\s+FROM public\.token_packs;/i);
+ assert.ok(backupInsert); assert.equal(backupInsert[1].replace(/\s/g,""),columns); assert.equal(backupInsert[2].replace(/\s/g,""),columns);
+ assert.doesNotMatch(backupInsert[0],/\btotal_tokens\b/i); assert.doesNotMatch(backupInsert[0],/SELECT\s+\*/i);
+ const rollbackInsert=rollback.match(/INSERT INTO public\.token_packs\s*\(([^)]*)\)\s*SELECT\s+([^;]+?)\s+FROM lock05c_backup_20260811_pre_apply\.token_packs;/i);
+ assert.ok(rollbackInsert); assert.equal(rollbackInsert[1].replace(/\s/g,""),columns); assert.equal(rollbackInsert[2].replace(/\s/g,""),columns);
+ assert.doesNotMatch(rollbackInsert[0],/\btotal_tokens\b/i); assert.doesNotMatch(rollbackInsert[0],/SELECT\s+\*/i);
+});
+test("generated token totals are preserved and verified",()=>{
+ for(const source of [backup,rollback]){
+  assert.match(source,/a\.attname='total_tokens'/); assert.match(source,/a\.atttypid='integer'::regtype/);
+  assert.match(source,/a\.attgenerated='s'/); assert.match(source,/pg_get_expr\(d\.adbin,d\.adrelid\)='\(tokens \+ bonus_tokens\)'/);
+  assert.match(source,/total_tokens IS DISTINCT FROM tokens\+bonus_tokens/i);
+ }
+ assert.match(integration,/total_tokens integer generated always as \(tokens \+ bonus_tokens\) stored/i);
 });
 test("policies are backed up semantically and reconstructed without nonexistent helpers",()=>{
  assert.doesNotMatch(`${backup}\n${rollback}`,new RegExp(["pg","get","policydef"].join("_"),"i"));

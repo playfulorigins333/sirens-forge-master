@@ -10,7 +10,10 @@ CREATE TABLE lock05c_backup_20260811_pre_apply.manifest(key text PRIMARY KEY,val
 INSERT INTO lock05c_backup_20260811_pre_apply.manifest VALUES
  ('baseline_sha','3b3075c903f292c10dbe8423f85fe4702f6e30c7'),('migration','20260811070000_lock05c_permanent_token_retirement.sql'),('created_at',clock_timestamp()::text);
 CREATE TABLE lock05c_backup_20260811_pre_apply.token_packs (LIKE public.token_packs INCLUDING ALL);
-INSERT INTO lock05c_backup_20260811_pre_apply.token_packs SELECT * FROM public.token_packs;
+INSERT INTO lock05c_backup_20260811_pre_apply.token_packs
+ (id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,is_active,sort_order,popular,created_at,updated_at)
+SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,is_active,sort_order,popular,created_at,updated_at
+FROM public.token_packs;
 CREATE TABLE lock05c_backup_20260811_pre_apply.token_transactions (LIKE public.token_transactions INCLUDING ALL);
 INSERT INTO lock05c_backup_20260811_pre_apply.token_transactions SELECT * FROM public.token_transactions;
 CREATE TABLE lock05c_backup_20260811_pre_apply.profile_state AS SELECT id,user_id,tier,tokens FROM public.profiles;
@@ -80,6 +83,23 @@ CREATE TABLE lock05c_backup_20260811_pre_apply.counts AS SELECT 'profiles' sourc
 REVOKE ALL ON ALL TABLES IN SCHEMA lock05c_backup_20260811_pre_apply FROM PUBLIC,anon,authenticated,service_role;
 DO $$ BEGIN
  IF (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_packs)<>3 OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_transactions)<>0
+ OR (SELECT count(*) FROM pg_attribute a WHERE a.attrelid='lock05c_backup_20260811_pre_apply.token_packs'::regclass AND a.attnum>0 AND NOT a.attisdropped AND a.attgenerated<>'')<>1
+ OR NOT EXISTS(
+   SELECT FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+   WHERE a.attrelid='lock05c_backup_20260811_pre_apply.token_packs'::regclass AND a.attname='total_tokens'
+    AND a.atttypid='integer'::regtype AND a.attgenerated='s'
+    AND pg_get_expr(d.adbin,d.adrelid)='(tokens + bonus_tokens)'
+ )
+ OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.token_packs WHERE total_tokens IS DISTINCT FROM tokens+bonus_tokens)
+ OR EXISTS(
+   (SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,total_tokens,is_active,sort_order,popular,created_at,updated_at FROM public.token_packs
+    EXCEPT
+    SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,total_tokens,is_active,sort_order,popular,created_at,updated_at FROM lock05c_backup_20260811_pre_apply.token_packs)
+   UNION ALL
+   (SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,total_tokens,is_active,sort_order,popular,created_at,updated_at FROM lock05c_backup_20260811_pre_apply.token_packs
+    EXCEPT
+    SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,total_tokens,is_active,sort_order,popular,created_at,updated_at FROM public.token_packs)
+ )
  OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.functions)<>7 OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.triggers)<>2
  OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.policies WHERE role_names IS NULL OR cardinality(role_names)=0 OR command NOT IN ('r','a','w','d','*'))
  OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.profile_column_grants)<>33
