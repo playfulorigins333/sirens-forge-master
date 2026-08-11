@@ -12,6 +12,7 @@ const billingPage = read("app/billing/page.tsx");
 const resolver = read("lib/stripe/billingCustomerResolver.ts");
 const portal = read("app/api/billing/portal/route.ts");
 const guard = read("lib/subscription-checker.ts");
+const paymentV2Contract = read("supabase/migrations/20260801002800_payment_first_v2_contract.sql");
 
 function hasActivePlan(statuses: string[]) {
   return statuses.find((status) => ["active", "trialing"].includes(status.trim().toLowerCase())) !== undefined;
@@ -67,6 +68,9 @@ test("customer IDs resolve by set cardinality without source precedence", () => 
 });
 
 test("billing customer resolver reads only the three authoritative profile-linked sources", () => {
+  assert.match(resolver, /import \{ getSupabaseAdmin \} from "@\/lib\/supabaseAdmin"/);
+  assert.match(resolver, /const supabase = getSupabaseAdmin\(\)/);
+  assert.doesNotMatch(resolver, /supabaseServer/);
   assert.match(resolver, /\.from\("profiles"\)[\s\S]*\.eq\("id", profileId\)/);
   assert.match(resolver, /\.from\("user_subscriptions"\)[\s\S]*\.eq\("user_id", profileId\)/);
   assert.match(resolver, /\.from\("payment_v2_purchases"\)[\s\S]*\.eq\("claimed_profile_id", profileId\)/);
@@ -74,9 +78,16 @@ test("billing customer resolver reads only the three authoritative profile-linke
   assert.doesNotMatch(resolver, /payment_v2_(holds|allocations)|customers\.(list|search|create)|email|metadata/);
 });
 
+test("frozen Payment V2 permissions require service-role reads and deny authenticated direct access", () => {
+  assert.match(paymentV2Contract, /revoke all on table public\.payment_v2_holds, public\.payment_v2_purchases, public\.payment_v2_allocations, public\.payment_v2_reconciliation_evidence from public, anon, authenticated, service_role;/i);
+  assert.match(paymentV2Contract, /grant select on table public\.payment_v2_holds, public\.payment_v2_purchases, public\.payment_v2_allocations, public\.payment_v2_reconciliation_evidence to service_role;/i);
+});
+
 test("portal creates only a portal session and never imports customer creation", () => {
   assert.match(portal, /ensureAuthenticatedProfile\(\)/);
+  assert.match(portal, /const profileId = auth\.profile\.id/);
   assert.match(portal, /resolveExistingBillingCustomer\(profileId\)/);
+  assert.doesNotMatch(portal, /req\.(json|formData)\(|searchParams|get\("(?:profile|profileId|customer|customerId)"\)/);
   assert.doesNotMatch(portal, /getOrCreateStripeCustomer|stripe\.customers\.(create|update)|stripe\.subscriptions\.(create|update|cancel)|stripe\.checkout\.sessions\.create/);
   assert.equal((portal.match(/stripe\.[\w.]+\.create/g) ?? []).join(","), "stripe.billingPortal.sessions.create");
 });

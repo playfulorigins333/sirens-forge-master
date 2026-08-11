@@ -1,4 +1,4 @@
-import { supabaseServer } from "@/lib/supabaseServer";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export type BillingCustomerResolution =
   | { ok: true; customerId: string }
@@ -14,7 +14,7 @@ export function resolveCollectedBillingCustomerIds(values: unknown[]): BillingCu
 }
 
 export async function resolveExistingBillingCustomer(profileId: string): Promise<BillingCustomerResolution> {
-  const supabase = await supabaseServer();
+  const supabase = getSupabaseAdmin();
   const [profileResult, subscriptionResult, purchaseResult] = await Promise.all([
     supabase.from("profiles").select("stripe_customer_id").eq("id", profileId).maybeSingle(),
     supabase.from("user_subscriptions").select("stripe_customer_id").eq("user_id", profileId),
