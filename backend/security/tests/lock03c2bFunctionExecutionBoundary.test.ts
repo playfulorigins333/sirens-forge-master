@@ -14,6 +14,13 @@ const signatures = [
   "creator_publishing_platform_account_clear_trusted_metadata\\(\\)",
 ];
 
+test("target lookups use ordered type-only signatures", () => {
+  for (const sql of [migration, rollback]) {
+    assert.equal((sql.match(/oidvectortypes\s*\(\s*p\.proargtypes\s*\)\s*=\s*target\.arguments/gi) ?? []).length, 2);
+    assert.doesNotMatch(sql, /pg_get_function_identity_arguments\s*\(\s*p\.oid\s*\)\s*=\s*target\.arguments/i);
+  }
+});
+
 test("forward migration contains only the five approved grant changes", () => {
   const sql = uncomment(migration);
   assert.match(sql, /^\s*begin\s*;/i);
@@ -53,12 +60,11 @@ test("manual rollback restores only the deliberately exposed pre-state", () => {
 
 test("changed-file scope is exactly the approved C2B set", () => {
   const expected = [
-    ".github/workflows/lock03c2b-function-execution-boundary.yml",
     "backend/security/tests/lock03c2bFunctionExecutionBoundary.test.ts",
     "backend/security/tests/runLock03c2bPostgresIntegration.mjs",
     migrationPath, rollbackPath,
   ].sort();
-  const tracked = execFileSync("git", ["diff", "--name-only", "81e8899b130299ab4ad63f0d6c8eeb990cf96e40", "--"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+  const tracked = execFileSync("git", ["diff", "--name-only", "1fa7fbe3e7d97e27a085b33ec110a8353c7d137b", "--"], { encoding: "utf8" }).trim().split("\n").filter(Boolean);
   const untracked = execFileSync("git", ["status", "--porcelain=v1"], { encoding: "utf8" }).trim().split("\n").filter(line => line.startsWith("?? ")).map(line => line.slice(3));
   const changed = [...new Set([...tracked, ...untracked])].sort();
   assert.deepEqual(changed, expected);
