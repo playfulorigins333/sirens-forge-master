@@ -19,7 +19,12 @@ export function ManageBillingPortalButton() {
       const data = await res.json().catch(() => ({}))
 
       if (!res.ok || typeof data.url !== "string") {
-        throw new Error(data.error || "Could not open billing portal")
+        const safeMessage = data.code === "BILLING_CUSTOMER_NOT_FOUND"
+          ? "No existing Stripe billing account is linked to this profile yet."
+          : data.code === "BILLING_CUSTOMER_AMBIGUOUS"
+            ? "Multiple billing accounts are linked to this profile. Billing management is temporarily unavailable."
+            : data.error || "Could not open billing portal"
+        throw new Error(safeMessage)
       }
 
       window.location.assign(data.url)

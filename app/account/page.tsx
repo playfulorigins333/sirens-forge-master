@@ -11,8 +11,10 @@ import {
   Wand2,
   Brain,
 } from "lucide-react";
-import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { ensureAuthenticatedProfile } from "@/lib/account-access";
 import { supabaseServer } from "@/lib/supabaseServer";
+
+export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Sirens Forge — Account",
@@ -75,40 +77,17 @@ function statusPill(status?: string | null) {
 }
 
 export default async function AccountPage() {
-  const auth = await ensureActiveSubscription();
+  const auth = await ensureAuthenticatedProfile();
 
-  if (!auth.ok) {
-    if (auth.error === "UNAUTHENTICATED") {
-      redirect("/login");
-    } else {
-      redirect("/pricing");
-    }
+  if (auth.ok === false) {
+    if (auth.error === "UNAUTHENTICATED") redirect("/login");
+    throw new Error(auth.message);
   }
 
   const supabase = await supabaseServer();
-  const authUserId = auth.user?.id;
-  const authEmail = auth.user?.email ?? null;
-
-  if (!authUserId) {
-    redirect("/login");
-  }
-
-  const { data: profileData } = await supabase
-    .from("profiles")
-    .select(
-      `
-      id,
-      user_id,
-      email,
-      badge,
-      seat_number
-    `
-    )
-    .eq("user_id", authUserId)
-    .maybeSingle();
-
-  const profile = (profileData as ProfileRow | null) ?? null;
-  const profileId = profile?.id ?? auth.profile?.id ?? null;
+  const authEmail = auth.user.email;
+  const profile = auth.profile;
+  const profileId = profile.id;
 
   const { data: subscriptionsData } = await supabase
     .from("user_subscriptions")
@@ -129,10 +108,11 @@ export default async function AccountPage() {
     .order("current_period_end", { ascending: false });
 
   const subscriptions = (subscriptionsData as SubscriptionRow[] | null) ?? [];
-  const currentSubscription =
-    subscriptions.find((s) => ["active", "trialing"].includes(String(s.status).toLowerCase())) ??
-    subscriptions[0] ??
-    null;
+  const activeSubscription =
+    subscriptions.find((s) => ["active", "trialing"].includes(String(s.status).trim().toLowerCase())) ?? null;
+  const latestSubscription = subscriptions[0] ?? null;
+  const displaySubscription = activeSubscription ?? latestSubscription;
+  const hasActivePlan = activeSubscription !== null;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -202,16 +182,16 @@ export default async function AccountPage() {
               <CreditCard className="h-7 w-7 text-white" />
             </div>
 
-            <h2 className="mb-4 text-2xl font-bold text-white">Current Plan</h2>
+            <h2 className="mb-4 text-2xl font-bold text-white">{hasActivePlan ? "Current Plan" : "Latest / Inactive Membership"}</h2>
 
-            {currentSubscription ? (
+            {displaySubscription ? (
               <div className="space-y-3 text-sm">
                 <div>
                   <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-gray-500">
                     Tier
                   </div>
                   <div className="mt-1 text-gray-200">
-                    {prettyTierName(currentSubscription.tier_name)}
+                    {prettyTierName(displaySubscription.tier_name)}
                   </div>
                 </div>
 
@@ -222,10 +202,10 @@ export default async function AccountPage() {
                   <div className="mt-2">
                     <span
                       className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${statusPill(
-                        currentSubscription.status
+                        displaySubscription.status
                       )}`}
                     >
-                      {prettyTierName(currentSubscription.status)}
+                      {prettyTierName(displaySubscription.status)}
                     </span>
                   </div>
                 </div>
@@ -235,7 +215,7 @@ export default async function AccountPage() {
                     Current Period Ends
                   </div>
                   <div className="mt-1 text-gray-200">
-                    {formatDate(currentSubscription.current_period_end)}
+                    {formatDate(displaySubscription.current_period_end)}
                   </div>
                 </div>
 
@@ -244,13 +224,15 @@ export default async function AccountPage() {
                     Cancel At Period End
                   </div>
                   <div className="mt-1 text-gray-200">
-                    {currentSubscription.cancel_at_period_end ? "Yes" : "No"}
+                    {displaySubscription.cancel_at_period_end ? "Yes" : "No"}
                   </div>
                 </div>
+                {!hasActivePlan ? <div className="flex gap-3 pt-2"><Link href="/billing" className="text-cyan-300 hover:text-cyan-200">Billing</Link><Link href="/pricing" className="text-cyan-300 hover:text-cyan-200">View Pricing</Link></div> : null}
               </div>
             ) : (
-              <div className="text-sm text-gray-300">
-                No active subscription found.
+              <div className="space-y-3 text-sm text-gray-300">
+                <p>No active plan and no subscription history found.</p>
+                <div className="flex gap-3"><Link href="/billing" className="text-cyan-300 hover:text-cyan-200">Billing</Link><Link href="/pricing" className="text-cyan-300 hover:text-cyan-200">View Pricing</Link></div>
               </div>
             )}
           </section>
