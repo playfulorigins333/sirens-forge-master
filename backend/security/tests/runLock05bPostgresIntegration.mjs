@@ -1,0 +1,51 @@
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import assert from "node:assert/strict";
+
+const databaseUrl=process.env.LOCK05B_DATABASE_URL;
+if(!databaseUrl) throw new Error("LOCK05B_DATABASE_URL is required; no database was contacted");
+const url=new URL(databaseUrl);
+if(!['postgres:','postgresql:'].includes(url.protocol)||!['localhost','127.0.0.1','[::1]'].includes(url.hostname)||url.port!=='5432'||url.pathname!=='/lock05b_test'||url.search||url.hash) throw new Error("LOCK05B safety boundary rejected non-local or unexpected database URL");
+const migration=readFileSync("supabase/migrations/20260811043000_lock05b_profile_credential_containment.sql","utf8");
+const rollback=readFileSync("supabase/manual/lock05b_profile_credential_containment_rollback.sql","utf8");
+function psql(sql,ok=true){const r=spawnSync("psql",[databaseUrl,"-X","-v","ON_ERROR_STOP=1","-qAt"],{input:sql,encoding:"utf8"});if((r.status===0)!==ok)throw new Error(`psql expectation failed\nstdout=${r.stdout}\nstderr=${r.stderr}`);return r;}
+function denied(role,sql){const r=psql(`\\set VERBOSITY verbose\nset role ${role}; ${sql}`,false);assert.match(r.stderr,/42501|permission denied/i);}
+const columns=["id","email","seat_number","is_og_vip","tokens","badge","created_at","user_id","tier","referral_code","referred_by","stripe_customer_id","stripe_subscription_id","subscription_status","is_beta_tester","og_seat_number","updated_at","username","full_name","avatar_url","role","clerk_id","last_login_at","metadata","stripe_connect_account_id","must_change_password","password_hash","is_tester","stripe_connect_onboarded","referral_email_sent_at","total_generations"];
+const approved=columns.filter(c=>c!=="password_hash");
+const fixture=`
+drop schema if exists auth cascade; drop schema public cascade; create schema public; create schema auth;
+do $$ begin if not exists(select from pg_roles where rolname='anon') then create role anon nologin; end if; if not exists(select from pg_roles where rolname='authenticated') then create role authenticated nologin; end if; if not exists(select from pg_roles where rolname='service_role') then create role service_role nologin bypassrls; end if; alter role service_role bypassrls; end $$;
+grant usage on schema public,auth to anon,authenticated,service_role;
+create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$; grant execute on function auth.uid() to authenticated;
+create table public.profiles(id uuid,email text,seat_number integer,is_og_vip boolean,tokens integer,badge text,created_at timestamptz,user_id uuid,tier text,referral_code text,referred_by uuid,stripe_customer_id text,stripe_subscription_id text,subscription_status text,is_beta_tester boolean,og_seat_number integer,updated_at timestamptz,username text,full_name text,avatar_url text,role text,clerk_id text,last_login_at timestamptz,metadata jsonb,stripe_connect_account_id text,must_change_password boolean,password_hash text,is_tester boolean,stripe_connect_onboarded boolean,referral_email_sent_at timestamptz,total_generations integer);
+alter table public.profiles enable row level security;
+create policy profiles_authenticated_own_select on public.profiles for select to authenticated using (user_id=auth.uid());
+grant select on table public.profiles to authenticated,service_role;
+grant update(stripe_customer_id,stripe_connect_account_id,stripe_connect_onboarded) on public.profiles to service_role;
+create table public.unrelated_control(id int); grant select on public.unrelated_control to anon;
+insert into public.profiles values('10000000-0000-0000-0000-000000000001','one@example.test',1,true,9,'OG',now(),'00000000-0000-0000-0000-000000000001','vip','r1',null,'cus1','sub1','active',false,1,now(),'one','One',null,'user',null,now(),'{}','acct1',false,'hash-one',false,true,null,4),('10000000-0000-0000-0000-000000000002','two@example.test',2,false,3,null,now(),'00000000-0000-0000-0000-000000000002','free','r2',null,'cus2',null,null,false,null,now(),'two','Two',null,'user',null,now(),'{}',null,false,'hash-two',false,false,null,1);
+`;
+const data=()=>psql("select md5(string_agg(row_to_json(p)::text,'|' order by id)) from public.profiles p;").stdout.trim();
+const tableAcl=()=>psql("select coalesce(array_to_string(relacl,','),'') from pg_class where oid='public.profiles'::regclass;").stdout.trim();
+const attrAcl=()=>psql("select string_agg(attname||':'||attacl::text,'|' order by attnum) from pg_attribute where attrelid='public.profiles'::regclass and attacl is not null;").stdout.trim();
+const policy=()=>psql("select polname||'|'||polcmd||'|'||polroles::text||'|'||pg_get_expr(polqual,polrelid) from pg_policy where polrelid='public.profiles'::regclass;").stdout.trim();
+const objects=()=>psql("select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind in ('v','m'); select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public';").stdout;
+psql(fixture); const beforeData=data(),beforeTableAcl=tableAcl(),beforeAttrAcl=attrAcl(),beforePolicy=policy(),beforeObjects=objects();
+assert.equal(psql("set role authenticated; set request.jwt.claim.sub='00000000-0000-0000-0000-000000000001'; select password_hash from public.profiles;").stdout.trim(),'hash-one');
+assert.equal(psql("set role authenticated; set request.jwt.claim.sub='00000000-0000-0000-0000-000000000001'; select count(*) from public.profiles where user_id='00000000-0000-0000-0000-000000000002';").stdout.trim(),'0');
+psql("set role authenticated; set request.jwt.claim.sub='00000000-0000-0000-0000-000000000001'; select * from public.profiles;"); denied('anon','select password_hash from public.profiles;');
+assert.equal(psql("set role service_role; select string_agg(password_hash,',' order by id) from public.profiles;").stdout.trim(),'hash-one,hash-two');
+psql(migration);
+denied('anon','select password_hash from public.profiles;'); denied('authenticated','select password_hash from public.profiles;'); denied('authenticated','select * from public.profiles;');
+assert.match(psql("set role authenticated; set request.jwt.claim.sub='00000000-0000-0000-0000-000000000001'; select id,user_id,email,badge,seat_number,tokens from public.profiles; select id,user_id from public.profiles;").stdout,/one@example\.test/);
+assert.equal(psql(`select count(*) from unnest(array[${approved.map(c=>`'${c}'`).join(',')}]) c where has_column_privilege('authenticated','public.profiles',c,'SELECT');`).stdout.trim(),'30');
+assert.equal(psql("select has_column_privilege('authenticated','public.profiles','password_hash','SELECT');").stdout.trim(),'f');
+assert.equal(psql("set role authenticated; set request.jwt.claim.sub='00000000-0000-0000-0000-000000000001'; select count(*) from public.profiles where user_id='00000000-0000-0000-0000-000000000002';").stdout.trim(),'0');
+psql("set role service_role; select password_hash,email from public.profiles;");
+assert.equal(data(),beforeData); assert.equal(policy(),beforePolicy); assert.equal(objects(),beforeObjects); assert.match(tableAcl(),/service_role=r/); assert.match(attrAcl(),/service_role=U/); assert.equal(psql("select pg_get_userbyid(relowner)||'|'||relrowsecurity||'|'||relforcerowsecurity from pg_class where oid='public.profiles'::regclass;").stdout.trim(),'postgres|t|f'); assert.equal(psql("select has_table_privilege('anon','public.unrelated_control','SELECT');").stdout.trim(),'t');
+psql(rollback);
+assert.equal(psql("select has_table_privilege('authenticated','public.profiles','SELECT');").stdout.trim(),'t');
+assert.equal(psql("select count(*) from pg_attribute a cross join lateral aclexplode(a.attacl) x where a.attrelid='public.profiles'::regclass and x.grantee=(select oid from pg_roles where rolname='authenticated');").stdout.trim(),'0');
+psql("set role authenticated; set request.jwt.claim.sub='00000000-0000-0000-0000-000000000001'; select * from public.profiles;");
+assert.equal(tableAcl(),beforeTableAcl); assert.equal(attrAcl(),beforeAttrAcl); assert.equal(data(),beforeData); assert.equal(policy(),beforePolicy); assert.equal(objects(),beforeObjects);
+console.log("LOCK-05B disposable PostgreSQL integration passed: pre-state, containment, RLS, immutability, ACL preservation, and rollback verified");
