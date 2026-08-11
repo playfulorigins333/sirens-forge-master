@@ -26,6 +26,20 @@ test("backup is private, baseline-pinned, and excludes password hashes",()=>{
  assert.match(backup,/lock05c_backup_20260811_pre_apply/); assert.match(backup,/3b3075c903f292c10dbe8423f85fe4702f6e30c7/); assert.match(backup,/REVOKE ALL ON SCHEMA[\s\S]*PUBLIC,anon,authenticated,service_role/i);
  assert.doesNotMatch(backup,/profile_state AS SELECT[^;]*password_hash/i); assert.match(backup,/column_name='password_hash'/);
 });
+test("policies are backed up semantically and reconstructed without nonexistent helpers",()=>{
+ assert.doesNotMatch(`${backup}\n${rollback}`,new RegExp(["pg","get","policydef"].join("_"),"i"));
+ for(const field of ["table_name","policy_name","is_permissive","command","role_names","using_expression","with_check_expression"]) assert.match(backup,new RegExp(`\\b${field}\\b`));
+ assert.match(backup,/pg_get_expr\(p\.polqual,p\.polrelid\)/); assert.match(backup,/pg_get_expr\(p\.polwithcheck,p\.polrelid\)/); assert.match(backup,/role_oid = 0 THEN 'PUBLIC'/);
+ for(const mapping of ["'r' THEN 'SELECT'","'a' THEN 'INSERT'","'w' THEN 'UPDATE'","'d' THEN 'DELETE'","'\\*' THEN 'ALL'"]) assert.match(rollback,new RegExp(mapping));
+ assert.match(rollback,/CREATE POLICY %I ON public\.%I AS %s FOR %s TO %s%s%s/); assert.match(rollback,/EXCEPT[\s\S]*UNION ALL[\s\S]*EXCEPT/);
+});
+test("replacement signup preserves audited non-economic behavior only",()=>{
+ assert.match(migration,/SET search_path TO pg_catalog, public, pg_temp/);
+ assert.match(migration,/INSERT INTO public\.profiles \(id,user_id,email,referral_code,badge,subscription_status,role,is_og_vip,is_beta_tester,must_change_password,created_at,updated_at\)/);
+ assert.match(migration,/VALUES \(NEW\.id,NEW\.id,NEW\.email,public\.generate_referral_code\(\),'Plebian','none','user',false,false,false,now\(\),now\(\)\)/);
+ const replacement=migration.slice(migration.indexOf("CREATE OR REPLACE FUNCTION public.handle_new_user()"),migration.indexOf("ALTER FUNCTION public.handle_new_user() OWNER"));
+ assert.doesNotMatch(replacement,/founder|inactive|is_tester|token_only|\btokens\b/i);
+});
 test("rollback is separately guarded and restores from backup identity",()=>{
  assert.match(rollback,/LOCK05C_ROLLBACK_DRIFT/); assert.match(rollback,/LOCK05C_ROLLBACK_POSTCONDITION_FAILED/); assert.doesNotMatch(rollback,/\bCASCADE\b/i); assert.match(rollback,/SET tier=b\.tier,tokens=b\.tokens/);
 });

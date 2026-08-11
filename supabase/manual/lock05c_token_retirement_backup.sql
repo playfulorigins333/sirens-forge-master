@@ -44,7 +44,24 @@ CREATE TABLE lock05c_backup_20260811_pre_apply.triggers AS
 CREATE TABLE lock05c_backup_20260811_pre_apply.table_security AS
  SELECT c.relname,c.relrowsecurity,c.relforcerowsecurity,c.relacl::text acl,r.rolname owner FROM pg_class c JOIN pg_roles r ON r.oid=c.relowner
  WHERE c.oid IN ('public.profiles'::regclass,'public.token_packs'::regclass,'public.token_transactions'::regclass);
-CREATE TABLE lock05c_backup_20260811_pre_apply.policies AS SELECT polrelid::regclass::text table_name,polname,pg_get_policydef(oid) definition FROM pg_policy WHERE polrelid IN ('public.profiles'::regclass,'public.token_packs'::regclass,'public.token_transactions'::regclass);
+CREATE TABLE lock05c_backup_20260811_pre_apply.policies AS
+SELECT
+ c.relname AS table_name,
+ p.polname AS policy_name,
+ p.polpermissive AS is_permissive,
+ p.polcmd AS command,
+ ARRAY(
+   SELECT CASE WHEN role_oid = 0 THEN 'PUBLIC' ELSE r.rolname END
+   FROM unnest(p.polroles) AS role_oid
+   LEFT JOIN pg_roles r ON r.oid = role_oid
+   ORDER BY CASE WHEN role_oid = 0 THEN 'PUBLIC' ELSE r.rolname END
+ )::text[] AS role_names,
+ pg_get_expr(p.polqual,p.polrelid) AS using_expression,
+ pg_get_expr(p.polwithcheck,p.polrelid) AS with_check_expression
+FROM pg_policy p
+JOIN pg_class c ON c.oid=p.polrelid
+WHERE p.polrelid IN ('public.profiles'::regclass,'public.token_packs'::regclass,'public.token_transactions'::regclass)
+ORDER BY c.relname,p.polname;
 CREATE TABLE lock05c_backup_20260811_pre_apply.profile_column_grants AS SELECT column_name,grantee,privilege_type,is_grantable FROM information_schema.column_privileges WHERE table_schema='public' AND table_name='profiles';
 CREATE TABLE lock05c_backup_20260811_pre_apply.grants AS SELECT table_name,grantee,privilege_type FROM information_schema.role_table_grants WHERE table_schema='public' AND table_name IN ('token_packs','token_transactions');
 CREATE TABLE lock05c_backup_20260811_pre_apply.counts AS SELECT 'profiles' source,count(*) rows FROM public.profiles UNION ALL SELECT 'token_packs',count(*) FROM public.token_packs UNION ALL SELECT 'token_transactions',count(*) FROM public.token_transactions;
@@ -52,6 +69,7 @@ REVOKE ALL ON ALL TABLES IN SCHEMA lock05c_backup_20260811_pre_apply FROM PUBLIC
 DO $$ BEGIN
  IF (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_packs)<>3 OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_transactions)<>0
  OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.functions)<>7 OR (SELECT count(*) FROM lock05c_backup_20260811_pre_apply.triggers)<>2
+ OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.policies WHERE role_names IS NULL OR cardinality(role_names)=0 OR command NOT IN ('r','a','w','d','*'))
  OR EXISTS(SELECT FROM information_schema.columns WHERE table_schema='lock05c_backup_20260811_pre_apply' AND column_name='password_hash')
  OR has_schema_privilege('anon','lock05c_backup_20260811_pre_apply','USAGE') OR has_schema_privilege('authenticated','lock05c_backup_20260811_pre_apply','USAGE') OR has_schema_privilege('service_role','lock05c_backup_20260811_pre_apply','USAGE')
  THEN RAISE EXCEPTION 'LOCK05C_POSTCONDITION_FAILED: private backup'; END IF;

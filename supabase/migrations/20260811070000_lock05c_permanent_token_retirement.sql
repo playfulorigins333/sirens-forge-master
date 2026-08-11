@@ -53,11 +53,11 @@ ALTER TABLE public.profiles DROP CONSTRAINT check_tier_valid;
 ALTER TABLE public.profiles ADD CONSTRAINT check_tier_valid CHECK (tier IS NULL OR tier IN ('og_throne','monthly_29','monthly_59','monthly_79'));
 
 CREATE OR REPLACE FUNCTION public.handle_new_user() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog, pg_temp
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog, public, pg_temp
 AS $function$
 BEGIN
-  INSERT INTO public.profiles (id,user_id,email,referral_code,badge,subscription_status,role,is_og_vip,is_beta_tester,is_tester,created_at,updated_at)
-  VALUES (NEW.id,NEW.id,NEW.email,public.generate_referral_code(),'founder','inactive','user',false,false,false,now(),now());
+  INSERT INTO public.profiles (id,user_id,email,referral_code,badge,subscription_status,role,is_og_vip,is_beta_tester,must_change_password,created_at,updated_at)
+  VALUES (NEW.id,NEW.id,NEW.email,public.generate_referral_code(),'Plebian','none','user',false,false,false,now(),now());
   RETURN NEW;
 END
 $function$;
@@ -97,8 +97,10 @@ BEGIN
  OR (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=p AND conname='check_tier_valid') LIKE '%token_only%'
  OR to_regprocedure('public.initialize_new_user()') IS NOT NULL OR EXISTS(SELECT FROM pg_trigger WHERE tgname='on_profile_created' AND tgrelid=p AND NOT tgisinternal)
  OR NOT EXISTS(SELECT FROM pg_trigger WHERE tgname='on_auth_user_created' AND tgrelid='auth.users'::regclass AND tgfoid='public.handle_new_user()'::regprocedure AND tgenabled<>'D' AND NOT tgisinternal)
- OR NOT (SELECT prosecdef AND proconfig=ARRAY['search_path=pg_catalog, pg_temp'] FROM pg_proc WHERE oid='public.handle_new_user()'::regprocedure)
+ OR NOT (SELECT prosecdef AND proconfig=ARRAY['search_path=pg_catalog, public, pg_temp'] FROM pg_proc WHERE oid='public.handle_new_user()'::regprocedure)
  OR pg_get_functiondef('public.handle_new_user()'::regprocedure) ~* 'tokens|token_only'
+ OR pg_get_functiondef('public.handle_new_user()'::regprocedure) !~ $contract$INSERT INTO public\.profiles \(id,user_id,email,referral_code,badge,subscription_status,role,is_og_vip,is_beta_tester,must_change_password,created_at,updated_at\)$contract$
+ OR pg_get_functiondef('public.handle_new_user()'::regprocedure) !~ $contract$VALUES \(NEW\.id,NEW\.id,NEW\.email,public\.generate_referral_code\(\),'Plebian','none','user',false,false,false,now\(\),now\(\)\)$contract$
  OR has_table_privilege('authenticated',p,'SELECT') OR has_column_privilege('authenticated',p,'password_hash','SELECT')
  OR EXISTS(SELECT FROM unnest(approved) c WHERE NOT has_column_privilege('authenticated',p,c,'SELECT'))
  OR (SELECT count(*) FROM pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl)x WHERE a.attrelid=p AND x.grantee=(SELECT oid FROM pg_roles WHERE rolname='authenticated') AND x.privilege_type='SELECT' AND a.attname=ANY(approved))<>29
