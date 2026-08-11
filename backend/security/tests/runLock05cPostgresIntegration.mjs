@@ -27,7 +27,7 @@ create function public.initialize_new_user()returns trigger language plpgsql set
 create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
 create trigger on_profile_created before insert on profiles for each row execute function public.initialize_new_user();
 create table public.user_subscriptions(id uuid primary key,user_id uuid,status text,tier_name text,current_period_end timestamptz);
-create table public.token_packs(id uuid primary key,name text,tokens integer,stripe_price_id text); alter table token_packs enable row level security;
+create table public.token_packs(id uuid primary key default gen_random_uuid(),name text not null,display_name text not null,tokens integer not null,price_usd numeric(10,2) not null,stripe_price_id text not null,bonus_tokens integer default 0,total_tokens integer generated always as (tokens + bonus_tokens) stored,is_active boolean default true,sort_order integer default 0,popular boolean default false,created_at timestamptz default now(),updated_at timestamptz default now()); alter table token_packs enable row level security;
 create policy token_packs_public_read on token_packs as permissive for select to public using(true); grant select on token_packs to authenticated;
 create table public.token_transactions(id uuid primary key,user_id uuid,amount integer,reason text); alter table token_transactions enable row level security;
 create policy token_transactions_own on token_transactions as restrictive for select to authenticated using(user_id=auth.uid()); grant select on token_transactions to authenticated;
@@ -40,7 +40,10 @@ create function public.deduct_tokens(uuid,integer,text)returns boolean language 
 create function public.complete_referral_reward(uuid)returns boolean language plpgsql security definer as $$begin return true;end$$;
 create function public.get_user_stats(uuid)returns table(total_generations bigint,total_collections bigint,total_tokens_spent integer,total_referrals bigint,current_streak integer)language plpgsql security definer as $$begin return;end$$;
 revoke execute on function add_tokens(uuid,integer,text),deduct_tokens(uuid,integer),deduct_tokens(uuid,integer,text)from public,anon,authenticated;
-insert into token_packs values('10000000-0000-0000-0000-000000000001','50',50,'price_1SScdNFjcWRhhOnz4fdtkych'),('10000000-0000-0000-0000-000000000002','200',200,'price_1SSce8FjcWRhhOnz9lAXHETb'),('10000000-0000-0000-0000-000000000003','500',500,'price_1SSceqFjcWRhhOnzfkiKHhGX');
+insert into token_packs(id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,is_active,sort_order,popular,created_at,updated_at) values
+('10000000-0000-0000-0000-000000000001','pack_50','50 Token Pack',50,2.99,'price_1SScdNFjcWRhhOnz4fdtkych',0,true,0,false,'2026-08-11T00:00:00Z','2026-08-11T00:00:00Z'),
+('10000000-0000-0000-0000-000000000002','pack_200','200 Token Pack',200,9.99,'price_1SSce8FjcWRhhOnz9lAXHETb',0,true,1,true,'2026-08-11T00:00:01Z','2026-08-11T00:00:01Z'),
+('10000000-0000-0000-0000-000000000003','pack_500','500 Token Pack',500,19.99,'price_1SSceqFjcWRhhOnzfkiKHhGX',0,true,2,false,'2026-08-11T00:00:02Z','2026-08-11T00:00:02Z');
 insert into profiles(id,email,user_id,tier,tokens,password_hash,role,is_og_vip,is_beta_tester,is_tester,must_change_password)select ('20000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,'u'||g||'@test',('30000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,case when g=22 then 'token_only' else 'og_throne'end,0,'secret-'||g,'user',false,false,false,false from generate_series(1,22)g;
 insert into user_subscriptions values('40000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000022','active','og_throne',now()+interval '1 month');
 insert into generations select ('50000000-0000-0000-0000-'||lpad(g::text,12,'0'))::uuid,1 from generate_series(1,10)g;`;
@@ -49,15 +52,23 @@ const explicitProfileAcls=()=>sql(`select a.attname||'|'||case when x.grantee=0 
 const explicitAclCounts=()=>sql(`select count(*)||'|'||count(*)filter(where grantee.rolname='authenticated'and x.privilege_type='SELECT')||'|'||count(*)filter(where grantee.rolname='service_role'and x.privilege_type='UPDATE')||'|'||count(*)filter(where grantee.rolname='service_role'and x.privilege_type='SELECT') from pg_attribute a cross join lateral aclexplode(a.attacl)x left join pg_roles grantee on grantee.oid=x.grantee where a.attrelid='profiles'::regclass and a.attnum>0 and not a.attisdropped`);
 const profileState=()=>sql("select md5(string_agg(id||'|'||user_id||'|'||tier||'|'||tokens,';' order by id))from profiles");
 const hashes=()=>sql("select md5(string_agg(password_hash,',' order by id))from profiles");
-const packs=()=>sql("select md5(string_agg(row_to_json(t)::text,';' order by id))from token_packs t");
+const packs=(relation="public.token_packs")=>sql(`select md5(string_agg(row_to_json(t)::text,';' order by id))from ${relation} t`);
+const generatedColumn=(relation="public.token_packs")=>sql(`select count(*)||'|'||string_agg(a.attname||'|'||format_type(a.atttypid,a.atttypmod)||'|'||a.attgenerated::text||'|'||pg_get_expr(d.adbin,d.adrelid),';' order by a.attnum) from pg_attribute a left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum where a.attrelid='${relation}'::regclass and a.attnum>0 and not a.attisdropped and a.attgenerated<>''`);
+const invalidGeneratedValues=(relation="public.token_packs")=>sql(`select count(*) from ${relation} where total_tokens is distinct from tokens+bonus_tokens`);
 
 sql(fixture); const beforeProfiles=profileState(),beforeHashes=hashes(),beforePacks=packs(),beforePolicies=policySemantics(),beforeExplicitAcls=explicitProfileAcls();
 assert.equal(explicitAclCounts(),'33|30|3|0');
+assert.equal(generatedColumn(),'1|total_tokens|integer|s|(tokens + bonus_tokens)');
+assert.equal(invalidGeneratedValues(),'0');
+assert.equal(sql("select string_agg(name||'|'||total_tokens,',' order by sort_order) from token_packs"),'pack_50|50,pack_200|200,pack_500|500');
 sql(file("supabase/manual/lock05c_token_retirement_backup.sql"));
 assert.equal(sql("select has_schema_privilege('anon','lock05c_backup_20260811_pre_apply','USAGE')||'|'||has_schema_privilege('authenticated','lock05c_backup_20260811_pre_apply','USAGE')||'|'||has_schema_privilege('service_role','lock05c_backup_20260811_pre_apply','USAGE')"),'false|false|false');
 assert.equal(sql("select count(*) from information_schema.columns where table_schema='lock05c_backup_20260811_pre_apply'and column_name='password_hash'"),'0');
 assert.equal(sql("select count(*) from lock05c_backup_20260811_pre_apply.policies where table_name in ('profiles','token_packs','token_transactions') and cardinality(role_names)>0"),'3');
 assert.equal(sql("select role_names::text from lock05c_backup_20260811_pre_apply.policies where policy_name='token_packs_public_read'"),'{PUBLIC}');
+assert.equal(generatedColumn('lock05c_backup_20260811_pre_apply.token_packs'),'1|total_tokens|integer|s|(tokens + bonus_tokens)');
+assert.equal(invalidGeneratedValues('lock05c_backup_20260811_pre_apply.token_packs'),'0');
+assert.equal(packs('lock05c_backup_20260811_pre_apply.token_packs'),beforePacks);
 sql(file("supabase/migrations/20260811070000_lock05c_permanent_token_retirement.sql"));
 assert.equal(sql("select to_regclass('public.token_packs') is null and to_regclass('public.token_transactions') is null"),'t');
 assert.equal(sql("select count(*) from information_schema.columns where table_schema='public'and (table_name,column_name)in(('profiles','tokens'),('generations','tokens_cost'),('purchases','tokens_received'),('referrals','reward_tokens'),('system_stats','tokens_purchased'),('system_stats','tokens_spent'),('crypto_payments','token_pack_id'))"),'0');
@@ -79,6 +90,7 @@ assert.equal(sql("select count(*) from pg_proc where oid in ('public.handle_new_
 assert.equal(sql("select count(*) from pg_trigger where not tgisinternal and tgname in ('on_auth_user_created','on_profile_created')"),'2');
 assert.match(sql("select pg_get_expr(adbin,adrelid) from pg_attrdef where adrelid='profiles'::regclass and adnum=(select attnum from pg_attribute where attrelid='profiles'::regclass and attname='tier')"),/token_only/);
 assert.match(sql("select pg_get_expr(adbin,adrelid) from pg_attrdef where adrelid='purchases'::regclass and adnum=(select attnum from pg_attribute where attrelid='purchases'::regclass and attname='purchase_type')"),/tokens/);
+assert.equal(generatedColumn(),'1|total_tokens|integer|s|(tokens + bonus_tokens)'); assert.equal(invalidGeneratedValues(),'0');
 assert.equal(explicitAclCounts(),'33|30|3|0'); assert.equal(explicitProfileAcls(),beforeExplicitAcls);
 assert.equal(policySemantics(),beforePolicies); assert.equal(profileState(),beforeProfiles); assert.equal(packs(),beforePacks); assert.equal(hashes(),beforeHashes);
-console.log("LOCK-05C disposable PostgreSQL integration passed: private backup, semantic policies, forward retirement, exact signup, LOCK-05B privileges, rollback, explicit ACL equality, password hashes, and semantic equality verified");
+console.log("LOCK-05C disposable PostgreSQL integration passed: realistic generated-column prestate, private backup, generated-column backup equality, forward retirement, exact signup, LOCK-05B privileges, rollback, generated-column restoration, explicit ACL equality, policy equality, password_hash immutability, and semantic equality verified");

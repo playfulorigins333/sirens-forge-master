@@ -22,7 +22,10 @@ DO $$ BEGIN
 END $$;
 
 CREATE TABLE public.token_packs (LIKE lock05c_backup_20260811_pre_apply.token_packs INCLUDING ALL);
-INSERT INTO public.token_packs SELECT * FROM lock05c_backup_20260811_pre_apply.token_packs;
+INSERT INTO public.token_packs
+ (id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,is_active,sort_order,popular,created_at,updated_at)
+SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,is_active,sort_order,popular,created_at,updated_at
+FROM lock05c_backup_20260811_pre_apply.token_packs;
 CREATE TABLE public.token_transactions (LIKE lock05c_backup_20260811_pre_apply.token_transactions INCLUDING ALL);
 INSERT INTO public.token_transactions SELECT * FROM lock05c_backup_20260811_pre_apply.token_transactions;
 ALTER TABLE public.token_packs OWNER TO postgres;
@@ -68,6 +71,23 @@ END $$;
 
 DO $$ BEGIN
  IF (SELECT count(*) FROM public.token_packs)<>(SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_packs)
+ OR (SELECT count(*) FROM pg_attribute a WHERE a.attrelid='public.token_packs'::regclass AND a.attnum>0 AND NOT a.attisdropped AND a.attgenerated<>'')<>1
+ OR NOT EXISTS(
+   SELECT FROM pg_attribute a JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+   WHERE a.attrelid='public.token_packs'::regclass AND a.attname='total_tokens'
+    AND a.atttypid='integer'::regtype AND a.attgenerated='s'
+    AND pg_get_expr(d.adbin,d.adrelid)='(tokens + bonus_tokens)'
+ )
+ OR EXISTS(SELECT FROM public.token_packs WHERE total_tokens IS DISTINCT FROM tokens+bonus_tokens)
+ OR EXISTS(
+   (SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,total_tokens,is_active,sort_order,popular,created_at,updated_at FROM public.token_packs
+    EXCEPT
+    SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,total_tokens,is_active,sort_order,popular,created_at,updated_at FROM lock05c_backup_20260811_pre_apply.token_packs)
+   UNION ALL
+   (SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,total_tokens,is_active,sort_order,popular,created_at,updated_at FROM lock05c_backup_20260811_pre_apply.token_packs
+    EXCEPT
+    SELECT id,name,display_name,tokens,price_usd,stripe_price_id,bonus_tokens,total_tokens,is_active,sort_order,popular,created_at,updated_at FROM public.token_packs)
+ )
  OR (SELECT count(*) FROM public.token_transactions)<>(SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_transactions)
  OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.generations_tokens b FULL JOIN public.generations g USING(id) WHERE g.tokens_cost IS DISTINCT FROM b.tokens_cost)
  OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.profile_state b FULL JOIN public.profiles p USING(id) WHERE p.user_id IS DISTINCT FROM b.user_id OR p.tier IS DISTINCT FROM b.tier OR p.tokens IS DISTINCT FROM b.tokens)
