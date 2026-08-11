@@ -13,7 +13,6 @@ export type ActiveSubscriptionResult = {
     email?: string | null;
     badge?: string | null;
     seat_number?: number | null;
-    tokens?: number | null;
   } | null;
   subscription?: {
     id: string;
@@ -57,8 +56,7 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
         user_id,
         email,
         badge,
-        seat_number,
-        tokens
+        seat_number
       `
       )
       .eq("user_id", user.id)
@@ -157,7 +155,6 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
         email: profile.email ?? null,
         badge: profile.badge ?? null,
         seat_number: profile.seat_number ?? null,
-        tokens: profile.tokens ?? null,
       },
       subscription: {
         id: subscription.id,

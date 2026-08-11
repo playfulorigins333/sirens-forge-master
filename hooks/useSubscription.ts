@@ -19,7 +19,6 @@ interface ProfileInfo {
   badge: string | null;
   isOgMember: boolean;
   seatNumber: number | null;
-  tokens: number | null;
 }
 
 interface SubscriptionResponse {

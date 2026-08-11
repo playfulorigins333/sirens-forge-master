@@ -1,0 +1,55 @@
+BEGIN;
+DO $$ BEGIN
+ IF current_user<>'postgres' OR to_regclass('lock05c_backup_20260811_pre_apply.manifest') IS NULL
+ OR (SELECT value FROM lock05c_backup_20260811_pre_apply.manifest WHERE key='baseline_sha')<>'3b3075c903f292c10dbe8423f85fe4702f6e30c7'
+ OR to_regclass('public.token_packs') IS NOT NULL OR to_regclass('public.token_transactions') IS NOT NULL
+ OR EXISTS(SELECT FROM information_schema.columns WHERE table_schema='public' AND (table_name,column_name) IN (('profiles','tokens'),('generations','tokens_cost'),('purchases','tokens_received'),('referrals','reward_tokens'),('system_stats','tokens_purchased'),('system_stats','tokens_spent'),('crypto_payments','token_pack_id')))
+ OR EXISTS(SELECT FROM public.profiles WHERE tier='token_only') OR to_regprocedure('public.initialize_new_user()') IS NOT NULL
+ THEN RAISE EXCEPTION 'LOCK05C_ROLLBACK_DRIFT'; END IF;
+END $$;
+
+CREATE TABLE public.token_packs (LIKE lock05c_backup_20260811_pre_apply.token_packs INCLUDING ALL);
+INSERT INTO public.token_packs SELECT * FROM lock05c_backup_20260811_pre_apply.token_packs;
+CREATE TABLE public.token_transactions (LIKE lock05c_backup_20260811_pre_apply.token_transactions INCLUDING ALL);
+INSERT INTO public.token_transactions SELECT * FROM lock05c_backup_20260811_pre_apply.token_transactions;
+ALTER TABLE public.token_packs OWNER TO postgres;
+ALTER TABLE public.token_transactions OWNER TO postgres;
+
+DO $$ DECLARE x record; BEGIN
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.column_types ORDER BY table_name,column_name LOOP
+  EXECUTE format('ALTER TABLE public.%I ADD COLUMN %I %s',x.table_name,x.column_name,x.data_type);
+ END LOOP;
+END $$;
+UPDATE public.profiles p SET tier=b.tier,tokens=b.tokens FROM lock05c_backup_20260811_pre_apply.profile_state b WHERE p.id=b.id AND p.user_id IS NOT DISTINCT FROM b.user_id;
+UPDATE public.generations g SET tokens_cost=b.tokens_cost FROM lock05c_backup_20260811_pre_apply.generations_tokens b WHERE g.id=b.id;
+UPDATE public.purchases p SET tokens_received=b.tokens_received FROM lock05c_backup_20260811_pre_apply.purchases_tokens b WHERE p.id=b.id;
+UPDATE public.referrals r SET reward_tokens=b.reward_tokens FROM lock05c_backup_20260811_pre_apply.referrals_tokens b WHERE r.id=b.id;
+UPDATE public.crypto_payments c SET token_pack_id=b.token_pack_id FROM lock05c_backup_20260811_pre_apply.crypto_payment_tokens b WHERE c.id=b.id;
+DROP TRIGGER on_auth_user_created ON auth.users;
+DO $$ DECLARE x record; BEGIN
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.column_defaults WHERE default_expression IS NOT NULL LOOP EXECUTE format('ALTER TABLE public.%I ALTER COLUMN %I SET DEFAULT %s',x.table_name,x.column_name,x.default_expression); END LOOP;
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.constraints LOOP EXECUTE format('ALTER TABLE %s ADD CONSTRAINT %I %s',x.table_name,x.conname,x.definition); END LOOP;
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.functions LOOP EXECUTE x.definition; EXECUTE format('ALTER FUNCTION %s OWNER TO %I',x.identity,x.owner); EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC,anon,authenticated,service_role',x.identity); END LOOP;
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.function_grants WHERE grantee NOT IN ('postgres') LOOP EXECUTE format('GRANT %s ON FUNCTION %s TO %I%s',x.privilege_type,x.identity,x.grantee,CASE WHEN x.is_grantable THEN ' WITH GRANT OPTION' ELSE '' END); END LOOP;
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.triggers LOOP EXECUTE x.definition; IF x.tgenabled='D' THEN EXECUTE format('ALTER TABLE %s DISABLE TRIGGER %I',x.table_name,x.tgname); ELSIF x.tgenabled='R' THEN EXECUTE format('ALTER TABLE %s ENABLE REPLICA TRIGGER %I',x.table_name,x.tgname); ELSIF x.tgenabled='A' THEN EXECUTE format('ALTER TABLE %s ENABLE ALWAYS TRIGGER %I',x.table_name,x.tgname); END IF; END LOOP;
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.column_types WHERE attnotnull LOOP EXECUTE format('ALTER TABLE public.%I ALTER COLUMN %I SET NOT NULL',x.table_name,x.column_name); END LOOP;
+END $$;
+DO $$ DECLARE x record; BEGIN
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.profile_column_grants WHERE grantee NOT IN ('postgres') LOOP EXECUTE format('GRANT %s (%I) ON public.profiles TO %I%s',x.privilege_type,x.column_name,x.grantee,CASE WHEN x.is_grantable='YES' THEN ' WITH GRANT OPTION' ELSE '' END); END LOOP;
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.table_security WHERE relname IN ('token_packs','token_transactions') LOOP IF x.relrowsecurity THEN EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY',x.relname); END IF; IF x.relforcerowsecurity THEN EXECUTE format('ALTER TABLE public.%I FORCE ROW LEVEL SECURITY',x.relname); END IF; END LOOP;
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.policies WHERE table_name IN ('token_packs','token_transactions') LOOP EXECUTE x.definition; END LOOP;
+ FOR x IN SELECT * FROM lock05c_backup_20260811_pre_apply.grants LOOP EXECUTE format('GRANT %s ON public.%I TO %I',x.privilege_type,x.table_name,x.grantee); END LOOP;
+END $$;
+
+DO $$ BEGIN
+ IF (SELECT count(*) FROM public.token_packs)<>(SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_packs)
+ OR (SELECT count(*) FROM public.token_transactions)<>(SELECT count(*) FROM lock05c_backup_20260811_pre_apply.token_transactions)
+ OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.generations_tokens b FULL JOIN public.generations g USING(id) WHERE g.tokens_cost IS DISTINCT FROM b.tokens_cost)
+ OR EXISTS(SELECT FROM lock05c_backup_20260811_pre_apply.profile_state b FULL JOIN public.profiles p USING(id) WHERE p.user_id IS DISTINCT FROM b.user_id OR p.tier IS DISTINCT FROM b.tier OR p.tokens IS DISTINCT FROM b.tokens)
+ OR (SELECT count(*) FROM pg_proc WHERE oid IN ('public.handle_new_user()'::regprocedure,'public.initialize_new_user()'::regprocedure,'public.add_tokens(uuid,integer,text)'::regprocedure,'public.deduct_tokens(uuid,integer)'::regprocedure,'public.deduct_tokens(uuid,integer,text)'::regprocedure,'public.complete_referral_reward(uuid)'::regprocedure,'public.get_user_stats(uuid)'::regprocedure))<>7
+ OR NOT EXISTS(SELECT FROM pg_trigger WHERE tgname='on_auth_user_created' AND tgrelid='auth.users'::regclass AND NOT tgisinternal)
+ OR NOT EXISTS(SELECT FROM pg_trigger WHERE tgname='on_profile_created' AND tgrelid='public.profiles'::regclass AND NOT tgisinternal)
+ OR EXISTS(SELECT FROM information_schema.columns WHERE table_schema='lock05c_backup_20260811_pre_apply' AND column_name='password_hash')
+ THEN RAISE EXCEPTION 'LOCK05C_ROLLBACK_POSTCONDITION_FAILED'; END IF;
+END $$;
+COMMIT;

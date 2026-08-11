@@ -24,7 +24,6 @@ type ProfileRow = {
   email: string | null
   badge: string | null
   seat_number: number | null
-  tokens: number | null
 }
 
 type SubscriptionRow = {
@@ -129,8 +128,7 @@ export default async function BillingPage() {
       user_id,
       email,
       badge,
-      seat_number,
-      tokens
+      seat_number
     `
     )
     .eq("user_id", authUserId)

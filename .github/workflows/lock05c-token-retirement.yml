@@ -1,0 +1,26 @@
+name: LOCK-05C token retirement
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  lock05c:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lock05c_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lock05c_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      LOCK05C_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lock05c_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npx tsx backend/security/tests/lock05cTokenRetirement.test.ts
+      - run: node backend/security/tests/runLock05cPostgresIntegration.mjs
