@@ -30,10 +30,43 @@ function fixture() {
   `;
 }
 psql(fixture() + migration);
-psql(`set role anon; select 1 / (case when count(*) = 0 then 1 else 0 end) from public.lora_status_events;`);
-psql(`set role authenticated; select 1 / (case when count(*) = 0 then 1 else 0 end) from public.lora_status_events;`);
 for (const role of ["anon", "authenticated"]) {
-  for (const statement of ["insert into public.lora_status_events values (2, 'bad')", "update public.lora_status_events set marker='bad' where id=1", "delete from public.lora_status_events where id=1"]) psql(`set role ${role}; ${statement};`, false);
+  psql(`
+    set role ${role};
+    select 1 / (case when count(*) = 0 then 1 else 0 end)
+      from public.lora_status_events;
+
+    do $lock03c1_denial$
+    declare
+      affected bigint;
+      insert_denied boolean := false;
+    begin
+      begin
+        insert into public.lora_status_events values (2, 'bad');
+      exception
+        when sqlstate '42501' then
+          insert_denied := true;
+      end;
+
+      if not insert_denied then
+        raise exception 'LOCK03C1_EXPECTED_INSERT_DENIAL_MISSING';
+      end if;
+
+      update public.lora_status_events set marker = 'bad' where id = 1;
+      get diagnostics affected = row_count;
+      if affected <> 0 then
+        raise exception 'LOCK03C1_UPDATE_NOT_DENIED';
+      end if;
+
+      delete from public.lora_status_events where id = 1;
+      get diagnostics affected = row_count;
+      if affected <> 0 then
+        raise exception 'LOCK03C1_DELETE_NOT_DENIED';
+      end if;
+    end
+    $lock03c1_denial$;
+    reset role;
+  `);
 }
 // Catalog and data invariants, including all 29 unchanged rows and the unrelated table.
 psql(`do $$ declare t text; n bigint; begin foreach t in array array[${targets.map((t) => `'${t}'`).join(",")}] loop execute format('select count(*) from public.%I where id=1 and marker=''original''',t) into n; if n<>1 then raise exception 'data changed %',t; end if; end loop; if (select marker from public.unrelated_control where id=1)<>'control' then raise exception 'control changed'; end if; end $$; set role service_role; select * from public.lora_status_events; insert into public.lora_status_events values (2,'service'); update public.lora_status_events set marker='service-updated' where id=2; delete from public.lora_status_events where id=2;`);
