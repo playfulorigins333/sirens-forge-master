@@ -2,6 +2,7 @@
 -- claimed Payment V2 Early Bird entitlement. Inventory and finance are frozen.
 
 create function public.payment_v2_apply_early_bird_subscription_lifecycle(
+  p_hold_id uuid,
   p_subscription_id text,
   p_customer_id text,
   p_status text,
@@ -25,7 +26,8 @@ declare
   v_entitlement public.user_subscriptions%rowtype;
   v_entitlement_count bigint;
 begin
-  if btrim(coalesce(p_subscription_id, '')) = '' or p_subscription_id <> btrim(p_subscription_id)
+  if p_hold_id is null
+     or btrim(coalesce(p_subscription_id, '')) = '' or p_subscription_id <> btrim(p_subscription_id)
      or btrim(coalesce(p_customer_id, '')) = '' or p_customer_id <> btrim(p_customer_id)
      or p_status not in ('active','trialing','past_due','canceled','unpaid','paused','incomplete','incomplete_expired')
      or p_cancel_at_period_end is null
@@ -40,10 +42,18 @@ begin
   select count(*) into v_purchase_count
   from public.payment_v2_purchases p
   where p.tier = 'early_bird'
+    and p.hold_id = p_hold_id
     and p.stripe_subscription_id = p_subscription_id
     and p.stripe_customer_id = p_customer_id;
 
   if v_purchase_count = 0 then
+    if exists (
+      select 1 from public.payment_v2_purchases p
+      where p.tier = 'early_bird' and p.stripe_subscription_id = p_subscription_id
+        and p.stripe_customer_id = p_customer_id and p.hold_id <> p_hold_id
+    ) then
+      raise exception 'subscription_hold_mismatch';
+    end if;
     if exists (
       select 1 from public.payment_v2_purchases p
       where p.tier = 'early_bird' and p.stripe_subscription_id = p_subscription_id
@@ -58,6 +68,7 @@ begin
   select p.* into strict v_purchase
   from public.payment_v2_purchases p
   where p.tier = 'early_bird'
+    and p.hold_id = p_hold_id
     and p.stripe_subscription_id = p_subscription_id
     and p.stripe_customer_id = p_customer_id
   for update;
@@ -115,6 +126,6 @@ begin
 end
 $$;
 
-alter function public.payment_v2_apply_early_bird_subscription_lifecycle(text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz) owner to postgres;
-revoke execute on function public.payment_v2_apply_early_bird_subscription_lifecycle(text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz) from public, anon, authenticated;
-grant execute on function public.payment_v2_apply_early_bird_subscription_lifecycle(text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz) to service_role;
+alter function public.payment_v2_apply_early_bird_subscription_lifecycle(uuid,text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz) owner to postgres;
+revoke execute on function public.payment_v2_apply_early_bird_subscription_lifecycle(uuid,text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz) from public, anon, authenticated;
+grant execute on function public.payment_v2_apply_early_bird_subscription_lifecycle(uuid,text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz) to service_role;

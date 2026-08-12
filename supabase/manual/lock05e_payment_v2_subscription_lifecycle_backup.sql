@@ -9,7 +9,7 @@ begin
      or to_regclass('public.user_subscriptions') is null
      or to_regclass('public.payment_v2_provider_event_inbox') is null
      or to_regprocedure('public.payment_v2_inbox_transition_status(text,text,text,text,boolean)') is null
-     or to_regprocedure('public.payment_v2_apply_early_bird_subscription_lifecycle(text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz)') is not null
+     or to_regprocedure('public.payment_v2_apply_early_bird_subscription_lifecycle(uuid,text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz)') is not null
   then raise exception 'lock05e_unexpected_catalog_prestate'; end if;
 end $$;
 
