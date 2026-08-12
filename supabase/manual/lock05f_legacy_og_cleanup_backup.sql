@@ -24,6 +24,23 @@ BEGIN
            WHERE lower(p.email)='admin@sirensforge.vip' OR p.role='admin'
               OR p.id='879c8a17-f9e8-473d-8de1-1fd1a77c080e' OR p.user_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e')
     THEN RAISE EXCEPTION 'lock05f_protected_admin_or_role_targeted'; END IF;
+ IF (SELECT count(*) FROM auth.users
+      WHERE id='879c8a17-f9e8-473d-8de1-1fd1a77c080e' AND lower(email)='admin@sirensforge.vip')<>1
+    THEN RAISE EXCEPTION 'lock05f_protected_admin_auth_precondition'; END IF;
+ IF (SELECT count(*) FROM public.profiles
+      WHERE id='879c8a17-f9e8-473d-8de1-1fd1a77c080e'
+        AND user_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e'
+        AND lower(email)='admin@sirensforge.vip' AND is_og_vip IS FALSE
+        AND seat_number IS NULL AND og_seat_number IS NULL)<>1
+    THEN RAISE EXCEPTION 'lock05f_protected_admin_profile_precondition'; END IF;
+ IF EXISTS(SELECT 1 FROM lock05f_targets
+           WHERE profile_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e' OR auth_user_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e')
+    THEN RAISE EXCEPTION 'lock05f_protected_admin_in_target'; END IF;
+ IF (SELECT count(*) FROM public.user_subscriptions s
+      WHERE s.tier_name='og_throne' AND NOT EXISTS(SELECT 1 FROM lock05f_targets t WHERE t.profile_id=s.user_id))<>1
+ OR (SELECT count(*) FROM public.user_subscriptions s
+     WHERE s.tier_name='og_throne' AND s.user_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e')<>1
+    THEN RAISE EXCEPTION 'lock05f_protected_admin_subscription_precondition'; END IF;
  IF (SELECT count(*) FROM auth.users u JOIN lock05f_targets t ON t.auth_user_id=u.id)<>21
     THEN RAISE EXCEPTION 'lock05f_auth_population_mismatch'; END IF;
  IF (SELECT count(*) FROM public.user_subscriptions s JOIN lock05f_targets t ON t.profile_id=s.user_id
@@ -47,7 +64,7 @@ CREATE TABLE lock05f_backup_20260812_pre_cleanup.manifest AS SELECT
  'lock05f_legacy_og_cleanup_backup.sql'::text cleanup_artifact,
  clock_timestamp() backup_timestamp,21::integer target_count,
  '879c8a17-f9e8-473d-8de1-1fd1a77c080e'::uuid protected_admin_uuid,
- encode(digest(lower('admin@sirensforge.vip'),'sha256'),'hex') protected_admin_email_sha256,
+ pg_catalog.encode(extensions.digest(lower('admin@sirensforge.vip'),'sha256'),'hex') protected_admin_email_sha256,
  '1-21'::text expected_seat_range,20::integer expected_subscription_row_count;
 CREATE TABLE lock05f_backup_20260812_pre_cleanup.profiles AS
  SELECT t.profile_id,t.auth_user_id,to_jsonb(p)-'password_hash' AS profile_without_password_hash

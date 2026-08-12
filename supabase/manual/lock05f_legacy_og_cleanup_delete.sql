@@ -28,6 +28,23 @@ BEGIN
    WHERE lower(p.email)='admin@sirensforge.vip' OR p.role='admin'
       OR p.id='879c8a17-f9e8-473d-8de1-1fd1a77c080e' OR p.user_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e')
  THEN RAISE EXCEPTION 'lock05f_protected_admin_or_role_targeted'; END IF;
+ IF (SELECT count(*) FROM auth.users
+      WHERE id='879c8a17-f9e8-473d-8de1-1fd1a77c080e' AND lower(email)='admin@sirensforge.vip')<>1
+    THEN RAISE EXCEPTION 'lock05f_protected_admin_auth_precondition'; END IF;
+ IF (SELECT count(*) FROM public.profiles
+      WHERE id='879c8a17-f9e8-473d-8de1-1fd1a77c080e'
+        AND user_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e'
+        AND lower(email)='admin@sirensforge.vip' AND is_og_vip IS FALSE
+        AND seat_number IS NULL AND og_seat_number IS NULL)<>1
+    THEN RAISE EXCEPTION 'lock05f_protected_admin_profile_precondition'; END IF;
+ IF EXISTS(SELECT 1 FROM lock05f_targets
+           WHERE profile_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e' OR auth_user_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e')
+    THEN RAISE EXCEPTION 'lock05f_protected_admin_in_target'; END IF;
+ IF (SELECT count(*) FROM public.user_subscriptions s
+      WHERE s.tier_name='og_throne' AND NOT EXISTS(SELECT 1 FROM lock05f_targets t WHERE t.profile_id=s.user_id))<>1
+ OR (SELECT count(*) FROM public.user_subscriptions s
+     WHERE s.tier_name='og_throne' AND s.user_id='879c8a17-f9e8-473d-8de1-1fd1a77c080e')<>1
+    THEN RAISE EXCEPTION 'lock05f_protected_admin_subscription_precondition'; END IF;
 
  -- Catalog contract: profiles -> auth.users is the one expected restrictive edge.
  IF NOT EXISTS(SELECT 1 FROM pg_constraint c WHERE c.contype='f' AND c.conrelid='public.profiles'::regclass
