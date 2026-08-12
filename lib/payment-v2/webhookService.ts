@@ -18,9 +18,9 @@ export type StripeSession = {
   line_items?: { data: Array<{ quantity?: number | null; amount_total?: number | null; price?: { id?: string; unit_amount?: number | null; currency?: string | null } | null }> };
 };
 export type StripePaymentIntent = { id: string; status: string; customer: unknown; amount: number; currency: string; latest_charge?: unknown };
-export type StripeSubscription = { id: string; customer: unknown; status: string; metadata?: Record<string,string> | null; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> }; latest_invoice?: unknown };
+export type StripeSubscription = { id: string; customer: unknown; status: string; current_period_start?: number; current_period_end?: number; cancel_at_period_end?: boolean; canceled_at?: number | null; trial_start?: number | null; trial_end?: number | null; metadata?: Record<string,string> | null; items?: { data: Array<{ quantity?: number | null; current_period_start?: number; current_period_end?: number; price?: { id?: string } | null }> }; latest_invoice?: unknown };
 export type StripeInvoicePayment={id:string;invoice:unknown;status:string;amount_paid:number|null;currency:string;payment:{type:string;payment_intent?:unknown}};
-export type StripeInvoice = { id?: string; status?: string | null; amount_due?: number; amount_paid?: number; currency?: string | null; parent?:{type:string;subscription_details?:{subscription:unknown;metadata?:Record<string,string>|null}|null}|null;payments?:unknown };
+export type StripeInvoice = { id?: string; customer?: unknown; status?: string | null; amount_due?: number; amount_paid?: number; currency?: string | null; parent?:{type:string;subscription_details?:{subscription:unknown;metadata?:Record<string,string>|null}|null}|null;payments?:unknown };
 export type StripeRecurringInvoice = StripeInvoice & { id: string; customer?: unknown; billing_reason?: string | null; lines?: { data: Array<{ amount?: number; quantity?: number | null; pricing?:{type:string;price_details?:{price:unknown}|null}|null; period?: { start?: number; end?: number } }> }; status_transitions?: { paid_at?: number | null } | null };
 
 export type HoldRow = { id: string; state: string; tier: string; expires_at: string; stripe_checkout_session_id: string | null; purchaser_credential_hash: string | Uint8Array };
@@ -43,6 +43,7 @@ export interface PaymentV2Database {
   recordPaid(args: Record<string, unknown>): Promise<string>;
   recordTerminal(args: Record<string, unknown>): Promise<string>;
   reconcilePaidInvoices?(args: Record<string, unknown>): Promise<string>;
+  applyEarlyBirdLifecycle?(args: Record<string, unknown>): Promise<string>;
 }
 export type WebhookResponse = { status: number; body: Record<string, string> };
 export interface WebhookInput {
@@ -68,6 +69,56 @@ const supported = new Set<string>(["checkout.session.completed", "checkout.sessi
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const id = (value: unknown): string | null => typeof value === "string" && value.trim() ? value : value && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : null;
 const timestamp = (created: number) => Number.isInteger(created) && created >= 0 ? new Date(created * 1000).toISOString() : null;
+const nullableTimestamp = (created: number | null | undefined) => created == null ? null : timestamp(created);
+const subscriptionStatuses = new Set(["active", "trialing", "past_due", "canceled", "unpaid", "paused", "incomplete", "incomplete_expired"]);
+
+async function processA3(event: StripeEvent, provider: PaymentV2Provider, db: PaymentV2Database): Promise<{ status: InboxStatus; error: string | null }> {
+  let subscriptionId: string | null = null;
+  let customerId: string | null = null;
+  let invoiceMetadata: ReturnType<typeof metadata> | null = null;
+  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+    subscriptionId = id(event.data.object.id);
+  } else if (event.type === "invoice.payment_failed") {
+    if (!provider.retrieveInvoice) return { status: "PENDING_RETRY", error: "PROVIDER_UNAVAILABLE" };
+    const invoiceId = id(event.data.object.id);
+    if (!invoiceId) return { status: "FAILED_TERMINAL", error: "MALFORMED_PROVIDER_IDENTITY" };
+    const invoice = await provider.retrieveInvoice(invoiceId);
+    if (invoice.id !== invoiceId) return { status: "FAILED_TERMINAL", error: "INVOICE_IDENTITY_MISMATCH" };
+    subscriptionId = invoice.parent?.type === "subscription_details" ? id(invoice.parent.subscription_details?.subscription) : null;
+    customerId = id(invoice.customer);
+    if (invoice.parent?.subscription_details?.metadata) invoiceMetadata = metadata({ metadata: invoice.parent.subscription_details.metadata });
+  } else return { status: "PENDING_PHASE", error: null };
+  if (!subscriptionId) return { status: "FAILED_TERMINAL", error: "MALFORMED_PROVIDER_IDENTITY" };
+  const subscription = await provider.retrieveSubscription(subscriptionId);
+  const authoritativeCustomer = id(subscription.customer);
+  if (subscription.id !== subscriptionId || !authoritativeCustomer || (customerId && customerId !== authoritativeCustomer)) {
+    return { status: "FAILED_TERMINAL", error: "SUBSCRIPTION_IDENTITY_MISMATCH" };
+  }
+  const discriminator = metadata(subscription);
+  if (discriminator.kind === "legacy") return { status: "IGNORED_NON_V2", error: null };
+  if (discriminator.kind !== "v2" || discriminator.tier !== "early_bird") return { status: "FAILED_TERMINAL", error: "INVALID_V2_METADATA" };
+  if (invoiceMetadata?.kind === "v2" && (invoiceMetadata.tier !== discriminator.tier || invoiceMetadata.holdId !== discriminator.holdId)) {
+    return { status: "FAILED_TERMINAL", error: "INVOICE_METADATA_MISMATCH" };
+  }
+  if (!subscriptionStatuses.has(subscription.status) || typeof subscription.cancel_at_period_end !== "boolean") {
+    return { status: "FAILED_TERMINAL", error: "UNSUPPORTED_SUBSCRIPTION_STATUS" };
+  }
+  const subscriptionItem = subscription.items?.data.length === 1 ? subscription.items.data[0] : null;
+  const currentPeriodStart = subscription.current_period_start ?? subscriptionItem?.current_period_start;
+  const currentPeriodEnd = subscription.current_period_end ?? subscriptionItem?.current_period_end;
+  const periodStart = nullableTimestamp(currentPeriodStart), periodEnd = nullableTimestamp(currentPeriodEnd);
+  const canceledAt = nullableTimestamp(subscription.canceled_at), trialStart = nullableTimestamp(subscription.trial_start), trialEnd = nullableTimestamp(subscription.trial_end);
+  if ((currentPeriodStart != null && !periodStart) || (currentPeriodEnd != null && !periodEnd) ||
+      (subscription.canceled_at != null && !canceledAt) || (subscription.trial_start != null && !trialStart) || (subscription.trial_end != null && !trialEnd) || !db.applyEarlyBirdLifecycle) {
+    return { status: "FAILED_TERMINAL", error: "INVALID_SUBSCRIPTION_SNAPSHOT" };
+  }
+  const result = await db.applyEarlyBirdLifecycle({ p_subscription_id: subscriptionId, p_customer_id: authoritativeCustomer, p_status: subscription.status,
+    p_current_period_start: periodStart, p_current_period_end: periodEnd, p_cancel_at_period_end: subscription.cancel_at_period_end,
+    p_canceled_at: canceledAt, p_trial_start: trialStart, p_trial_end: trialEnd });
+  if (result === "purchase_pending") return { status: "PENDING_PURCHASE", error: "PURCHASE_PENDING" };
+  if (["applied", "unclaimed", "terminal_noop"].includes(result)) return { status: "PROCESSED", error: null };
+  return { status: "FAILED_TERMINAL", error: "LIFECYCLE_RESULT_INVALID" };
+}
 
 export async function recurringInvoice(event: StripeEvent, provider: PaymentV2Provider, db: PaymentV2Database): Promise<WebhookResponse> {
   const invoice = event.data.object as StripeRecurringInvoice;
@@ -221,12 +272,18 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
     try {
       const inbox = input.createInboxDatabase();
       const received = await inbox.receiveEvent(envelope.args);
-      if (received === "RECEIVED") {
-        const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: "RECEIVED", p_new_status: "PENDING_PHASE", p_error_code: null, p_count_attempt: false });
-        return responseForInboxStatus(transitioned as InboxStatus) as WebhookResponse;
-      }
-      if (received === "PENDING_PHASE" || received === "PENDING_PURCHASE" || received === "PENDING_RETRY" || received === "PROCESSED" || received === "IGNORED_NON_V2" || received === "FAILED_TERMINAL") {
-        return responseForInboxStatus(received as InboxStatus, true) as WebhookResponse;
+      let current = received as InboxStatus;
+      if (current === "RECEIVED") current = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: "RECEIVED", p_new_status: "PENDING_PHASE", p_error_code: null, p_count_attempt: false });
+      if (["PROCESSED", "IGNORED_NON_V2", "FAILED_TERMINAL"].includes(current)) return responseForInboxStatus(current, true) as WebhookResponse;
+      if (envelope.classification.lifecyclePhase !== "PFC-07E-A3" || event.type === "invoice.paid") return responseForInboxStatus(current) as WebhookResponse;
+      try {
+        const outcome = await processA3(event, provider, input.createDatabase());
+        const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: current, p_new_status: outcome.status, p_error_code: outcome.error, p_count_attempt: true });
+        return responseForInboxStatus(transitioned) as WebhookResponse;
+      } catch (cause) {
+        const terminal = cause instanceof Error && /^(subscription_customer_mismatch|purchase_ambiguous|unclaimed_relationship_mismatch|claimed_relationship_mismatch|allocation_identity_mismatch|entitlement_cardinality_mismatch|entitlement_identity_mismatch|invalid_subscription_snapshot)$/.test(cause.message);
+        const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: current, p_new_status: terminal ? "FAILED_TERMINAL" : "PENDING_RETRY", p_error_code: terminal ? "DATABASE_IDENTITY_MISMATCH" : "TRANSIENT_PROCESSING_FAILURE", p_count_attempt: true });
+        return responseForInboxStatus(transitioned) as WebhookResponse;
       }
       return inboxUnavailable();
     } catch (cause) {

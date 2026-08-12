@@ -1,0 +1,33 @@
+name: LOCK-05E Payment V2 Subscription Lifecycle
+on:
+  pull_request:
+    paths:
+      - 'lib/payment-v2/**'
+      - 'app/api/webhook/payment-v2/**'
+      - 'app/api/payment-v2/claim/**'
+      - 'backend/payment-v2/tests/**'
+      - 'supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql'
+      - 'supabase/manual/lock05e_payment_v2_subscription_lifecycle_*.sql'
+      - '.github/workflows/lock05e-payment-v2-subscription-lifecycle.yml'
+  workflow_dispatch:
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: postgres }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      PAYMENT_V2_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 24, cache: npm }
+      - run: npm ci
+      - run: npm run test:lock05e
+      - run: npm run test:lock05e-postgres
+      - run: npx tsc --noEmit
