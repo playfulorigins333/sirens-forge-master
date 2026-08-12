@@ -72,14 +72,14 @@ for (const body of [null, [], "og_throne", 1, true, { tierName: "prime_access" }
 }
 
 const now = new Date("2026-08-04T00:00:00.000Z");
-let inventory = calculatePaymentV2Inventory([], now); equal(inventory.og_throne.slots_remaining, 50); equal(inventory.early_bird.slots_remaining, 120);
+let inventory = calculatePaymentV2Inventory([], now); equal(inventory.og_throne.slots_remaining, 50); equal(inventory.early_bird.slots_remaining, 150);
 const states = ["SESSION_ASSOCIATED", "PAID_UNCLAIMED", "CLAIMED"];
 for (const state of states) { inventory = calculatePaymentV2Inventory([{ tier: "og_throne", state, expires_at: null }], now); equal(inventory.og_throne.slots_remaining, 49); }
 inventory = calculatePaymentV2Inventory([{ tier: "og_throne", state: "HELD", expires_at: "2026-08-04T00:00:01Z" }], now); equal(inventory.og_throne.slots_remaining, 49);
-for (const expires_at of ["2026-08-03T23:59:59Z", now.toISOString()]) { inventory = calculatePaymentV2Inventory([{ tier: "early_bird", state: "HELD", expires_at }], now); equal(inventory.early_bird.slots_remaining, 120); }
+for (const expires_at of ["2026-08-03T23:59:59Z", now.toISOString()]) { inventory = calculatePaymentV2Inventory([{ tier: "early_bird", state: "HELD", expires_at }], now); equal(inventory.early_bird.slots_remaining, 150); }
 for (const state of ["EXPIRED_UNPAID", "CANCELED_UNPAID", "REFUNDED", "REVOKED"]) { inventory = calculatePaymentV2Inventory([{ tier: "og_throne", state, expires_at: null }], now); equal(inventory.og_throne.slots_remaining, 50); }
 equal(calculatePaymentV2Inventory(Array.from({ length: 50 }, () => ({ tier: "og_throne", state: "CLAIMED", expires_at: null })), now).og_throne.slots_remaining, 0);
-equal(calculatePaymentV2Inventory(Array.from({ length: 120 }, () => ({ tier: "early_bird", state: "CLAIMED", expires_at: null })), now).early_bird.slots_remaining, 0);
+equal(calculatePaymentV2Inventory(Array.from({ length: 150 }, () => ({ tier: "early_bird", state: "CLAIMED", expires_at: null })), now).early_bird.slots_remaining, 0);
 rejects(() => calculatePaymentV2Inventory(Array.from({ length: 51 }, () => ({ tier: "og_throne", state: "CLAIMED", expires_at: null })), now));
 rejects(() => calculatePaymentV2Inventory([{ tier: "og_throne", state: "HELD", expires_at: "bad" }], now));
 rejects(() => calculatePaymentV2Inventory([{ tier: "bad", state: "CLAIMED", expires_at: null }], now));
@@ -94,11 +94,11 @@ inventory = calculatePaymentV2Inventory([
   { tier: "early_bird", state: "EXPIRED_UNPAID", expires_at: null },
 ], now);
 equal(inventory.og_throne.slots_remaining, 49);
-equal(inventory.early_bird.slots_remaining, 119);
+equal(inventory.early_bird.slots_remaining, 149);
 equal(inventory.og_throne.max_slots, 50);
-equal(inventory.early_bird.max_slots, 120);
-rejects(() => calculatePaymentV2Inventory(Array.from({ length: 121 }, () => ({ tier: "early_bird", state: "PAID_UNCLAIMED", expires_at: null })), now));
-equal(PAYMENT_V2_PUBLIC_CAPACITY.og_throne, 50); equal(PAYMENT_V2_PUBLIC_CAPACITY.early_bird, 120);
+equal(inventory.early_bird.max_slots, 150);
+rejects(() => calculatePaymentV2Inventory(Array.from({ length: 151 }, () => ({ tier: "early_bird", state: "PAID_UNCLAIMED", expires_at: null })), now));
+equal(PAYMENT_V2_PUBLIC_CAPACITY.og_throne, 50); equal(PAYMENT_V2_PUBLIC_CAPACITY.early_bird, 150);
 const migration = readFileSync("supabase/migrations/20260801002800_payment_first_v2_contract.sql", "utf8"); equal(migration.includes("when 'og_throne' then 50 else 120 end"), true);
 
 const homeSource = readFileSync("app/page.tsx", "utf8");
@@ -144,12 +144,12 @@ includes(pricingSource, ') : ogUnavailable ? (');
 includes(pricingSource, ') : earlyBirdUnavailable ? (');
 includes(pricingSource, '// Do nothing — keep last known good state.');
 includes(pricingSource, 'ogTotal !== 50');
-includes(pricingSource, 'ebTotal !== 120');
+includes(pricingSource, 'ebTotal !== 150');
 excludes(pricingSource, "Numbers update as soon as a tier is claimed");
 excludes(homeSource.toLowerCase(), "prime access");
 excludes(pricingSource.toLowerCase(), "prime access");
 excludes(homeSource, "/150 LEFT");
-excludes(pricingSource, "150 total seats");
+includes(pricingSource, "150 total seats");
 includes(pricingSource, 'useState<ViewMode>("compare")');
 includes(pricingSource, "Card View");
 includes(pricingSource, "Comparison View");
@@ -160,7 +160,7 @@ excludes(pricingSource, "before public pricing activates");
 includes(pricingSource, 'og: "$1,333 one-time"');
 includes(pricingSource, 'earlyBird: "$29.99/month"');
 includes(pricingSource, 'og: "50 total seats"');
-includes(pricingSource, 'earlyBird: "120 total seats"');
+includes(pricingSource, 'earlyBird: "150 total seats"');
 includes(pricingSource, 'label: "Affiliate % (first 6 months)"');
 includes(pricingSource, 'label: "Affiliate % (lifetime after 6 months)"');
 includes(pricingSource, 'og: "50%"');

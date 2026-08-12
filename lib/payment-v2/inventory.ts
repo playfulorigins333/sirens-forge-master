@@ -1,4 +1,9 @@
-export const PAYMENT_V2_PUBLIC_CAPACITY = { og_throne: 50, early_bird: 120 } as const;
+import { LAUNCH_CAPACITY } from "@/lib/launch-capacity";
+
+export const PAYMENT_V2_PUBLIC_CAPACITY = {
+  og_throne: LAUNCH_CAPACITY.og_throne,
+  early_bird: LAUNCH_CAPACITY.early_bird,
+} as const;
 export type PaymentV2InventoryTier = keyof typeof PAYMENT_V2_PUBLIC_CAPACITY;
 export type PaymentV2InventoryRow = { tier: unknown; state: unknown; expires_at: unknown };
 

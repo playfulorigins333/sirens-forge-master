@@ -181,9 +181,9 @@ export default function PricingClient() {
         // Require valid numbers to hydrate/update — prevents accidental drift
         if (
           !isFiniteNumber(ogRemaining) || ogTotal !== 50 ||
-          !isFiniteNumber(ebRemaining) || ebTotal !== 120 ||
+          !isFiniteNumber(ebRemaining) || ebTotal !== 150 ||
           !Number.isInteger(ogRemaining) || ogRemaining < 0 || ogRemaining > 50 ||
-          !Number.isInteger(ebRemaining) || ebRemaining < 0 || ebRemaining > 120 ||
+          !Number.isInteger(ebRemaining) || ebRemaining < 0 || ebRemaining > 150 ||
           typeof ogTier?.is_active !== "boolean" || typeof ebTier?.is_active !== "boolean"
         ) {
           throw new Error("Seat numbers missing");
@@ -264,7 +264,7 @@ export default function PricingClient() {
     {
       label: "Availability",
       og: "50 total seats",
-      earlyBird: "120 total seats",
+      earlyBird: "150 total seats",
       highlight: "og",
     },
     {
@@ -764,7 +764,7 @@ export default function PricingClient() {
                 <div className="border-b border-slate-800/80 bg-gradient-to-br from-pink-900/90 via-pink-950/90 to-slate-950/90 px-4 py-3 flex flex-col items-center justify-center text-center">
                   <span className="text-[10px] uppercase tracking-[0.24em] text-pink-200/80">Early Bird</span>
                   <span className="text-xs font-semibold text-pink-50">$29.99/month</span>
-                  <span className="text-[10px] text-pink-200/80">120 total seats</span>
+                  <span className="text-[10px] text-pink-200/80">150 total seats</span>
                 </div>
 
 
