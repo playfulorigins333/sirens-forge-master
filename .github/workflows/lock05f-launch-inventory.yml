@@ -1,0 +1,15 @@
+name: LOCK-05F launch inventory
+on:
+  pull_request:
+  push:
+    branches: [codex/lock05f-launch-inventory-and-legacy-og-cleanup]
+jobs:
+  focused:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run test:lock05f
+      - run: npx tsc --noEmit

@@ -48,8 +48,8 @@ for(const [label,current] of [["wrong price",{...subscription(),items:{data:[{qu
 {const h=claimHarness("og_throne");await paymentFirstClaim(h.input);equal(h.retrieves,0,"OG claim performs no subscription lookup");}
 
 const baseline="eff1aa6e96c21dfd2b17f59b292476da164f0073";
-for(const path of ["app/api/checkout/subscription-v2/route.ts","lib/payment-v2/checkoutService.ts","lib/payment-v2/checkoutRequestProtection.ts","lib/payment-v2/inventory.ts","lib/subscription-checker.ts"]){execFileSync("git",["diff","--quiet",baseline,"--",path]);assertions++;}
-const changedMigrations=execFileSync("git",["diff","--name-only",baseline,"HEAD","--","supabase/migrations"],{encoding:"utf8"}).trim().split("\n").filter(Boolean);equal(changedMigrations,["supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql"],"only new migration differs");
+for(const path of ["app/api/checkout/subscription-v2/route.ts","lib/payment-v2/checkoutService.ts","lib/payment-v2/checkoutRequestProtection.ts","lib/subscription-checker.ts"]){execFileSync("git",["diff","--quiet",baseline,"--",path]);assertions++;}
+const changedMigrations=execFileSync("git",["diff","--name-only",baseline,"--","supabase/migrations"],{encoding:"utf8"}).trim().split("\n").filter(Boolean);equal(changedMigrations,["supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql","supabase/migrations/20260812090000_lock05f_launch_inventory_reset.sql"],"only LOCK-05E and forward LOCK-05F migrations differ");
 const migration=await import("node:fs").then(({readFileSync})=>readFileSync("supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql","utf8"));
 const inboxSource=await import("node:fs").then(({readFileSync})=>readFileSync("lib/payment-v2/eventInboxService.ts","utf8"));
 const receiveArgs=["p_provider_event_id","p_provider_event_type","p_provider_object_id","p_provider_object_type","p_provider_created_at","p_raw_payload_sha256","p_lifecycle_phase","p_lifecycle_version"];
@@ -61,5 +61,5 @@ check(migration.includes("pg_catalog.pg_notify('pgrst', 'reload schema')"),"forw
 const rollback=await import("node:fs").then(({readFileSync})=>readFileSync("supabase/manual/lock05e_payment_v2_subscription_lifecycle_rollback.sql","utf8"));check(rollback.includes("pg_catalog.pg_notify('pgrst','reload schema')"),"rollback notifies PostgREST schema reload");
 for(const name of ["payment_v2_record_paid","payment_v2_record_paid_with_charge","payment_v2_claim","payment_v2_associate_session","payment_v2_record_session_unpaid_terminal","payment_v2_expire_unpaid","payment_v2_reconcile_paid_invoices"]){check(!new RegExp(`create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\b`,"i").test(migration),`migration does not rewrite ${name}`);}
 check(!/alter\s+table\s+public\.payment_v2_reconciliation_evidence|(?:create|drop)\s+(?:unique\s+)?index[^;]*payment_v2_(?:reconciliation_)?evidence/i.test(migration),"migration does not alter evidence contracts");
-for(const path of ["backend/affiliate","app/pricing"]){execFileSync("git",["diff","--quiet",baseline,"--",path]);assertions++;}
+for(const path of ["backend/affiliate"]){execFileSync("git",["diff","--quiet",baseline,"--",path]);assertions++;}
 check(true,"no live provider used");console.log(`LOCK-05E lifecycle tests passed (${assertions} assertions; no external network calls)`);
