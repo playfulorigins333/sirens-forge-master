@@ -46,7 +46,7 @@ const historical=execFileSync('git',['diff','--name-only','e47e641048b48ed858b9f
 equal(historical,'','historical migrations unchanged')
 absent(backup,/encrypted_password|recovery_token|confirmation_token|refresh_token|mfa|oauth/i,'backup excludes auth credentials')
 match(backup,/to_jsonb\(p\)-'password_hash'/,'backup strips password hash')
-for(const sql of [backup,cleanup]){match(sql,/admin@sirensforge\.vip/,'admin email protected');match(sql,/879c8a17-f9e8-473d-8de1-1fd1a77c080e/,'admin UUID protected');match(sql,/count\(\*\).*<>21/s,'exact target count required');match(sql,/payment_v2_(purchases|relationship)|payment_or_affiliate_relationship/,'Payment V2 relationship guard');match(sql,/total_uses<>0/,'used stale codes fail closed');match(sql,/TEST_TXN_001[\s\S]*status='pending'[\s\S]*paid_at IS NULL[\s\S]*commission_type='subscription'[\s\S]*base_amount=100[\s\S]*commission_rate=10[\s\S]*commission_amount=10[\s\S]*metadata='\{\}'::jsonb/,'exact commission contract guarded')}
+for(const sql of [backup,cleanup]){match(sql,/admin@sirensforge\.vip/,'admin email protected');match(sql,/879c8a17-f9e8-473d-8de1-1fd1a77c080e/,'admin UUID protected');match(sql,/count\(\*\).*<>21/s,'exact target count required');match(sql,/payment_v2_(purchases|relationship)|payment_or_affiliate_relationship/,'Payment V2 relationship guard');match(sql,/total_uses IS DISTINCT FROM 0/,'nonzero or null stale codes fail closed');match(sql,/TEST_TXN_001[\s\S]*status='pending'[\s\S]*paid_at IS NULL[\s\S]*commission_type='subscription'[\s\S]*base_amount=100[\s\S]*commission_rate=10[\s\S]*commission_amount=10[\s\S]*metadata='\{\}'::jsonb/,'exact commission contract guarded')}
 match(cleanup,/lock05f_unexpected_dependency/,'unexpected FK dependencies guarded')
 match(cleanup,/protected_admin_postcondition_failed/,'admin survival verified')
 absent(backup+cleanup,/insert[^;]*(is_beta_tester|auth\.users)/i,'no beta users created')
@@ -57,6 +57,7 @@ match(backup,/extensions\.digest/,'backup pins Production pgcrypto schema')
 for(const sql of [backup,cleanup]) match(sql,/protected_admin_subscription_precondition/,'retained admin subscription is a precondition')
 for(const table of ['referral_codes','referral_tracking','commission_earnings']) match(backup,new RegExp(`CREATE TABLE lock05f_backup_20260812_pre_cleanup\\.${table}`),'private referral artifact backup exists')
 match(cleanup,/DELETE FROM public\.commission_earnings[\s\S]*DELETE FROM public\.referral_tracking[\s\S]*DELETE FROM public\.referral_codes[\s\S]*DELETE FROM public\.user_subscriptions[\s\S]*DELETE FROM public\.profiles[\s\S]*DELETE FROM auth\.users/,'delete order is exact and FK safe')
+match(cleanup,/baseline_sha='8cc080017d947719761fdc98c49bc960112972f0'[\s\S]*lock05f_backup_target_mismatch[\s\S]*lock05f_backup_test_artifact_mismatch/,'delete binds manifest and exact backed-up object sets')
 match(postgresRunner,/Early Bird seat 151 rejected[\s\S]*OG hold 51 rejected/,'PostgreSQL runner exercises both sold-out boundaries')
 match(postgresRunner,/lock05f_legacy_og_cleanup_backup\.sql[\s\S]*lock05f_legacy_og_cleanup_delete\.sql/,'PostgreSQL runner executes both manual artifacts')
 console.log(`LOCK-05F focused tests passed (${assertions} assertions)`)

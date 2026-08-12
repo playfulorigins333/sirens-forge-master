@@ -43,7 +43,7 @@ BEGIN
  OR EXISTS(SELECT 1 FROM public.user_subscriptions s JOIN lock05f_targets t ON t.profile_id=s.user_id WHERE s.tier_name<>'og_throne')
  THEN RAISE EXCEPTION 'lock05f_subscription_population_mismatch'; END IF;
  IF (SELECT count(*) FROM lock05f_target_codes)<>21 THEN RAISE EXCEPTION 'lock05f_expected_21_referral_codes'; END IF;
- IF EXISTS(SELECT 1 FROM public.referral_codes r JOIN lock05f_target_codes x ON x.id=r.id WHERE r.total_uses<>0)
+ IF EXISTS(SELECT 1 FROM public.referral_codes r JOIN lock05f_target_codes x ON x.id=r.id WHERE r.total_uses IS DISTINCT FROM 0)
  THEN RAISE EXCEPTION 'lock05f_stale_referral_code_used'; END IF;
  IF (SELECT count(*) FROM lock05f_test_tracking)<>1
  OR NOT EXISTS(SELECT 1 FROM lock05f_test_tracking r JOIN lock05f_targets t ON t.auth_user_id=r.referred_user_id WHERE t.seat_number=1)

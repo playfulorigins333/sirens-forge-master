@@ -43,7 +43,7 @@ BEGIN
  OR EXISTS(SELECT 1 FROM public.user_subscriptions s JOIN lock05f_targets t ON t.profile_id=s.user_id WHERE s.tier_name<>'og_throne')
  THEN RAISE EXCEPTION 'lock05f_subscription_population_mismatch'; END IF;
  IF (SELECT count(*) FROM lock05f_target_codes)<>21 THEN RAISE EXCEPTION 'lock05f_expected_21_referral_codes'; END IF;
- IF EXISTS(SELECT 1 FROM public.referral_codes r JOIN lock05f_target_codes x ON x.id=r.id WHERE r.total_uses<>0)
+ IF EXISTS(SELECT 1 FROM public.referral_codes r JOIN lock05f_target_codes x ON x.id=r.id WHERE r.total_uses IS DISTINCT FROM 0)
  THEN RAISE EXCEPTION 'lock05f_stale_referral_code_used'; END IF;
  IF (SELECT count(*) FROM lock05f_test_tracking)<>1
  OR NOT EXISTS(SELECT 1 FROM lock05f_test_tracking r JOIN lock05f_targets t ON t.auth_user_id=r.referred_user_id WHERE t.seat_number=1)
@@ -90,13 +90,47 @@ END $guard$;
 DO $backup_guard$
 BEGIN
  IF to_regnamespace('lock05f_backup_20260812_pre_cleanup') IS NULL THEN RAISE EXCEPTION 'lock05f_private_backup_required'; END IF;
- IF (SELECT count(*) FROM lock05f_backup_20260812_pre_cleanup.profiles)<>21
+ IF (SELECT count(*) FROM lock05f_backup_20260812_pre_cleanup.manifest)<>1
+ OR NOT EXISTS(SELECT 1 FROM lock05f_backup_20260812_pre_cleanup.manifest
+   WHERE baseline_sha='8cc080017d947719761fdc98c49bc960112972f0' AND target_count=21 AND referral_code_count=21
+     AND protected_admin_uuid='879c8a17-f9e8-473d-8de1-1fd1a77c080e')
+ OR (SELECT count(*) FROM lock05f_backup_20260812_pre_cleanup.profiles)<>21
  OR (SELECT count(*) FROM lock05f_backup_20260812_pre_cleanup.auth_user_audit)<>21
  OR (SELECT count(*) FROM lock05f_backup_20260812_pre_cleanup.user_subscriptions)<>20
  OR (SELECT count(*) FROM lock05f_backup_20260812_pre_cleanup.referral_codes)<>21
  OR (SELECT count(*) FROM lock05f_backup_20260812_pre_cleanup.referral_tracking)<>1
  OR (SELECT count(*) FROM lock05f_backup_20260812_pre_cleanup.commission_earnings)<>1
  THEN RAISE EXCEPTION 'lock05f_backup_incomplete'; END IF;
+ IF EXISTS(SELECT profile_id,auth_user_id FROM lock05f_targets
+           EXCEPT SELECT profile_id,auth_user_id FROM lock05f_backup_20260812_pre_cleanup.profiles)
+ OR EXISTS(SELECT profile_id,auth_user_id FROM lock05f_backup_20260812_pre_cleanup.profiles
+           EXCEPT SELECT profile_id,auth_user_id FROM lock05f_targets)
+ OR EXISTS(SELECT s.id FROM public.user_subscriptions s JOIN lock05f_targets t ON t.profile_id=s.user_id WHERE s.tier_name='og_throne'
+           EXCEPT SELECT (subscription_row->>'id')::uuid FROM lock05f_backup_20260812_pre_cleanup.user_subscriptions)
+ OR EXISTS(SELECT (subscription_row->>'id')::uuid FROM lock05f_backup_20260812_pre_cleanup.user_subscriptions
+           EXCEPT SELECT s.id FROM public.user_subscriptions s JOIN lock05f_targets t ON t.profile_id=s.user_id WHERE s.tier_name='og_throne')
+ OR EXISTS(SELECT id FROM lock05f_target_codes
+           EXCEPT SELECT (referral_code_row->>'id')::uuid FROM lock05f_backup_20260812_pre_cleanup.referral_codes)
+ OR EXISTS(SELECT (referral_code_row->>'id')::uuid FROM lock05f_backup_20260812_pre_cleanup.referral_codes
+           EXCEPT SELECT id FROM lock05f_target_codes)
+ THEN RAISE EXCEPTION 'lock05f_backup_target_mismatch'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM lock05f_test_tracking x
+   JOIN lock05f_backup_20260812_pre_cleanup.referral_tracking b
+     ON x.id=(b.referral_tracking_row->>'id')::uuid
+    AND x.referral_code_id=(b.referral_tracking_row->>'referral_code_id')::uuid
+    AND x.referrer_user_id=(b.referral_tracking_row->>'referrer_user_id')::uuid
+    AND x.referred_user_id=(b.referral_tracking_row->>'referred_user_id')::uuid)
+ OR NOT EXISTS(SELECT 1 FROM lock05f_test_commission x
+   JOIN lock05f_backup_20260812_pre_cleanup.commission_earnings b
+     ON x.id=(b.commission_earning_row->>'id')::uuid
+    AND x.referral_code_id=(b.commission_earning_row->>'referral_code_id')::uuid
+    AND x.referrer_user_id=(b.commission_earning_row->>'referrer_user_id')::uuid
+    AND x.referred_user_id=(b.commission_earning_row->>'referred_user_id')::uuid
+   JOIN public.commission_earnings c ON c.id=x.id
+   WHERE c.transaction_reference='TEST_TXN_001' AND c.status='pending' AND c.paid_at IS NULL
+     AND c.commission_type='subscription' AND c.base_amount=100 AND c.commission_rate=10
+     AND c.commission_amount=10 AND c.metadata='{}'::jsonb)
+ THEN RAISE EXCEPTION 'lock05f_backup_test_artifact_mismatch'; END IF;
 END $backup_guard$;
 
 CREATE TEMP TABLE lock05f_unchanged_counts ON COMMIT DROP AS SELECT

@@ -12,7 +12,7 @@ const failsFile=(path,pattern,msg)=>{const r=psql(['-f',path]);assert.notEqual(r
 const fails=(sql,pattern,msg)=>{const r=psql(['-c',sql]);assert.notEqual(r.status,0,`${msg}: unexpectedly succeeded`);assert.match(r.stderr||r.stdout,pattern,msg);assertions++}
 const ADMIN='879c8a17-f9e8-473d-8de1-1fd1a77c080e'
 
-run(`drop schema if exists lock05f_backup_20260812_pre_cleanup;drop schema public cascade;create schema public;grant all on schema public to postgres;grant usage on schema public to public;
+run(`drop schema if exists lock05f_backup_20260812_pre_cleanup cascade;drop schema public cascade;create schema public;grant all on schema public to postgres;grant usage on schema public to public;
 drop schema if exists auth cascade;create schema auth;create schema if not exists extensions;create extension if not exists pgcrypto with schema extensions;
 do $$begin if not exists(select from pg_roles where rolname='anon')then create role anon;end if;if not exists(select from pg_roles where rolname='authenticated')then create role authenticated;end if;if not exists(select from pg_roles where rolname='service_role')then create role service_role bypassrls;end if;end$$;
 create function auth.uid()returns uuid language sql stable as 'select null::uuid';
@@ -22,7 +22,7 @@ create table subscription_tiers(id uuid primary key,name text not null,stripe_pr
 create table user_subscriptions(id uuid primary key default gen_random_uuid(),user_id uuid not null references profiles(id),tier_id uuid,tier_name text,stripe_customer_id text,stripe_subscription_id text,status text,metadata jsonb default '{}');
 insert into subscription_tiers values('00000000-0000-4000-8000-000000000001','og_throne','price_og',true,50,10),('00000000-0000-4000-8000-000000000002','early_bird','price_early',true,150,120);`)
 file('supabase/migrations/20260801002800_payment_first_v2_contract.sql')
-run(`create table referral_codes(id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users(id),code text not null,is_active boolean not null,expires_at timestamptz,total_uses integer not null default 0);
+run(`create table referral_codes(id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users(id),code text not null,is_active boolean not null,expires_at timestamptz,total_uses integer default 0);
 create table referral_tracking(id uuid primary key default gen_random_uuid(),referral_code_id uuid not null references referral_codes(id),referrer_user_id uuid not null references auth.users(id),referred_user_id uuid not null references auth.users(id));
 create table commission_earnings(id uuid primary key default gen_random_uuid(),referral_code_id uuid not null references referral_codes(id),referrer_user_id uuid not null references auth.users(id),referred_user_id uuid not null references auth.users(id),transaction_reference text,status text,paid_at timestamptz,commission_type text,base_amount numeric,commission_rate numeric,commission_amount numeric,metadata jsonb);
 create table affiliate_ledger(id uuid primary key default gen_random_uuid(),affiliate_user_id uuid not null,referred_user_id uuid not null,stripe_event_id text not null unique,stripe_subscription_id text,tier_name text not null,commission_amount_cents integer not null,gross_amount_cents integer not null,commission_percent integer not null,status text not null check(status in('pending','available','paid','void')),created_at timestamptz default now(),updated_at timestamptz default now());alter table affiliate_ledger enable row level security;
@@ -74,6 +74,10 @@ insert into referral_codes(user_id,code,is_active,total_uses)select ('30000000-0
 insert into referral_codes(id,user_id,code,is_active,total_uses)values('${REFERRER_CODE}','${REFERRER}','TEST_REFERRER',true,0);
 insert into referral_tracking(id,referral_code_id,referrer_user_id,referred_user_id)values('${TRACKING}','${REFERRER_CODE}','${REFERRER}','${STALE1}');
 insert into commission_earnings(id,referral_code_id,referrer_user_id,referred_user_id,transaction_reference,status,paid_at,commission_type,base_amount,commission_rate,commission_amount,metadata)values('${COMMISSION}','${REFERRER_CODE}','${REFERRER}','${STALE1}','TEST_TXN_001','pending',null,'subscription',100,10,10,'{}');`)
+run(`update referral_codes set total_uses=null where user_id='${STALE1}'`)
+failsFile('supabase/manual/lock05f_legacy_og_cleanup_backup.sql',/lock05f_stale_referral_code_used/,'backup refuses null stale code uses')
+equal(`select (select count(*) from profiles where is_og_vip)||'|'||(select count(*) from auth.users where id::text like '30000000-0000-4000-8000-%')||'|'||(select count(*) from pg_namespace where nspname='lock05f_backup_20260812_pre_cleanup')`,'21|21|0','failed null backup changes nothing')
+run(`update referral_codes set total_uses=0 where user_id='${STALE1}'`)
 file('supabase/manual/lock05f_legacy_og_cleanup_backup.sql')
 equal(`select (select count(*) from lock05f_backup_20260812_pre_cleanup.profiles)||'|'||(select count(*) from lock05f_backup_20260812_pre_cleanup.auth_user_audit)||'|'||(select count(*) from lock05f_backup_20260812_pre_cleanup.user_subscriptions)||'|'||(select count(*) from lock05f_backup_20260812_pre_cleanup.referral_codes)||'|'||(select count(*) from lock05f_backup_20260812_pre_cleanup.referral_tracking)||'|'||(select count(*) from lock05f_backup_20260812_pre_cleanup.commission_earnings)`,'21|21|20|21|1|1','all approved backup row counts')
 equal(`select count(*) from lock05f_backup_20260812_pre_cleanup.profiles where profile_id='${ADMIN}'`,0,'admin excluded from backup')
@@ -83,6 +87,7 @@ equal(`select pg_get_userbyid(nspowner)||'|'||has_schema_privilege('public','loc
 equal(`select bool_and(not has_table_privilege('anon',c.oid,'SELECT') and not has_table_privilege('authenticated',c.oid,'SELECT') and not has_table_privilege('service_role',c.oid,'SELECT')) from pg_class c where c.relnamespace='lock05f_backup_20260812_pre_cleanup'::regnamespace and c.relkind='r'`,'t','backup tables inaccessible')
 const untouched=()=>equal(`select (select count(*) from profiles where is_og_vip)||'|'||(select count(*) from auth.users where id::text like '30000000-0000-4000-8000-%')||'|'||(select count(*) from referral_codes where user_id::text like '30000000-0000-4000-8000-%')`,'21|21|21','refusal leaves stale population untouched')
 const refusal=(mutation,pattern,msg,restore)=>{run(mutation);failsFile('supabase/manual/lock05f_legacy_og_cleanup_delete.sql',pattern,msg);untouched();run(restore)}
+refusal(`update referral_codes set total_uses=null where user_id='${STALE1}'`,/lock05f_stale_referral_code_used/,'null stale code uses refuses cleanup',`update referral_codes set total_uses=0 where user_id='${STALE1}'`)
 refusal(`update referral_codes set total_uses=1 where user_id='${STALE1}'`,/lock05f_stale_referral_code_used/,'used stale code refuses',`update referral_codes set total_uses=0 where user_id='${STALE1}'`)
 refusal(`insert into referral_tracking(referral_code_id,referrer_user_id,referred_user_id)values('${REFERRER_CODE}','${REFERRER}','${STALE1}')`,/lock05f_tracking_contract_mismatch/,'second tracking refuses',`delete from referral_tracking where id<>'${TRACKING}'`)
 refusal(`insert into commission_earnings(referral_code_id,referrer_user_id,referred_user_id,transaction_reference,status,commission_type,base_amount,commission_rate,commission_amount,metadata)values('${REFERRER_CODE}','${REFERRER}','${STALE1}','OTHER','pending','subscription',100,10,10,'{}')`,/lock05f_commission_contract_mismatch/,'second commission refuses',`delete from commission_earnings where id<>'${COMMISSION}'`)
@@ -93,6 +98,11 @@ refusal(`update referral_tracking set referrer_user_id='${STALE1}' where id='${T
 refusal(`update profiles set role='admin' where id='${STALE1}'`,/lock05f_protected_admin_or_role_targeted/,'protected admin inclusion refuses',`update profiles set role='user' where id='${STALE1}'`)
 run(`create table unexpected_dependency(id uuid primary key default gen_random_uuid(),user_id uuid references auth.users(id));insert into unexpected_dependency(user_id)values('${STALE1}')`)
 failsFile('supabase/manual/lock05f_legacy_og_cleanup_delete.sql',/lock05f_unexpected_dependency/,'unexpected FK dependency refuses');untouched();run(`drop table unexpected_dependency`)
+const originalStaleCode=run(`select id from referral_codes where user_id='${STALE1}'`)
+const replacementStaleCode='80000000-0000-4000-8000-000000000001'
+run(`update referral_codes set id='${replacementStaleCode}' where id='${originalStaleCode}'`)
+failsFile('supabase/manual/lock05f_legacy_og_cleanup_delete.sql',/lock05f_backup_target_mismatch/,'post-backup referral code ID drift refuses cleanup');untouched()
+run(`update referral_codes set id='${originalStaleCode}' where id='${replacementStaleCode}'`)
 const before=run(`select (select count(*) from payment_v2_holds)||'|'||(select count(*) from payment_v2_purchases)||'|'||(select count(*) from payment_v2_allocations)||'|'||(select count(*) from affiliate_ledger)`)
 file('supabase/manual/lock05f_legacy_og_cleanup_delete.sql')
 equal(`select (select count(*) from profiles where is_og_vip)||'|'||(select count(*) from auth.users where id::text like '30000000-0000-4000-8000-%')||'|'||(select count(*) from user_subscriptions where user_id::text like '30000000-0000-4000-8000-%')||'|'||(select count(*) from referral_codes where user_id::text like '30000000-0000-4000-8000-%')||'|'||(select count(*) from referral_tracking where referred_user_id='${STALE1}')||'|'||(select count(*) from commission_earnings where referred_user_id='${STALE1}')`,'0|0|0|0|0|0','all stale and exact test artifacts deleted')
