@@ -117,6 +117,10 @@ async function processA3(event: StripeEvent, provider: PaymentV2Provider, db: Pa
     return { status: "FAILED_TERMINAL", error: "UNSUPPORTED_SUBSCRIPTION_STATUS" };
   }
   const subscriptionItem = subscription.items?.data.length === 1 ? subscription.items.data[0] : null;
+  const priceId = subscriptionItem?.price?.id;
+  if (!subscriptionItem || subscriptionItem.quantity !== 1 || typeof priceId !== "string" || !priceId.trim() || priceId !== priceId.trim()) {
+    return { status: "FAILED_TERMINAL", error: "INVALID_SUBSCRIPTION_ITEM" };
+  }
   const currentPeriodStart = subscription.current_period_start ?? subscriptionItem?.current_period_start;
   const currentPeriodEnd = subscription.current_period_end ?? subscriptionItem?.current_period_end;
   const periodStart = nullableTimestamp(currentPeriodStart), periodEnd = nullableTimestamp(currentPeriodEnd);
@@ -125,7 +129,7 @@ async function processA3(event: StripeEvent, provider: PaymentV2Provider, db: Pa
       (subscription.canceled_at != null && !canceledAt) || (subscription.trial_start != null && !trialStart) || (subscription.trial_end != null && !trialEnd) || !db.applyEarlyBirdLifecycle) {
     return { status: "FAILED_TERMINAL", error: "INVALID_SUBSCRIPTION_SNAPSHOT" };
   }
-  const result = await db.applyEarlyBirdLifecycle({ p_hold_id: discriminator.holdId, p_subscription_id: subscriptionId, p_customer_id: authoritativeCustomer, p_status: subscription.status,
+  const result = await db.applyEarlyBirdLifecycle({ p_hold_id: discriminator.holdId, p_subscription_id: subscriptionId, p_customer_id: authoritativeCustomer, p_price_id: priceId, p_status: subscription.status,
     p_current_period_start: periodStart, p_current_period_end: periodEnd, p_cancel_at_period_end: subscription.cancel_at_period_end,
     p_canceled_at: canceledAt, p_trial_start: trialStart, p_trial_end: trialEnd });
   if (result === "purchase_pending") return { status: "PENDING_PURCHASE", error: "PURCHASE_PENDING" };
@@ -295,7 +299,7 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
         const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: current, p_new_status: target, p_error_code: outcome.error, p_count_attempt: true });
         return a3Response(transitioned);
       } catch (cause) {
-        const terminal = cause instanceof Error && /^(subscription_customer_mismatch|subscription_hold_mismatch|purchase_ambiguous|unclaimed_relationship_mismatch|claimed_relationship_mismatch|allocation_identity_mismatch|entitlement_cardinality_mismatch|entitlement_identity_mismatch|invalid_subscription_snapshot)$/.test(cause.message);
+        const terminal = cause instanceof Error && /^(subscription_customer_mismatch|subscription_hold_mismatch|subscription_price_mismatch|purchase_ambiguous|unclaimed_relationship_mismatch|claimed_relationship_mismatch|allocation_identity_mismatch|entitlement_cardinality_mismatch|entitlement_identity_mismatch|invalid_subscription_snapshot)$/.test(cause.message);
         const target = terminal ? "FAILED_TERMINAL" : stickyPending(current, "PENDING_RETRY");
         const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: current, p_new_status: target, p_error_code: terminal ? "DATABASE_IDENTITY_MISMATCH" : "TRANSIENT_PROCESSING_FAILURE", p_count_attempt: true });
         return a3Response(transitioned);

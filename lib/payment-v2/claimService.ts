@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 export const PAYMENT_V2_CLAIM_COOKIE = "sf_payment_v2_claim";
 export type ClaimResponse = { status: number; body: Record<string, string>; clearCookie?: true };
 export type Hold = { id: string; purchaser_credential_hash: string | Uint8Array; tier: string; state: string; stripe_checkout_session_id: string | null };
-export type Purchase = { id: string; hold_id: string; purchaser_credential_hash: string | Uint8Array; tier: string; state: string; stripe_checkout_session_id: string; stripe_subscription_id: string | null; stripe_customer_id: string; claimed_profile_id: string | null };
-export type ClaimSubscription = { id: string; customer: unknown; status: string; metadata?: Record<string, string> | null };
+export type Purchase = { id: string; hold_id: string; purchaser_credential_hash: string | Uint8Array; tier: string; state: string; stripe_checkout_session_id: string; stripe_subscription_id: string | null; stripe_customer_id: string; stripe_price_id: string; claimed_profile_id: string | null };
+export type ClaimSubscription = { id: string; customer: unknown; status: string; metadata?: Record<string, string> | null; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> } };
 export type Allocation = { purchase_id: string; tier: string; profile_id: string; entitlement_id: string };
 export type Entitlement = { id: string; user_id: string; tier_name: string; status: string };
 export type Profile = { id: string; user_id: string };
@@ -135,7 +135,8 @@ export async function paymentFirstClaim(input: ClaimInput): Promise<ClaimRespons
       catch { return providerUnavailable(); }
       const customer = typeof subscription.customer === "string" ? subscription.customer : subscription.customer && typeof subscription.customer === "object" && typeof (subscription.customer as { id?: unknown }).id === "string" ? (subscription.customer as { id: string }).id : null;
       const md = subscription.metadata || {};
-      if (subscription.id !== purchase.stripe_subscription_id || customer !== purchase.stripe_customer_id || md.checkout_contract_version !== "pfc-03-v2" || md.payment_v2_hold_id !== purchase.hold_id || md.tier_name !== "early_bird" || !supportedSubscriptionStatuses.has(subscription.status)) return failed();
+      const item = subscription.items?.data.length === 1 ? subscription.items.data[0] : null;
+      if (subscription.id !== purchase.stripe_subscription_id || customer !== purchase.stripe_customer_id || md.checkout_contract_version !== "pfc-03-v2" || md.payment_v2_hold_id !== purchase.hold_id || md.tier_name !== "early_bird" || !supportedSubscriptionStatuses.has(subscription.status) || !item || item.quantity !== 1 || !purchase.stripe_price_id || item.price?.id !== purchase.stripe_price_id) return failed();
       if (!['active', 'trialing'].includes(subscription.status)) return subscriptionInactive();
     }
     const result = await resolved.db.claim({ p_purchase_id: purchase.id, p_purchaser_hash: resolved.credential, p_profile_id: profile.id, p_auth_user_id: userId });
