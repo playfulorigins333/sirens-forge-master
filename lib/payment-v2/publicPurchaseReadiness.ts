@@ -28,6 +28,7 @@ const REQUIRED_TRUE = [
   "PAYMENT_FIRST_AUTH_CONTINUATION_V2_ENABLED",
   "PAYMENT_FIRST_CHECKOUT_V2_PROTECTION_ENABLED",
   "PAYMENT_FIRST_CHECKOUT_V2_ENABLED",
+  "PAYMENT_V2_EVENT_INBOX_ENABLED",
   "PAYMENT_V2_PAYOUT_EXECUTION_ENABLED",
 ] as const;
 
@@ -62,7 +63,7 @@ export async function derivePublicPurchaseState(
   dependencies: PublicReadinessDependencies,
 ): Promise<PublicPurchaseState> {
   if (!paymentFirstPublicCutoverEnabled(env.PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED)) return unavailable();
-  if (REQUIRED_TRUE.some((name) => env[name] !== "true") || env.PAYMENT_V2_EVENT_INBOX_ENABLED === "true") return unavailable();
+  if (REQUIRED_TRUE.some((name) => env[name] !== "true")) return unavailable();
   const production = env.NODE_ENV === "production";
   const site = canonicalOrigin(env.NEXT_PUBLIC_SITE_URL, production);
   const returns = canonicalOrigin(env.PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN, production);
