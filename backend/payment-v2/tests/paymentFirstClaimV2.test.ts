@@ -17,7 +17,7 @@ function harness(options: { holdState?: string; purchaseState?: string | null; a
   let entitlement = options.entitlement ?? allocation;
   const calls = { body: 0, cookie: 0, db: 0, auth: 0, rpc: [] as any[], writes: 0, stripe: 0 };
   const hold = (): Hold => ({ id: ids.hold, purchaser_credential_hash: digest, tier: "og_throne", state: holdState, stripe_checkout_session_id: sid });
-  const purchase = (): Purchase => ({ id: ids.purchase, hold_id: ids.hold, purchaser_credential_hash: digest, tier: "og_throne", state: purchaseState!, stripe_checkout_session_id: sid, claimed_profile_id: purchaseState === "CLAIMED" ? ids.profile : null });
+  const purchase = (): Purchase => ({ id: ids.purchase, hold_id: ids.hold, purchaser_credential_hash: digest, tier: "og_throne", state: purchaseState!, stripe_checkout_session_id: sid, stripe_subscription_id: null, stripe_customer_id: "cus_test", stripe_price_id: "price_og", claimed_profile_id: purchaseState === "CLAIMED" ? ids.profile : null });
   const alloc = (): Allocation => ({ purchase_id: ids.purchase, tier: "og_throne", profile_id: ids.profile, entitlement_id: ids.entitlement });
   const ent = (): Entitlement => ({ id: ids.entitlement, user_id: ids.profile, tier_name: "og_throne", status: options.entitlementStatus || "active" });
   const db: ClaimDatabase = {

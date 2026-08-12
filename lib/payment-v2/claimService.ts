@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 export const PAYMENT_V2_CLAIM_COOKIE = "sf_payment_v2_claim";
 export type ClaimResponse = { status: number; body: Record<string, string>; clearCookie?: true };
 export type Hold = { id: string; purchaser_credential_hash: string | Uint8Array; tier: string; state: string; stripe_checkout_session_id: string | null };
-export type Purchase = { id: string; hold_id: string; purchaser_credential_hash: string | Uint8Array; tier: string; state: string; stripe_checkout_session_id: string; claimed_profile_id: string | null };
+export type Purchase = { id: string; hold_id: string; purchaser_credential_hash: string | Uint8Array; tier: string; state: string; stripe_checkout_session_id: string; stripe_subscription_id: string | null; stripe_customer_id: string; stripe_price_id: string; claimed_profile_id: string | null };
+export type ClaimSubscription = { id: string; customer: unknown; status: string; metadata?: Record<string, string> | null; items?: { data: Array<{ quantity?: number | null; price?: { id?: string } | null }> } };
 export type Allocation = { purchase_id: string; tier: string; profile_id: string; entitlement_id: string };
 export type Entitlement = { id: string; user_id: string; tier_name: string; status: string };
 export type Profile = { id: string; user_id: string };
@@ -25,6 +26,7 @@ export interface ClaimInput {
   readCookie(): string | undefined;
   readOrigin?(): string | null;
   getAuthenticatedUser?(): Promise<string | null>;
+  retrieveSubscription?(subscriptionId: string): Promise<ClaimSubscription>;
   createDatabase(): ClaimDatabase;
 }
 
@@ -32,6 +34,9 @@ const response = (status: number, body: Record<string, string>): ClaimResponse =
 const disabled = () => response(503, { error: "Payment-first claiming is not active", code: "PAYMENT_FIRST_CLAIM_V2_DISABLED" });
 const invalid = () => response(400, { error: "Invalid claim request", code: "INVALID_PAYMENT_V2_CLAIM_REQUEST" });
 const failed = () => response(500, { error: "Unable to process claim", code: "PAYMENT_FIRST_CLAIM_V2_ERROR" });
+const providerUnavailable = () => response(503, { error: "Unable to verify subscription", code: "PAYMENT_V2_SUBSCRIPTION_VERIFICATION_UNAVAILABLE" });
+const subscriptionInactive = () => response(409, { error: "Subscription is not active", code: "PAYMENT_V2_SUBSCRIPTION_NOT_ACTIVE" });
+const supportedSubscriptionStatuses = new Set(["active", "trialing", "past_due", "canceled", "unpaid", "paused", "incomplete", "incomplete_expired"]);
 
 function sessionId(value: unknown): string | null {
   return typeof value === "string" && value.length <= 255 && /^cs_[A-Za-z0-9_\-]+$/.test(value) ? value : null;
@@ -123,6 +128,17 @@ export async function paymentFirstClaim(input: ClaimInput): Promise<ClaimRespons
     if (purchases.length !== 1 || !exactPurchase(purchases[0], holds[0], resolved.sid, resolved.credential) || !["PAID_UNCLAIMED", "CLAIMED"].includes(purchases[0].state) || purchases[0].state !== holds[0].state) return failed();
     const purchase = purchases[0], profile = profiles[0];
     if (purchase.state === "CLAIMED" && purchase.claimed_profile_id !== profile.id) return failed();
+    if (purchase.tier === "early_bird" && purchase.state === "PAID_UNCLAIMED") {
+      if (!purchase.stripe_subscription_id || !purchase.stripe_customer_id || !input.retrieveSubscription) return failed();
+      let subscription: ClaimSubscription;
+      try { subscription = await input.retrieveSubscription(purchase.stripe_subscription_id); }
+      catch { return providerUnavailable(); }
+      const customer = typeof subscription.customer === "string" ? subscription.customer : subscription.customer && typeof subscription.customer === "object" && typeof (subscription.customer as { id?: unknown }).id === "string" ? (subscription.customer as { id: string }).id : null;
+      const md = subscription.metadata || {};
+      const item = subscription.items?.data.length === 1 ? subscription.items.data[0] : null;
+      if (subscription.id !== purchase.stripe_subscription_id || customer !== purchase.stripe_customer_id || md.checkout_contract_version !== "pfc-03-v2" || md.payment_v2_hold_id !== purchase.hold_id || md.tier_name !== "early_bird" || !supportedSubscriptionStatuses.has(subscription.status) || !item || item.quantity !== 1 || !purchase.stripe_price_id || item.price?.id !== purchase.stripe_price_id) return failed();
+      if (!['active', 'trialing'].includes(subscription.status)) return subscriptionInactive();
+    }
     const result = await resolved.db.claim({ p_purchase_id: purchase.id, p_purchaser_hash: resolved.credential, p_profile_id: profile.id, p_auth_user_id: userId });
     if (result !== "claimed" && result !== "already_claimed") return failed();
     const verifiedPurchases = await resolved.db.loadPurchases(holds[0].id, resolved.sid, resolved.credential);
