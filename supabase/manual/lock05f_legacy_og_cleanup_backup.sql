@@ -67,11 +67,13 @@ BEGIN
  FOR fk IN SELECT c.conrelid::regclass rel,quote_ident(a.attname) col,c.confrelid
    FROM pg_constraint c JOIN LATERAL unnest(c.conkey) k(attnum) ON true JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.attnum
    WHERE c.contype='f' AND c.confrelid IN ('auth.users'::regclass,'public.profiles'::regclass)
-     AND NOT (c.conrelid='public.profiles'::regclass AND a.attname='user_id')
-     AND NOT (c.conrelid='public.user_subscriptions'::regclass AND a.attname='user_id')
-     AND NOT (c.conrelid='public.referral_codes'::regclass AND a.attname='user_id')
-     AND NOT (c.conrelid='public.referral_tracking'::regclass AND a.attname='referred_user_id')
-     AND NOT (c.conrelid='public.commission_earnings'::regclass AND a.attname='referred_user_id')
+     AND NOT ((c.conrelid,a.attname,c.confrelid) IN (
+       ('public.profiles'::regclass,'id','auth.users'::regclass),
+       ('public.user_subscriptions'::regclass,'user_id','public.profiles'::regclass),
+       ('public.referral_codes'::regclass,'user_id','auth.users'::regclass),
+       ('public.referral_tracking'::regclass,'referred_user_id','auth.users'::regclass),
+       ('public.commission_earnings'::regclass,'referred_user_id','auth.users'::regclass)
+     ))
  LOOP
   EXECUTE format('select count(*) from %s x join lock05f_targets t on x.%s=%s',fk.rel,fk.col,CASE WHEN fk.confrelid='auth.users'::regclass THEN 't.auth_user_id' ELSE 't.profile_id' END) INTO hit;
   IF hit<>0 THEN RAISE EXCEPTION 'lock05f_unexpected_dependency: %.%',fk.rel,fk.col; END IF;
