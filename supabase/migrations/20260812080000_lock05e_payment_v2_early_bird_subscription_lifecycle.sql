@@ -48,7 +48,11 @@ do $lock05e_bridge$
 begin
   if pg_catalog.to_regprocedure('public.payment_v2_inbox_receive_event(text,text,text,text,timestamptz,text,text,integer)') is null then
     execute $ddl$
-create function public.payment_v2_inbox_receive_event(text,text,text,text,timestamptz,text,text,integer)
+create function public.payment_v2_inbox_receive_event(
+  p_provider_event_id text, p_provider_event_type text, p_provider_object_id text,
+  p_provider_object_type text, p_provider_created_at timestamptz,
+  p_raw_payload_sha256 text, p_lifecycle_phase text, p_lifecycle_version integer
+)
 returns text language plpgsql security definer set search_path=pg_catalog,pg_temp as $fn$
 declare v_existing public.payment_v2_provider_event_inbox%rowtype;
 begin
@@ -71,7 +75,10 @@ $ddl$;
   end if;
   if pg_catalog.to_regprocedure('public.payment_v2_inbox_transition_status(text,text,text,text,boolean)') is null then
     execute $ddl$
-create function public.payment_v2_inbox_transition_status(text,text,text,text,boolean)
+create function public.payment_v2_inbox_transition_status(
+  p_provider_event_id text, p_expected_status text, p_new_status text,
+  p_error_code text, p_count_attempt boolean
+)
 returns text language plpgsql security definer set search_path=pg_catalog,pg_temp as $fn$
 declare v_existing public.payment_v2_provider_event_inbox%rowtype; v_allowed boolean;
 begin
@@ -104,13 +111,17 @@ revoke execute on function public.payment_v2_inbox_receive_event(text,text,text,
 grant execute on function public.payment_v2_inbox_receive_event(text,text,text,text,timestamptz,text,text,integer),public.payment_v2_inbox_transition_status(text,text,text,text,boolean) to service_role;
 
 do $lock05e_contract$
-declare v_named bigint;v_columns bigint;v_secure bigint;
+declare v_named bigint;v_columns bigint;v_secure bigint;v_receive_names text[];v_transition_names text[];
 begin
   select count(*) into v_named from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('payment_v2_inbox_receive_event','payment_v2_inbox_transition_status');
   select count(*) into v_columns from information_schema.columns where table_schema='public' and table_name='payment_v2_provider_event_inbox' and column_name in ('id','provider_event_id','provider_event_type','provider_object_id','provider_object_type','provider_created_at','received_at','raw_payload_sha256','lifecycle_phase','processing_status','attempt_count','last_attempt_at','processed_at','last_error_code','lifecycle_version','created_at','updated_at');
   select count(*) into v_secure from pg_catalog.pg_proc p join pg_catalog.pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('payment_v2_inbox_receive_event','payment_v2_inbox_transition_status') and p.prosecdef and pg_catalog.pg_get_userbyid(p.proowner)='postgres' and (p.proconfig @> array['search_path=pg_catalog, pg_temp'] or p.proconfig @> array['search_path=public, pg_temp']);
+  select p.proargnames into v_receive_names from pg_catalog.pg_proc p where p.oid=pg_catalog.to_regprocedure('public.payment_v2_inbox_receive_event(text,text,text,text,timestamptz,text,text,integer)');
+  select p.proargnames into v_transition_names from pg_catalog.pg_proc p where p.oid=pg_catalog.to_regprocedure('public.payment_v2_inbox_transition_status(text,text,text,text,boolean)');
   if pg_catalog.to_regclass('public.payment_v2_provider_event_inbox') is null or v_named<>2
      or v_columns<>17 or v_secure<>2
+     or v_receive_names is distinct from array['p_provider_event_id','p_provider_event_type','p_provider_object_id','p_provider_object_type','p_provider_created_at','p_raw_payload_sha256','p_lifecycle_phase','p_lifecycle_version']::text[]
+     or v_transition_names is distinct from array['p_provider_event_id','p_expected_status','p_new_status','p_error_code','p_count_attempt']::text[]
      or pg_catalog.to_regprocedure('public.payment_v2_inbox_receive_event(text,text,text,text,timestamptz,text,text,integer)') is null
      or pg_catalog.to_regprocedure('public.payment_v2_inbox_transition_status(text,text,text,text,boolean)') is null
      or not (select relrowsecurity from pg_catalog.pg_class where oid='public.payment_v2_provider_event_inbox'::regclass)
@@ -266,4 +277,5 @@ alter function public.payment_v2_apply_early_bird_subscription_lifecycle(uuid,te
 revoke execute on function public.payment_v2_apply_early_bird_subscription_lifecycle(uuid,text,text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz) from public, anon, authenticated;
 grant execute on function public.payment_v2_apply_early_bird_subscription_lifecycle(uuid,text,text,text,text,timestamptz,timestamptz,boolean,timestamptz,timestamptz,timestamptz) to service_role;
 
+select pg_catalog.pg_notify('pgrst', 'reload schema');
 commit;

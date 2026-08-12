@@ -17,4 +17,5 @@ begin
   execute 'drop function public.payment_v2_inbox_receive_event(text,text,text,text,timestamptz,text,text,integer) restrict';execute 'drop function public.payment_v2_inbox_transition_status(text,text,text,text,boolean) restrict';execute 'drop table public.payment_v2_provider_event_inbox restrict';
  end if;
 end$$;
+select pg_catalog.pg_notify('pgrst','reload schema');
 commit;

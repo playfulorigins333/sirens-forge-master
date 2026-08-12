@@ -23,6 +23,10 @@ ok(readFileSync('supabase/manual/lock05e_payment_v2_subscription_lifecycle_backu
 equal(`select has_schema_privilege('service_role','lock05e_backup_20260811_pre_apply','usage')`,'f','backup remains private')
 equal(`select count(*) from information_schema.columns where table_schema='lock05e_backup_20260811_pre_apply' and column_name='password_hash'`,0,'backup excludes password hash')
 ok(readFileSync('supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql','utf8'),'forward migration applies')
+const receiveNames='{p_provider_event_id,p_provider_event_type,p_provider_object_id,p_provider_object_type,p_provider_created_at,p_raw_payload_sha256,p_lifecycle_phase,p_lifecycle_version}'
+const transitionNames='{p_provider_event_id,p_expected_status,p_new_status,p_error_code,p_count_attempt}'
+equal(`select proargnames from pg_proc where oid='public.payment_v2_inbox_receive_event(text,text,text,text,timestamptz,text,text,integer)'::regprocedure`,receiveNames,'A1-present receive argument names exact')
+equal(`select proargnames from pg_proc where oid='public.payment_v2_inbox_transition_status(text,text,text,text,boolean)'::regprocedure`,transitionNames,'A1-present transition argument names exact')
 equal(`select md5(string_agg(pg_get_functiondef(p.oid),'' order by p.oid)) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in('payment_v2_acquire_hold','payment_v2_associate_session','payment_v2_record_paid','payment_v2_record_session_unpaid_terminal','payment_v2_expire_unpaid','payment_v2_claim')`,coreDefinitions,'core functions unchanged')
 equal(`select md5(string_agg(indexdef,'' order by indexname)) from pg_indexes where schemaname='public' and tablename='payment_v2_reconciliation_evidence'`,evidenceContract,'evidence indexes unchanged')
 const sig="public.payment_v2_apply_early_bird_subscription_lifecycle(uuid,text,text,text,text,timestamp with time zone,timestamp with time zone,boolean,timestamp with time zone,timestamp with time zone,timestamp with time zone)"
@@ -66,8 +70,11 @@ const productionEvidence=ok(`select pg_get_constraintdef(oid) from pg_constraint
 ok(readFileSync('supabase/manual/lock05e_payment_v2_subscription_lifecycle_backup.sql','utf8'),'absent-A1 backup succeeds')
 equal(`select a1_inbox_preexisting from lock05e_backup_20260811_pre_apply.manifest`,'f','absent A1 recorded')
 ok(readFileSync('supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql','utf8'),'absent-A1 forward bridge applies')
+equal(`select proargnames from pg_proc where oid='public.payment_v2_inbox_receive_event(text,text,text,text,timestamptz,text,text,integer)'::regprocedure`,receiveNames,'bridge receive argument names exact')
+equal(`select proargnames from pg_proc where oid='public.payment_v2_inbox_transition_status(text,text,text,text,boolean)'::regprocedure`,transitionNames,'bridge transition argument names exact')
 equal(`select pg_get_constraintdef(oid) from pg_constraint where conname='payment_v2_reconciliation_evidence_hold_id_event_kind_key'`,productionEvidence,'production evidence constraint unchanged')
-equal(`select payment_v2_inbox_receive_event('evt_bridge','customer.subscription.updated','sub_bridge','subscription',now(),repeat('a',64),'PFC-07E-A3',1)`,'RECEIVED','bridge receive works','service_role')
+equal(`select payment_v2_inbox_receive_event(p_provider_event_id=>'evt_bridge',p_provider_event_type=>'customer.subscription.updated',p_provider_object_id=>'sub_bridge',p_provider_object_type=>'subscription',p_provider_created_at=>now(),p_raw_payload_sha256=>repeat('a',64),p_lifecycle_phase=>'PFC-07E-A3',p_lifecycle_version=>1)`,'RECEIVED','bridge named receive works','service_role')
+equal(`select payment_v2_inbox_transition_status(p_provider_event_id=>'evt_bridge',p_expected_status=>'RECEIVED',p_new_status=>'PENDING_PHASE',p_error_code=>null,p_count_attempt=>false)`,'PENDING_PHASE','bridge named transition works','service_role')
 fails(readFileSync('supabase/manual/lock05e_payment_v2_subscription_lifecycle_rollback.sql','utf8'),/lock05e_inbox_not_empty/,'rollback refuses received events')
 equal(`select to_regprocedure('${sig}') is not null`,'t','failed rollback preserves lifecycle RPC')
 ok(`delete from payment_v2_provider_event_inbox`,'empty bridge inbox before rollback')
