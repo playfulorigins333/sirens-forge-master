@@ -5,9 +5,9 @@ import { derivePublicPurchaseState, LOCKED_PAYMENT_V2_PRICES, paymentFirstPublic
 let assertions = 0;
 const equal = (actual: unknown, expected: unknown, message: string) => { assert.deepEqual(actual, expected, message); assertions++; };
 const check = (value: unknown, message: string) => { assert.ok(value, message); assertions++; };
-const gates = ["PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED", "PAYMENT_FIRST_WEBHOOK_V2_ENABLED", "PAYMENT_FIRST_CLAIM_V2_ENABLED", "PAYMENT_FIRST_SUCCESS_V2_ENABLED", "PAYMENT_FIRST_AUTH_CONTINUATION_V2_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_PROTECTION_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_ENABLED", "PAYMENT_V2_PAYOUT_EXECUTION_ENABLED"];
+const gates = ["PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED", "PAYMENT_FIRST_WEBHOOK_V2_ENABLED", "PAYMENT_FIRST_CLAIM_V2_ENABLED", "PAYMENT_FIRST_SUCCESS_V2_ENABLED", "PAYMENT_FIRST_AUTH_CONTINUATION_V2_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_PROTECTION_ENABLED", "PAYMENT_FIRST_CHECKOUT_V2_ENABLED", "PAYMENT_V2_EVENT_INBOX_ENABLED", "PAYMENT_V2_PAYOUT_EXECUTION_ENABLED"];
 const env: Record<string,string> = Object.fromEntries(gates.map((name) => [name, "true"]));
-Object.assign(env, { NODE_ENV: "production", CRON_SECRET: "test", PAYMENT_V2_EVENT_INBOX_ENABLED: "false", NEXT_PUBLIC_SITE_URL: "https://www.sirensforge.vip", PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN: "https://www.sirensforge.vip", STRIPE_SECRET_KEY: "test", STRIPE_PAYMENT_V2_WEBHOOK_SECRET: "test", SUPABASE_URL: "https://project.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test" });
+Object.assign(env, { NODE_ENV: "production", CRON_SECRET: "test", NEXT_PUBLIC_SITE_URL: "https://www.sirensforge.vip", PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN: "https://www.sirensforge.vip", STRIPE_SECRET_KEY: "test", STRIPE_PAYMENT_V2_WEBHOOK_SECRET: "test", SUPABASE_URL: "https://project.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "test" });
 const effects = { capability: 0, tiers: 0, inventory: 0 };
 const deps: PublicReadinessDependencies = {
   now: () => new Date("2026-08-06T00:00:00Z"),
@@ -30,8 +30,6 @@ for (const gate of gates) for (const value of [undefined, "", "false", "TRUE", "
   state = await derivePublicPurchaseState(changed, deps);
   equal(state, { checkoutMode: "payment_v2", tiers: { og_throne: "unavailable", early_bird: "unavailable" } }, `${gate} rejects ${String(value)}`);
 }
-state = await derivePublicPurchaseState({ ...env, PAYMENT_V2_EVENT_INBOX_ENABLED: "true" }, deps);
-equal(state.tiers?.early_bird, "unavailable", "enabled lifecycle inbox fails closed");
 for (const [key, value] of [["STRIPE_SECRET_KEY", ""], ["STRIPE_PAYMENT_V2_WEBHOOK_SECRET", ""], ["SUPABASE_SERVICE_ROLE_KEY", ""], ["SUPABASE_URL", ""], ["NEXT_PUBLIC_SITE_URL", "bad"], ["PAYMENT_FIRST_CHECKOUT_V2_RETURN_ORIGIN", "https://other.test"]] as const) {
   const changed = { ...env, [key]: value }; if (key === "SUPABASE_URL") changed.NEXT_PUBLIC_SUPABASE_URL = "";
   equal((await derivePublicPurchaseState(changed, deps)).tiers?.og_throne, "unavailable", `${key} fails closed`);
@@ -40,8 +38,7 @@ for (const rows of [[], [{ name: "og_throne", is_active: true, stripe_price_id: 
   equal((await derivePublicPurchaseState(env, { ...deps, loadTiers: async () => rows })).tiers?.og_throne, "unavailable", "invalid tier shape/price fails closed");
 }
 state = await derivePublicPurchaseState(env, deps);
-equal(state.checkoutMode, "payment_v2", "exact true cutover with healthy gates selects Payment V2");
-equal(state.tiers, { og_throne: "available", early_bird: "available" }, "valid runtime state is available");
+equal(state, { checkoutMode: "payment_v2", tiers: { og_throne: "available", early_bird: "available" } }, "exact LOCK-05E healthy state makes both tiers available");
 state = await derivePublicPurchaseState(env, { ...deps, loadInventoryRows: async () => Array.from({ length: 50 }, () => ({ tier: "og_throne", state: "CLAIMED", expires_at: null })) });
 equal(state.tiers?.og_throne, "sold_out", "valid full inventory is sold out");
 state = await derivePublicPurchaseState(env, { ...deps, loadInventoryRows: async () => { throw new Error("schema detail"); } }); equal(state.tiers?.og_throne, "unavailable", "query ambiguity is unavailable");
