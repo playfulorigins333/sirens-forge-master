@@ -221,41 +221,63 @@ export async function GET(req: Request) {
     const providerUsername = getIdentityUsername(identity)
 
     const supabaseAdmin = getSupabaseAdmin()
-    const { error: upsertError } = await supabaseAdmin
-      .from("autopost_accounts")
-      .upsert(
-        {
-          user_id: userId,
-          platform: "fanvue",
-          provider_account_id: providerAccountId,
-          provider_username: providerUsername,
-          display_name: identity?.displayName ?? identity?.name ?? providerUsername,
-          token_type: tokenResponse.token_type ?? "bearer",
-          scopes,
-          encrypted_access_token: encryptedAccessToken,
-          encrypted_refresh_token: encryptedRefreshToken,
-          token_key_version: getAutopostTokenKeyVersion(),
-          token_expires_at: tokenExpiresAt,
-          connection_status: "CONNECTED",
-          connected_at: now,
-          last_refresh_at: null,
-          last_error: null,
-          metadata: {
-            provider: "fanvue",
-            identity_fetched: true,
-            identity_source: "users/account",
-            api_version: apiVersion,
-            is_creator: identity?.isCreator ?? null,
-            has_account: Boolean(identity?.account),
-            has_creator: Boolean(identity?.creator),
-            oauth_operation: statePayload.operation,
-            scopes_include_write_creator: grantedWriteCreator,
-          },
-        },
-        { onConflict: "user_id,platform" }
-      )
+    const accountPayload = {
+      user_id: userId,
+      platform: "fanvue",
+      provider_account_id: providerAccountId,
+      provider_username: providerUsername,
+      display_name: identity?.displayName ?? identity?.name ?? providerUsername,
+      token_type: tokenResponse.token_type ?? "bearer",
+      scopes,
+      encrypted_access_token: encryptedAccessToken,
+      encrypted_refresh_token: encryptedRefreshToken,
+      token_key_version: getAutopostTokenKeyVersion(),
+      token_expires_at: tokenExpiresAt,
+      connection_status: "CONNECTED",
+      connected_at: now,
+      last_refresh_at: null,
+      last_error: null,
+      metadata: {
+        provider: "fanvue",
+        identity_fetched: true,
+        identity_source: "users/account",
+        api_version: apiVersion,
+        is_creator: identity?.isCreator ?? null,
+        has_account: Boolean(identity?.account),
+        has_creator: Boolean(identity?.creator),
+        oauth_operation: statePayload.operation,
+        scopes_include_write_creator: grantedWriteCreator,
+      },
+    }
 
-    if (upsertError) return redirectWithClearedCookie({ error: "fanvue_oauth_account_save_failed" })
+    if (statePayload.operation === FANVUE_CONNECT_OPERATION) {
+      const { error: bridgeError } = await supabaseAdmin.rpc("creator_publishing_link_fanvue_oauth_account", {
+        p_user_id: userId,
+        p_provider_account_id: accountPayload.provider_account_id,
+        p_provider_username: accountPayload.provider_username,
+        p_display_name: accountPayload.display_name,
+        p_token_type: accountPayload.token_type,
+        p_scopes: accountPayload.scopes,
+        p_encrypted_access_token: accountPayload.encrypted_access_token,
+        p_encrypted_refresh_token: accountPayload.encrypted_refresh_token,
+        p_token_key_version: accountPayload.token_key_version,
+        p_token_expires_at: accountPayload.token_expires_at,
+        p_metadata: accountPayload.metadata,
+      })
+      if (bridgeError) {
+        const detail = `${bridgeError.message ?? ""} ${bridgeError.details ?? ""}`
+        if (detail.includes("FANVUE_PROVIDER_IDENTITY_CHANGE_REQUIRES_EXPLICIT_RELINK")) return redirectWithClearedCookie({ error: "fanvue_provider_identity_change_requires_explicit_relink" })
+        if (detail.includes("FANVUE_PROVIDER_IDENTITY_ALREADY_LINKED")) return redirectWithClearedCookie({ error: "fanvue_provider_identity_already_linked" })
+        return redirectWithClearedCookie({ error: "fanvue_oauth_account_bridge_failed" })
+      }
+    } else {
+      // Privileged write:creator reconnect is credential-only and must never create CPQ state.
+      const { error: upsertError } = await supabaseAdmin
+        .from("autopost_accounts")
+        .upsert(accountPayload, { onConflict: "user_id,platform" })
+      if (upsertError) return redirectWithClearedCookie({ error: "fanvue_oauth_account_save_failed" })
+    }
+
     return redirectWithClearedCookie({ connected: "fanvue" })
   } catch (error) {
     const message = error instanceof Error ? error.message : "fanvue_oauth_failed"
