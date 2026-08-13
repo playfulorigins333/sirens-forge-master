@@ -63,8 +63,11 @@ assert.equal(allowed.blocker, null)
 const runRoute = readFileSync('app/api/autopost/run/route.ts', 'utf8')
 const scheduleAdvance = readFileSync('lib/autopost/scheduleAdvance.ts', 'utf8')
 const fanvueScheduleAdvance = readFileSync('lib/autopost/fanvueScheduleAdvance.ts', 'utf8')
-assert.doesNotMatch(runRoute, /fanvue|validateFanvueScheduleAdvanceProof/, 'Fanvue helper must not be called from public run route')
+const liveFanvueExecution = /postFanvueInternalSinglePost|createFanvue(?:Text|Media)Post|fanvueInternalAdapter|fanvueApiClientCore|fanvueInternalControlledDispatchRoute|\bfetch\s*\(/i
+assert.match(runRoute, /from ["']@\/lib\/autopost\/fanvueRunRouteDryRunVerifier["']/, 'run route may import only the controlled Fanvue dry-run verifier')
+assert.doesNotMatch(runRoute, /validateFanvueScheduleAdvanceProof/, 'Fanvue schedule-advance proof helper must not be imported or invoked by the run route')
+assert.doesNotMatch(runRoute, liveFanvueExecution, 'run route must not directly import or invoke live Fanvue provider execution')
 assert.doesNotMatch(scheduleAdvance, /fanvue|validateFanvueScheduleAdvanceProof/i, 'Fanvue helper must not alter current scheduleAdvance module')
-assert.doesNotMatch(fanvueScheduleAdvance, /from\("autopost_jobs"\)|update\(|insert\(|persistAutopostJobResult/, 'Fanvue schedule helper must not persist or advance real jobs')
+assert.doesNotMatch(fanvueScheduleAdvance, /autopost_jobs|update\(|insert\(|upsert\(|delete\(|persistAutopostJobResult/, 'Fanvue schedule helper must not persist or advance real jobs')
 
 console.log('Fanvue schedule advancement safety checks passed')
