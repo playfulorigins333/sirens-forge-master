@@ -14,17 +14,23 @@ const originalEnv = {
   SIRENS_API_INTERNAL_SECRET: process.env.SIRENS_API_INTERNAL_SECRET,
 }
 
-let authenticatedUser: string | null = ownerId
+type AuthResult = {
+  ok: boolean
+  user?: { id: string }
+  subscription?: { status: string }
+  error?: string
+  message?: string
+  status?: number
+}
+
+let authResult: AuthResult = { ok: true, user: { id: ownerId } }
 let adminCalls = 0
 let ownershipQueries: Array<[string, string]> = []
 let railwayCalls: Array<{ url: string; init?: RequestInit }> = []
 
-mock.module(new URL("../../../lib/supabaseServer.ts", import.meta.url).href, {
+mock.module(new URL("../../../lib/subscription-checker.ts", import.meta.url).href, {
   namedExports: {
-    requireUserId: async () => {
-      if (!authenticatedUser) throw new Error("Unauthorized")
-      return authenticatedUser
-    },
+    ensureActiveSubscription: async () => authResult,
   },
 })
 
@@ -72,7 +78,7 @@ const { proxyDatasetDoctorOperation } = await import(
 )
 
 function reset() {
-  authenticatedUser = ownerId
+  authResult = { ok: true, user: { id: ownerId } }
   adminCalls = 0
   ownershipQueries = []
   railwayCalls = []
@@ -90,21 +96,49 @@ function request(method: string, body?: unknown) {
 
 try {
   reset()
-  authenticatedUser = null
+  authResult = {
+    ok: false,
+    error: "UNAUTHENTICATED",
+    message: "You must be logged in.",
+    status: 401,
+  }
   let response = await proxyDatasetDoctorOperation(request("POST"), jobId, "analyze")
   assert.equal(response.status, 401)
   assert.equal(adminCalls, 0)
   assert.equal(railwayCalls.length, 0)
 
+  for (const inactiveStatus of ["no subscription", "canceled", "past_due", "unpaid", "paused", "incomplete", "incomplete_expired"]) {
+    reset()
+    authResult = {
+      ok: false,
+      error: "NO_ACTIVE_SUBSCRIPTION",
+      message: `Inactive subscription: ${inactiveStatus}`,
+      status: 402,
+    }
+    response = await proxyDatasetDoctorOperation(request("POST"), jobId, "analyze")
+    assert.equal(response.status, 402)
+    assert.equal(adminCalls, 0, `${inactiveStatus} must not reach the ownership database`)
+    assert.equal(railwayCalls.length, 0, `${inactiveStatus} must not reach Dataset Doctor`)
+  }
+
   reset()
-  authenticatedUser = "foreign-user"
+  authResult = { ok: true, user: { id: "foreign-user" } }
   response = await proxyDatasetDoctorOperation(request("POST"), jobId, "analyze")
   assert.equal(response.status, 404)
   assert.deepEqual(ownershipQueries, [[jobId, "foreign-user"]])
   assert.equal(railwayCalls.length, 0)
 
-  for (const operation of ["analyze", "images", "approve"] as const) {
+  for (const [operation, subscriptionStatus] of [
+    ["analyze", "active"],
+    ["images", "trialing"],
+    ["approve", "active"],
+  ] as const) {
     reset()
+    authResult = {
+      ok: true,
+      user: { id: ownerId },
+      subscription: { status: subscriptionStatus },
+    }
     const inbound =
       operation === "approve"
         ? request("POST", {
