@@ -1,6 +1,7 @@
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { requireUserId } from "@/lib/supabaseServer"
+import { ensureActiveSubscription } from "@/lib/subscription-checker"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { encryptAutopostToken, getAutopostTokenKeyVersion } from "@/lib/autopost/tokenCrypto"
 import { buildFanvueTokenExchangeRequestInit } from "@/lib/autopost/fanvueOAuthTokenExchange"
@@ -170,6 +171,18 @@ export async function GET(req: Request) {
     }
     const operationStateError = validateFanvueOAuthOperationState({ statePayload, requestedScopes: config.scopes })
     if (operationStateError) return redirectWithClearedCookie({ error: redirectErrorForFanvueOAuthStateCode(operationStateError) })
+
+    if (statePayload.operation === FANVUE_CONNECT_OPERATION) {
+      const entitlement = await ensureActiveSubscription()
+      if (!entitlement.ok || entitlement.user?.id !== userId) {
+        return redirectWithClearedCookie({
+          error: entitlement.error === "UNAUTHENTICATED"
+            ? "fanvue_oauth_unauthenticated"
+            : "fanvue_oauth_no_active_subscription",
+        })
+      }
+      userId = entitlement.user.id
+    }
 
     const { tokenResponse, requestedScopes, apiBaseUrl, apiVersion } = await exchangeCodeForTokens({
       code,

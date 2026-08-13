@@ -155,9 +155,17 @@ async function run() {
   }
 
   const runRoute = readFileSync('app/api/autopost/run/route.ts', 'utf8')
+  const runRouteDryRunVerifier = readFileSync('lib/autopost/fanvueRunRouteDryRunVerifier.ts', 'utf8')
+  const runDryRunBranch = readFileSync('lib/autopost/fanvueRunDryRunBranch.ts', 'utf8')
   const availability = readFileSync('lib/autopost/platformAvailability.ts', 'utf8')
   const registry = readFileSync('lib/autopost/platformRegistry.ts', 'utf8')
-  assert.doesNotMatch(runRoute, /fanvue/i, 'Fanvue remains absent from public dispatch route')
+  const liveFanvueExecution = /postFanvueInternalSinglePost|createFanvue(?:Text|Media)Post|fanvueInternalAdapter|fanvueApiClientCore|fanvueInternalControlledDispatchRoute|\bfetch\s*\(/i
+  assert.match(runRoute, /from ["']@\/lib\/autopost\/fanvueRunRouteDryRunVerifier["']/, 'run route may import only the controlled Fanvue dry-run verifier')
+  assert.doesNotMatch(runRoute, liveFanvueExecution, 'run route must not directly import or invoke live Fanvue provider execution')
+  assert.match(runRouteDryRunVerifier, /from ["']\.\/fanvueRunDryRunBranch["']/, 'permitted route verifier must delegate to the Fanvue dry-run branch')
+  assert.doesNotMatch(runRouteDryRunVerifier, liveFanvueExecution, 'route verifier must not import or invoke live Fanvue provider execution')
+  assert.match(runDryRunBranch, /buildFanvueMockedRunnerPersistenceBridge/, 'dry-run branch must use the mocked persistence bridge')
+  assert.doesNotMatch(runDryRunBranch, liveFanvueExecution, 'dry-run branch must not import or invoke live Fanvue provider execution')
   assert.match(availability, /public_selectable: false/, 'Fanvue remains not public-selectable')
   assert.match(availability, /can_schedule: false/, 'Fanvue remains not schedulable')
   assert.match(registry, /id: "fanvue"/, 'Fanvue registry entry remains present')
