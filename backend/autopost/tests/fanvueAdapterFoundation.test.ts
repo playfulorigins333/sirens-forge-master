@@ -3,8 +3,11 @@ import { readFileSync } from 'node:fs'
 
 const adapter = readFileSync('lib/autopost/fanvueAdapter.ts', 'utf8')
 const runRoute = readFileSync('app/api/autopost/run/route.ts', 'utf8')
+const runRouteDryRunVerifier = readFileSync('lib/autopost/fanvueRunRouteDryRunVerifier.ts', 'utf8')
+const runDryRunBranch = readFileSync('lib/autopost/fanvueRunDryRunBranch.ts', 'utf8')
 const availability = readFileSync('lib/autopost/platformAvailability.ts', 'utf8')
 const jobProof = readFileSync('lib/autopost/jobProof.ts', 'utf8')
+const liveFanvueExecution = /postFanvueInternalSinglePost|createFanvue(?:Text|Media)Post|fanvueInternalAdapter|fanvueApiClientCore|fanvueInternalControlledDispatchRoute|\bfetch\s*\(/i
 
 assert.match(adapter, /import "server-only"/, 'Fanvue adapter must be server-only')
 assert.match(adapter, /FANVUE_RUN_DISPATCH_ENABLED === "true"/, 'Fanvue adapter must require explicit dispatch gate')
@@ -21,7 +24,12 @@ assert.match(adapter, /POSTED_READY_FOR_PROOF/, 'immediate provider response mus
 assert.match(adapter, /verification_needed: true/, 'proof candidate must require later verification')
 assert.doesNotMatch(adapter, /platform_post_id|posted_at|persistAutopostJobResult|from\("autopost_jobs"\)|fetch\(/, 'FV-6 adapter must not persist proof, set platform_post_id, or perform live fetch')
 
-assert.doesNotMatch(runRoute, /fanvue/, 'Fanvue adapter must not be wired into public run route')
+assert.match(runRoute, /from ["']@\/lib\/autopost\/fanvueRunRouteDryRunVerifier["']/, 'run route may import only the controlled Fanvue dry-run verifier')
+assert.doesNotMatch(runRoute, liveFanvueExecution, 'run route must not directly import or invoke live Fanvue provider execution')
+assert.match(runRouteDryRunVerifier, /from ["']\.\/fanvueRunDryRunBranch["']/, 'permitted route verifier must delegate to the Fanvue dry-run branch')
+assert.doesNotMatch(runRouteDryRunVerifier, liveFanvueExecution, 'route verifier must not import or invoke live Fanvue provider execution')
+assert.match(runDryRunBranch, /buildFanvueMockedRunnerPersistenceBridge/, 'dry-run branch must use the mocked persistence bridge')
+assert.doesNotMatch(runDryRunBranch, liveFanvueExecution, 'dry-run branch must not import or invoke live Fanvue provider execution')
 assert.match(availability, /public_selectable: false/, 'Fanvue must remain non-selectable')
 assert.match(availability, /can_schedule: false/, 'Fanvue must remain non-schedulable')
 assert.match(availability, /supports_real_posting: false/, 'Fanvue must remain not real-posting-enabled')
