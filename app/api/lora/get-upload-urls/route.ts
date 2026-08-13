@@ -8,7 +8,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireUserId } from "@/lib/supabaseServer";
+import { ensureActiveSubscription } from "@/lib/subscription-checker";
 
 /**
  * Generates presigned PUT URLs for uploading Dataset Doctor raw images directly to R2.
@@ -76,7 +76,14 @@ const BUCKET = process.env.R2_BUCKET!; // identity-loras
 
 export async function POST(req: Request) {
   try {
-    const userId = await requireUserId({ request: req });
+    const auth = await ensureActiveSubscription();
+    if (!auth.ok) {
+      return NextResponse.json(
+        { error: auth.error, message: auth.message },
+        { status: auth.status },
+      );
+    }
+    const userId = auth.user.id;
     const supabaseAdmin = getSupabaseAdmin();
 
     const body = await req.json();

@@ -140,15 +140,15 @@ try {
     ),
   }
 
-  assert.match(activeRoutes.create, /requireUserId/)
+  assert.match(activeRoutes.create, /ensureActiveSubscription/)
   assert.match(activeRoutes.create, /\.eq\("user_id", userId\)/)
   assert.match(activeRoutes.create, /user_id: userId/)
-  assert.match(activeRoutes.status, /requireUserId/)
+  assert.match(activeRoutes.status, /ensureActiveSubscription/)
   assert.match(activeRoutes.status, /data\.user_id !== userId/)
-  assert.match(activeRoutes.uploadUrls, /requireUserId/)
+  assert.match(activeRoutes.uploadUrls, /ensureActiveSubscription/)
   assert.match(activeRoutes.uploadUrls, /lora\.user_id !== userId/)
   assert.match(activeRoutes.uploadUrls, /r2\.send\(/)
-  assert.match(activeRoutes.train, /requireUserId/)
+  assert.match(activeRoutes.train, /ensureActiveSubscription/)
   assert.match(activeRoutes.train, /lora\.user_id !== userId/)
   assert.match(activeRoutes.train, /status: "queued"/)
 

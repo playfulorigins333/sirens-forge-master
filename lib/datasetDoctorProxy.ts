@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "./supabaseAdmin";
-import { requireUserId } from "./supabaseServer";
+import { ensureActiveSubscription } from "./subscription-checker";
 import { requireSirensApiConfig, sirensApiFetch } from "./sirensApi";
 
 const UUID_RE =
@@ -27,7 +27,14 @@ export async function proxyDatasetDoctorOperation(
   operation: Operation,
 ) {
   try {
-    const userId = await requireUserId({ request });
+    const auth = await ensureActiveSubscription();
+    if (!auth.ok) {
+      return NextResponse.json(
+        { error: auth.error, message: auth.message },
+        { status: auth.status },
+      );
+    }
+    const userId = auth.user.id;
 
     if (!UUID_RE.test(jobId)) {
       return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });

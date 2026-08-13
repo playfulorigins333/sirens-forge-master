@@ -1,14 +1,21 @@
 // app/api/lora/create/route.ts
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireUserId } from "@/lib/supabaseServer";
+import { ensureActiveSubscription } from "@/lib/subscription-checker";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    const userId = await requireUserId({ request: req });
+    const auth = await ensureActiveSubscription();
+    if (!auth.ok) {
+      return NextResponse.json(
+        { error: auth.error, message: auth.message },
+        { status: auth.status },
+      );
+    }
+    const userId = auth.user.id;
     const supabaseAdmin = getSupabaseAdmin();
 
     // Body is intentionally read but NOT persisted
