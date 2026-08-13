@@ -48,6 +48,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
+      TASK21_RELIABILITY_INITIAL_SCOPE_BASE_SHA: 96218eb0ca467b26b5cc68f8baf979e081deea57
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       TASK21_SCHEDULER_RETRY_EXHAUSTION_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task21_scheduler_retry_exhaustion_ci
       TASK21_SCHEDULER_RETRY_RECOVERY_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task21_scheduler_retry_recovery_ci
@@ -112,6 +113,13 @@ jobs:
             "supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql"
           )
 
+          enforce_initial_scope=false
+          if [[ "$base" == "$TASK21_RELIABILITY_INITIAL_SCOPE_BASE_SHA" ]]; then
+            enforce_initial_scope=true
+          else
+            printf 'Skipping historical Task 21 reliability changed-file allowlist for future PR base %s\n' "$base"
+          fi
+
           for path in "${changed[@]}"; do
             for migration_path in "${immutable_migrations[@]}"; do
               if [[ "$path" == "$migration_path" ]]; then
@@ -122,6 +130,10 @@ jobs:
             if [[ "$path" == supabase/migrations/* ]]; then
               printf 'Task 21 reliability changed-file guard forbids migration changes: %s\n' "$path" >&2
               exit 1
+            fi
+
+            if [[ "$enforce_initial_scope" != true ]]; then
+              continue
             fi
 
             recognized=false

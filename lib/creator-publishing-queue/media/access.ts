@@ -1,6 +1,6 @@
 import "server-only"
 import { getSupabaseAdmin } from "../../supabaseAdmin"
-import { requireUserId } from "../../supabaseServer"
+import { requireActiveCreatorId } from "../creatorEntitlement"
 export { CREATOR_PUBLISHING_MEDIA_DEFAULT_BUCKET, CREATOR_PUBLISHING_MEDIA_SIGNED_URL_EXPIRES_IN_SECONDS, getCreatorPublishingMediaBucket, parseCreatorPublishingMediaAccessMode } from "./core"
 import { createCreatorPublishingSignedMediaUrl as createCoreSignedUrl } from "./core"
 import type { CreatorPublishingMediaAccessResult, CreatorPublishingMediaAccessMode } from "./types"
@@ -17,7 +17,7 @@ export async function createCreatorPublishingSignedMediaUrl(input: {
   let creatorId = input.authenticatedCreatorId
   if (!creatorId) {
     try {
-      creatorId = await requireUserId()
+      creatorId = await requireActiveCreatorId()
     } catch (error) {
       if (isUnauthenticatedError(error)) return { ok: false, status: 401, code: "UNAUTHENTICATED" }
       return { ok: false, status: 500, code: "SIGNING_FAILED" }

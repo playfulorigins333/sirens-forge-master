@@ -2,11 +2,11 @@ import "server-only"
 import { randomUUID } from "node:crypto"
 import { redirect } from "next/navigation"
 import { getSupabaseAdmin } from "../../supabaseAdmin"
-import { supabaseServer } from "../../supabaseServer"
+import { activeCreatorIdOrNull } from "../creatorEntitlement"
 import { mapPlatformAccountRow, saveCreatorPlatformAccountWithDeps } from "./serviceCore"
 import type { AccountDeps, PlatformAccountInput } from "./types"
 
-async function defaultUserId() { const supabase = await supabaseServer(); const { data, error } = await supabase.auth.getUser(); if (error || !data.user?.id) return null; return data.user.id }
+async function defaultUserId() { return activeCreatorIdOrNull() }
 const defaultDeps: AccountDeps = { getAuthenticatedUserId: defaultUserId, getAdminClient: () => getSupabaseAdmin() as any, randomUUID }
 export class CreatorPlatformAccountError extends Error { constructor(public code: string, message: string) { super(message) } }
 export async function saveCreatorPlatformAccount(input: PlatformAccountInput, deps: AccountDeps = defaultDeps) { return saveCreatorPlatformAccountWithDeps(input, deps) }

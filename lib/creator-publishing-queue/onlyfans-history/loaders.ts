@@ -1,6 +1,7 @@
 import "server-only"
 import { getSupabaseAdmin } from "../../supabaseAdmin"
 import { supabaseServer } from "../../supabaseServer"
+import { activeCreatorIdOrNull } from "../creatorEntitlement"
 import { loadCreatorOnlyFansPackageHistoryCore } from "./creator-package"
 import { normalizeOnlyFansHistory } from "./core"
 import { jobStateLabel } from "./presentation"
@@ -180,7 +181,7 @@ export async function collectOnlyFansHistoryRows(admin: any, job: any): Promise<
 }
 
 export async function loadCreatorOnlyFansHistory(contentPackageId: string): Promise<OnlyFansCreatorPackageHistoryView> {
-  const actor = await actorId()
+  const actor = await activeCreatorIdOrNull()
   if (!actor) return { ok: false, code: "sign_in_required", message: "Sign in to view publishing history." }
   const admin = getSupabaseAdmin()
 

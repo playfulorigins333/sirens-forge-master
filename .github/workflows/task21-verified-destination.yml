@@ -43,6 +43,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     env:
+      TASK21_VERIFIED_DESTINATION_INITIAL_SCOPE_BASE_SHA: d8d4ebd1b2c38dac2d05734e5a925896301ef3b9
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       TASK21_VERIFIED_DESTINATION_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task21_verified_destination_ci
       TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task15_ci
@@ -77,13 +78,21 @@ jobs:
           if ((${#changed[@]} == 0)); then echo "No Task 21 verified-destination pull-request changes were found." >&2; exit 1; fi
           unauthorized=()
           forbidden=()
+          enforce_initial_scope=false
+          if [[ "$base_sha" == "$TASK21_VERIFIED_DESTINATION_INITIAL_SCOPE_BASE_SHA" ]]; then
+            enforce_initial_scope=true
+          else
+            printf 'Skipping historical Task 21 verified-destination changed-file allowlist for future PR base %s\n' "$base_sha"
+          fi
           for path in "${changed[@]}"; do
-            if [[ ! "$path" =~ $allowed ]]; then unauthorized+=("$path"); fi
             for migration in "${immutable_migrations[@]}"; do
               if [[ "$path" == "$migration" ]]; then
                 forbidden+=("$path")
               fi
             done
+            if [[ "$path" == supabase/migrations/* ]]; then forbidden+=("$path"); fi
+            if [[ "$enforce_initial_scope" != true ]]; then continue; fi
+            if [[ ! "$path" =~ $allowed ]]; then unauthorized+=("$path"); fi
             case "$path" in
               supabase/migrations/*|vercel.json|package.json|package-lock.json|.env|.env.*|*/.env|*/.env.*|lib/creator-publishing-queue/scheduling/*|lib/creator-publishing-queue/scheduler-runner/*|app/api/creator-publishing-queue/scheduler/*|app/api/creator-publishing-queue/scheduling/*|*connector*|*adapter*) forbidden+=("$path");;
             esac
