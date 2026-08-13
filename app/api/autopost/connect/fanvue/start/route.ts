@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireUserId } from "@/lib/supabaseServer"
+import { ensureActiveSubscription } from "@/lib/subscription-checker"
 import {
   buildFanvueAuthorizeUrl,
   createFanvueOAuthState,
@@ -13,11 +13,15 @@ import {
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-export async function GET(req: Request) {
-  const userId = await requireUserId({ request: req }).catch(() => null)
-  if (!userId) {
-    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 })
+export async function GET(_req: Request) {
+  const entitlement = await ensureActiveSubscription()
+  if (!entitlement.ok || !entitlement.user) {
+    return NextResponse.json(
+      { error: entitlement.error ?? "NO_ACTIVE_SUBSCRIPTION" },
+      { status: entitlement.status ?? 403 },
+    )
   }
+  const userId = entitlement.user.id
 
   const configStatus = getFanvueOAuthConfigStatus()
   if (!configStatus.connect_enabled) {
