@@ -1,13 +1,12 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { redirect } from "next/navigation"
 import { z } from "zod"
 import { performCreatorPublishingCreatorApproval } from "@/lib/creator-publishing-queue/approval/service"
 import { CreatorPublishingApprovalError } from "@/lib/creator-publishing-queue/approval/types"
 import type { CreatorPublishingApprovalStatus, CreatorPublishingQueueTaskStatus } from "@/lib/creator-publishing-queue/approval/types"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
-import { supabaseServer } from "@/lib/supabaseServer"
+import { requireActiveCreatorPageIdentity } from "@/lib/creator-publishing-queue/creatorEntitlement"
 import { creatorApprovalSuccessMessage, mapCreatorApprovalError, platformLabel } from "@/lib/creator-publishing-queue/ui/status"
 
 const schema = z.object({
@@ -15,7 +14,7 @@ const schema = z.object({
 })
 export type ApprovalActionState = { ok: boolean; message?: string; title?: string; code?: string; reloadRequired?: boolean; controlsDisabled?: boolean; resultingApprovalStatus?: CreatorPublishingApprovalStatus; targetPlatform?: string; queueTaskCreated?: boolean; queueTaskStatus?: CreatorPublishingQueueTaskStatus | null }
 
-async function sessionUserId() { const supabase = await supabaseServer(); const { data, error } = await supabase.auth.getUser(); if (error || !data.user?.id) redirect("/login"); return data.user.id }
+async function sessionUserId() { return (await requireActiveCreatorPageIdentity()).authUserId }
 
 
 export async function decideCreatorPublishingPackage(_prev: ApprovalActionState, formData: FormData): Promise<ApprovalActionState> {
