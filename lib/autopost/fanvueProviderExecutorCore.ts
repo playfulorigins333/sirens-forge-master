@@ -215,10 +215,14 @@ function readinessFailureFinalState(failure: FanvueApiFailure): FanvueProviderRe
   return "unknown"
 }
 
-function accountHasScopes(account: FanvueProviderAccount, contentType: FanvueProviderContentType) {
+function missingPublicationScope(account: FanvueProviderAccount, contentType: FanvueProviderContentType) {
   const scopes = scopeList(account.scopes)
-  if (contentType === "text") return true
-  return scopes.includes("write:media") && scopes.includes("read:media") && scopes.includes("write:creator")
+  if (!scopes.includes("write:post")) return "FANVUE_EXECUTION_WRITE_POST_SCOPE_MISSING"
+  if (contentType === "text") return null
+  if (!scopes.includes("read:media")) return "FANVUE_EXECUTION_READ_MEDIA_SCOPE_MISSING"
+  if (!scopes.includes("write:media")) return "FANVUE_EXECUTION_WRITE_MEDIA_SCOPE_MISSING"
+  if (!scopes.includes("write:creator")) return "FANVUE_EXECUTION_WRITE_CREATOR_SCOPE_MISSING"
+  return null
 }
 
 async function resolveCreatorUuid(input: Pick<FanvueProviderPostInput, "apiBaseUrl" | "apiVersion" | "fetchIdentity">, accessToken: string) {
@@ -268,9 +272,8 @@ export async function executeFanvueProviderPost(input: FanvueProviderPostInput):
   if (!account || account.user_id !== input.userId || account.platform !== "fanvue" || account.connection_status !== "CONNECTED" || !nonEmptyString(account.encrypted_access_token)) {
     return fanvueProviderBaseResult({ ...contentFlags, live_attempted: true, safe_code: "FANVUE_EXECUTION_CONNECTED_ACCOUNT_REQUIRED" })
   }
-  if (!accountHasScopes(account, input.content.content_type)) {
-    return fanvueProviderBaseResult({ ...contentFlags, live_attempted: true, safe_code: "FANVUE_EXECUTION_REQUIRED_SCOPES_MISSING" })
-  }
+  const scopeError = missingPublicationScope(account, input.content.content_type)
+  if (scopeError) return fanvueProviderBaseResult({ ...contentFlags, live_attempted: true, safe_code: scopeError })
 
   let refreshAttempted = false
   let refreshStatusClass: FanvueProviderRefreshStatusClass = "not_attempted"

@@ -1,6 +1,7 @@
 import "server-only"
 import crypto from "crypto"
 import type { NextResponse } from "next/server"
+export { FANVUE_MEDIA_PUBLICATION_SCOPES, FANVUE_TEXT_PUBLICATION_SCOPES } from "../creator-publishing-queue/fanvue/capability"
 
 export const FANVUE_OAUTH_COOKIE_NAME = "sf_autopost_fanvue_oauth"
 export const FANVUE_OAUTH_COOKIE_PATH = "/api/autopost/connect/fanvue"
@@ -29,6 +30,7 @@ export const FANVUE_DEFAULT_REQUESTED_SCOPES = [
   "write:post",
   "read:media",
   "write:media",
+  "write:creator",
 ] as const
 
 export const FANVUE_REQUIRED_CONNECTION_SCOPES = [
@@ -40,6 +42,7 @@ export const FANVUE_REQUIRED_CONNECTION_SCOPES = [
 export const FANVUE_OPTIONAL_CREATOR_UPLOAD_SCOPES = [
   "write:creator",
 ] as const
+
 
 export type FanvueScope = (typeof FANVUE_APPROVED_SCOPES)[number]
 

@@ -71,7 +71,6 @@ function validateFanvueOAuthOperationState(input: { statePayload: ReturnType<typ
   if (statePayload.operation === FANVUE_CONNECT_OPERATION) {
     if (statePayload.initiated_from !== "generic_fanvue_start") return "FANVUE_OAUTH_STATE_OPERATION_INVALID"
     if (statePayload.admin_reconnect_authorized) return "FANVUE_OAUTH_STATE_OPERATION_INVALID"
-    if (statePayload.requested_scopes_include_write_creator) return "FANVUE_WRITE_CREATOR_STATE_NOT_ADMIN_AUTHORIZED"
     return null
   }
 
@@ -195,9 +194,6 @@ export async function GET(req: Request) {
       return redirectWithClearedCookie({ error: "fanvue_oauth_missing_required_scopes" })
     }
     const grantedWriteCreator = hasFanvueWriteCreatorScope(scopes)
-    if (statePayload.operation === FANVUE_CONNECT_OPERATION && grantedWriteCreator) {
-      return redirectWithClearedCookie({ error: redirectErrorForFanvueOAuthStateCode("FANVUE_WRITE_CREATOR_STATE_NOT_ADMIN_AUTHORIZED") })
-    }
     if (statePayload.operation === FANVUE_WRITE_CREATOR_RECONNECT_OPERATION && !grantedWriteCreator) {
       return redirectWithClearedCookie({ error: redirectErrorForFanvueOAuthStateCode("FANVUE_WRITE_CREATOR_EXPECTED_SCOPE_MISSING") })
     }
