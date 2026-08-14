@@ -58,6 +58,8 @@ const migrations = [
  "20260716001500_creator_publishing_onlyfans_manual_completion.sql",
  "20260718001700_creator_publishing_onlyfans_history_timeline.sql",
  "20260721001800_creator_publishing_verified_destination_guards.sql",
+ "20260721001900_creator_publishing_scheduler_retry_exhaustion.sql",
+ "20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql",
  "20260813035247_fanvue_oauth_cpq_account_bridge.sql",
 ]
 try {

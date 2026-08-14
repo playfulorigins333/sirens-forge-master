@@ -64,6 +64,7 @@ export type FanvueProviderPostInput = {
   reloadAccountAfterRefresh?: (userId: string) => Promise<FanvueProviderAccount | null>
   now?: () => Date
   waitForMediaReady?: typeof waitForFanvueMediaReady
+  beforeProviderCreate?: () => Promise<boolean>
 }
 
 export type FanvueProviderPostResult = {
@@ -312,6 +313,7 @@ export async function executeFanvueProviderPost(input: FanvueProviderPostInput):
   const config: FanvueApiClientConfig = { accessToken, apiBaseUrl: input.apiBaseUrl, apiVersion: input.apiVersion, fetch: input.fanvueFetch }
 
   if (input.content.content_type === "text") {
+    if (input.beforeProviderCreate && !await input.beforeProviderCreate()) return fanvueProviderBaseResult({ ...contentFlags, safe_code: "FANVUE_EXECUTION_CREATE_DISPATCH_MARKER_FAILED" })
     const created = await createFanvueTextPost(config, { text: validation.text!, audience: FANVUE_PROVIDER_EXECUTION_AUDIENCE })
     if (!created.ok) {
       const failure = created as FanvueApiFailure
@@ -341,6 +343,7 @@ export async function executeFanvueProviderPost(input: FanvueProviderPostInput):
   const ready = await (input.waitForMediaReady ?? waitForFanvueMediaReady)(config, { uuid: session.mediaUuid, ...readinessConfig(media.mediaType) })
   const readyFlags = { ...uploadFlags, upload_session_status_class: "2xx" as const, signed_url_status_class: "2xx" as const, byte_upload_status_class: "2xx" as const, finalize_status_class: "2xx" as const, readiness_checked: true, readiness_attempts_used: ready.attempts ?? null }
   if (!ready.ok) { const failure = ready as FanvueApiFailure; return fanvueProviderBaseResult({ ...readyFlags, readiness_status_class: readinessFailureStatusClass(failure), readiness_final_state: readinessFailureFinalState(failure), safe_code: failure.error_code === "FANVUE_MEDIA_READY_TIMEOUT" ? "FANVUE_EXECUTION_MEDIA_NOT_READY" : failure.error_code, safe_error_message: failure.safe_error_message }) }
+  if (input.beforeProviderCreate && !await input.beforeProviderCreate()) return fanvueProviderBaseResult({ ...readyFlags, readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", safe_code: "FANVUE_EXECUTION_CREATE_DISPATCH_MARKER_FAILED" })
   const created = await createFanvueMediaPost(config, { text: validation.text, audience: FANVUE_PROVIDER_EXECUTION_AUDIENCE, mediaUuids: [session.mediaUuid] })
   if (!created.ok) { const failure = created as FanvueApiFailure; return fanvueProviderBaseResult({ ...readyFlags, readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code === "FANVUE_POST_UUID_MISSING" ? "FANVUE_EXECUTION_PROVIDER_POST_UUID_INVALID" : failure.error_code, safe_error_message: failure.safe_error_message }) }
   if (!validUuid(created.post.uuid)) { return fanvueProviderBaseResult({ ...readyFlags, readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", create_attempted: true, create_status_class: "2xx", safe_code: "FANVUE_EXECUTION_PROVIDER_POST_UUID_INVALID" }) }

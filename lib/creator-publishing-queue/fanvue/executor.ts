@@ -29,7 +29,7 @@ export type PreparedFanvueExecutionEnvelope = Readonly<{
   destination: PreparedFanvueDestination
   oauthAccount: PreparedFanvueOAuthAccount
   approvedContent: FanvueProviderApprovedContent
-  provider: Pick<FanvueProviderPostInput, "apiBaseUrl" | "apiVersion" | "fanvueFetch" | "fetchIdentity" | "signedPartUploader" | "decryptAccessToken" | "refreshAccessToken" | "reloadAccountAfterRefresh" | "now" | "waitForMediaReady">
+  provider: Pick<FanvueProviderPostInput, "apiBaseUrl" | "apiVersion" | "fanvueFetch" | "fetchIdentity" | "signedPartUploader" | "decryptAccessToken" | "refreshAccessToken" | "reloadAccountAfterRefresh" | "now" | "waitForMediaReady" | "beforeProviderCreate">
 }>
 
 export type FanvueCpqExecutionResult = FanvueProviderPostResult

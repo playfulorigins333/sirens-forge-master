@@ -1,7 +1,6 @@
-export type FanvueHistoryRow = { id: string; creator_id: string; content_package_id: string; destination_id: string; publication_type: string; requested_publication_at: string; state: string; next_attempt_at: string | null; posted_at: string | null; safe_error_code: string | null; created_at: string; updated_at: string }
-export type FanvueHistoryDto = Omit<FanvueHistoryRow, "creator_id">
-export function toCreatorFanvueHistory(row: FanvueHistoryRow, creatorId: string): FanvueHistoryDto | null {
-  if (row.creator_id !== creatorId) return null
-  const { creator_id: _creatorId, ...safe } = row
-  return safe
-}
+import "server-only"
+import { requireActiveCreatorId } from "../creatorEntitlement"
+import { getSupabaseAdmin } from "../../supabaseAdmin"
+export type FanvueHistoryRow={id:string;creator_id:string;content_package_id:string;destination_id:string;publication_type:string;scheduled_at:string;state:string;next_attempt_at:string|null;posted_at:string|null;safe_error_code:string|null;created_at:string;updated_at:string}
+export type FanvueHistoryDto=Omit<FanvueHistoryRow,"creator_id">&{attempts:Array<{attempt_ordinal:number;started_at:string;provider_create_dispatched_at:string|null;finished_at:string|null;outcome_class:string|null;safe_error_code:string|null}>}
+export async function loadCreatorFanvueHistory():Promise<FanvueHistoryDto[]>{const creatorId=await requireActiveCreatorId();const admin=getSupabaseAdmin();const{data,error}=await admin.from("creator_publishing_fanvue_history").select("*").eq("creator_id",creatorId).order("created_at",{ascending:false});if(error)throw new Error("FANVUE_HISTORY_UNAVAILABLE");const rows=data??[];return Promise.all(rows.map(async row=>{const{data:attempts}=await admin.from("creator_publishing_fanvue_attempts").select("attempt_ordinal,started_at,provider_create_dispatched_at,finished_at,outcome_class,safe_error_code").eq("job_id",row.id).eq("creator_id",creatorId).order("attempt_ordinal");const{creator_id:_,...safe}=row;return{...safe,attempts:attempts??[]}as FanvueHistoryDto}))}

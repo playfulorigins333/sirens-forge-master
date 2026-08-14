@@ -11,6 +11,6 @@ assert.equal(classifyFanvuePublicationCapability({...account,connection_status:'
 assert.equal(classifyFanvueExecutionOutcome(fanvueProviderBaseResult({create_attempted:true,safe_code:'NETWORK_LOST'})),'uncertain')
 assert.equal(classifyFanvueExecutionOutcome(fanvueProviderBaseResult({safe_code:'FANVUE_REFRESH_TOKEN_MISSING'})),'reconnect_required')
 assert.equal(nextFanvueAttemptAt(1,new Date(0)),new Date(60_000).toISOString()); assert.equal(nextFanvueAttemptAt(2,new Date(0)),new Date(120_000).toISOString()); assert.equal(nextFanvueAttemptAt(3,new Date(0)),null)
-let claimedLimit=0; const summary=await runFanvuePublicationWorker({enabled:false,batchSize:999,store:{claimDue:async limit=>{claimedLimit=limit;return[]},entitlementActive:async()=>true,executionRequirementsValid:async()=>true,finish:async()=>true}})
+let claimedLimit=0; const summary=await runFanvuePublicationWorker({enabled:false,batchSize:999,store:{claimDue:async limit=>{claimedLimit=limit;return[]},entitlementActive:async()=>true,executionRequirementsValid:async()=>true,markCreateDispatched:async()=>true,finish:async()=>true}})
 assert.equal(summary.claimed,0); assert.equal(claimedLimit,0)
 console.log('Fanvue capability and worker state-machine tests passed')

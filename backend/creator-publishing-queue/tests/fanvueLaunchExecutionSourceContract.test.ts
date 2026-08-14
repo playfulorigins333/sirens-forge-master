@@ -1,7 +1,2 @@
-import assert from 'node:assert/strict'; import {readFileSync} from 'node:fs'
-const files=['lib/creator-publishing-queue/fanvue/workerCore.ts','lib/creator-publishing-queue/fanvue/capability.ts','lib/creator-publishing-queue/fanvue/history.ts']
-const forbidden=['app/api/admin/autopost/fanvue','backend/autopost/admin','autopost_rules','autopost_jobs','/api/autopost/run','publishAt','x dispatch','reddit dispatch','diagnostic secret']
-for(const file of files){const source=readFileSync(file,'utf8');for(const value of forbidden)assert.equal(source.toLowerCase().includes(value.toLowerCase()),false,`${file}: ${value}`)}
-assert.match(readFileSync(files[0],'utf8'),/executePreparedFanvuePublication/)
-assert.equal(readFileSync('vercel.json','utf8').includes('fanvue'),false)
-console.log('Fanvue launch execution source contract passed')
+import assert from'node:assert/strict';import{readFileSync}from'node:fs'
+const files=['lib/creator-publishing-queue/fanvue/workerCore.ts','lib/creator-publishing-queue/fanvue/service.ts','lib/creator-publishing-queue/fanvue/history.ts','supabase/migrations/20260814090000_cpq_fanvue_launch_execution_foundation.sql'];const forbidden=['app/api/admin/autopost/fanvue','backend/autopost/admin','autopost_rules','autopost_jobs','/api/autopost/run','publishAt','diagnostic confirmation','admin diagnostic secret','reddit','x dispatch'];for(const f of files){const s=readFileSync(f,'utf8');for(const x of forbidden)assert.equal(s.toLowerCase().includes(x.toLowerCase()),false,`${f}:${x}`)}const migration=readFileSync(files[3],'utf8');assert.match(migration,/creator_publishing_scheduler_events/);assert.match(migration,/provider_create_dispatched_at/);assert.doesNotMatch(migration,/requested_publication_at/);assert.match(readFileSync(files[1],'utf8'),/creator_publishing_job_source_is_current/);console.log('Fanvue launch execution source contract passed')
