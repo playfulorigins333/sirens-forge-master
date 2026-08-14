@@ -9,6 +9,7 @@ const validation = readFileSync("lib/creator-publishing-queue/accounts/validatio
 const accountService = readFileSync("lib/creator-publishing-queue/accounts/service.ts", "utf8")
 const platformSetup = readFileSync("supabase/migrations/20260710000700_creator_publishing_platform_account_setup.sql", "utf8")
 const packageMigration = readFileSync("supabase/migrations/20260721001800_creator_publishing_verified_destination_guards.sql", "utf8")
+const packageEnablement = readFileSync("supabase/migrations/20260814022245_cpq_fanvue_accounts_packages_nonrunnable.sql", "utf8")
 const registry = readFileSync("lib/autopost/platformRegistry.ts", "utf8")
 const availability = readFileSync("lib/autopost/platformAvailability.ts", "utf8")
 
@@ -64,10 +65,12 @@ for (const forbidden of ["provider_account_id:", ".delete(", "ensureActiveSubscr
 for (const forbidden of ["provider_account_id", "oauth_account_id", "creator_platform_accounts", ".delete("]) assert.equal(refresh.includes(forbidden), false, forbidden)
 
 assert.match(validation, /if \(p === "fanvue"\) throw[\s\S]*FANVUE_NOT_AVAILABLE/)
-assert.match(accountService, /\.in\("platform", \["onlyfans", "fansly"\]\)/)
+assert.match(accountService, /\.in\("platform", \["onlyfans", "fansly", "fanvue"\]\)/)
 assert.match(platformSetup, /if v_platform = 'fanvue' then raise exception 'FANVUE_NOT_AVAILABLE'/)
 assert.match(packageMigration, /if v_account\.platform = 'fanvue' then raise exception 'FANVUE_NOT_AVAILABLE'/)
 assert.match(packageMigration, /target_platform='fanvue'\) then raise exception 'FANVUE_NOT_AVAILABLE'/)
+assert.match(packageEnablement, /FANVUE_OAUTH_DESTINATION_NOT_CONNECTED/)
+assert.doesNotMatch(packageEnablement, /creator_publishing_create_autopost_plan/)
 for (const field of ["public_selectable: platform.public_selectable ?? false", "supports_real_posting: platform.supports_real_posting ?? false"]) assert.ok(registry.includes(field), field)
 const fanvueAvailability = availability.slice(availability.indexOf('if (platform.id === "fanvue")'), availability.indexOf('if (platform.id === "x")'))
 for (const field of ["can_schedule: false", "supports_real_posting: false", "supports_text_posting: false", "supports_media_posting: false"]) assert.ok(fanvueAvailability.includes(field), field)

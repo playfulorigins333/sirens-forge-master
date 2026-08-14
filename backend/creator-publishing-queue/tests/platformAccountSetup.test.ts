@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import fs from "node:fs"
 import test from "node:test"
 import { normalizeAccountInput, normalizeProfileUrl, normalizeUsername } from "../../../lib/creator-publishing-queue/accounts/validation"
-import { saveCreatorPlatformAccountWithDeps } from "../../../lib/creator-publishing-queue/accounts/serviceCore"
+import { mapPlatformAccountRow, saveCreatorPlatformAccountWithDeps } from "../../../lib/creator-publishing-queue/accounts/serviceCore"
 
 const migrationPath = "supabase/migrations/20260710000700_creator_publishing_platform_account_setup.sql"
 const migration = fs.readFileSync(migrationPath, "utf8")
@@ -116,10 +116,10 @@ test("action and UI source assertions enforce safe fields and copy", () => {
   assert.match(form, /OnlyFans/); assert.match(form, /Fansly/); assert.doesNotMatch(form, /Fanvue/)
   assert.match(form, /value="onlyfans"/); assert.doesNotMatch(form, /<select[\s\S]*name="platform"/); assert.doesNotMatch(form, /<option[\s\S]*fansly/)
   assert.match(form + page, /Platform account/)
-  assert.match(page, /No OnlyFans account references yet\./); assert.doesNotMatch(page, /No OnlyFans or Fansly account references yet/)
+  assert.match(page, /No OnlyFans, Fansly, or Fanvue destinations yet\./); assert.match(page, /ordinary OAuth connect flow/); assert.match(page, /account.platform === "fanvue"/); assert.match(page, /href="\/autopost"/)
   assert.match(form, /readOnly/); assert.match(form, /platformUsername/); assert.match(form, /profileUrl/); assert.match(form, /isVirtualEntity/); assert.match(form, /creatorAttested/)
   assert.doesNotMatch(form + page, /type="password"|name="token"|name="cookie"|Connect account|Login connected|Test connection|Platform verified|Automatically verified/i)
-  assert.match(form + page, /does not store your password, tokens, cookies, or login session/)
+  assert.match(fs.readFileSync("lib/creator-publishing-queue/accounts/validation.ts", "utf8"), /does not store your password, tokens, cookies, or login session/); assert.match(page, /OnlyFans and Fansly use manual account references/); assert.match(page, /OAuth credentials are encrypted and stored server-side/); assert.match(page, /token values are never displayed in the browser/); assert.match(page, /OAuth ownership and connection remain separate from human trusted verification/); assert.match(page, /OAuth connected/); assert.match(page, /OAuth disconnected/); assert.match(page, /must be reconnected before new Fanvue package composition/)
   assert.match(page, /Creator attested/); assert.match(form + page, /Creator attestation confirms ownership or authorization only/); assert.match(form + page, /does not enable publishing packages, Publishing Plans, or scheduling/); assert.doesNotMatch(form + page, /Creator attested[\s\S]{0,80}Trusted verification recorded/); assert.doesNotMatch(form + page, /attestation enables publishing/i)
   assert.match(actions, /updateAccountIdSchema = z\.string\(\)\.uuid\(\)/); assert.match(actions, /if \(!parsed\.success\) return invalidForm\(\)/); assert.match(actions, /operation: "create"/); assert.match(actions, /operation: "update"/); assert.match(actions, /revalidatePath\("\/creator\/publishing-queue\/accounts"\)/); assert.match(actions, /revalidatePath\("\/creator\/publishing-queue"\)/)
   assert.match(queue, /Manage platform accounts/)
@@ -132,3 +132,19 @@ test("no Fanvue/autopost imports or platform network calls are introduced", () =
     assert.doesNotMatch(source, /lib\/autopost|backend\/autopost|fanvueAdapter|fetch\(|onlyfans\.com.*fetch|fansly\.com.*fetch/)
   }
 })
+
+
+test("Fanvue safe account read model includes linkage but never credentials, while manual writes stay forbidden", () => {
+  const service = fs.readFileSync("lib/creator-publishing-queue/accounts/service.ts", "utf8")
+  const types = fs.readFileSync("lib/creator-publishing-queue/accounts/types.ts", "utf8")
+  assert.match(types, /"onlyfans" \| "fansly" \| "fanvue"/)
+  assert.match(service, /oauth_account_id/); assert.match(service, /autopost_accounts!creator_platform_accounts_oauth_owner_fk\(id,connection_status\)/); assert.match(types, /fanvueConnected: boolean/); assert.match(fs.readFileSync("lib/creator-publishing-queue/accounts/serviceCore.ts", "utf8"), /connection_status === "CONNECTED"/)
+  assert.match(service, /\["onlyfans", "fansly", "fanvue"\]/)
+  for (const secret of ["encrypted_access_token", "encrypted_refresh_token", "token_key", "provider_secret"]) assert.doesNotMatch(service, new RegExp(secret))
+  for (const operation of ["create", "update"] as const) assert.throws(() => normalizeAccountInput({ operation, accountId: uuidFor(operation), platform: "fanvue", platformUsername: "forged", idempotencyKey: "fanvue_123" } as any), /Fanvue/)
+  const connected = mapPlatformAccountRow({ id: "fanvue-destination", platform: "fanvue", platform_username: null, verification_status: "unattested", oauth_account_id: "oauth-1", autopost_accounts: { id: "oauth-1", connection_status: "CONNECTED", encrypted_access_token: "must-not-map" } })
+  assert.equal(connected.oauthLinked, true); assert.equal(connected.fanvueConnected, true); assert.equal(JSON.stringify(connected).includes("must-not-map"), false)
+  const disconnected = mapPlatformAccountRow({ id: "fanvue-destination", platform: "fanvue", platform_username: null, verification_status: "unattested", oauth_account_id: "oauth-1", autopost_accounts: { id: "oauth-1", connection_status: "REVOKED" } })
+  assert.equal(disconnected.oauthLinked, true); assert.equal(disconnected.fanvueConnected, false)
+})
+function uuidFor(operation: string) { return operation === "update" ? "00000000-0000-4000-8000-000000000001" : undefined }

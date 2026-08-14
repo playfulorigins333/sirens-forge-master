@@ -25,6 +25,10 @@ on:
       - supabase/migrations/20260721002000_creator_publishing_scheduler_retry_exhaustion_recovery.sql
       - backend/creator-publishing-queue/tests/task21VerifiedDestinationPostgresIntegration.sql
       - backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
+      - backend/creator-publishing-queue/tests/cpqFanvueAccountsPackagesPostgresIntegration.sql
+      - backend/creator-publishing-queue/tests/runCpqFanvueAccountsPackagesPostgresIntegration.mjs
+      - supabase/migrations/20260813035247_fanvue_oauth_cpq_account_bridge.sql
+      - supabase/migrations/20260814022245_cpq_fanvue_accounts_packages_nonrunnable.sql
       - .github/workflows/task21-verified-destination.yml
 
 jobs:
@@ -46,6 +50,7 @@ jobs:
       TASK21_VERIFIED_DESTINATION_INITIAL_SCOPE_BASE_SHA: d8d4ebd1b2c38dac2d05734e5a925896301ef3b9
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
       TASK21_VERIFIED_DESTINATION_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task21_verified_destination_ci
+      CPQ_FANVUE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cpq_fanvue_ci
       TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task15_ci
       TASK20_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task20_ci
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
@@ -102,6 +107,8 @@ jobs:
       - run: npx tsx backend/creator-publishing-queue/tests/packageComposer.test.ts
       - run: npx tsx backend/creator-publishing-queue/tests/autopostOrchestration.test.ts
       - run: node backend/creator-publishing-queue/tests/runTask21VerifiedDestinationPostgresIntegration.mjs
+      - name: Gate 5 Fanvue CPQ PostgreSQL behavior
+        run: node backend/creator-publishing-queue/tests/runCpqFanvueAccountsPackagesPostgresIntegration.mjs
       - run: npm run test:creator-publishing-queue
       - run: npx tsx backend/creator-publishing-queue/tests/task15SchedulerSourceContract.test.ts
       - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'drop database if exists task15_ci;' -c 'create database task15_ci;'
@@ -138,6 +145,7 @@ jobs:
           path: |
             task21-build.log
             task21-verified-destination-postgres-diagnostics.log
+            cpq-fanvue-accounts-packages-postgres-diagnostics.log
             task15-postgres-diagnostics.log
             task17a-postgres-diagnostics*.log
             task20-postgres-diagnostics.log
