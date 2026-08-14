@@ -116,7 +116,7 @@ test("action and UI source assertions enforce safe fields and copy", () => {
   assert.match(form, /OnlyFans/); assert.match(form, /Fansly/); assert.doesNotMatch(form, /Fanvue/)
   assert.match(form, /value="onlyfans"/); assert.doesNotMatch(form, /<select[\s\S]*name="platform"/); assert.doesNotMatch(form, /<option[\s\S]*fansly/)
   assert.match(form + page, /Platform account/)
-  assert.match(page, /No OnlyFans account references yet\./); assert.doesNotMatch(page, /No OnlyFans or Fansly account references yet/)
+  assert.match(page, /No OnlyFans, Fansly, or Fanvue destinations yet\./); assert.match(page, /ordinary OAuth connect flow/); assert.match(page, /account.platform === "fanvue"/); assert.match(page, /href="\/autopost"/)
   assert.match(form, /readOnly/); assert.match(form, /platformUsername/); assert.match(form, /profileUrl/); assert.match(form, /isVirtualEntity/); assert.match(form, /creatorAttested/)
   assert.doesNotMatch(form + page, /type="password"|name="token"|name="cookie"|Connect account|Login connected|Test connection|Platform verified|Automatically verified/i)
   assert.match(form + page, /does not store your password, tokens, cookies, or login session/)
@@ -132,3 +132,15 @@ test("no Fanvue/autopost imports or platform network calls are introduced", () =
     assert.doesNotMatch(source, /lib\/autopost|backend\/autopost|fanvueAdapter|fetch\(|onlyfans\.com.*fetch|fansly\.com.*fetch/)
   }
 })
+
+
+test("Fanvue safe account read model includes linkage but never credentials, while manual writes stay forbidden", () => {
+  const service = fs.readFileSync("lib/creator-publishing-queue/accounts/service.ts", "utf8")
+  const types = fs.readFileSync("lib/creator-publishing-queue/accounts/types.ts", "utf8")
+  assert.match(types, /"onlyfans" \| "fansly" \| "fanvue"/)
+  assert.match(service, /oauth_account_id/)
+  assert.match(service, /\["onlyfans", "fansly", "fanvue"\]/)
+  for (const secret of ["encrypted_access_token", "encrypted_refresh_token", "token_key", "provider_secret"]) assert.doesNotMatch(service, new RegExp(secret))
+  for (const operation of ["create", "update"] as const) assert.throws(() => normalizeAccountInput({ operation, accountId: uuidFor(operation), platform: "fanvue", platformUsername: "forged", idempotencyKey: "fanvue_123" } as any), /Fanvue/)
+})
+function uuidFor(operation: string) { return operation === "update" ? "00000000-0000-4000-8000-000000000001" : undefined }
