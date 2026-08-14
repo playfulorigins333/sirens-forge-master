@@ -90,11 +90,10 @@ jobs:
                 forbidden+=("$path")
               fi
             done
-            if [[ "$path" == supabase/migrations/* ]]; then forbidden+=("$path"); fi
             if [[ "$enforce_initial_scope" != true ]]; then continue; fi
             if [[ ! "$path" =~ $allowed ]]; then unauthorized+=("$path"); fi
             case "$path" in
-              supabase/migrations/*|vercel.json|package.json|package-lock.json|.env|.env.*|*/.env|*/.env.*|lib/creator-publishing-queue/scheduling/*|lib/creator-publishing-queue/scheduler-runner/*|app/api/creator-publishing-queue/scheduler/*|app/api/creator-publishing-queue/scheduling/*|*connector*|*adapter*) forbidden+=("$path");;
+              vercel.json|package.json|package-lock.json|.env|.env.*|*/.env|*/.env.*|lib/creator-publishing-queue/scheduling/*|lib/creator-publishing-queue/scheduler-runner/*|app/api/creator-publishing-queue/scheduler/*|app/api/creator-publishing-queue/scheduling/*|*connector*|*adapter*) forbidden+=("$path");;
             esac
           done
           if ((${#unauthorized[@]} > 0)); then printf 'Unauthorized Task 21 verified-destination reliability path changed: %s\n' "${unauthorized[@]}" >&2; exit 1; fi

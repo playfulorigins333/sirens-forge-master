@@ -49,7 +49,15 @@ for(const [label,current] of [["wrong price",{...subscription(),items:{data:[{qu
 
 const baseline="eff1aa6e96c21dfd2b17f59b292476da164f0073";
 for(const path of ["app/api/checkout/subscription-v2/route.ts","lib/payment-v2/checkoutService.ts","lib/payment-v2/checkoutRequestProtection.ts","lib/subscription-checker.ts"]){execFileSync("git",["diff","--quiet",baseline,"--",path]);assertions++;}
-const changedMigrations=execFileSync("git",["diff","--name-only",baseline,"--","supabase/migrations"],{encoding:"utf8"}).trim().split("\n").filter(Boolean);equal(changedMigrations,["supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql","supabase/migrations/20260812090000_lock05f_launch_inventory_reset.sql"],"only LOCK-05E and forward LOCK-05F migrations differ");
+const historicalMigrationMutations=(statusLines:string[])=>statusLines.filter(line=>line.length>0&&!line.startsWith("A\t"));
+const migrationChanges=execFileSync("git",["diff","--name-status",baseline,"--","supabase/migrations"],{encoding:"utf8"}).trim().split(/\r?\n/).filter(Boolean);
+equal(historicalMigrationMutations(migrationChanges),[],"historical migrations remain immutable while later forward-only additions are allowed");
+equal(historicalMigrationMutations(["A\tsupabase/migrations/20990101000000_future_forward_only.sql"]),[],"new forward-only migration is allowed");
+equal(historicalMigrationMutations(["M\tsupabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql"]),["M\tsupabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql"],"modified historical migration is rejected");
+equal(historicalMigrationMutations(["D\tsupabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql"]),["D\tsupabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql"],"deleted historical migration is rejected");
+equal(historicalMigrationMutations(["R100\tsupabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql\tsupabase/migrations/20990101000000_replacement.sql"]),["R100\tsupabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql\tsupabase/migrations/20990101000000_replacement.sql"],"renamed historical migration is rejected");
+equal(historicalMigrationMutations(["T\tsupabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql"]),["T\tsupabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql"],"historical migration type change is rejected");
+execFileSync("git",["diff","--quiet","e47e641048b48ed858b9fe21af7c0169fe0575c2","--","supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql"]);assertions++;
 const migration=await import("node:fs").then(({readFileSync})=>readFileSync("supabase/migrations/20260812080000_lock05e_payment_v2_early_bird_subscription_lifecycle.sql","utf8"));
 const inboxSource=await import("node:fs").then(({readFileSync})=>readFileSync("lib/payment-v2/eventInboxService.ts","utf8"));
 const receiveArgs=["p_provider_event_id","p_provider_event_type","p_provider_object_id","p_provider_object_type","p_provider_created_at","p_raw_payload_sha256","p_lifecycle_phase","p_lifecycle_version"];
