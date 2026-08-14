@@ -13,7 +13,7 @@ import {
   type FanvueSignedPartUploader,
 } from "./fanvueApiClientCore"
 import { refreshFanvueAccessToken, type FanvueTokenRefreshResult } from "./fanvueTokenRefresh"
-import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS, FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS } from "./fanvueMediaReadinessDiagnostic"
+import { FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_MEDIA_READINESS_MAX_DELAY_MS, FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS, FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS, FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS } from "./fanvueMediaReadinessConfig"
 
 export const FANVUE_PROVIDER_EXECUTION_AUDIENCE = "subscribers" as const
 
@@ -111,6 +111,10 @@ function nonEmptyString(value: unknown): value is string {
 
 function clean(value: unknown) {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null
+}
+
+function validUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_RE.test(value)
 }
 
 function statusClass(status: number | null | undefined): FanvueProviderStatusClass {
@@ -232,7 +236,7 @@ async function resolveCreatorUuid(input: Pick<FanvueProviderPostInput, "apiBaseU
   if (!body || typeof body !== "object" || Array.isArray(body)) return { ok: false as const, safe_code: "FANVUE_EXECUTION_CREATOR_UUID_UNAVAILABLE" }
   const record = body as Record<string, unknown>
   const uuid = clean(record.uuid)
-  if (record.isCreator !== true || !uuid || !UUID_RE.test(uuid)) return { ok: false as const, safe_code: "FANVUE_EXECUTION_CREATOR_UUID_UNAVAILABLE" }
+  if (record.isCreator !== true || !uuid || !validUuid(uuid)) return { ok: false as const, safe_code: "FANVUE_EXECUTION_CREATOR_UUID_UNAVAILABLE" }
   return { ok: true as const, creatorUserUuid: uuid }
 }
 
@@ -308,7 +312,10 @@ export async function executeFanvueProviderPost(input: FanvueProviderPostInput):
     const created = await createFanvueTextPost(config, { text: validation.text!, audience: FANVUE_PROVIDER_EXECUTION_AUDIENCE })
     if (!created.ok) {
       const failure = created as FanvueApiFailure
-      return fanvueProviderBaseResult({ ...contentFlags, live_attempted: true, token_refresh_attempted: refreshAttempted, token_refresh_status_class: refreshStatusClass, supabase_mutated: supabaseMutated, create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message })
+      return fanvueProviderBaseResult({ ...contentFlags, live_attempted: true, token_refresh_attempted: refreshAttempted, token_refresh_status_class: refreshStatusClass, supabase_mutated: supabaseMutated, create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code === "FANVUE_POST_UUID_MISSING" ? "FANVUE_EXECUTION_PROVIDER_POST_UUID_INVALID" : failure.error_code, safe_error_message: failure.safe_error_message })
+    }
+    if (!validUuid(created.post.uuid)) {
+      return fanvueProviderBaseResult({ ...contentFlags, live_attempted: true, token_refresh_attempted: refreshAttempted, token_refresh_status_class: refreshStatusClass, supabase_mutated: supabaseMutated, create_attempted: true, create_status_class: "2xx", safe_code: "FANVUE_EXECUTION_PROVIDER_POST_UUID_INVALID" })
     }
     return fanvueProviderBaseResult({ ...contentFlags, ok: true, safe_code: "FANVUE_EXECUTION_CREATED", live_attempted: true, token_refresh_attempted: refreshAttempted, token_refresh_status_class: refreshStatusClass, supabase_mutated: supabaseMutated, create_attempted: true, create_status_class: "2xx", provider_post_uuid_present: true, provider_post_uuid: created.post.uuid })
   }
@@ -332,7 +339,8 @@ export async function executeFanvueProviderPost(input: FanvueProviderPostInput):
   const readyFlags = { ...uploadFlags, upload_session_status_class: "2xx" as const, signed_url_status_class: "2xx" as const, byte_upload_status_class: "2xx" as const, finalize_status_class: "2xx" as const, readiness_checked: true, readiness_attempts_used: ready.attempts ?? null }
   if (!ready.ok) { const failure = ready as FanvueApiFailure; return fanvueProviderBaseResult({ ...readyFlags, readiness_status_class: readinessFailureStatusClass(failure), readiness_final_state: readinessFailureFinalState(failure), safe_code: failure.error_code === "FANVUE_MEDIA_READY_TIMEOUT" ? "FANVUE_EXECUTION_MEDIA_NOT_READY" : failure.error_code, safe_error_message: failure.safe_error_message }) }
   const created = await createFanvueMediaPost(config, { text: validation.text, audience: FANVUE_PROVIDER_EXECUTION_AUDIENCE, mediaUuids: [session.mediaUuid] })
-  if (!created.ok) { const failure = created as FanvueApiFailure; return fanvueProviderBaseResult({ ...readyFlags, readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code, safe_error_message: failure.safe_error_message }) }
+  if (!created.ok) { const failure = created as FanvueApiFailure; return fanvueProviderBaseResult({ ...readyFlags, readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", create_attempted: true, create_status_class: statusClass(failure.status), safe_code: failure.error_code === "FANVUE_POST_UUID_MISSING" ? "FANVUE_EXECUTION_PROVIDER_POST_UUID_INVALID" : failure.error_code, safe_error_message: failure.safe_error_message }) }
+  if (!validUuid(created.post.uuid)) { return fanvueProviderBaseResult({ ...readyFlags, readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", create_attempted: true, create_status_class: "2xx", safe_code: "FANVUE_EXECUTION_PROVIDER_POST_UUID_INVALID" }) }
   return fanvueProviderBaseResult({ ...readyFlags, ok: true, safe_code: "FANVUE_EXECUTION_CREATED", readiness_ready: true, readiness_status_class: "2xx", readiness_final_state: "ready", create_attempted: true, create_status_class: "2xx", provider_post_uuid_present: true, provider_post_uuid: created.post.uuid })
 }
 

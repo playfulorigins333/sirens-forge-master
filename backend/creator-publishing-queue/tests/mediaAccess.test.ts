@@ -122,7 +122,7 @@ await test("no upload, delete, list, move, public bucket, platform calls, or Fan
   assert.doesNotMatch(media, /\.upload\(|\.remove\(|\.list\(|\.move\(|getPublicUrl|public\s*:/)
   assert.doesNotMatch(media, /onlyfans|fansly|fanvue\.com|fetch\(/i)
   const changed = execSync("git diff --name-only", { encoding: "utf8" })
-  const allowedAutopost = new Set(["app/autopost/page.tsx", "app/autopost/AutopostPageClient.tsx", "app/autopost/Task14AutopostOrchestration.tsx", "app/api/autopost/connect/fanvue/callback/route.ts", "lib/autopost/platformRegistry.ts", "lib/autopost/fanvueInternalAdapter.ts", "lib/autopost/fanvueProviderExecutorCore.ts", "lib/creator-publishing-queue/fanvue/executor.ts"])
+  const allowedAutopost = new Set(["app/autopost/page.tsx", "app/autopost/AutopostPageClient.tsx", "app/autopost/Task14AutopostOrchestration.tsx", "app/api/autopost/connect/fanvue/callback/route.ts", "lib/autopost/platformRegistry.ts", "lib/autopost/fanvueInternalAdapter.ts", "lib/autopost/fanvueProviderExecutorCore.ts", "lib/autopost/fanvueMediaReadinessConfig.ts", "lib/autopost/fanvueMediaReadinessDiagnostic.ts", "lib/creator-publishing-queue/fanvue/executor.ts"])
   const unsafe = (path: string) => (path.includes("lib/autopost") && !allowedAutopost.has(path)) || (path.includes("fanvue") && !path.includes("creator-publishing-queue/tests") && !allowedAutopost.has(path)) || (path.startsWith("app/autopost/") && !allowedAutopost.has(path))
   assert.equal(changed.split(/\n/).filter(Boolean).filter(unsafe).length, 0)
   assert.equal(unsafe("app/autopost/unrelated-production-change.tsx"), true)

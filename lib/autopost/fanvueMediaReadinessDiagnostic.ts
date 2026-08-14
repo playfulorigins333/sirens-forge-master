@@ -12,6 +12,19 @@ import {
   type FanvueSignedPartUploader,
 } from "./fanvueApiClientCore"
 import type { FanvueUploadDiagnosticAccount, FanvueIdentityFetch } from "./fanvueUploadDiagnostic"
+export {
+  FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS,
+  FANVUE_MEDIA_READINESS_MAX_ATTEMPTS,
+  FANVUE_MEDIA_READINESS_MAX_DELAY_MS,
+  FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS,
+  FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS,
+  FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS,
+} from "./fanvueMediaReadinessConfig"
+import {
+  FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS,
+  FANVUE_MEDIA_READINESS_MAX_ATTEMPTS,
+  FANVUE_MEDIA_READINESS_MAX_DELAY_MS,
+} from "./fanvueMediaReadinessConfig"
 
 export const FANVUE_MEDIA_READINESS_DIAGNOSTIC_GATE = "FV-40DN" as const
 export const FANVUE_MEDIA_READINESS_DIAGNOSTIC_MODE = "fanvue_media_readiness_followup_diagnostic_no_post" as const
@@ -20,13 +33,6 @@ export const FANVUE_MEDIA_READINESS_DIAGNOSTIC_CONFIRMATION = "RUN_FANVUE_MEDIA_
 export const FANVUE_MEDIA_READINESS_DIAGNOSTIC_ASSET_PROFILE = "safe_static_image_v1" as const
 export const FANVUE_MEDIA_READINESS_DIAGNOSTIC_READINESS_PROFILE = "bounded_extended_v1" as const
 export const FANVUE_MEDIA_READINESS_DIAGNOSTIC_FILENAME = "fanvue-media-readiness-diagnostic-safe-static-v1.png" as const
-export const FANVUE_MEDIA_READINESS_MAX_ATTEMPTS = 6 as const
-export const FANVUE_MEDIA_READINESS_BACKOFF_BASE_MS = 5_000 as const
-export const FANVUE_MEDIA_READINESS_MAX_DELAY_MS = 5_000 as const
-export const FANVUE_VIDEO_MEDIA_READINESS_MAX_ATTEMPTS = 24 as const
-export const FANVUE_VIDEO_MEDIA_READINESS_BACKOFF_BASE_MS = 5_000 as const
-export const FANVUE_VIDEO_MEDIA_READINESS_MAX_DELAY_MS = 5_000 as const
-
 export type FanvueMediaReadinessClass =
   | "ready"
   | "processing_timeout"
