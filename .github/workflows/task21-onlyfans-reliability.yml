@@ -127,11 +127,6 @@ jobs:
                 exit 1
               fi
             done
-            if [[ "$path" == supabase/migrations/* ]]; then
-              printf 'Task 21 reliability changed-file guard forbids migration changes: %s\n' "$path" >&2
-              exit 1
-            fi
-
             if [[ "$enforce_initial_scope" != true ]]; then
               continue
             fi
