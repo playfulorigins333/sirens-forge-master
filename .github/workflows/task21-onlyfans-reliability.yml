@@ -24,6 +24,11 @@ on:
       - 'backend/creator-publishing-queue/tests/task21PlanSchedulingSourceContract.test.ts'
       - 'backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts'
       - 'backend/creator-publishing-queue/tests/autopostOrchestration.test.ts'
+      - 'lib/creator-publishing-queue/fanvue/**'
+      - 'backend/creator-publishing-queue/tests/fanvue*.test.ts'
+      - 'backend/creator-publishing-queue/tests/runFanvueLaunchExecutionPostgresIntegration.mjs'
+      - 'supabase/migrations/20260814090000_cpq_fanvue_launch_execution_foundation.sql'
+      - 'package.json'
       - 'docs/creator-publishing/task21-onlyfans-reliability-operations.md'
       - 'backend/creator-publishing-queue/tests/task22PublicAutopostScopeLockSourceContract.test.ts'
       - '.github/workflows/task22-public-autopost-scope-lock.yml'
@@ -54,6 +59,7 @@ jobs:
       TASK21_SCHEDULER_RETRY_RECOVERY_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task21_scheduler_retry_recovery_ci
       TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task15_ci
       TASK17A_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task17a_ci
+      CPQ_FANVUE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cpq_fanvue_ci
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
       SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
       NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
@@ -100,6 +106,16 @@ jobs:
             "backend/creator-publishing-queue/tests/task21PlanSchedulingSourceContract.test.ts"
             "backend/creator-publishing-queue/tests/task21PlanSchedulingUi.test.ts"
             "backend/creator-publishing-queue/tests/autopostOrchestration.test.ts"
+            "backend/creator-publishing-queue/tests/fanvueCapabilityWorker.test.ts"
+            "backend/creator-publishing-queue/tests/fanvueServiceCore.test.ts"
+            "backend/creator-publishing-queue/tests/fanvueLaunchExecutionPostgresIntegration.sql"
+            "backend/creator-publishing-queue/tests/fanvueLaunchExecutionSourceContract.test.ts"
+            "backend/creator-publishing-queue/tests/runFanvueLaunchExecutionPostgresIntegration.mjs"
+            "lib/creator-publishing-queue/fanvue/service.ts"
+            "lib/creator-publishing-queue/fanvue/serviceCore.ts"
+            "lib/creator-publishing-queue/fanvue/workerCore.ts"
+            "supabase/migrations/20260814090000_cpq_fanvue_launch_execution_foundation.sql"
+            "package.json"
             "backend/creator-publishing-queue/tests/task22PublicAutopostScopeLockSourceContract.test.ts"
             "docs/creator-publishing/task21-onlyfans-reliability-operations.md"
             ".github/workflows/task22-public-autopost-scope-lock.yml"
@@ -165,6 +181,8 @@ jobs:
           create database task17a_ci;
           SQL
       - run: npm run test:creator-publishing-task15-postgres
+      - name: Fanvue CPQ launch PostgreSQL integration
+        run: npm run test:creator-publishing-fanvue-launch-postgres
       - run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
       - run: npm run test:creator-publishing-task17a-upgrade
       - run: npm run test:creator-publishing-task17a-postgres
@@ -184,4 +202,5 @@ jobs:
             task21-scheduler-retry-exhaustion-postgres-diagnostics.log
             task15-postgres-diagnostics.log
             task17a-postgres-diagnostics*.log
+            fanvue-launch-execution-postgres-diagnostics.log
             .next/trace
