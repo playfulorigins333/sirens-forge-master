@@ -2,33 +2,26 @@ import "server-only"
 import { getSupabaseAdmin } from "../../supabaseAdmin"
 import { runFanvuePublicationWorker, type ClaimedFanvueJob, type FanvueWorkerStore } from "./workerCore"
 import type { PreparedFanvueExecutionEnvelope } from "./executor"
+import type { FanvueProviderPostInput } from "../../autopost/fanvueProviderExecutorCore"
+import { nonblank, validateFanvueExecutionFacts } from "./serviceCore"
 
 type Admin = ReturnType<typeof getSupabaseAdmin>
-type Hydrator = (facts: { job: any; destination: any; oauth: any; contentPackage: any; media: any[] }) => Promise<PreparedFanvueExecutionEnvelope>
-export function createFanvueCpqStore(admin: Admin, hydrate: Hydrator): FanvueWorkerStore {
-  return {
-    async claimDue(limit, leaseMinutes) {
-      const { data, error } = await admin.rpc("creator_publishing_claim_scheduled_fanvue_jobs", { p_limit: limit, p_lease_minutes: leaseMinutes }); if (error) throw new Error("FANVUE_CPQ_CLAIM_FAILED")
-      const claimed: ClaimedFanvueJob[] = []
-      for (const claim of data ?? []) {
-        const { data: job } = await admin.from("creator_publishing_platform_jobs").select("*").eq("id", claim.job_id).eq("target_platform", "fanvue").single()
-        if (!job || job.job_state !== "publishing_direct" || job.lease_token !== claim.lease_token) throw new Error("FANVUE_CPQ_JOB_INVALID")
-        const [{ data: destination }, { data: oauth }, { data: contentPackage }, { data: media }] = await Promise.all([
-          admin.from("creator_platform_accounts").select("*").eq("id", job.platform_account_id).eq("creator_id", job.creator_id).eq("platform", "fanvue").single(),
-          admin.from("autopost_accounts").select("*").eq("id", job.oauth_account_id).eq("user_id", job.creator_id).eq("platform", "fanvue").single(),
-          admin.from("creator_publishing_content_packages").select("*").eq("id", job.content_package_id).eq("creator_id", job.creator_id).eq("platform_account_id", job.platform_account_id).eq("target_platform", "fanvue").single(),
-          admin.from("creator_publishing_media_assets").select("*").eq("content_package_id", job.content_package_id).eq("creator_id", job.creator_id),
-        ])
-        if (!destination || destination.oauth_account_id !== job.oauth_account_id || !oauth || oauth.connection_status !== "CONNECTED" || !contentPackage || contentPackage.creator_approval_status !== "approved" || contentPackage.compliance_status !== "passed") throw new Error("FANVUE_CPQ_REQUIREMENTS_INVALID")
-        const envelope = await hydrate({ job, destination, oauth, contentPackage, media: media ?? [] })
-        claimed.push({ jobId: job.id, attemptId: claim.attempt_id, leaseToken: claim.lease_token, attemptOrdinal: claim.attempt_ordinal, envelope })
-      }
-      return claimed
-    },
-    async entitlementActive(creatorId) { const { data } = await admin.from("profiles").select("id").eq("user_id", creatorId).single(); if (!data) return false; const { data: subscriptions } = await admin.from("user_subscriptions").select("id").eq("user_id", data.id).in("status", ["active", "trialing"]).limit(1); return Boolean(subscriptions?.length) },
-    async executionRequirementsValid(jobId, creatorId) { const { data } = await admin.rpc("creator_publishing_job_source_is_current", { p_job_id: jobId }); if (data !== true) return false; const { data: consent } = await admin.from("creator_publishing_ai_twin_consents").select("id").eq("creator_id", creatorId).eq("status", "active").limit(1); return Boolean(consent?.length) },
-    async markCreateDispatched(attemptId, leaseToken) { const { data, error } = await admin.rpc("creator_publishing_mark_fanvue_create_dispatched", { p_attempt_id: attemptId, p_lease_token: leaseToken }); return !error && data === true },
-    async finish(input) { const r=input.result; const { data,error }=await admin.rpc("creator_publishing_finish_fanvue_attempt",{p_attempt_id:input.attemptId,p_lease_token:input.leaseToken,p_outcome:input.outcome,p_upload:r.upload_attempted,p_refresh:r.token_refresh_attempted,p_safe_code:r.safe_code,p_status:r.create_status_class,p_proof:r.provider_post_uuid,p_next:input.nextAttemptAt}); return !error&&data===true },
-  }
+type MediaRow = { id:string; content_package_id:string; storage_key:string; mime_type:string; sha256:string; source:string; ai_generation_metadata:Record<string,unknown> }
+export type FanvueTechnicalDependencies = {
+  provider: Pick<FanvueProviderPostInput,"apiBaseUrl"|"apiVersion"|"fanvueFetch"|"fetchIdentity"|"signedPartUploader"|"decryptAccessToken"|"refreshAccessToken"|"reloadAccountAfterRefresh"|"now"|"waitForMediaReady">
+  loadMediaBytes(asset: MediaRow): Promise<BodyInit>
 }
-export function runDormantFanvueCpqWorker(input:{enabled:boolean;batchSize:number;hydrate:Hydrator}){return runFanvuePublicationWorker({enabled:input.enabled,batchSize:input.batchSize,store:createFanvueCpqStore(getSupabaseAdmin(),input.hydrate)})}
+async function loadEnvelope(admin:Admin,job:any,deps:FanvueTechnicalDependencies):Promise<PreparedFanvueExecutionEnvelope>{
+ const [{data:destination},{data:oauth},{data:p},{data:media},{data:verification},{data:consent},{data:performers},{data:sourceCurrent}]=await Promise.all([
+  admin.from("creator_platform_accounts").select("*").eq("id",job.platform_account_id).single(),admin.from("autopost_accounts").select("*").eq("id",job.oauth_account_id).single(),admin.from("creator_publishing_content_packages").select("*").eq("id",job.content_package_id).single(),admin.from("creator_publishing_media_assets").select("*").eq("content_package_id",job.content_package_id).order("id"),admin.from("creator_publishing_creator_verifications").select("status").eq("creator_id",job.creator_id).single(),admin.from("creator_publishing_ai_twin_consents").select("status,revoked_at,attestation_version,attestation_text_sha256").eq("creator_id",job.creator_id).single(),admin.from("creator_publishing_co_performer_records").select("platform_release_confirmed,release_document_reference").eq("content_package_id",job.content_package_id),admin.rpc("creator_publishing_job_source_is_current",{p_job_id:job.id})])
+ const {data:reviews}=await admin.from("creator_publishing_compliance_reviews").select("*").eq("content_package_id",job.content_package_id).order("created_at",{ascending:false})
+ const evidence=(reviews??[]).find((r:any)=>p?.compliance_status==="passed"?r.review_source==="automated"&&r.outcome==="pass"&&r.compliance_policy_version===p.compliance_policy_version:r.review_source==="human"&&r.outcome==="escalate"&&nonblank(r.escalated_approval_reason)&&r.compliance_policy_version===p?.compliance_policy_version)
+ const laterBlockingReview=Boolean(evidence&&(reviews??[]).some((r:any)=>["block","manual_review"].includes(r.outcome)&&(r.created_at>evidence.created_at||(r.created_at===evidence.created_at&&r.id>evidence.id))))
+ const error=validateFanvueExecutionFacts({job,destination,oauth,contentPackage:p,verification,consent,performers,sourceCurrent,complianceEvidence:evidence,laterBlockingReview});if(error)throw new Error(error)
+ const assets=(media??[]) as MediaRow[];let approvedMedia:any=null
+ if(assets.length){if(assets.length!==1)throw new Error("FANVUE_CPQ_MEDIA_INVALID");const asset=assets[0];const generationId=asset.ai_generation_metadata?.generation_id;if(asset.source==="ai_pipeline"&&!nonblank(generationId))throw new Error("FANVUE_CPQ_MEDIA_PROVENANCE_INVALID");if(nonblank(generationId)){const{data:g}=await admin.from("generations").select("id,user_id,status,r2_bucket,r2_key,metadata").eq("id",generationId).eq("user_id",job.creator_id).single();if(!g||g.status!=="completed"||!nonblank(g.r2_bucket)||!nonblank(g.r2_key)||g.metadata?.placeholder===true||g.metadata?.test===true)throw new Error("FANVUE_CPQ_MEDIA_PROVENANCE_INVALID")};const type=asset.mime_type.startsWith("video/")?"video":asset.mime_type.startsWith("image/")?"image":null;if(!type)throw new Error("FANVUE_CPQ_MEDIA_INVALID");approvedMedia={filename:asset.storage_key.split("/").pop()!,mediaType:type,contentType:asset.mime_type,bytes:await deps.loadMediaBytes(asset)}}
+ const publicationType=approvedMedia?approvedMedia.mediaType:"text";if(job.publication_type!==publicationType)throw new Error("FANVUE_CPQ_PUBLICATION_TYPE_INVALID")
+ return{creatorId:job.creator_id,destination:{id:destination.id,creator_id:destination.creator_id,platform:"fanvue",oauth_account_id:destination.oauth_account_id},oauthAccount:{...oauth,platform:"fanvue"},approvedContent:{platform:"fanvue",content_type:approvedMedia?"media":"text",text:p.caption_body,media:approvedMedia},provider:deps.provider}
+}
+export function createFanvueCpqStore(admin:Admin,deps:FanvueTechnicalDependencies):FanvueWorkerStore{return{async claimDue(limit,leaseMinutes){const{data,error}=await admin.rpc("creator_publishing_claim_scheduled_fanvue_jobs",{p_limit:limit,p_lease_minutes:leaseMinutes});if(error)throw new Error("FANVUE_CPQ_CLAIM_FAILED");const out:ClaimedFanvueJob[]=[];for(const c of data??[]){const{data:j}=await admin.from("creator_publishing_platform_jobs").select("*").eq("id",c.job_id).eq("job_state","publishing_direct").eq("lease_token",c.lease_token).single();if(!j)throw new Error("FANVUE_CPQ_JOB_INVALID");out.push({jobId:j.id,attemptId:c.attempt_id,leaseToken:c.lease_token,attemptOrdinal:c.attempt_ordinal,envelope:await loadEnvelope(admin,j,deps)})}return out},async entitlementActive(id){const{data:p}=await admin.from("profiles").select("id").eq("user_id",id).single();if(!p)return false;const{data:s}=await admin.from("user_subscriptions").select("id").eq("user_id",p.id).in("status",["active","trialing"]).limit(1);return Boolean(s?.length)},async executionRequirementsValid(jobId){const{data}=await admin.rpc("creator_publishing_job_source_is_current",{p_job_id:jobId});return data===true},async markCreateDispatched(id,lease){const{data,error}=await admin.rpc("creator_publishing_mark_fanvue_create_dispatched",{p_attempt_id:id,p_lease_token:lease});return!error&&data===true},async finish(i){const r=i.result;const{data,error}=await admin.rpc("creator_publishing_finish_fanvue_attempt",{p_attempt_id:i.attemptId,p_lease_token:i.leaseToken,p_outcome:i.outcome,p_upload:r.upload_attempted,p_refresh:r.token_refresh_attempted,p_safe_code:r.safe_code,p_status:r.create_status_class,p_proof:r.provider_post_uuid,p_next:i.nextAttemptAt});return!error&&data===true}}}
+export function runDormantFanvueCpqWorker(input:{enabled:boolean;batchSize:number;dependencies:FanvueTechnicalDependencies}){return runFanvuePublicationWorker({enabled:input.enabled,batchSize:input.batchSize,store:createFanvueCpqStore(getSupabaseAdmin(),input.dependencies)})}
