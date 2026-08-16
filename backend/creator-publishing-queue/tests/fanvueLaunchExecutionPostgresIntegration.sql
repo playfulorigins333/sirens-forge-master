@@ -25,10 +25,15 @@ select pg_temp.assert_true((select count(*)=1 from claim),'due worker claim');se
 select pg_temp.assert_true(public.creator_publishing_mark_fanvue_create_dispatched((select attempt_id from claim),(select lease_token from claim)),'dispatch marker durable');update public.creator_publishing_platform_jobs set leased_at=clock_timestamp()-interval '16 minutes' where id='55555555-5555-4555-8555-555555555555';select count(*) from public.creator_publishing_claim_scheduled_fanvue_jobs(1,15);
 select pg_temp.assert_true((select job_state='uncertain' and next_attempt_at is null from public.creator_publishing_platform_jobs where id='55555555-5555-4555-8555-555555555555'),'crash after dispatch uncertain');select pg_temp.assert_true((select count(*)=0 from public.creator_publishing_claim_scheduled_fanvue_jobs(1,15)),'second create impossible');
 -- Creators have read-only ownership-scoped attempt history; authoritative RPCs remain service-only.
-set local role authenticated; set local request.jwt.claim.sub='11111111-1111-4111-8111-111111111111';
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub='11111111-1111-4111-8111-111111111111';
 select pg_temp.assert_true((select count(*)=1 from public.creator_publishing_fanvue_attempts),'owner reads attempt');
-do $$begin begin insert into public.creator_publishing_fanvue_attempts(job_id,creator_id,attempt_ordinal) values('55555555-5555-4555-8555-555555555555','11111111-1111-4111-8111-111111111111',2);raise exception 'creator forged attempt';exception when insufficient_privilege then null;end;end$$;
-reset role; set local role authenticated; set local request.jwt.claim.sub='22222222-2222-4222-8222-222222222222';
+do $$begin begin insert into public.creator_publishing_fanvue_attempts(id,job_id,creator_id,attempt_ordinal,lease_token) values('66666666-6666-4666-8666-666666666666','55555555-5555-4555-8555-555555555555','11111111-1111-4111-8111-111111111111',2,'77777777-7777-4777-8777-777777777777');raise exception 'creator forged attempt';exception when insufficient_privilege then null;end;end$$;
+commit;
+begin;
+set local role authenticated;
+set local request.jwt.claim.sub='22222222-2222-4222-8222-222222222222';
 select pg_temp.assert_true((select count(*)=0 from public.creator_publishing_fanvue_attempts),'other creator isolated');
-reset role;
+commit;
 select 'FANVUE_LAUNCH_EXECUTION_POSTGRES_ASSERTIONS_PASSED';
