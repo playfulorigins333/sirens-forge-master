@@ -20,7 +20,7 @@ const token = 'access-token-never-returned'
 const refreshedToken = 'refreshed-access-token-never-returned'
 
 function account(overrides: Partial<FanvueInternalAccount> = {}): FanvueInternalAccount {
-  return { user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['read:media', 'write:media', 'write:creator'], ...overrides }
+  return { user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['write:post', 'read:media', 'write:media', 'write:creator'], ...overrides }
 }
 
 async function runAdapter(input: Partial<Parameters<typeof postFanvueInternalSinglePost>[0]> = {}) {
@@ -76,7 +76,7 @@ async function run() {
   let refreshes = 0
   const stale = await runAdapter({
     account: account({ encrypted_access_token: 'stale-encrypted-token-never-returned', token_expires_at: staleExpiry }),
-    refreshAccessToken: async () => { refreshes++; return { ok: true, token_expires_at: freshExpiry, token_type: 'bearer', scopes: ['read:media', 'write:media', 'write:creator'], refreshed: true } },
+    refreshAccessToken: async () => { refreshes++; return { ok: true, token_expires_at: freshExpiry, token_type: 'bearer', scopes: ['write:post', 'read:media', 'write:media', 'write:creator'], refreshed: true } },
     reloadAccountAfterRefresh: async () => account({ encrypted_access_token: 'refreshed-encrypted-token-never-returned', token_expires_at: freshExpiry }),
     decryptAccessToken: (encrypted: string) => encrypted === 'refreshed-encrypted-token-never-returned' ? refreshedToken : token,
   })
@@ -139,7 +139,7 @@ async function run() {
   assert.equal(notReady.calls.filter((call) => call.init.method === 'POST' && /\/posts$/.test(call.url)).length, 0)
 
   const missingScopes = await runAdapter({ account: account({ scopes: [] }), content: { platform: 'fanvue', content_type: 'media', media: { filename: 'approved.png', mediaType: 'image', bytes: new Blob(['safe-bytes']) } } })
-  assert.equal(missingScopes.result.safe_code, 'FANVUE_INTERNAL_REQUIRED_SCOPES_MISSING')
+  assert.equal(missingScopes.result.safe_code, 'FANVUE_INTERNAL_WRITE_POST_SCOPE_MISSING')
   assert.equal(missingScopes.calls.length, 0)
 }
 

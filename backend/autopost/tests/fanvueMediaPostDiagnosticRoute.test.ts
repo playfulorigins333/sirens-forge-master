@@ -54,7 +54,7 @@ async function route(input: { requestBody?: unknown; requestSecret?: string | nu
       if (input.authenticatedUserId === null) throw new Error('missing auth')
       return input.authenticatedUserId ?? userId
     },
-    createLoadAccount: () => input.loadAccount ?? (async () => ({ user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['read:media', 'write:media', 'write:creator'] })),
+    createLoadAccount: () => input.loadAccount ?? (async () => ({ user_id: userId, platform: 'fanvue', connection_status: 'CONNECTED', encrypted_access_token: 'encrypted-token-never-returned', encrypted_refresh_token: 'encrypted-refresh-token-never-returned', token_expires_at: freshExpiry, scopes: ['write:post', 'read:media', 'write:media', 'write:creator'] })),
     fetchIdentity: input.fetchIdentity ?? (async () => ({ ok: true, status: 200, json: async () => ({ uuid: creatorUuid, isCreator: true, provider_identity_marker: 'sensitive-marker-must-not-leak' }) })),
     apiBaseUrl: 'https://api.test.fanvue.example',
     apiVersion: '2025-01-01',

@@ -325,7 +325,7 @@ async function run() {
   const defaultScopesMatch = oauth.match(/export const FANVUE_DEFAULT_REQUESTED_SCOPES = \[([\s\S]*?)\] as const/)
   assert.ok(defaultScopesMatch, 'Fanvue default requested scopes must be declared separately')
   const defaultScopes = Array.from(defaultScopesMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1])
-  assert.ok(!defaultScopes.includes('write:creator'), 'write:creator must not be default requested')
+  assert.ok(defaultScopes.includes('write:creator'), 'launch OAuth must request write:creator')
   const requiredScopesMatch = oauth.match(/export const FANVUE_REQUIRED_CONNECTION_SCOPES = \[([\s\S]*?)\] as const/)
   assert.ok(requiredScopesMatch, 'Fanvue required connection scopes must be declared separately')
   const requiredScopes = Array.from(requiredScopesMatch[1].matchAll(/"([^"]+)"/g), (match) => match[1])

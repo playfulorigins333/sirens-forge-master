@@ -12,7 +12,7 @@ function envelope(overrides: any={}): PreparedFanvueExecutionEnvelope {
   return {
     creatorId,
     destination:{id:destinationId,creator_id:creatorId,platform:'fanvue',oauth_account_id:accountId},
-    oauthAccount:{id:accountId,user_id:creatorId,platform:'fanvue',connection_status:'CONNECTED',encrypted_access_token:cipher,encrypted_refresh_token:refreshCipher,token_expires_at:fresh,scopes:['read:media','write:media','write:creator']},
+    oauthAccount:{id:accountId,user_id:creatorId,platform:'fanvue',connection_status:'CONNECTED',encrypted_access_token:cipher,encrypted_refresh_token:refreshCipher,token_expires_at:fresh,scopes:['write:post','read:media','write:media','write:creator']},
     approvedContent:{platform:'fanvue',content_type:'text',text:'Approved caption'},
     provider:{apiBaseUrl:'https://api.test.fanvue.example',apiVersion:'2025-01-01',fanvueFetch,fetchIdentity:async()=>({ok:true,status:200,json:async()=>({uuid:'423e4567-e89b-42d3-a456-426614174000',isCreator:true})}),signedPartUploader:async()=>({ETag:'etag'}),decryptAccessToken:()=>token,now:()=>now},
     ...overrides,
@@ -39,6 +39,6 @@ async function run(){
   const noRefresh=envelope(); Object.assign(noRefresh.oauthAccount,{token_expires_at:stale,encrypted_refresh_token:null}); assert.equal((await executePreparedFanvuePublication(noRefresh)).safe_code,'FANVUE_REFRESH_TOKEN_MISSING')
   let refreshed=0; const refresh=envelope(); Object.assign(refresh.oauthAccount,{token_expires_at:stale}); (refresh.provider as any).refreshAccessToken=async()=>{refreshed++;return {ok:true,refreshed:true,token_expires_at:fresh,token_type:'bearer',scopes:[]}}; (refresh.provider as any).reloadAccountAfterRefresh=async()=>({...refresh.oauthAccount,token_expires_at:fresh,encrypted_access_token:'new-cipher'}); assert.equal((await executePreparedFanvuePublication(refresh)).ok,true); assert.equal(refreshed,1)
   const decrypt=envelope(); (decrypt.provider as any).decryptAccessToken=()=>{throw new Error(cipher)}; const decryptResult=await executePreparedFanvuePublication(decrypt); assert.equal(decryptResult.safe_code,'FANVUE_EXECUTION_TOKEN_DECRYPT_FAILED'); safe(decryptResult)
-  const scopes=envelope(); (scopes.oauthAccount as any).scopes=[]; (scopes.approvedContent as any)={platform:'fanvue',content_type:'media',media:{filename:'a.png',mediaType:'image',bytes:new Blob(['x'])}}; assert.equal((await executePreparedFanvuePublication(scopes)).safe_code,'FANVUE_EXECUTION_REQUIRED_SCOPES_MISSING')
+  const scopes=envelope(); (scopes.oauthAccount as any).scopes=[]; (scopes.approvedContent as any)={platform:'fanvue',content_type:'media',media:{filename:'a.png',mediaType:'image',bytes:new Blob(['x'])}}; assert.equal((await executePreparedFanvuePublication(scopes)).safe_code,'FANVUE_EXECUTION_WRITE_POST_SCOPE_MISSING')
 }
 run().then(()=>console.log('CPQ Fanvue executor tests passed')).catch(e=>{console.error(e);process.exit(1)})
