@@ -43,10 +43,11 @@ export async function prepareFanvueDirectPackage(input:{client:any;creatorId:str
  const loaded=await client.rpc("creator_publishing_load_fanvue_direct_compliance_facts",{p_creator_id:creatorId,p_content_package_id:packageId})
  if(loaded.error)return{ok:false,code:String(loaded.error.message??loaded.error.code??"FANVUE_PREPARATION_FAILED")}
  let parsed;try{parsed=parseFacts(loaded.data,creatorId,packageId)}catch{return{ok:false,code:"FANVUE_PREPARATION_FACTS_INVALID"}}
- const evaluation=evaluateFanvueDirectCompliance(deriveFanvueDirectComplianceInput(parsed.facts,true))
+ const directInput=deriveFanvueDirectComplianceInput(parsed.facts,true)
+ const evaluation=evaluateFanvueDirectCompliance(directInput)
  const complianceKey=subKey("fvcomp",creatorId,packageId,planIdempotencyKey)
  const applied=await client.rpc("creator_publishing_apply_fanvue_direct_compliance",{
-  p_creator_id:creatorId,p_content_package_id:packageId,p_expected_package_updated_at:parsed.packageUpdatedAt,p_facts_fingerprint:parsed.factsFingerprint,p_media_manifest_hash:parsed.mediaHash,p_policy_version:evaluation.policy_version,p_outcome:evaluation.outcome,p_normalized_caption:evaluation.normalized_caption,p_ai_flag:evaluation.rule_hits.length===0&&parsed.facts.media_manifest.length===0?"none":"ai_generated",p_ai_detail:deriveFanvueDirectComplianceInput(parsed.facts,true).ai_detail??{},p_rule_hits:evaluation.rule_hits,p_reasons:evaluation.reasons,p_review_requirements:evaluation.review_requirements,p_evaluator_metadata:evaluation.metadata,p_effective_ai_twin_consent_status:deriveFanvueDirectComplianceInput(parsed.facts,true).ai_twin_consent_status??"not_applicable",p_idempotency_key:complianceKey
+  p_creator_id:creatorId,p_content_package_id:packageId,p_expected_package_updated_at:parsed.packageUpdatedAt,p_facts_fingerprint:parsed.factsFingerprint,p_media_manifest_hash:parsed.mediaHash,p_policy_version:evaluation.policy_version,p_outcome:evaluation.outcome,p_normalized_caption:evaluation.normalized_caption,p_ai_flag:parsed.facts.media_manifest.length===0?"none":"ai_generated",p_ai_detail:directInput.ai_detail??{},p_rule_hits:evaluation.rule_hits,p_reasons:evaluation.reasons,p_review_requirements:evaluation.review_requirements,p_evaluator_metadata:evaluation.metadata,p_effective_ai_twin_consent_status:directInput.ai_twin_consent_status??"not_applicable",p_idempotency_key:complianceKey
  })
  if(applied.error)return{ok:false,code:String(applied.error.message??applied.error.code??"FANVUE_PREPARATION_FAILED")}
  if(evaluation.outcome!=="passed")return{ok:false,code:evaluation.outcome==="blocked"?"FANVUE_COMPLIANCE_BLOCKED":"FANVUE_COMPLIANCE_REVIEW_REQUIRED"}
