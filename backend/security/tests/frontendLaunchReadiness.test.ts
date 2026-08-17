@@ -19,6 +19,14 @@ const home=await readFile("app/page.tsx","utf8"); assert(!home.includes("/120 LE
 const generator=await readFile("app/generate/page.tsx","utf8"); assert(!generator.includes('subscriptionStatus: "active"')); assert(generator.includes('disabled={mode.unavailable}')); assert(generator.includes("Image generation is temporarily unavailable."));
 const route=await readFile("app/api/generate/route.ts","utf8"); assert(route.indexOf("isGenerationExecutionEnabled()")<route.indexOf("requireSirensApiConfig()")); assert(route.includes("resolveLoraStack(bodyMode, identityLora, userId)"));
 
+for (const videoPath of ["app/api/video/route.ts", "app/api/generate_video/route.ts"]) {
+  const videoRoute = await readFile(videoPath, "utf8");
+  assert(videoRoute.includes('error: "VIDEO_GENERATION_UNAVAILABLE"'), `${videoPath} must expose the stable unavailable contract`);
+  assert(videoRoute.includes("status: 503"), `${videoPath} must fail closed with 503`);
+  assert(!videoRoute.includes("RUNPOD_"), `${videoPath} must not contain executable RunPod routing`);
+  assert(!videoRoute.includes("resolveLoraStack("), `${videoPath} must not resolve LoRAs while video is disabled`);
+}
+
 const registry=getAutopostPlatformRegistry(); const fanvue=registry.find(p=>p.id==="fanvue")!; assert.equal(fanvue.public_selectable,false); assert.equal(fanvue.supports_real_posting,true); assert.equal(fanvue.env_var,undefined);
 const availability=await readFile("lib/autopost/platformAvailability.ts","utf8"); const fanvueBranch=availability.slice(availability.indexOf('if (platform.id === "fanvue")'),availability.indexOf('if (platform.id === "x")')); assert(fanvueBranch.includes("can_schedule: false")); assert(fanvueBranch.includes("public_selectable: false"));
 for(const id of ["x","reddit"]){const p=registry.find(v=>v.id===id)!;assert.equal(p.public_selectable,false)}
