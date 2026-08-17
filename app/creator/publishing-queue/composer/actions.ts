@@ -30,13 +30,14 @@ function invalidForm(): PackageComposerActionState {
 }
 
 async function success(pkg: Pick<ComposerPackage, "id" | "target_platform">) {
+  const id = pkg.id
   revalidatePath("/creator/publishing-queue")
-  revalidatePath(`/creator/publishing-queue/${pkg.id}`)
+  revalidatePath(`/creator/publishing-queue/${id}`)
   if (pkg.target_platform === "fanvue") {
-    revalidatePath(`/creator/publishing-queue/fanvue/packages/${pkg.id}/media`)
-    redirect(`/creator/publishing-queue/fanvue/packages/${pkg.id}/media`)
+    revalidatePath(`/creator/publishing-queue/fanvue/packages/${id}/media`)
+    redirect(`/creator/publishing-queue/fanvue/packages/${id}/media`)
   }
-  redirect(`/creator/publishing-queue/${pkg.id}`)
+  redirect(`/creator/publishing-queue/${id}`)
 }
 
 export async function createCreatorPublishingPackage(
