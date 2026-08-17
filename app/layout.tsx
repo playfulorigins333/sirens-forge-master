@@ -1,4 +1,5 @@
 import "./globals.css"
+import "./reduced-motion.css"
 import type { ReactNode } from "react"
 import type { Metadata } from "next"
 import Footer from "@/components/layout/Footer"
