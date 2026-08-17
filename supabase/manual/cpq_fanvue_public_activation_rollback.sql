@@ -1,7 +1,7 @@
--- Roll back 20260817170000_cpq_fanvue_public_activation.sql.
--- This freezes new Fanvue publishing-plan creation again.
--- The OAuth-backed creator_platform_accounts destination is intentionally kept;
--- deleting it could be destructive once referenced by packages/jobs.
+-- Roll back the Fanvue public activation package.
+-- This freezes new Fanvue publishing-plan creation again and removes only the
+-- new activation RPC/trigger surface. Existing OAuth destinations, packages,
+-- media, reviews, approvals, jobs, attempts, and audit history are preserved.
 
 update public.creator_publishing_platform_capabilities
 set registry_version = 'task14.20260711.001',
@@ -22,8 +22,28 @@ set publishing_mode = 'disabled',
     updated_at = clock_timestamp()
 where platform = 'fanvue';
 
+drop trigger if exists trg_creator_publishing_fanvue_job_insert_guard on public.creator_publishing_platform_jobs;
+
+revoke all on function public.creator_publishing_fanvue_job_insert_guard() from PUBLIC;
+revoke execute on function public.creator_publishing_fanvue_job_insert_guard() from anon,authenticated,service_role;
+drop function if exists public.creator_publishing_fanvue_job_insert_guard();
+
 revoke all on function public.creator_publishing_create_fanvue_autopost_plan(uuid,uuid,text) from PUBLIC;
-revoke execute on function public.creator_publishing_create_fanvue_autopost_plan(uuid,uuid,text) from anon;
-revoke execute on function public.creator_publishing_create_fanvue_autopost_plan(uuid,uuid,text) from authenticated;
-revoke execute on function public.creator_publishing_create_fanvue_autopost_plan(uuid,uuid,text) from service_role;
+revoke execute on function public.creator_publishing_create_fanvue_autopost_plan(uuid,uuid,text) from anon,authenticated,service_role;
 drop function if exists public.creator_publishing_create_fanvue_autopost_plan(uuid,uuid,text);
+
+revoke all on function public.creator_publishing_approve_fanvue_direct_package(uuid,uuid,timestamptz,text,text) from PUBLIC;
+revoke execute on function public.creator_publishing_approve_fanvue_direct_package(uuid,uuid,timestamptz,text,text) from anon,authenticated,service_role;
+drop function if exists public.creator_publishing_approve_fanvue_direct_package(uuid,uuid,timestamptz,text,text);
+
+revoke all on function public.creator_publishing_apply_fanvue_direct_compliance(uuid,uuid,timestamptz,text,text,text,text,text,text,jsonb,jsonb,jsonb,jsonb,jsonb,text,text) from PUBLIC;
+revoke execute on function public.creator_publishing_apply_fanvue_direct_compliance(uuid,uuid,timestamptz,text,text,text,text,text,text,jsonb,jsonb,jsonb,jsonb,jsonb,text,text) from anon,authenticated,service_role;
+drop function if exists public.creator_publishing_apply_fanvue_direct_compliance(uuid,uuid,timestamptz,text,text,text,text,text,text,jsonb,jsonb,jsonb,jsonb,jsonb,text,text);
+
+revoke all on function public.creator_publishing_load_fanvue_direct_compliance_facts(uuid,uuid) from PUBLIC;
+revoke execute on function public.creator_publishing_load_fanvue_direct_compliance_facts(uuid,uuid) from anon,authenticated,service_role;
+drop function if exists public.creator_publishing_load_fanvue_direct_compliance_facts(uuid,uuid);
+
+revoke all on function public.creator_publishing_build_fanvue_direct_compliance_facts(uuid,uuid) from PUBLIC;
+revoke execute on function public.creator_publishing_build_fanvue_direct_compliance_facts(uuid,uuid) from anon,authenticated,service_role;
+drop function if exists public.creator_publishing_build_fanvue_direct_compliance_facts(uuid,uuid);
