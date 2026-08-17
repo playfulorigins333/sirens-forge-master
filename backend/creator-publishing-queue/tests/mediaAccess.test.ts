@@ -25,6 +25,7 @@ function mockAdmin(options: MockOptions) {
 }
 
 const ownedRow = { id: "asset-1", storage_key: "creator/pkg/photo.png", mime_type: "image/png", creator_publishing_content_packages: { id: "pkg", creator_id: "creator-1", target_platform: "onlyfans" } }
+const ownedFanvueRow = { ...ownedRow, creator_publishing_content_packages: { ...ownedRow.creator_publishing_content_packages, target_platform: "fanvue" } }
 
 await test("owned media asset receives a signed preview URL", async () => {
   const { admin, calls } = mockAdmin({ row: ownedRow, signedUrl: "https://signed.example/preview" })
@@ -32,6 +33,15 @@ await test("owned media asset receives a signed preview URL", async () => {
   assert.equal(result.ok, true)
   assert.equal(result.ok && result.value.signedUrl, "https://signed.example/preview")
   assert.deepEqual(calls.signed[0], { key: "creator/pkg/photo.png", expires: 300, opts: undefined })
+})
+
+await test("owned Fanvue media asset receives the same private signed preview", async () => {
+  const { admin, calls } = mockAdmin({ row: ownedFanvueRow, signedUrl: "https://signed.example/fanvue-preview" })
+  const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin, getAuthenticatedCreatorId: async () => "creator-1" })
+  assert.equal(result.ok, true)
+  assert.equal(result.ok && result.value.signedUrl, "https://signed.example/fanvue-preview")
+  assert.deepEqual(calls.filters, [["eq", "id", "asset-1"], ["eq", "creator_publishing_content_packages.creator_id", "creator-1"]])
+  assert.equal(calls.filters.some((filter: any[]) => filter[0] === "neq" && filter[1].includes("target_platform")), false)
 })
 
 await test("owned media asset receives a signed download URL", async () => {
@@ -48,7 +58,7 @@ await test("unauthenticated request is rejected", async () => {
   assert.equal(calls.signed.length, 0)
 })
 
-await test("foreign, missing, Fanvue, and blank-key media fail closed before signing", async () => {
+await test("foreign, missing, and blank-key media fail closed before signing", async () => {
   for (const row of [null, { ...ownedRow, storage_key: "" }]) {
     const { admin, calls } = mockAdmin({ row, signedUrl: "https://signed.example" })
     const result = await createCreatorPublishingSignedMediaUrl({ mediaAssetId: "asset-1", mode: "preview", authenticatedCreatorId: "creator-1" }, { supabaseAdmin: admin, getAuthenticatedCreatorId: async () => "creator-1" })
@@ -57,10 +67,9 @@ await test("foreign, missing, Fanvue, and blank-key media fail closed before sig
     assert.equal(calls.signed.length, 0)
   }
   const source = fs.readFileSync("lib/creator-publishing-queue/media/core.ts", "utf8")
-  assert.match(source, /neq\("creator_publishing_content_packages\.target_platform", "fanvue"\)/)
+  assert.doesNotMatch(source, /neq\("creator_publishing_content_packages\.target_platform", "fanvue"\)/)
   assert.match(source, /eq\("creator_publishing_content_packages\.creator_id", creatorId\)/)
 })
-
 
 await test("authentication provider throws maps to unauthenticated without signing", async () => {
   const { admin, calls } = mockAdmin({ row: ownedRow, signedUrl: "https://signed.example" })
@@ -117,19 +126,18 @@ await test("approval loader uses centralized media service", () => {
   assert.match(source, /return result\.ok \? result\.value\.signedUrl : null/)
 })
 
-await test("no upload, delete, list, move, public bucket, platform calls, or Fanvue autopost changes are introduced", () => {
+await test("no upload, delete, list, move, public bucket, or provider calls are introduced by media signing", () => {
   const media = fs.readFileSync("lib/creator-publishing-queue/media/core.ts", "utf8")
   assert.doesNotMatch(media, /\.upload\(|\.remove\(|\.list\(|\.move\(|getPublicUrl|public\s*:/)
   assert.doesNotMatch(media, /onlyfans|fansly|fanvue\.com|fetch\(/i)
   const changed = execSync("git diff --name-only", { encoding: "utf8" })
   const allowedAutopost = new Set(["app/autopost/page.tsx", "app/autopost/AutopostPageClient.tsx", "app/autopost/Task14AutopostOrchestration.tsx", "app/api/autopost/connect/fanvue/callback/route.ts", "app/api/autopost/connect/fanvue/start/route.ts", "lib/autopost/platformRegistry.ts", "lib/autopost/platformAvailability.ts", "lib/autopost/fanvueOAuth.ts", "lib/autopost/fanvueInternalAdapter.ts", "lib/autopost/fanvueProviderExecutorCore.ts", "lib/autopost/fanvueMediaReadinessConfig.ts", "lib/autopost/fanvueMediaReadinessDiagnostic.ts", "lib/creator-publishing-queue/fanvue/executor.ts", "lib/creator-publishing-queue/fanvue/capability.ts", "lib/creator-publishing-queue/fanvue/history.ts", "lib/creator-publishing-queue/fanvue/service.ts", "lib/creator-publishing-queue/fanvue/serviceCore.ts", "lib/creator-publishing-queue/fanvue/workerCore.ts", "supabase/migrations/20260814090000_cpq_fanvue_launch_execution_foundation.sql"])
-  const unsafe = (path: string) => (path.includes("lib/autopost") && !allowedAutopost.has(path)) || (path.includes("fanvue") && !path.includes("creator-publishing-queue/tests") && !path.includes("backend/autopost/tests") && !allowedAutopost.has(path)) || (path.startsWith("app/autopost/") && !allowedAutopost.has(path))
+  const allowedFanvueMediaGate = new Set(["lib/creator-publishing-queue/fanvue/packageMedia.ts", "app/creator/publishing-queue/fanvue/packages/[contentPackageId]/media/page.tsx", "supabase/migrations/20260817040000_cpq_fanvue_generated_media_attachment.sql"])
+  const unsafe = (path: string) => (path.includes("lib/autopost") && !allowedAutopost.has(path)) || (path.includes("fanvue") && !path.includes("creator-publishing-queue/tests") && !path.includes("backend/autopost/tests") && !allowedAutopost.has(path) && !allowedFanvueMediaGate.has(path)) || (path.startsWith("app/autopost/") && !allowedAutopost.has(path))
   assert.equal(changed.split(/\n/).filter(Boolean).filter(unsafe).length, 0)
   assert.equal(unsafe("app/autopost/unrelated-production-change.tsx"), true)
   assert.equal(unsafe("app/autopost/page.tsx"), false)
-  assert.equal(unsafe("app/autopost/AutopostPageClient.tsx"), false)
-  assert.equal(unsafe("app/autopost/Task14AutopostOrchestration.tsx"), false)
-  assert.equal(unsafe("app/api/autopost/connect/fanvue/callback/route.ts"), false)
-  assert.equal(unsafe("lib/autopost/platformRegistry.ts"), false)
+  assert.equal(unsafe("lib/creator-publishing-queue/fanvue/packageMedia.ts"), false)
+  assert.equal(unsafe("app/creator/publishing-queue/fanvue/packages/[contentPackageId]/media/page.tsx"), false)
   assert.equal(unsafe("lib/autopost/fanvueApiClient.ts"), true)
 })
