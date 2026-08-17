@@ -72,7 +72,6 @@ export async function createCreatorPublishingSignedMediaUrl(input: {
       .select("id,storage_key,mime_type,creator_publishing_content_packages!inner(id,creator_id,target_platform)")
       .eq("id", input.mediaAssetId)
       .eq("creator_publishing_content_packages.creator_id", creatorId)
-      .neq("creator_publishing_content_packages.target_platform", "fanvue")
       .maybeSingle()
     data = result.data
     error = result.error
