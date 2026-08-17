@@ -439,10 +439,20 @@ function GradientDrift(props: {
 }
 
 function GeneratorHeader(props: { activeMode: GenerationMode }) {
-  const userName = "Creator";
+  const [presentation, setPresentation] = useState<{ loading: boolean; active: boolean | null; userName: string; badge: "OG_FOUNDER" | "EARLY_BIRD" | null }>({ loading: true, active: null, userName: "Creator", badge: null });
+  useEffect(() => {
+    let current = true;
+    fetch("/api/user/subscription", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => {
+      if (!current) return;
+      const email = typeof data?.profile?.email === "string" ? data.profile.email : "";
+      const rawBadge = data?.profile?.badge;
+      setPresentation({ loading: false, active: data?.active === true, userName: email.split("@")[0] || "Creator", badge: rawBadge === "OG_FOUNDER" || rawBadge === "EARLY_BIRD" ? rawBadge : null });
+    }).catch(() => { if (current) setPresentation((value) => ({ ...value, loading: false, active: null })); });
+    return () => { current = false; };
+  }, []);
+  const userName = presentation.userName;
   const userAvatar = "";
-  const badge: "OG_FOUNDER" | "EARLY_BIRD" | null = null;
-  const subscriptionStatus: "active" | "inactive" = "active";
+  const badge = presentation.badge;
 
   const getBadgeConfig = () => {
     switch (badge) {
@@ -494,12 +504,12 @@ function GeneratorHeader(props: { activeMode: GenerationMode }) {
 
           <div
             className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-              subscriptionStatus === "active"
+              presentation.active === true
                 ? "border border-emerald-500/30 bg-emerald-500/20 text-emerald-400"
                 : "border border-gray-700 bg-gray-800 text-gray-300"
             }`}
           >
-            {subscriptionStatus === "active" ? "✅ Active Subscription" : "⚠️ Inactive"}
+            {presentation.loading ? "Checking membership…" : presentation.active === true ? "Active Subscription" : presentation.active === false ? "Inactive subscription" : "Membership unavailable"}
           </div>
 
           <div className="flex items-center gap-3">
@@ -523,10 +533,10 @@ function ModeTabs(props: {
   activeMode: GenerationMode;
   onChange: (mode: GenerationMode) => void;
 }) {
-  const modes: { id: GenerationMode; label: string; icon: React.ElementType }[] = [
+  const modes: { id: GenerationMode; label: string; icon: React.ElementType; unavailable?: boolean }[] = [
     { id: "text_to_image", label: "Text → Image", icon: FileText },
-    { id: "image_to_video", label: "Image → Video", icon: ImageIcon },
-    { id: "text_to_video", label: "Text → Video", icon: VideoIcon },
+    { id: "image_to_video", label: "Image → Video · Coming Soon", icon: ImageIcon, unavailable: true },
+    { id: "text_to_video", label: "Text → Video · Coming Soon", icon: VideoIcon, unavailable: true },
   ];
 
   return (
@@ -537,10 +547,14 @@ function ModeTabs(props: {
         return (
           <motion.button
             key={mode.id}
+            type="button"
+            disabled={mode.unavailable}
+            aria-disabled={mode.unavailable}
+            title={mode.unavailable ? "Video generation is coming soon." : undefined}
             onClick={() => props.onChange(mode.id)}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className={`relative overflow-hidden rounded-xl border-2 p-3 transition-all duration-300 ${
+            className={`relative overflow-hidden rounded-xl border-2 p-3 transition-all duration-300 disabled:cursor-not-allowed disabled:opacity-50 ${
               isActive
                 ? "border-purple-500 bg-purple-500/10 shadow-[0_0_22px_rgba(168,85,247,0.16)]"
                 : "border-gray-800 bg-gray-900/70 hover:-translate-y-0.5 hover:border-gray-700 hover:shadow-[0_10px_28px_rgba(0,0,0,0.28)]"
@@ -3295,12 +3309,18 @@ function HistorySidebar(props: {
 }
 
 export default function GeneratePage() {
+  const [generationAvailable, setGenerationAvailable] = useState<boolean | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const hydratedFromHandoffRef = useRef(false);
 
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
+  useEffect(() => {
+    let current = true;
+    fetch("/api/generate/availability", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => { if (current) setGenerationAvailable(data?.available === true); }).catch(() => { if (current) setGenerationAvailable(false); });
+    return () => { current = false; };
+  }, []);
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState(DEFAULT_NEGATIVE_PROMPT);
@@ -3438,7 +3458,9 @@ export default function GeneratePage() {
   const hasGenerationInput =
     mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim());
 
-  const generateDisabledReason = !hasSelectedIdentity
+  const generateDisabledReason = generationAvailable !== true
+    ? generationAvailable === null ? "Checking generation availability…" : "Image generation is temporarily unavailable."
+    : !hasSelectedIdentity
     ? "Select or create an AI Twin identity first."
     : !hasGenerationInput
       ? mode === "image_to_video"

@@ -13,6 +13,7 @@ import {
   requireSirensApiConfig,
   sirensApiFetch,
 } from "../../../lib/sirensApi";
+import { isGenerationExecutionEnabled } from "../../../lib/generation/executionAvailability";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -184,6 +185,12 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = auth.user.id;
+    if (!isGenerationExecutionEnabled()) {
+      return NextResponse.json(
+        { error: "GENERATION_UNAVAILABLE", message: "Image generation is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
     // Fail closed before parsing input or invoking any privileged generation work.
     const sirensApiConfig = requireSirensApiConfig();
 
@@ -234,7 +241,7 @@ export async function POST(req: NextRequest) {
       batch: Math.max(1, Math.min(4, Number(body.batch || 1))),
     };
 
-    const loraStack = await resolveLoraStack(bodyMode, identityLora);
+    const loraStack = await resolveLoraStack(bodyMode, identityLora, userId);
     const finalPrompt = loraStack.trigger_token
       ? injectTriggerToken(prompt, loraStack.trigger_token)
       : prompt;

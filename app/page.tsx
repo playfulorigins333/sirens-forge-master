@@ -16,6 +16,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import { LAUNCH_CAPACITY } from '@/lib/launch-capacity';
 
 export default function HomePage() {
   const [inventory, setInventory] = useState<{
@@ -43,10 +44,10 @@ export default function HomePage() {
         const data = await response.json();
         const og = data?.tiers?.og_throne;
         const earlyBird = data?.tiers?.early_bird;
-        if (!response.ok || data?.success !== true || og?.max_slots !== 50 || earlyBird?.max_slots !== 120 ||
+        if (!response.ok || data?.success !== true || og?.max_slots !== LAUNCH_CAPACITY.og_throne || earlyBird?.max_slots !== LAUNCH_CAPACITY.early_bird ||
             !Number.isInteger(og?.slots_remaining) || !Number.isInteger(earlyBird?.slots_remaining) ||
             typeof og?.is_active !== "boolean" || typeof earlyBird?.is_active !== "boolean" ||
-            og.slots_remaining < 0 || og.slots_remaining > 50 || earlyBird.slots_remaining < 0 || earlyBird.slots_remaining > 120) return;
+            og.slots_remaining < 0 || og.slots_remaining > LAUNCH_CAPACITY.og_throne || earlyBird.slots_remaining < 0 || earlyBird.slots_remaining > LAUNCH_CAPACITY.early_bird) return;
         if (active) setInventory({
           og: { remaining: og.slots_remaining, active: og.is_active },
           earlyBird: { remaining: earlyBird.slots_remaining, active: earlyBird.is_active },
@@ -513,7 +514,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
-                    {!inventory ? "Availability loading" : !inventory.earlyBird.active ? "Currently unavailable" : inventory.earlyBird.remaining === 0 ? "SOLD OUT" : `${inventory.earlyBird.remaining}/120 LEFT`}
+                    {!inventory ? "Availability loading" : !inventory.earlyBird.active ? "Currently unavailable" : inventory.earlyBird.remaining === 0 ? "SOLD OUT" : `${inventory.earlyBird.remaining}/${LAUNCH_CAPACITY.early_bird} LEFT`}
                   </div>
 
                   <p className="mb-4 text-lg leading-relaxed font-medium text-gray-300">

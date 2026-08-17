@@ -1,0 +1,1 @@
+export default function Loading() { return <div className="flex min-h-[50vh] items-center justify-center bg-black text-white" role="status" aria-live="polite"><p className="rounded-full border border-white/15 px-5 py-3 text-sm">Loading Sirens Forge…</p></div>; }

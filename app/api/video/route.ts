@@ -147,7 +147,8 @@ export async function POST(req: Request) {
     // ------------------------------------------------------------
     const loraStack = await resolveLoraStack(
       request.params.body_mode,
-      request.params.user_lora?.id ?? null
+      request.params.user_lora?.id ?? null,
+      user.id,
     );
 
     // ------------------------------------------------------------

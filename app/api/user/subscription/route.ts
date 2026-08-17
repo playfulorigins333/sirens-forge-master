@@ -82,7 +82,6 @@ export async function GET() {
           hasProfile: true,
           subscription: null,
           profile: {
-            id: profile.id,
             email: profile.email,
             badge: profile.badge,
             seatNumber: profile.seat_number,
@@ -104,7 +103,6 @@ export async function GET() {
         hasProfile: true,
         subscription: subscription
           ? {
-              id: subscription.id,
               status: subscription.status,
               tierName: subscription.tier_name,
               currentPeriodStart: subscription.current_period_start,
@@ -116,7 +114,6 @@ export async function GET() {
             }
           : null,
         profile: {
-          id: profile.id,
           email: profile.email,
           badge: profile.badge,
           seatNumber: profile.seat_number,
