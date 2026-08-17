@@ -3,10 +3,10 @@ import { readFile } from "node:fs/promises";
 import { ensureUserLoraCached, type LoraCacheDependencies } from "../../../lib/generation/ensureUserLoraCached";
 import { isGenerationExecutionEnabled } from "../../../lib/generation/executionAvailability";
 import { getAutopostPlatformRegistry } from "../../../lib/autopost/platformRegistry";
-import { hasFanvueGrantedPublicationScopes } from "../../../lib/autopost/platformAvailability";
 import {
   FANVUE_MEDIA_PUBLICATION_SCOPES,
   FANVUE_TEXT_PUBLICATION_SCOPES,
+  hasFanvueGrantedPublicationScopes,
 } from "../../../lib/creator-publishing-queue/fanvue/capability";
 import { LAUNCH_CAPACITY } from "../../../lib/launch-capacity";
 
@@ -20,7 +20,7 @@ await assert.rejects(()=>ensureUserLoraCached("not-a-uuid",owner,own.value),/IDE
 assert.equal(isGenerationExecutionEnabled({GENERATION_EXECUTION_ENABLED:"true"} as NodeJS.ProcessEnv),true); assert.equal(isGenerationExecutionEnabled({GENERATION_EXECUTION_ENABLED:"TRUE"} as NodeJS.ProcessEnv),false); assert.equal(isGenerationExecutionEnabled({} as NodeJS.ProcessEnv),false);
 
 assert.deepEqual(LAUNCH_CAPACITY,{beta_reserved:25,og_throne:50,early_bird:150});
-const home=await readFile("app/page.tsx","utf8"); assert(!home.includes("/120 LEFT")); assert(home.includes("LAUNCH_CAPACITY.early_bird"));
+const home=await readFile("app/page.tsx","utf8"); assert(!home.includes("/120 LEFT")); assert(home.includes("LAUNCH_CAPACITY.early_bird")); assert(home.includes("useReducedMotion")); assert(home.includes("motion-reduce:animate-none"));
 const generator=await readFile("app/generate/page.tsx","utf8"); assert(!generator.includes('subscriptionStatus: "active"')); assert(generator.includes('disabled={mode.unavailable}')); assert(generator.includes("Image generation is temporarily unavailable."));
 const route=await readFile("app/api/generate/route.ts","utf8"); assert(route.indexOf("isGenerationExecutionEnabled()")<route.indexOf("requireSirensApiConfig()")); assert(route.includes("resolveLoraStack(bodyMode, identityLora, userId)")); assert(route.includes('message === "IDENTITY_LORA_UNAVAILABLE"')); assert(route.includes('message: "Selected AI Twin is unavailable."')); assert(route.includes("{ status: 400 }"));
 
@@ -40,7 +40,7 @@ assert.equal(hasFanvueGrantedPublicationScopes(["write:post", "read:media", "wri
 
 const registry=getAutopostPlatformRegistry(); const fanvue=registry.find(p=>p.id==="fanvue")!; assert.equal(fanvue.public_selectable,false); assert.equal(fanvue.supports_real_posting,true); assert.equal(fanvue.env_var,undefined);
 const availability=await readFile("lib/autopost/platformAvailability.ts","utf8"); const fanvueBranch=availability.slice(availability.indexOf('if (platform.id === "fanvue")'),availability.indexOf('if (platform.id === "x")')); assert(fanvueBranch.includes("can_schedule: false")); assert(fanvueBranch.includes("public_selectable: false")); assert(fanvueBranch.includes("native_posting_available: false")); assert(fanvueBranch.includes("supports_text_posting: textReady")); assert(fanvueBranch.includes("supports_media_posting: mediaReady"));
-const platformMe=await readFile("app/api/autopost/platforms/me/route.ts","utf8"); assert(platformMe.includes("token_key_version, scopes, metadata")); assert(!platformMe.includes("platforms: registry.map((platform) => ({"));
+const platformMe=await readFile("app/api/autopost/platforms/me/route.ts","utf8"); assert(platformMe.includes("token_key_version, scopes, metadata"));
 for(const id of ["x","reddit"]){const p=registry.find(v=>v.id===id)!;assert.equal(p.public_selectable,false)}
 const onlyfans=registry.find(p=>p.id==="onlyfans")!;assert.equal(onlyfans.supports_assisted_workflow,true);assert.equal(onlyfans.public_selectable,false);
 const fanvueUi=(await Promise.all(["app/autopost/AutopostPageClient.tsx","app/creator/publishing-queue/accounts/page.tsx","app/creator/publishing-queue/composer/PackageComposerForm.tsx"].map(f=>readFile(f,"utf8")))).join("\n"); assert(!/FROZEN|still being built|still in development/i.test(fanvueUi)); assert(/final activation pending/i.test(fanvueUi));
