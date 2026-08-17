@@ -5,6 +5,7 @@ import { getXStoredPostureBlocker } from "./xStoredPosture"
 import {
   FANVUE_MEDIA_PUBLICATION_SCOPES,
   FANVUE_TEXT_PUBLICATION_SCOPES,
+  hasFanvueGrantedPublicationScopes,
 } from "../creator-publishing-queue/fanvue/capability"
 export { getXStoredPostureBlocker } from "./xStoredPosture"
 export type { XStoredPostureAccount, XStoredPostureBlocker } from "./xStoredPosture"
@@ -71,24 +72,6 @@ function isConnectedStatus(status: string | null | undefined) {
 
 function nonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
-}
-
-function normalizeGrantedScopes(value: unknown): Set<string> {
-  if (Array.isArray(value)) {
-    return new Set(value.filter((scope): scope is string => typeof scope === "string" && scope.trim().length > 0).map((scope) => scope.trim()))
-  }
-  if (typeof value === "string") {
-    return new Set(value.split(/\s+/).map((scope) => scope.trim()).filter(Boolean))
-  }
-  return new Set()
-}
-
-export function hasFanvueGrantedPublicationScopes(
-  scopes: string[] | string | null | undefined,
-  requiredScopes: readonly string[],
-) {
-  const granted = normalizeGrantedScopes(scopes)
-  return requiredScopes.every((scope) => granted.has(scope))
 }
 
 function getFanvueConnectionBlocker(args: {
