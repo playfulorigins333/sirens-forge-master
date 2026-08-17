@@ -43,6 +43,9 @@ try{
    select case when exists(select 1 from public.creator_platform_accounts where oauth_account_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1') then pg_catalog.current_setting('missing.setting') else 'activation prep ok' end;
  `)
  runFile("public-activation-migration","supabase/migrations/20260817170000_cpq_fanvue_public_activation.sql")
+ runFile("direct-compliance-facts-migration","supabase/migrations/20260817170050_cpq_fanvue_direct_compliance_facts.sql")
+ runFile("direct-compliance-approval-migration","supabase/migrations/20260817170100_cpq_fanvue_direct_compliance_approval.sql")
+ runFile("direct-preparation-hardening-migration","supabase/migrations/20260817170200_cpq_fanvue_direct_preparation_hardening.sql")
  runFile("public-activation-behavior","backend/creator-publishing-queue/tests/fanvuePublicActivationPostgresIntegration.sql")
  appendFileSync(logPath,"\nFANVUE_LAUNCH_EXECUTION_POSTGRES_INTEGRATION_PASSED\n");console.log("FANVUE_LAUNCH_EXECUTION_POSTGRES_INTEGRATION_PASSED")
-}catch(error){appendFileSync(logPath,`\nFAILED: ${error?.stack||error}\n`);try{console.error(readFileSync(logPath,"utf8").split(/\n/).slice(-220).join("\n"))}catch{}process.exit(1)}
+}catch(error){appendFileSync(logPath,`\nFAILED: ${error?.stack||error}\n`);try{console.error(readFileSync(logPath,"utf8").split(/\n/).slice(-260).join("\n"))}catch{}process.exit(1)}
