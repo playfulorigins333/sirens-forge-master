@@ -47,6 +47,7 @@ const fanvueUi=(await Promise.all(["app/autopost/AutopostPageClient.tsx","app/cr
 const history=await readFile("lib/creator-publishing-queue/fanvue/history.ts","utf8"); assert(history.includes('.eq("creator_id",creatorId)')); assert(!history.includes('select("*")')); assert(!history.includes("lease_token"));
 const historyPage=await readFile("app/creator/publishing-queue/fanvue/page.tsx","utf8"); assert(historyPage.includes("No Fanvue publishing jobs yet.")); assert(!/token|ciphertext|credential/i.test(historyPage));
 const login=await readFile("app/login/LoginClient.tsx","utf8"); for(const contract of ['htmlFor="email"','id="email"','autoComplete="email"','htmlFor="password"','aria-pressed={show}','role="alert"'])assert(login.includes(contract),contract);
-const layout=await readFile("app/layout.tsx","utf8"); assert(!layout.includes('<main className="flex-1">'));
+const layout=await readFile("app/layout.tsx","utf8"); assert(!layout.includes('<main className="flex-1">')); assert(layout.includes('import "./reduced-motion.css"'));
+const reducedMotion=await readFile("app/reduced-motion.css","utf8"); assert(reducedMotion.includes("prefers-reduced-motion: reduce")); assert(reducedMotion.includes('[style*="box-shadow"]')); assert(reducedMotion.includes('[style*="background-position"]'));
 const sitemap=await readFile("app/sitemap.ts","utf8"); assert(!/dashboard|account|billing|login|generate/.test(sitemap));
 console.log("frontend launch readiness focused contracts: PASS");
