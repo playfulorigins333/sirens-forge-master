@@ -2,6 +2,10 @@ import type { PlatformId } from "./types"
 import type { AutopostPlatformRegistryEntry } from "./platformRegistry"
 import { getFanvueOAuthConfigStatus } from "./fanvueOAuth"
 import { getXStoredPostureBlocker } from "./xStoredPosture"
+import {
+  FANVUE_MEDIA_PUBLICATION_SCOPES,
+  FANVUE_TEXT_PUBLICATION_SCOPES,
+} from "../creator-publishing-queue/fanvue/capability"
 export { getXStoredPostureBlocker } from "./xStoredPosture"
 export type { XStoredPostureAccount, XStoredPostureBlocker } from "./xStoredPosture"
 
@@ -17,6 +21,7 @@ export type AutopostAccountStatus = {
   encrypted_refresh_token?: string | null
   token_expires_at?: string | null
   token_key_version?: number | null
+  scopes?: string[] | string | null
   metadata?: Record<string, unknown> | null
 }
 
@@ -66,6 +71,24 @@ function isConnectedStatus(status: string | null | undefined) {
 
 function nonEmptyString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
+}
+
+function normalizeGrantedScopes(value: unknown): Set<string> {
+  if (Array.isArray(value)) {
+    return new Set(value.filter((scope): scope is string => typeof scope === "string" && scope.trim().length > 0).map((scope) => scope.trim()))
+  }
+  if (typeof value === "string") {
+    return new Set(value.split(/\s+/).map((scope) => scope.trim()).filter(Boolean))
+  }
+  return new Set()
+}
+
+export function hasFanvueGrantedPublicationScopes(
+  scopes: string[] | string | null | undefined,
+  requiredScopes: readonly string[],
+) {
+  const granted = normalizeGrantedScopes(scopes)
+  return requiredScopes.every((scope) => granted.has(scope))
 }
 
 function getFanvueConnectionBlocker(args: {
@@ -141,6 +164,8 @@ export function buildUserPlatformStatus(
       configConfigured: fanvueConfig.configured,
     })
     const userConnected = connectionBlocker === null
+    const textReady = userConnected && hasFanvueGrantedPublicationScopes(account?.scopes, FANVUE_TEXT_PUBLICATION_SCOPES)
+    const mediaReady = userConnected && hasFanvueGrantedPublicationScopes(account?.scopes, FANVUE_MEDIA_PUBLICATION_SCOPES)
     const nativePostingBlocker = "FANVUE_FINAL_ACTIVATION_PENDING"
     const disabledReason = userConnected
       ? "Fanvue connection is ready; scheduled publishing will become available when final launch activation is enabled."
@@ -171,8 +196,8 @@ export function buildUserPlatformStatus(
       public_selectable: false,
       can_schedule: false,
       supports_real_posting: platform.supports_real_posting,
-      supports_text_posting: true,
-      supports_media_posting: true,
+      supports_text_posting: textReady,
+      supports_media_posting: mediaReady,
       supports_async_dispatch: platform.supports_async_dispatch,
       supports_assisted_workflow: platform.supports_assisted_workflow,
       assisted_available: platform.supports_assisted_workflow,
