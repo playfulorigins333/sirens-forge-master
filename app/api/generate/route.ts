@@ -120,7 +120,7 @@ async function bestEffortLogGeneration(args: {
       ? { placeholder_url: args.imageUrl }
       : {}),
     body_mode: args.bodyMode,
-    identity_lora: args.identityLora, // legacy only
+    identity_lora: args.identityLora,
     negative_prompt: args.negativePrompt,
     request: args.request,
     upstream: args.upstream,
@@ -456,6 +456,17 @@ export async function POST(req: NextRequest) {
     );
   } catch (err: any) {
     const message = err instanceof Error ? err.message : "";
+
+    if (message === "IDENTITY_LORA_UNAVAILABLE") {
+      return NextResponse.json(
+        {
+          error: "IDENTITY_LORA_UNAVAILABLE",
+          message: "Selected AI Twin is unavailable.",
+        },
+        { status: 400 },
+      );
+    }
+
     if (
       message === "SIRENS_API_INTERNAL_SECRET_MISSING" ||
       message === "SIRENS_API_BASE_URL_MISSING"
