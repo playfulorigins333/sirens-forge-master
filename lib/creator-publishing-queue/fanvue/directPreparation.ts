@@ -33,7 +33,7 @@ function parseFacts(data:unknown,creatorId:string,packageId:string){
  return{facts:normalized as unknown as TrustedComplianceFacts,factsFingerprint,mediaHash,packageUpdatedAt:normalized.package.updated_at}
 }
 
-export type FanvuePreparationResult={ok:true}|{ok:false;code:string}
+export type FanvuePreparationResult={ok:true;code?:never}|{ok:false;code:string}
 export async function prepareFanvueDirectPackage(input:{client:any;creatorId:string;packageId:string;planIdempotencyKey:string}):Promise<FanvuePreparationResult>{
  const {client,creatorId,packageId,planIdempotencyKey}=input
  const state=await client.from("creator_publishing_content_packages").select("id,creator_id,target_platform,creator_approval_status,compliance_status,compliance_policy_version").eq("id",packageId).maybeSingle()
