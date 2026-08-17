@@ -1,0 +1,28 @@
+name: Frontend Launch Readiness
+
+on:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'lib/generation/**'
+      - 'lib/autopost/**'
+      - 'lib/creator-publishing-queue/fanvue/**'
+      - 'backend/security/tests/frontendLaunchReadiness.test.ts'
+      - 'package.json'
+      - '.env.example'
+      - '.github/workflows/frontend-launch-readiness.yml'
+  workflow_dispatch:
+
+jobs:
+  frontend-launch-readiness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test:frontend-launch-readiness
+      - run: npx tsc --noEmit
+      - run: git diff --check
