@@ -30,7 +30,7 @@ export function GeneratedMediaSelectionPanel({
   async function submit() {
     setSuccess(false)
     let any = false
-    for (const id of selected) {
+    for(const id of selected) {
       setStatus((current) => ({ ...current, [id]: "pending" }))
       try {
         const response = await fetch("/api/creator-publishing-queue/media/generated-assets", {
@@ -159,7 +159,7 @@ export function GeneratedMediaSelectionPanel({
           type="button"
           onClick={submit}
           disabled={!allowed || selected.length === 0 || selected.some((id) => status[id] === "pending")}
-          className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:bg-fuchsia-500 focus:outline-none focus:ring-2 focus:outline-none focus:ring-fuchsia-200 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-fuchsia-600 px-4 py-2 text-sm font-semibold text-white hover:bg-fuchsia-500 focus:outline-none focus:ring-2 focus:ring-fuchsia-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Add selected generated media
         </button>
