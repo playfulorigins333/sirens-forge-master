@@ -11,6 +11,8 @@ const DISCOVERY_ERROR = "Verification subjects could not be loaded."
 const DISCOVERY_BOUNDARY_ERROR = "Verification subject discovery exceeded its safe pagination boundary."
 const CREATOR_IDENTITY_DISCOVERY_PLATFORMS = ["onlyfans", "fansly", "fanvue"] as const
 const PLATFORM_ACCOUNT_REVIEW_PLATFORMS = ["onlyfans", "fansly"] as const
+// Platform-account review remains equivalent to .in("platform", ["onlyfans", "fansly"]).
+// Creator identity discovery previously used .in("target_platform", ["onlyfans", "fansly"]); it now also discovers Fanvue creators without making Fanvue accounts reviewable.
 
 async function loadDiscoveryPage(admin: TrustedAdminClient, table: "creator_publishing_content_packages" | "creator_platform_accounts", platformColumn: "target_platform" | "platform", from: number, to: number) {
   if (table === "creator_publishing_content_packages") return admin.from("creator_publishing_content_packages").select("id,creator_id").in("target_platform", [...CREATOR_IDENTITY_DISCOVERY_PLATFORMS]).not("creator_id", "is", null).order("creator_id", { ascending: true }).order("id", { ascending: true }).range(from, to)
