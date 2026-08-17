@@ -25,7 +25,7 @@ import {
   Zap,
   Heart,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 
 interface UploadedImage {
   id: string;
@@ -139,7 +139,9 @@ type DatasetDoctorApproveResult = {
 };
 
 const POLL_INTERVAL_MS = 5000;
+const seeded = (index: number, salt: number) => ((index * 9301 + salt * 49297) % 233280) / 233280;
 const FloatingParticles = () => {
+  const reduceMotion = useReducedMotion();
   const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 });
 
   useEffect(() => {
@@ -156,18 +158,18 @@ const FloatingParticles = () => {
           key={i}
           className="absolute w-1 h-1 bg-purple-400 rounded-full"
           initial={{
-            x: Math.random() * dimensions.width,
-            y: Math.random() * dimensions.height,
+            x: seeded(i, 1) * dimensions.width,
+            y: seeded(i, 2) * dimensions.height,
             opacity: 0,
           }}
           animate={{
-            y: Math.random() * -100 - 50,
-            opacity: [0, 1, 0],
+            y: reduceMotion ? 0 : seeded(i, 3) * -100 - 50,
+            opacity: reduceMotion ? 0.35 : [0, 1, 0],
           }}
           transition={{
-            duration: Math.random() * 3 + 2,
-            repeat: Infinity,
-            delay: Math.random() * 2,
+            duration: seeded(i, 4) * 3 + 2,
+            repeat: reduceMotion ? 0 : Infinity,
+            delay: seeded(i, 5) * 2,
           }}
         />
       ))}
@@ -176,6 +178,7 @@ const FloatingParticles = () => {
 };
 
 const Confetti = () => {
+  const reduceMotion = useReducedMotion();
   const [dimensions, setDimensions] = useState({ width: 1000, height: 1000 });
 
   useEffect(() => {
@@ -195,18 +198,18 @@ const Confetti = () => {
             background: ["#a855f7", "#ec4899", "#06b6d4", "#10b981", "#f59e0b"][
               i % 5
             ],
-            left: `${Math.random() * 100}%`,
+            left: `${seeded(i, 6) * 100}%`,
             top: "-10px",
           }}
           initial={{ y: -10, opacity: 1, rotate: 0 }}
           animate={{
-            y: dimensions.height + 10,
-            opacity: 0,
-            rotate: Math.random() * 360,
+            y: reduceMotion ? 20 : dimensions.height + 10,
+            opacity: reduceMotion ? 0.45 : 0,
+            rotate: seeded(i, 7) * 360,
           }}
           transition={{
-            duration: Math.random() * 2 + 1,
-            delay: Math.random() * 0.5,
+            duration: seeded(i, 8) * 2 + 1,
+            delay: seeded(i, 9) * 0.5,
           }}
         />
       ))}

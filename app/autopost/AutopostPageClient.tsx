@@ -110,7 +110,7 @@ const FALLBACK_PLATFORMS: Platform[] = [
   { id: "x", name: "X", launch_status: "coming_soon", public_selectable: false, status_message: FALLBACK_PLATFORM_STATUS, reason: "Traffic & Discovery: promote content and drive audiences to a paid destination." },
   { id: "reddit", name: "Reddit", launch_status: "not_configured", public_selectable: false, supports_real_posting: false, supports_assisted_workflow: true, status_message: "Manual Reddit handoff only. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval.", reason: "Manual Reddit handoff only. Native OAuth, API posting, scheduling, and dispatch are not enabled pending Reddit written approval." },
   { id: "onlyfans", name: "OnlyFans", launch_status: "coming_soon", public_selectable: false, status_message: "Assisted/manual publishing destination. Use the internal queue to complete OnlyFans posts safely.", reason: "Paid Content: assisted/manual publishing only; no direct API posting or browser automation." },
-  { id: "fanvue", name: "Fanvue", launch_status: "coming_soon", public_selectable: false, status_message: "Paid-content destination remains frozen by safety restrictions.", reason: "Paid Content: native posting, scheduling, media upload, and dispatch are not enabled." },
+  { id: "fanvue", name: "Fanvue", launch_status: "coming_soon", public_selectable: false, status_message: "Backend capability ready; final activation pending.", reason: "Scheduled publishing will become available after final launch activation." },
 ]
 
 const AUTOPOST_PACK_PREFILL_STORAGE_KEY = "sirensforge:autopost_pack_prefill"
@@ -259,7 +259,7 @@ function platformPurpose(platform: Platform) {
   if (platform.id === "x") return "Promote your paid content and direct followers to OnlyFans or Fanvue."
   if (platform.id === "reddit") return "Native Reddit posting and scheduling are not configured. Use caption copy/export and Open Reddit to complete posting manually."
   if (platform.id === "onlyfans") return "Prepare and complete posts through the assisted Creator Publishing Queue."
-  if (platform.id === "fanvue") return "Paid-content publishing remains unavailable while safety restrictions are in place."
+  if (platform.id === "fanvue") return "Fanvue connection is ready; scheduled publishing is awaiting final launch activation."
   return platform.reason ?? platformUnavailableMessage(platform)
 }
 
@@ -267,7 +267,7 @@ function platformStatusBadge(platform: Platform) {
   if (platform.id === "x") return "TRAFFIC CHANNEL"
   if (platform.id === "reddit") return "MANUAL ONLY"
   if (platform.id === "onlyfans") return "ASSISTED PUBLISHING"
-  if (platform.id === "fanvue") return "FROZEN"
+  if (platform.id === "fanvue") return "FINAL ACTIVATION PENDING"
   return String(platform.launch_status ?? "Unavailable").replace("_", " ").toUpperCase()
 }
 
@@ -1152,7 +1152,7 @@ export default function AutopostPage() {
                                       <span className="rounded-full border border-slate-500/40 bg-slate-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-100">Non-runnable draft</span>
                                     </div>
                                     <div className="mt-2 text-xs leading-5 text-cyan-100/85">
-                                      Native posting disabled · Scheduling disabled · Media upload disabled. This Fanvue draft remains visible for internal validation, but it cannot be approved, scheduled, dispatched, or posted.
+                                      Final activation pending. This legacy validation draft cannot be approved, scheduled, dispatched, or posted.
                                     </div>
                                   </div>
                                 )}

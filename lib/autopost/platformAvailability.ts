@@ -2,6 +2,11 @@ import type { PlatformId } from "./types"
 import type { AutopostPlatformRegistryEntry } from "./platformRegistry"
 import { getFanvueOAuthConfigStatus } from "./fanvueOAuth"
 import { getXStoredPostureBlocker } from "./xStoredPosture"
+import {
+  FANVUE_MEDIA_PUBLICATION_SCOPES,
+  FANVUE_TEXT_PUBLICATION_SCOPES,
+  hasFanvueGrantedPublicationScopes,
+} from "../creator-publishing-queue/fanvue/capability"
 export { getXStoredPostureBlocker } from "./xStoredPosture"
 export type { XStoredPostureAccount, XStoredPostureBlocker } from "./xStoredPosture"
 
@@ -17,6 +22,7 @@ export type AutopostAccountStatus = {
   encrypted_refresh_token?: string | null
   token_expires_at?: string | null
   token_key_version?: number | null
+  scopes?: string[] | string | null
   metadata?: Record<string, unknown> | null
 }
 
@@ -141,11 +147,13 @@ export function buildUserPlatformStatus(
       configConfigured: fanvueConfig.configured,
     })
     const userConnected = connectionBlocker === null
-    const nativePostingBlocker = "FANVUE_NATIVE_POSTING_NOT_ENABLED"
+    const textReady = userConnected && hasFanvueGrantedPublicationScopes(account?.scopes, FANVUE_TEXT_PUBLICATION_SCOPES)
+    const mediaReady = userConnected && hasFanvueGrantedPublicationScopes(account?.scopes, FANVUE_MEDIA_PUBLICATION_SCOPES)
+    const nativePostingBlocker = "FANVUE_FINAL_ACTIVATION_PENDING"
     const disabledReason = userConnected
-      ? "Fanvue OAuth is connected for internal validation. Native posting and scheduling are not enabled."
+      ? "Fanvue connection is ready; scheduled publishing will become available when final launch activation is enabled."
       : fanvueConfig.configured
-        ? "Fanvue OAuth connect is available for internal validation. Native posting and scheduling are not enabled."
+        ? "Fanvue connection is available; public scheduled publishing is awaiting final activation."
         : fanvueConfig.config_error === "FANVUE_CONNECT_DISABLED"
           ? "Fanvue OAuth connect is disabled for this environment."
           : "Fanvue OAuth is not fully configured for this environment."
@@ -170,19 +178,19 @@ export function buildUserPlatformStatus(
       has_error: Boolean(account?.last_error) || Boolean(account && connectionBlocker && account.connection_status === "CONNECTED"),
       public_selectable: false,
       can_schedule: false,
-      supports_real_posting: false,
-      supports_text_posting: false,
-      supports_media_posting: false,
-      supports_async_dispatch: false,
+      supports_real_posting: platform.supports_real_posting,
+      supports_text_posting: textReady,
+      supports_media_posting: mediaReady,
+      supports_async_dispatch: platform.supports_async_dispatch,
       supports_assisted_workflow: platform.supports_assisted_workflow,
       assisted_available: platform.supports_assisted_workflow,
       native_posting_available: false,
       native_posting_blocker: nativePostingBlocker,
       status_message: userConnected
-        ? "Fanvue OAuth is connected for internal validation. Native posting is not enabled."
+        ? "Fanvue connection is ready. Final activation for scheduled publishing is pending."
         : platform.status_message,
       disabled_reason: disabledReason,
-      blockers: [nativePostingBlocker, "FANVUE_SCHEDULED_POSTING_NOT_ENABLED"],
+      blockers: [nativePostingBlocker, "FANVUE_PUBLIC_SCHEDULING_DISABLED"],
     }
   }
 

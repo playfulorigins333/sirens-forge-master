@@ -285,10 +285,10 @@ export default async function AccountPage() {
 
             <div className="space-y-3 text-sm text-gray-300">
               <p>
-                This page is now pulling your membership details from Supabase so you can see the plan tied to your account without guessing.
+                Review your current membership and access status here at any time.
               </p>
               <p>
-                If you later want cancel / manage / upgrade controls here, this is the correct page to add them.
+                Visit Billing to manage your subscription, or compare available membership options on Pricing.
               </p>
             </div>
           </section>

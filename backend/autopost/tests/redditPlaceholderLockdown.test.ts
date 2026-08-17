@@ -235,7 +235,7 @@ await test("Fanvue, OnlyFans, and X locks remain unchanged", () => {
   const onlyfans = registry.find(platform => platform.id === "onlyfans")!
   const x = registry.find(platform => platform.id === "x")!
   assert.equal(fanvue.public_selectable, false)
-  assert.equal(fanvue.supports_real_posting, false)
+  assert.equal(fanvue.supports_real_posting, true)
   assert.equal(onlyfans.supports_assisted_workflow, true)
   assert.equal(onlyfans.supports_real_posting, false)
   assert.equal(x.public_selectable, false)

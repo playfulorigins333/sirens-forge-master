@@ -1,0 +1,3 @@
+"use client";
+import Link from "next/link";
+export default function ErrorPage({ reset }: { error: Error & { digest?: string }; reset: () => void }) { return <main className="flex min-h-[70vh] items-center justify-center bg-black px-6 text-white"><section className="max-w-lg text-center" role="alert"><h1 className="text-4xl font-bold">Something went wrong</h1><p className="mt-4 text-zinc-300">We could not load this page safely. Please retry or return home.</p><div className="mt-7 flex justify-center gap-3"><button className="rounded-xl bg-fuchsia-600 px-5 py-3 font-semibold" type="button" onClick={reset}>Try again</button><Link className="rounded-xl border border-white/20 px-5 py-3" href="/">Home</Link></div></section></main>; }

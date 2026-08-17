@@ -146,11 +146,14 @@ export default function LoginClient({ initialMode, continuation, authError, call
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 {checkEmail && <p className="text-cyan-300 text-sm" role="status">Check your email to confirm your account, then continue signing in.</p>}
-                {error && <p className="text-red-400 text-sm">{error}</p>}
+                {error && <p className="text-red-400 text-sm" role="alert">{error}</p>}
 
                 <div>
-                  <Label className="text-gray-300">Email</Label>
+                  <Label htmlFor="email" className="text-gray-300">Email</Label>
                   <Input
+                    id="email"
+                    name="email"
+                    autoComplete="email"
                     type="email"
                     className="bg-gray-900 border-gray-700 text-white placeholder:text-gray-500"
                     value={email}
@@ -160,16 +163,18 @@ export default function LoginClient({ initialMode, continuation, authError, call
                 </div>
 
                 <div>
-                  <Label className="text-gray-300">Password</Label>
+                  <Label htmlFor="password" className="text-gray-300">Password</Label>
                   <PasswordInput
                     value={password}
                     onChange={setPassword}
                     show={showPassword}
                     setShow={setShowPassword}
+                    autoComplete={mode === "login" ? "current-password" : "new-password"}
                   />
                 </div>
 
                 <Button
+                  type="submit"
                   disabled={isLoading || checkEmail}
                   className="w-full bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white"
                 >
@@ -230,10 +235,13 @@ function Divider() {
   )
 }
 
-function PasswordInput({ value, onChange, show, setShow }: any) {
+function PasswordInput({ value, onChange, show, setShow, autoComplete }: any) {
   return (
     <div className="relative">
       <Input
+        id="password"
+        name="password"
+        autoComplete={autoComplete}
         type={show ? "text" : "password"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -243,6 +251,8 @@ function PasswordInput({ value, onChange, show, setShow }: any) {
       <button
         type="button"
         onClick={() => setShow(!show)}
+        aria-label={show ? "Hide password" : "Show password"}
+        aria-pressed={show}
         className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200"
       >
         {show ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { motion, useScroll, useTransform } from 'framer-motion';
+import { motion, useReducedMotion, useScroll, useTransform } from 'framer-motion';
 import {
   Crown,
   ChevronRight,
@@ -16,6 +16,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import { LAUNCH_CAPACITY } from '@/lib/launch-capacity';
 
 export default function HomePage() {
   const [inventory, setInventory] = useState<{
@@ -25,6 +26,7 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [checkoutMode, setCheckoutMode] = useState<"payment_v2" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
@@ -43,10 +45,10 @@ export default function HomePage() {
         const data = await response.json();
         const og = data?.tiers?.og_throne;
         const earlyBird = data?.tiers?.early_bird;
-        if (!response.ok || data?.success !== true || og?.max_slots !== 50 || earlyBird?.max_slots !== 120 ||
+        if (!response.ok || data?.success !== true || og?.max_slots !== LAUNCH_CAPACITY.og_throne || earlyBird?.max_slots !== LAUNCH_CAPACITY.early_bird ||
             !Number.isInteger(og?.slots_remaining) || !Number.isInteger(earlyBird?.slots_remaining) ||
             typeof og?.is_active !== "boolean" || typeof earlyBird?.is_active !== "boolean" ||
-            og.slots_remaining < 0 || og.slots_remaining > 50 || earlyBird.slots_remaining < 0 || earlyBird.slots_remaining > 120) return;
+            og.slots_remaining < 0 || og.slots_remaining > LAUNCH_CAPACITY.og_throne || earlyBird.slots_remaining < 0 || earlyBird.slots_remaining > LAUNCH_CAPACITY.early_bird) return;
         if (active) setInventory({
           og: { remaining: og.slots_remaining, active: og.is_active },
           earlyBird: { remaining: earlyBird.slots_remaining, active: earlyBird.is_active },
@@ -69,19 +71,19 @@ export default function HomePage() {
       {/* CINEMATIC GRADIENT BACKGROUND */}
       <div className="fixed inset-0 z-0">
         <div className="absolute inset-0 bg-gradient-to-br from-purple-950/60 via-black to-pink-950/60" />
-        <div className="absolute top-0 left-0 h-[1400px] w-[1400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-600/30 blur-[150px] animate-pulse" />
+        <div className="absolute top-0 left-0 h-[1400px] w-[1400px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-purple-600/30 blur-[150px] animate-pulse motion-reduce:animate-none" />
         <div
-          className="absolute right-0 bottom-0 h-[1400px] w-[1400px] translate-x-1/2 translate-y-1/2 rounded-full bg-pink-600/30 blur-[150px] animate-pulse"
+          className="absolute right-0 bottom-0 h-[1400px] w-[1400px] translate-x-1/2 translate-y-1/2 rounded-full bg-pink-600/30 blur-[150px] animate-pulse motion-reduce:animate-none"
           style={{ animationDelay: '2s' }}
         />
         <div
-          className="absolute top-1/2 left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-600/20 blur-[120px] animate-pulse"
+          className="absolute top-1/2 left-1/2 h-[1000px] w-[1000px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-600/20 blur-[120px] animate-pulse motion-reduce:animate-none"
           style={{ animationDelay: '4s' }}
         />
       </div>
 
       {/* ANIMATED PARTICLES */}
-      {mounted && (
+      {mounted && !reduceMotion && (
         <div className="pointer-events-none fixed inset-0 z-0 opacity-30">
           {[...Array(30)].map((_, i) => (
             <motion.div
@@ -108,8 +110,8 @@ export default function HomePage() {
 
       {/* HERO */}
       <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-4 pt-20 pb-16 sm:px-8">
-        <motion.div style={{ y: y1 }} className="mx-auto w-full max-w-7xl">
-          <div className="pointer-events-none absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-purple-500/30 via-pink-500/30 to-cyan-500/30 blur-[100px] animate-pulse" />
+        <motion.div style={{ y: reduceMotion ? 0 : y1 }} className="mx-auto w-full max-w-7xl">
+          <div className="pointer-events-none absolute top-1/2 left-1/2 h-[600px] w-[600px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-gradient-to-r from-purple-500/30 via-pink-500/30 to-cyan-500/30 blur-[100px] animate-pulse motion-reduce:animate-none" />
 
           <motion.div
             initial={{ opacity: 0, y: 50 }}
@@ -118,11 +120,11 @@ export default function HomePage() {
             className="relative mb-8 text-center"
           >
             <motion.div
-              animate={{
+              animate={reduceMotion ? undefined : {
                 scale: [1, 1.02, 1],
                 rotate: [0, 0.5, 0],
               }}
-              transition={{ duration: 8, repeat: 999999, ease: 'linear' }}
+              transition={reduceMotion ? undefined : { duration: 8, repeat: 999999, ease: 'linear' }}
             >
               <h1 className="mb-6 text-7xl leading-none font-black tracking-tighter sm:text-8xl md:text-[10rem] lg:text-[12rem]">
                 <span className="relative inline-block">
@@ -166,8 +168,8 @@ export default function HomePage() {
           >
             <div className="mb-5 flex items-center justify-center gap-3">
               <motion.div
-                animate={{ rotate: [0, 360] }}
-                transition={{ duration: 4, repeat: 999999, ease: 'linear' }}
+                animate={reduceMotion ? undefined : { rotate: [0, 360] }}
+                transition={reduceMotion ? undefined : { duration: 4, repeat: 999999, ease: 'linear' }}
               >
                 <Sparkles className="h-8 w-8 text-purple-400" />
               </motion.div>
@@ -175,8 +177,8 @@ export default function HomePage() {
                 Forge Your AI Muse. Create Without Limits.
               </h2>
               <motion.div
-                animate={{ rotate: [0, -360] }}
-                transition={{ duration: 4, repeat: 999999, ease: 'linear' }}
+                animate={reduceMotion ? undefined : { rotate: [0, -360] }}
+                transition={reduceMotion ? undefined : { duration: 4, repeat: 999999, ease: 'linear' }}
               >
                 <Sparkles className="h-8 w-8 text-pink-400" />
               </motion.div>
@@ -297,8 +299,8 @@ export default function HomePage() {
             {[
               {
                 icon: Wand2,
-                title: 'Create without a LoRA',
-                desc: 'Start generating immediately. Identity training is optional, not required.',
+                title: 'Identity-first creation',
+                desc: 'Select or create your AI Twin before generating so every output starts from a consistent identity.',
                 gradient: 'from-purple-500 to-pink-500',
               },
               {
@@ -309,8 +311,8 @@ export default function HomePage() {
               },
               {
                 icon: Layers3,
-                title: 'Build consistency later',
-                desc: 'Train identities and scale into repeatable creative control when you are ready.',
+                title: 'Reuse your AI Twin',
+                desc: 'Carry the same identity into new prompts and scenes for repeatable creative control.',
                 gradient: 'from-cyan-500 to-blue-500',
               },
             ].map((item, index) => (
@@ -388,7 +390,7 @@ export default function HomePage() {
       </section>
 
       {/* HOW IT WORKS / ENTRY PATH */}
-      <motion.section style={{ y: y2 }} className="relative z-10 px-4 py-24">
+      <motion.section style={{ y: reduceMotion ? 0 : y2 }} className="relative z-10 px-4 py-24">
         <div className="mx-auto max-w-6xl space-y-20">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -406,7 +408,7 @@ export default function HomePage() {
               </span>
             </h2>
             <p className="text-xl font-medium text-gray-300">
-              Start guided or go direct. Identity is optional, not required.
+              Start guided or go direct. Your AI Twin identity anchors every generation.
             </p>
           </motion.div>
 
@@ -424,13 +426,13 @@ export default function HomePage() {
               },
               {
                 number: '03',
-                title: 'Generate now',
-                desc: 'Create without a LoRA, or select an identity when you want stronger repeatability.',
+                title: 'Generate with your AI Twin',
+                desc: 'Select your identity, then create new prompts and scenes while keeping the same person consistent.',
               },
               {
                 number: '04',
-                title: 'Scale into identity',
-                desc: 'Train identities later and build toward more advanced, controlled creative output.',
+                title: 'Reuse and refine',
+                desc: 'Carry your AI Twin into future generations and refine creative direction without giving up identity consistency.',
               },
             ].map((step, index) => (
               <motion.div
@@ -513,7 +515,7 @@ export default function HomePage() {
                   </div>
 
                   <div className="mb-6 inline-flex rounded-full bg-gradient-to-r from-red-600 to-red-700 px-5 py-2 text-sm font-bold text-white shadow-lg shadow-red-500/40">
-                    {!inventory ? "Availability loading" : !inventory.earlyBird.active ? "Currently unavailable" : inventory.earlyBird.remaining === 0 ? "SOLD OUT" : `${inventory.earlyBird.remaining}/120 LEFT`}
+                    {!inventory ? "Availability loading" : !inventory.earlyBird.active ? "Currently unavailable" : inventory.earlyBird.remaining === 0 ? "SOLD OUT" : `${inventory.earlyBird.remaining}/${LAUNCH_CAPACITY.early_bird} LEFT`}
                   </div>
 
                   <p className="mb-4 text-lg leading-relaxed font-medium text-gray-300">

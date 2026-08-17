@@ -1,0 +1,24 @@
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+
+  /* Framer Motion can drive these decorative properties inline. Freeze the
+     launch-page glow/drift effects without disabling layout transforms. */
+  [style*="box-shadow"] {
+    box-shadow: none !important;
+  }
+
+  [style*="background-position"] {
+    background-position: 50% 50% !important;
+  }
+}
