@@ -48,6 +48,8 @@ export default async function FanvuePackageMediaPage({
           candidates={view.generatedMediaCandidates}
           allowed={view.generatedMediaSelectionAllowed}
           blockedReason={view.generatedMediaSelectionBlockedReason}
+          warningText="Adding generated media changes this Fanvue package manifest. Public scheduling and posting remain disabled until the separate final activation gate."
+          successText="Sirens Forge-generated media was added to the Fanvue package. The private package preview has been refreshed; nothing was scheduled or published."
         />
 
         <section className="mt-8 rounded-3xl border border-white/10 bg-white/[0.04] p-5">
