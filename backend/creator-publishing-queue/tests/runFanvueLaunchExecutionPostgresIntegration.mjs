@@ -38,8 +38,9 @@ try{
  runFile("launch-behavior","backend/creator-publishing-queue/tests/fanvueLaunchExecutionPostgresIntegration.sql")
  runSql("activation-prep",`
    update public.autopost_accounts set scopes='["openid","offline_access","offline","read:self","read:creator","read:post","write:post","read:media","write:media","write:creator"]'::jsonb where user_id='11111111-1111-4111-8111-111111111111' and platform='fanvue';
-   insert into public.autopost_accounts(id,user_id,platform,provider_account_id,provider_username,connection_status,encrypted_access_token,encrypted_refresh_token,token_key_version,token_expires_at,scopes,metadata)
-   values('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1','22222222-2222-4222-8222-222222222222','fanvue','provider-prebridge','prebridge_creator','CONNECTED','activation-access-fixture','activation-refresh-fixture',1,clock_timestamp()+interval '1 hour','["write:post"]'::jsonb,'{"provider":"fanvue","identity_fetched":true}'::jsonb);
+   update public.autopost_accounts
+   set id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1',provider_account_id='provider-prebridge',provider_username='prebridge_creator',connection_status='CONNECTED',encrypted_access_token='activation-access-fixture',encrypted_refresh_token='activation-refresh-fixture',token_key_version=1,token_expires_at=clock_timestamp()+interval '1 hour',scopes='["write:post"]'::jsonb,metadata='{"provider":"fanvue","identity_fetched":true}'::jsonb
+   where user_id='22222222-2222-4222-8222-222222222222' and platform='fanvue';
    select case when exists(select 1 from public.creator_platform_accounts where oauth_account_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1') then pg_catalog.current_setting('missing.setting') else 'activation prep ok' end;
  `)
  runFile("public-activation-migration","supabase/migrations/20260817170000_cpq_fanvue_public_activation.sql")
