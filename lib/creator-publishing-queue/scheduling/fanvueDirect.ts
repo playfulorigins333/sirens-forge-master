@@ -1,5 +1,6 @@
 import "server-only"
-import { normalizeSchedulePlanRequest, resolveScheduleLocalDateTime } from "./validation"
+import { normalizeCancelPlanRequest, normalizeSchedulePlanRequest, resolveScheduleLocalDateTime } from "./validation"
+import { parseCancelPlanRpcResult } from "./response"
 import type { SafeMutationResult } from "./types"
 
 type Deps={getAuthenticatedCreatorId:()=>Promise<string|null>;getAdminClient:()=>any;getConsent:()=>Promise<{version:string;textSha256:string}>;now?:()=>Date}
@@ -37,4 +38,28 @@ export async function scheduleFanvueDirectPlanCore(input:unknown,deps:Deps):Prom
   if(error)return fail(/IDEMPOTENCY|CONFLICT|STALE/.test(String(error.message??error.code??""))?"SCHEDULING_CONFLICT":"SCHEDULING_INELIGIBLE","Fanvue scheduling could not be confirmed safely.")
   return directResult(data,{planId:plan.id,jobId:job.id,intended:time.intendedPublishAtUtc,idempotent:replay})
  }catch{return fail("SCHEDULING_SERVICE_UNAVAILABLE","Scheduling is temporarily unavailable.")}
+}
+
+const terminal=new Set(["published_direct","confirmed_posted_manual","exported","failed_manual_upload","direct_publish_failed","skipped","blocked","platform_rejected","archived"])
+export async function cancelFanvueDirectPlanCore(input:unknown,deps:Deps):Promise<SafeMutationResult>{
+ const creatorId=await deps.getAuthenticatedCreatorId();if(!creatorId)return fail("UNAUTHENTICATED","Sign in to cancel a plan.")
+ let request;try{request=normalizeCancelPlanRequest(input)}catch{return fail("SCHEDULING_INVALID_REQUEST","Cancellation accepts only a plan, reason, and idempotency key.")}
+ const admin=deps.getAdminClient()
+ try{
+  const [{data:plan,error:planError},{data:jobs,error:jobsError},{data:idem,error:idemError}]=await Promise.all([
+   admin.from("creator_publishing_plans").select("id,creator_id,status,cancelled_at,cancellation_reason").eq("id",request.publishingPlanId).maybeSingle(),
+   admin.from("creator_publishing_platform_jobs").select("id,creator_id,publishing_plan_id,target_platform,publishing_mode,job_state,cancelled_at").eq("publishing_plan_id",request.publishingPlanId),
+   admin.from("creator_publishing_scheduler_idempotency").select("creator_id,publishing_plan_id,action_type,idempotency_key").eq("creator_id",creatorId).eq("action_type","cancel_plan").eq("idempotency_key",request.idempotencyKey).maybeSingle(),
+  ])
+  if(planError||jobsError||idemError)return fail("SCHEDULING_SERVICE_UNAVAILABLE","Cancellation is temporarily unavailable.")
+  if(!plan||plan.creator_id!==creatorId||!Array.isArray(jobs)||jobs.length!==1)return fail("SCHEDULING_INELIGIBLE","This Fanvue plan cannot be cancelled.")
+  const job=jobs[0]
+  if(job.creator_id!==creatorId||job.publishing_plan_id!==plan.id||job.target_platform!=="fanvue"||job.publishing_mode!=="direct")return fail("SCHEDULING_INELIGIBLE","This Fanvue plan cannot be cancelled.")
+  const replay=!!idem
+  if(replay){if(idem.publishing_plan_id!==plan.id||plan.status!=="cancelled"||plan.cancellation_reason!==request.cancellationReason)return fail("SCHEDULING_CONFLICT","This cancellation cannot be replayed safely with that idempotency key.")}
+  else if(plan.status==="cancelled"||terminal.has(job.job_state)||job.cancelled_at)return fail("SCHEDULING_INELIGIBLE","This Fanvue plan can no longer be cancelled.")
+  const {data,error}=await admin.rpc("creator_publishing_cancel_plan_schedule",{p_creator_id:creatorId,p_publishing_plan_id:plan.id,p_cancellation_reason:request.cancellationReason,p_idempotency_key:request.idempotencyKey})
+  if(error)return fail(/IDEMPOTENCY|CONFLICT/.test(String(error.message??error.code??""))?"SCHEDULING_CONFLICT":"SCHEDULING_INELIGIBLE","Fanvue cancellation could not be confirmed safely.")
+  return parseCancelPlanRpcResult(data,{planId:plan.id,idempotent:replay,countBound:0})
+ }catch{return fail("SCHEDULING_SERVICE_UNAVAILABLE","Cancellation is temporarily unavailable.")}
 }
