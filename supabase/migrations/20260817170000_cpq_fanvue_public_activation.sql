@@ -159,12 +159,6 @@ begin
     raise exception 'FANVUE_PUBLICATION_SCOPE_MISSING';
   end if;
 
-  if exists (
-    select 1 from public.creator_publishing_platform_jobs j
-    where j.content_package_id=v_package.id
-      and j.job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived','cancelled')
-  ) then raise exception 'ACTIVE_PUBLICATION_JOB_CONFLICT'; end if;
-
   select count(*) into v_media_count
   from public.creator_publishing_media_assets
   where content_package_id=v_package.id;
@@ -229,6 +223,8 @@ begin
   );
   v_request_fingerprint := encode(extensions.digest(v_request::text,'sha256'),'hex');
 
+  -- Exact retries must reconcile against the original plan before the active-job
+  -- conflict guard. A changed replay still fails with IDEMPOTENCY_CONFLICT.
   select * into v_existing
   from public.creator_publishing_plans
   where creator_id=p_creator_id and idempotency_key=v_key
@@ -245,6 +241,12 @@ begin
       'idempotent',true
     );
   end if;
+
+  if exists (
+    select 1 from public.creator_publishing_platform_jobs j
+    where j.content_package_id=v_package.id
+      and j.job_state not in ('published_direct','confirmed_posted_manual','exported','failed_manual_upload','direct_publish_failed','skipped','blocked','platform_rejected','archived','cancelled')
+  ) then raise exception 'ACTIVE_PUBLICATION_JOB_CONFLICT'; end if;
 
   insert into public.creator_publishing_plans(
     creator_id,status,idempotency_key,request_fingerprint,registry_version,created_at,updated_at
