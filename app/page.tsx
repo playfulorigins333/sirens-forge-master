@@ -299,8 +299,8 @@ export default function HomePage() {
             {[
               {
                 icon: Wand2,
-                title: 'Create without a LoRA',
-                desc: 'Start generating immediately. Identity training is optional, not required.',
+                title: 'Identity-first creation',
+                desc: 'Select or create your AI Twin before generating so every output starts from a consistent identity.',
                 gradient: 'from-purple-500 to-pink-500',
               },
               {
@@ -311,8 +311,8 @@ export default function HomePage() {
               },
               {
                 icon: Layers3,
-                title: 'Build consistency later',
-                desc: 'Train identities and scale into repeatable creative control when you are ready.',
+                title: 'Reuse your AI Twin',
+                desc: 'Carry the same identity into new prompts and scenes for repeatable creative control.',
                 gradient: 'from-cyan-500 to-blue-500',
               },
             ].map((item, index) => (
@@ -408,7 +408,7 @@ export default function HomePage() {
               </span>
             </h2>
             <p className="text-xl font-medium text-gray-300">
-              Start guided or go direct. Identity is optional, not required.
+              Start guided or go direct. Your AI Twin identity anchors every generation.
             </p>
           </motion.div>
 
@@ -426,13 +426,13 @@ export default function HomePage() {
               },
               {
                 number: '03',
-                title: 'Generate now',
-                desc: 'Create without a LoRA, or select an identity when you want stronger repeatability.',
+                title: 'Generate with your AI Twin',
+                desc: 'Select your identity, then create new prompts and scenes while keeping the same person consistent.',
               },
               {
                 number: '04',
-                title: 'Scale into identity',
-                desc: 'Train identities later and build toward more advanced, controlled creative output.',
+                title: 'Reuse and refine',
+                desc: 'Carry your AI Twin into future generations and refine creative direction without giving up identity consistency.',
               },
             ].map((step, index) => (
               <motion.div
