@@ -70,6 +70,8 @@ try {
  runFile("gate-migration", "supabase/migrations/20260814022245_cpq_fanvue_accounts_packages_nonrunnable.sql")
  runFile("behavior", "backend/creator-publishing-queue/tests/cpqFanvueAccountsPackagesPostgresIntegration.sql")
  runFile("launch-migration", "supabase/migrations/20260814090000_cpq_fanvue_launch_execution_foundation.sql")
+ runFile("generated-media-migration", "supabase/migrations/20260817040000_cpq_fanvue_generated_media_attachment.sql")
+ runFile("generated-media-behavior", "backend/creator-publishing-queue/tests/fanvueGeneratedMediaAttachmentPostgresIntegration.sql")
  runFile("launch-behavior", "backend/creator-publishing-queue/tests/fanvueLaunchExecutionPostgresIntegration.sql")
  appendFileSync(logPath, "\nFANVUE_LAUNCH_EXECUTION_POSTGRES_INTEGRATION_PASSED\n")
  console.log("FANVUE_LAUNCH_EXECUTION_POSTGRES_INTEGRATION_PASSED")
