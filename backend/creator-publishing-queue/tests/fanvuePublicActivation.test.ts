@@ -2,10 +2,15 @@ import { strict as assert } from "node:assert"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-const migration=readFileSync("supabase/migrations/20260817170000_cpq_fanvue_public_activation.sql","utf8")
+const activation=readFileSync("supabase/migrations/20260817170000_cpq_fanvue_public_activation.sql","utf8")
+const factsMigration=readFileSync("supabase/migrations/20260817170050_cpq_fanvue_direct_compliance_facts.sql","utf8")
+const complianceMigration=readFileSync("supabase/migrations/20260817170100_cpq_fanvue_direct_compliance_approval.sql","utf8")
+const hardening=readFileSync("supabase/migrations/20260817170200_cpq_fanvue_direct_preparation_hardening.sql","utf8")
 const rollback=readFileSync("supabase/manual/cpq_fanvue_public_activation_rollback.sql","utf8")
 const registry=readFileSync("lib/autopost/platformRegistry.ts","utf8")
 const autopostService=readFileSync("lib/creator-publishing-queue/autopost/service.ts","utf8")
+const directPreparation=readFileSync("lib/creator-publishing-queue/fanvue/directPreparation.ts","utf8")
+const directCompliance=readFileSync("lib/creator-publishing-queue/fanvue/directCompliance.ts","utf8")
 const schedulingService=readFileSync("lib/creator-publishing-queue/scheduling/service.ts","utf8")
 const directScheduling=readFileSync("lib/creator-publishing-queue/scheduling/fanvueDirect.ts","utf8")
 const schedulingUi=readFileSync("app/autopost/Task15PlanScheduling.tsx","utf8")
@@ -14,45 +19,90 @@ const workerRuntime=readFileSync("lib/creator-publishing-queue/fanvue/workerRunt
 const envExample=readFileSync(".env.example","utf8")
 const vercel=readFileSync("vercel.json","utf8")
 
-test("activation migration publishes one coherent Fanvue direct capability release without provider execution",()=>{
- assert.match(migration,/registry_version = 'task14\.20260817\.002'/)
- assert.match(migration,/where platform = 'fanvue'/)
- assert.match(migration,/publishing_mode = 'direct'/)
- assert.match(migration,/availability_status = 'available'/)
- assert.match(migration,/connector_can_publish_immediately = true/)
- assert.match(migration,/connector_can_upload_media = true/)
- assert.match(migration,/connector_can_schedule_directly = false/)
- assert.match(migration,/human_publishing_required = false/)
- assert.doesNotMatch(migration,/fetch\s*\(|fanvueFetch|provider_create|createPost|signedUrl|upload_session/i)
+test("activation publishes coherent Fanvue direct capability and backfills only missing OAuth destinations",()=>{
+ assert.match(activation,/registry_version = 'task14\.20260817\.002'/)
+ assert.match(activation,/where platform = 'fanvue'/)
+ assert.match(activation,/publishing_mode = 'direct'/)
+ assert.match(activation,/availability_status = 'available'/)
+ assert.match(activation,/connector_can_publish_immediately = true/)
+ assert.match(activation,/connector_can_upload_media = true/)
+ assert.match(activation,/connector_can_schedule_directly = false/)
+ assert.match(activation,/human_publishing_required = false/)
+ assert.match(activation,/from public\.autopost_accounts a/)
+ assert.match(activation,/a\.connection_status = 'CONNECTED'/)
+ assert.match(activation,/not exists \([\s\S]*?public\.creator_platform_accounts d[\s\S]*?d\.oauth_account_id = a\.id/)
+ assert.match(activation,/credentials_mutated', false/)
+ assert.doesNotMatch(activation,/update public\.autopost_accounts/)
+ assert.doesNotMatch(activation,/fetch\s*\(|fanvueFetch|createFanvueTextPost|createFanvueMediaPost|signedUrl/i)
 })
 
-test("OAuth destination activation backfill is idempotent and does not update credential rows",()=>{
- assert.match(migration,/from public\.autopost_accounts a/)
- assert.match(migration,/a\.connection_status = 'CONNECTED'/)
- assert.match(migration,/not exists \(\s*select 1 from public\.creator_platform_accounts d\s*where d\.oauth_account_id = a\.id/s)
- assert.match(migration,/insert into public\.creator_platform_accounts/)
- assert.doesNotMatch(migration,/update public\.autopost_accounts/)
- assert.match(migration,/credentials_mutated', false/)
+test("dedicated Fanvue plan creator is service-role only and server-derives execution fields",()=>{
+ assert.match(activation,/create or replace function public\.creator_publishing_create_fanvue_autopost_plan/)
+ assert.match(activation,/security definer/)
+ assert.match(activation,/set search_path = public, pg_temp/)
+ for(const field of ["oauth_account_id","publication_type","server_idempotency_key"]) assert.match(activation,new RegExp(field))
+ assert.match(activation,/grant execute on function public\.creator_publishing_create_fanvue_autopost_plan\([^;]+\) to service_role/)
+ assert.match(activation,/revoke execute on function public\.creator_publishing_create_fanvue_autopost_plan\([^;]+\) from authenticated/)
+ assert.match(activation,/revoke execute on function public\.creator_publishing_create_fanvue_autopost_plan\([^;]+\) from anon/)
 })
 
-test("dedicated Fanvue plan creator is service-role only and server-derives execution shape",()=>{
- assert.match(migration,/create or replace function public\.creator_publishing_create_fanvue_autopost_plan/)
- assert.match(migration,/security definer/)
- assert.match(migration,/set search_path = public, pg_temp/)
- assert.match(migration,/oauth_account_id/)
- assert.match(migration,/publication_type/)
- assert.match(migration,/server_idempotency_key/)
- assert.match(migration,/grant execute on function public\.creator_publishing_create_fanvue_autopost_plan\([^;]+\) to service_role/)
- assert.match(migration,/revoke execute on function public\.creator_publishing_create_fanvue_autopost_plan\([^;]+\) from authenticated/)
- assert.match(migration,/revoke execute on function public\.creator_publishing_create_fanvue_autopost_plan\([^;]+\) from anon/)
+test("Fanvue trusted facts are isolated from legacy compliance and support text-only packages",()=>{
+ assert.match(factsMigration,/creator_publishing_build_fanvue_direct_compliance_facts/)
+ assert.match(factsMigration,/creator_publishing_load_fanvue_direct_compliance_facts/)
+ assert.match(factsMigration,/if v_media_count>1 then raise exception 'FANVUE_COMPLIANCE_MEDIA_INVALID'/)
+ assert.match(factsMigration,/if v_media_count=0 then/)
+ assert.match(factsMigration,/FANVUE_COMPLIANCE_TEXT_REQUIRED/)
+ assert.match(factsMigration,/oauth_destination_verified',true/)
+ assert.doesNotMatch(factsMigration,/create or replace function public\.creator_publishing_build_compliance_facts/)
+ assert.doesNotMatch(factsMigration,/create or replace function public\.creator_publishing_load_compliance_facts/)
 })
 
-test("rollback freezes new Fanvue plans without destructively deleting OAuth destinations",()=>{
+test("Fanvue direct compliance and approval stay outside the manual operator queue",()=>{
+ assert.match(complianceMigration,/creator_publishing_apply_fanvue_direct_compliance/)
+ assert.match(complianceMigration,/creator_publishing_approve_fanvue_direct_package/)
+ assert.match(complianceMigration,/queue_task_created',false/)
+ assert.match(complianceMigration,/FANVUE_APPROVAL_CREATOR_NOT_VERIFIED/)
+ assert.match(complianceMigration,/FANVUE_APPROVAL_AI_TWIN_CONSENT_REQUIRED/)
+ assert.match(complianceMigration,/review_source='automated'/)
+ assert.doesNotMatch(complianceMigration,/insert into public\.creator_publishing_queue_tasks/i)
+ assert.doesNotMatch(complianceMigration,/create or replace function public\.creator_publishing_apply_creator_approval_decision/)
+})
+
+test("hardening binds compliance to Fanvue facts and database rejects unprepared Fanvue jobs",()=>{
+ assert.match(hardening,/creator_publishing_build_fanvue_direct_compliance_facts/)
+ assert.doesNotMatch(hardening,/v_facts:=public\.creator_publishing_build_compliance_facts/)
+ assert.match(hardening,/creator_publishing_fanvue_job_insert_guard/)
+ assert.match(hardening,/before insert on public\.creator_publishing_platform_jobs/)
+ assert.match(hardening,/creator_approval_status<>'approved'/)
+ assert.match(hardening,/compliance_status<>'passed'/)
+ assert.match(hardening,/v_verification\.status<>'verified'/)
+ assert.match(hardening,/v_consent\.status<>'granted'/)
+ assert.match(hardening,/FANVUE_JOB_TRUST_GATE_FAILED/)
+})
+
+test("server preparation orders trusted facts, compliance, approval, then plan creation",()=>{
+ assert.match(autopostService,/prepareFanvueDirectPackage/)
+ const prep=autopostService.indexOf("await prepareFanvueDirectPackage")
+ const create=autopostService.indexOf('client.rpc("creator_publishing_create_fanvue_autopost_plan"')
+ assert(prep>0&&create>prep)
+ const load=directPreparation.indexOf('client.rpc("creator_publishing_load_fanvue_direct_compliance_facts"')
+ const apply=directPreparation.indexOf('client.rpc("creator_publishing_apply_fanvue_direct_compliance"')
+ const approve=directPreparation.indexOf('client.rpc("creator_publishing_approve_fanvue_direct_package"')
+ assert(load>0&&apply>load&&approve>apply)
+ assert.match(directPreparation,/subKey\("fvcomp"/)
+ assert.match(directPreparation,/subKey\("fvappr"/)
+ assert.match(directPreparation,/evaluation\.outcome!=="passed"/)
+ assert.match(directCompliance,/policy_mode:"direct_api"/)
+ assert.match(directCompliance,/queue_enabled:false/)
+ assert.match(directCompliance,/fanvue-ai-twin-consent-missing/)
+})
+
+test("rollback freezes Fanvue and removes only activation surfaces without deleting persisted data",()=>{
  assert.match(rollback,/publishing_mode = 'disabled'/)
  assert.match(rollback,/availability_status = 'frozen'/)
- assert.match(rollback,/drop function if exists public\.creator_publishing_create_fanvue_autopost_plan/)
- assert.doesNotMatch(rollback,/delete\s+from\s+public\.creator_platform_accounts/i)
- assert.doesNotMatch(rollback,/delete\s+from\s+public\.autopost_accounts/i)
+ for(const surface of ["creator_publishing_create_fanvue_autopost_plan","creator_publishing_approve_fanvue_direct_package","creator_publishing_apply_fanvue_direct_compliance","creator_publishing_load_fanvue_direct_compliance_facts","creator_publishing_build_fanvue_direct_compliance_facts","creator_publishing_fanvue_job_insert_guard"]) assert.match(rollback,new RegExp(`drop function if exists public\\.${surface}`))
+ assert.match(rollback,/drop trigger if exists trg_creator_publishing_fanvue_job_insert_guard/)
+ assert.doesNotMatch(rollback,/delete\s+from\s+public\.(creator_platform_accounts|autopost_accounts|creator_publishing_content_packages|creator_publishing_media_assets|creator_publishing_platform_jobs|creator_publishing_fanvue_attempts)/i)
 })
 
 test("public registry activation is exact-env gated and X Reddit remain unavailable",()=>{
@@ -63,10 +113,7 @@ test("public registry activation is exact-env gated and X Reddit remain unavaila
  assert.match(registry,/id:\s*"reddit"[\s\S]*?public_selectable:\s*false/)
 })
 
-test("Fanvue plan creation and scheduling route only Fanvue into dedicated direct paths",()=>{
- assert.match(autopostService,/creator_publishing_create_fanvue_autopost_plan/)
- assert.match(autopostService,/creator_publishing_create_autopost_plan/)
- assert.match(autopostService,/platforms\.has\("fanvue"\)/)
+test("Fanvue scheduling routes only direct Fanvue jobs into dedicated validation",()=>{
  assert.match(schedulingService,/data\?\.target_platform\s*===\s*"fanvue"/)
  assert.match(schedulingService,/scheduleFanvueDirectPlanCore/)
  assert.match(schedulingService,/cancelFanvueDirectPlanCore/)
@@ -100,7 +147,7 @@ test("scheduling UI stays truthful for Fanvue direct and OnlyFans assisted modes
  assert.match(schedulingUi,/!fanvueDirect/)
 })
 
-test("activation runtime gates remain false by default and this PR does not add a Fanvue cron blindly",()=>{
+test("activation runtime gates remain false by default and no Fanvue cron is added blindly",()=>{
  assert.match(envExample,/CREATOR_PUBLISHING_SCHEDULER_ENABLED=false/)
  assert.match(envExample,/FANVUE_PUBLIC_ACTIVATION_ENABLED=false/)
  assert.match(envExample,/FANVUE_CPQ_WORKER_ENABLED=false/)
