@@ -42,9 +42,9 @@ const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
     public_selectable: false,
     supports_real_posting: true,
     supports_async_dispatch: true,
-    supports_assisted_workflow: true,
-    status_message: "Backend publishing capability is ready; final public launch activation is pending.",
-    reason: "Fanvue scheduled publishing will become available after final launch activation.",
+    supports_assisted_workflow: false,
+    status_message: "Backend publishing capability is ready; public activation is gated off.",
+    reason: "Fanvue direct scheduled publishing becomes selectable only after the final server activation gate is enabled.",
   },
   {
     id: "onlyfans",
@@ -106,9 +106,31 @@ const PLATFORM_REGISTRY_SEEDS: PlatformRegistrySeed[] = [
   },
 ]
 
+function isFanvuePublicActivationEnabled() {
+  return process.env.FANVUE_PUBLIC_ACTIVATION_ENABLED === "true"
+}
+
 export function getAutopostPlatformRegistry(): AutopostPlatformRegistryEntry[] {
+  const fanvuePublicActivationEnabled = isFanvuePublicActivationEnabled()
+
   return PLATFORM_REGISTRY_SEEDS.map((platform) => {
     const hasWebhookEnv = platform.env_var ? Boolean(process.env[platform.env_var]) : false
+
+    if (platform.id === "fanvue") {
+      return {
+        ...platform,
+        launch_status: fanvuePublicActivationEnabled ? "available" : "coming_soon",
+        public_selectable: fanvuePublicActivationEnabled,
+        supports_real_posting: true,
+        supports_async_dispatch: true,
+        status_message: fanvuePublicActivationEnabled
+          ? "Direct Fanvue scheduled publishing is available for connected accounts with required permissions."
+          : "Backend publishing capability is ready; public activation is gated off.",
+        reason: fanvuePublicActivationEnabled
+          ? "Direct scheduled Fanvue publishing uses the connected OAuth account and the Creator Publishing safety gates."
+          : platform.reason,
+      }
+    }
 
     return {
       ...platform,

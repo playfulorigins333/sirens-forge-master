@@ -52,6 +52,24 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.json({
-    platforms: registry.map((platform) => buildUserPlatformStatus(platform, accountsByPlatform)),
+    platforms: registry.map((platform) => {
+      const status = buildUserPlatformStatus(platform, accountsByPlatform)
+      if (platform.id !== "fanvue" || platform.public_selectable !== true) return status
+
+      const ready = status.user_connected === true && status.supports_text_posting === true
+      return {
+        ...status,
+        launch_status: ready ? "available" : status.launch_status,
+        public_selectable: ready,
+        can_schedule: ready,
+        native_posting_available: ready,
+        native_posting_blocker: ready ? null : status.native_posting_blocker,
+        status_message: ready
+          ? "Fanvue is connected and ready for direct scheduled publishing."
+          : status.status_message,
+        disabled_reason: ready ? null : status.disabled_reason,
+        blockers: ready ? [] : status.blockers,
+      }
+    }),
   })
 }

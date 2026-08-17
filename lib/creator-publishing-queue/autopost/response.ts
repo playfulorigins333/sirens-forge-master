@@ -79,7 +79,8 @@ export function parseCreateAutopostPlanRpcResult(data: any, expectedCreatorId: s
     const targetPlatform = platformStr(j.target_platform)
     const publishingMode = str(j.publishing_mode) as PublishingMode
     const jobState = str(j.job_state) as JobState
-    if(!modes.has(publishingMode) || !jobStates.has(jobState) || str(j.capability_registry_version) !== registryVersion || publishingMode === "disabled" || targetPlatform === "fanvue") throw new Error("AUTOPOST_MALFORMED_TRUSTED_RESPONSE")
+    if(!modes.has(publishingMode) || !jobStates.has(jobState) || str(j.capability_registry_version) !== registryVersion || publishingMode === "disabled") throw new Error("AUTOPOST_MALFORMED_TRUSTED_RESPONSE")
+    if(targetPlatform === "fanvue" && publishingMode !== "direct") throw new Error("AUTOPOST_MALFORMED_TRUSTED_RESPONSE")
     hashStr(j.source_package_fingerprint)
     const auditId = auditStr(j.original_job_audit_event_id)
     return { id, publishingPlanId: planId, contentPackageId, platformAccountId: accountId, targetPlatform, platformLabel: str(j.platform_label ?? j.target_platform), publishingMode, publishingModeLabel: labelFor(publishingMode), jobState, originalJobAuditEventId: auditId, createdAt: tsStr(j.created_at), updatedAt: tsStr(j.updated_at) }
