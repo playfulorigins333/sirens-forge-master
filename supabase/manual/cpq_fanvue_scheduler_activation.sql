@@ -1,27 +1,23 @@
 -- OPERATOR-RUN ONLY: applying this file is a separately authorized database write.
--- Prerequisites: Vault must contain exactly one enabled secret named
--- cpq_fanvue_scheduler_base_url and one named cpq_fanvue_scheduler_cron_secret.
--- The base URL must not end in a slash.
+-- Prerequisite: Vault must contain exactly one nonblank decrypted secret named
+-- fanvue_cpq_cron_secret. The value is resolved dynamically by every cron run.
 
 do $activation$
 declare
   v_existing_job_id bigint;
   v_conflicting_jobs integer;
 begin
-  if (select count(*) from vault.decrypted_secrets where name = 'cpq_fanvue_scheduler_base_url') <> 1 then
-    raise exception 'CPQ Fanvue scheduler base URL is not uniquely configured';
-  end if;
-  if (select count(*) from vault.decrypted_secrets where name = 'cpq_fanvue_scheduler_cron_secret') <> 1 then
+  if (select count(*) from vault.decrypted_secrets where name = 'fanvue_cpq_cron_secret') <> 1 then
     raise exception 'CPQ Fanvue scheduler secret is not uniquely configured';
   end if;
-  if (select decrypted_secret ~ '/$' from vault.decrypted_secrets where name = 'cpq_fanvue_scheduler_base_url') then
-    raise exception 'CPQ Fanvue scheduler base URL must not end in a slash';
+  if (select nullif(btrim(decrypted_secret), '') is null from vault.decrypted_secrets where name = 'fanvue_cpq_cron_secret') then
+    raise exception 'CPQ Fanvue scheduler secret is empty';
   end if;
 
   select count(*)
     into v_conflicting_jobs
     from cron.job
-   where command like '%/api/creator-publishing-queue/fanvue/run%'
+   where command like '%https://www.sirensforge.vip/api/creator-publishing-queue/fanvue/run%'
      and jobname <> 'sirens_forge_cpq_fanvue_runner';
   if v_conflicting_jobs <> 0 then
     raise exception 'A different recurring trigger already targets the CPQ Fanvue runner';
@@ -39,10 +35,10 @@ begin
     '* * * * *',
     $run$
       select net.http_get(
-        url := (select decrypted_secret from vault.decrypted_secrets where name = 'cpq_fanvue_scheduler_base_url') || '/api/creator-publishing-queue/fanvue/run',
+        url := 'https://www.sirensforge.vip/api/creator-publishing-queue/fanvue/run',
         headers := jsonb_build_object(
           'Authorization',
-          'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'cpq_fanvue_scheduler_cron_secret')
+          'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'fanvue_cpq_cron_secret')
         ),
         timeout_milliseconds := 55000
       );
