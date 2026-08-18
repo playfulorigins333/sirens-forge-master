@@ -1,0 +1,5 @@
+-- One-time prelaunch founder verification bootstrap for a sole-admin Sirens Forge instance.
+-- This does not weaken the normal trusted-review workflow. It is callable only by
+-- service_role and only while exactly one auth user exists and no trusted reviewers
+-- have ever been enrolled. It verifies only that same sole auth user, requires that
+-- user to own a currently
