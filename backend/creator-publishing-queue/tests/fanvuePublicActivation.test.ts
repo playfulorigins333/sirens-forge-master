@@ -6,6 +6,8 @@ const activation=readFileSync("supabase/migrations/20260817170000_cpq_fanvue_pub
 const factsMigration=readFileSync("supabase/migrations/20260817170050_cpq_fanvue_direct_compliance_facts.sql","utf8")
 const complianceMigration=readFileSync("supabase/migrations/20260817170100_cpq_fanvue_direct_compliance_approval.sql","utf8")
 const hardening=readFileSync("supabase/migrations/20260817170200_cpq_fanvue_direct_preparation_hardening.sql","utf8")
+const personaCorrection=readFileSync("supabase/migrations/20260818164748_cpq_fanvue_ai_persona_policy_correction.sql","utf8")
+const personaRollback=readFileSync("supabase/manual/cpq_fanvue_ai_persona_policy_correction_rollback.sql","utf8")
 const rollback=readFileSync("supabase/manual/cpq_fanvue_public_activation_rollback.sql","utf8")
 const registry=readFileSync("lib/autopost/platformRegistry.ts","utf8")
 const autopostService=readFileSync("lib/creator-publishing-queue/autopost/service.ts","utf8")
@@ -78,6 +80,31 @@ test("hardening binds compliance to Fanvue facts and database rejects unprepared
  assert.match(hardening,/v_verification\.status<>'verified'/)
  assert.match(hardening,/v_consent\.status<>'granted'/)
  assert.match(hardening,/FANVUE_JOB_TRUST_GATE_FAILED/)
+})
+
+
+test("Fanvue AI-persona correction is forward-only, V2-bound, and preserves every trust gate",()=>{
+ assert.match(personaCorrection,/platform_requires_ai_disclosure = true/)
+ assert.match(personaCorrection,/platform_blocks_fictional_personas = false/)
+ assert.doesNotMatch(personaCorrection,/registry_version\s*=/)
+ assert.match(personaCorrection,/creator_publishing_approve_fanvue_direct_package/)
+ assert.match(personaCorrection,/creator_publishing_fanvue_job_insert_guard/)
+ assert.match(personaCorrection,/creator-ai-content-persona-consent-v2/g)
+ assert.match(personaCorrection,/b6c9ee005f1800b0cf41757592f846a97b4a28843bbee8abe0cb0997a47b760d/g)
+ assert.doesNotMatch(personaCorrection,/creator-ai-twin-consent-v1|0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12/)
+ for(const gate of ["security definer","set search_path = public, pg_temp","FANVUE_APPROVAL_STALE","FANVUE_APPROVAL_EVIDENCE_REQUIRED","FANVUE_APPROVAL_DESTINATION_INVALID","write:post","FANVUE_APPROVAL_CREATOR_NOT_VERIFIED","FANVUE_APPROVAL_MEDIA_INVALID","FANVUE_JOB_TRUST_GATE_FAILED"]) assert.match(personaCorrection,new RegExp(gate.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")))
+ const executableCorrection=personaCorrection.replace(/^--.*$/gm,"")
+ assert.doesNotMatch(executableCorrection,/fetch\s*\(|createFanvue|creator_publishing_schedule_plan|insert into public\.creator_publishing_(scheduler_events|fanvue_attempts|platform_jobs)/i)
+ assert.match(personaRollback,/publishing_mode = 'disabled'/)
+ assert.match(personaRollback,/availability_status = 'frozen'/)
+ assert.match(personaRollback,/drop function if exists public\.creator_publishing_approve_fanvue_direct_package/)
+ assert.match(personaRollback,/drop function if exists public\.creator_publishing_fanvue_job_insert_guard/)
+ assert.doesNotMatch(personaRollback,/delete\s+from|update public\.autopost_accounts|insert into public\.creator_publishing_(platform_jobs|fanvue_attempts|scheduler_events)/i)
+})
+
+test("launch-facing Fanvue consent wording no longer calls the current contract AI Twin consent",()=>{
+ assert.doesNotMatch(autopostService,/Grant the current AI Twin consent/)
+ assert.match(autopostService,/Grant the current AI content & persona consent before creating a Fanvue direct plan/)
 })
 
 test("server preparation orders trusted facts, compliance, approval, then plan creation",()=>{

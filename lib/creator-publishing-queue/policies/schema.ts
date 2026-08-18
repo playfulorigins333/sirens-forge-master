@@ -125,6 +125,11 @@ export function validatePlatformPolicy(policy: PlatformPolicy): PlatformPolicy {
   if (policy.platform === "fanvue") {
     if (policy.mode !== "direct_api") throw new Error("Fanvue policy must remain direct_api")
     if (policy.enabled_for_queue) throw new Error("Fanvue policy must not be routed through the manual queue")
+    if (!policy.disclosure_policy.disclosure_required_for_ai) throw new Error("Fanvue AI policy must require transparent AI disclosure")
+    const allowed = policy.ai_policy.allowed.map((item) => item.toLowerCase())
+    if (!allowed.some((item) => item.includes("fully synthetic") || item.includes("fictional"))) throw new Error("Fanvue policy must allow fully synthetic fictional AI personas")
+    const verification = policy.creator_verification_policy.requirements.join(" ").toLowerCase()
+    if (!verification.includes("does not require") || !verification.includes("likeness")) throw new Error("Fanvue human verification must remain separate from persona likeness")
   }
 
   if (!Object.isFrozen(policy)) throw new Error(`${policy.platform} policy object must be frozen`)
