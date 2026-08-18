@@ -47,7 +47,8 @@
     "test:pfc-core-03f-postgres": "node backend/affiliate/tests/runPfcCore03fPostgresIntegration.mjs",
     "test:lock05f": "tsx backend/payment-v2/tests/lock05fLaunchInventory.test.ts",
     "test:lock05f-postgres": "node backend/payment-v2/tests/runLock05fLaunchInventoryPostgres.mjs",
-    "test:creator-publishing-fanvue-launch-postgres": "node backend/creator-publishing-queue/tests/runFanvueLaunchExecutionPostgresIntegration.mjs"
+    "test:creator-publishing-fanvue-launch-postgres": "node backend/creator-publishing-queue/tests/runFanvueLaunchExecutionPostgresIntegration.mjs",
+    "test:cpq-fanvue-scheduler-contract": "tsx backend/creator-publishing-queue/tests/cpqFanvueSchedulerSourceContract.test.ts"
   },
   "repository": {
     "type": "git",
