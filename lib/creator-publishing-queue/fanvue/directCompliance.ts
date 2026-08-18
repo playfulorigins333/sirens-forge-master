@@ -54,7 +54,7 @@ export function deriveFanvueDirectComplianceInput(facts:TrustedComplianceFacts,o
 export function evaluateFanvueDirectCompliance(input:ComplianceInput):ComplianceEvaluation{
   if(input.target_platform!=="fanvue")throw new Error("Fanvue direct compliance requires a Fanvue package.")
   const hits=[...evaluateAiAndProvenanceRules({...input,policy:fanvuePolicy}),...evaluateTextRules(input)]
-  if(requiresAiTwinConsent(input)&&input.ai_twin_consent_status!=="granted")hits.push(hit("fanvue-ai-twin-consent-missing","block","missing AI twin consent","Generated creator likeness requires current AI twin consent before Fanvue direct publishing.","ai_twin_consent_status"))
+  if(requiresAiTwinConsent(input)&&input.ai_twin_consent_status!=="granted")hits.push(hit("fanvue-ai-twin-consent-missing","block","missing AI content consent","AI-generated content or persona publishing requires current creator consent. A fully synthetic Fanvue persona does not have to resemble the verified account owner.","ai_twin_consent_status"))
   hits.sort((a,b)=>a.rule_id.localeCompare(b.rule_id))
   const resolved=outcome(hits)
   return Object.freeze({

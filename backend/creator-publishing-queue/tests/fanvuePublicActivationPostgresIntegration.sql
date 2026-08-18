@@ -3,6 +3,7 @@ create or replace function pg_temp.expect_error(label text,expected text,stateme
 create or replace function pg_temp.public_execute_granted(signature regprocedure) returns boolean language sql stable as $$select exists(select 1 from pg_proc p cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where p.oid=signature and a.grantee=0 and a.privilege_type='EXECUTE')$$;
 
 select pg_temp.assert_true((select count(distinct registry_version)=1 and min(registry_version)='task14.20260817.002' from public.creator_publishing_platform_capabilities),'activation registry is coherent');
+select pg_temp.assert_true((select platform_requires_ai_disclosure and not platform_blocks_fictional_personas),'Fanvue requires disclosure and permits fictional personas');
 select pg_temp.assert_true((select publishing_mode='direct' and availability_status='available' and connector_can_upload_media and connector_can_publish_immediately and not connector_can_schedule_directly and not human_operator_queue_supported and not human_publishing_required from public.creator_publishing_platform_capabilities where platform='fanvue'),'Fanvue direct capability activated');
 select pg_temp.assert_true((select publishing_mode='disabled' and availability_status='unassigned' from public.creator_publishing_platform_capabilities where platform='x'),'X remains disabled');
 select pg_temp.assert_true((select publishing_mode='disabled' and availability_status='unassigned' from public.creator_publishing_platform_capabilities where platform='reddit'),'Reddit remains disabled');
@@ -43,6 +44,17 @@ select pg_temp.assert_true((select result->>'resulting_compliance_status'='passe
 select pg_temp.assert_true((select compliance_status='passed' and compliance_policy_version='fanvue-reference-2026-07-10-v1' and creator_approval_status='pending' from public.creator_publishing_content_packages where id=(select id from activation_package_id)),'compliance persists without approval');
 select pg_temp.assert_true((select count(*)=1 from public.creator_publishing_compliance_reviews where content_package_id=(select id from activation_package_id) and review_source='automated' and outcome='pass' and compliance_policy_version='fanvue-reference-2026-07-10-v1'),'Fanvue compliance evidence durable');
 
+-- V1 consent is deliberately insufficient after the policy correction.
+select pg_temp.expect_error('V1 consent rejected by approval','FANVUE_APPROVAL_AI_TWIN_CONSENT_REQUIRED',$q$select public.creator_publishing_approve_fanvue_direct_package(
+ '11111111-1111-4111-8111-111111111111',(select id from activation_package_id),
+ (select updated_at from public.creator_publishing_content_packages where id=(select id from activation_package_id)),
+ 'fanvue-reference-2026-07-10-v1','fvappr_v1_rejected_01')$q$);
+update public.creator_publishing_ai_twin_consents
+set status='granted', revoked_at=null,
+    attestation_version='creator-ai-content-persona-consent-v2',
+    attestation_text_sha256='b6c9ee005f1800b0cf41757592f846a97b4a28843bbee8abe0cb0997a47b760d'
+where creator_id='11111111-1111-4111-8111-111111111111';
+
 create temp table direct_approval as
 select public.creator_publishing_approve_fanvue_direct_package(
  '11111111-1111-4111-8111-111111111111',(select id from activation_package_id),
@@ -52,6 +64,18 @@ select public.creator_publishing_approve_fanvue_direct_package(
 select pg_temp.assert_true((select result->>'resulting_creator_approval_status'='approved' and result->>'queue_task_created'='false' from direct_approval),'Fanvue direct approval creates no operator task');
 select pg_temp.assert_true((select creator_approval_status='approved' and creator_approved_by='11111111-1111-4111-8111-111111111111' and creator_approved_at is not null from public.creator_publishing_content_packages where id=(select id from activation_package_id)),'Fanvue approval durable');
 select pg_temp.assert_true((select count(*)=0 from public.creator_publishing_queue_tasks where content_package_id=(select id from activation_package_id)),'Fanvue approval remains outside manual operator queue');
+
+-- The insert guard independently rejects V1 even after package approval.
+update public.creator_publishing_ai_twin_consents
+set attestation_version='creator-ai-twin-consent-v1',
+    attestation_text_sha256='0c36baeb6477f36caa583cc46dd204cad4b5b57f0bd9c34779b0a14672b5de12'
+where creator_id='11111111-1111-4111-8111-111111111111';
+select pg_temp.expect_error('V1 consent rejected by job guard','FANVUE_JOB_TRUST_GATE_FAILED',$q$select public.creator_publishing_create_fanvue_autopost_plan(
+ '11111111-1111-4111-8111-111111111111',(select id from activation_package_id),'fanvue_v1_guard_rejected_01')$q$);
+update public.creator_publishing_ai_twin_consents
+set attestation_version='creator-ai-content-persona-consent-v2',
+    attestation_text_sha256='b6c9ee005f1800b0cf41757592f846a97b4a28843bbee8abe0cb0997a47b760d'
+where creator_id='11111111-1111-4111-8111-111111111111';
 
 create temp table activation_plan as
 select public.creator_publishing_create_fanvue_autopost_plan(

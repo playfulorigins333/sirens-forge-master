@@ -47,6 +47,7 @@ try{
  runFile("direct-compliance-facts-migration","supabase/migrations/20260817170050_cpq_fanvue_direct_compliance_facts.sql")
  runFile("direct-compliance-approval-migration","supabase/migrations/20260817170100_cpq_fanvue_direct_compliance_approval.sql")
  runFile("direct-preparation-hardening-migration","supabase/migrations/20260817170200_cpq_fanvue_direct_preparation_hardening.sql")
+ runFile("ai-persona-policy-correction-migration","supabase/migrations/20260818164748_cpq_fanvue_ai_persona_policy_correction.sql")
  runFile("public-activation-behavior","backend/creator-publishing-queue/tests/fanvuePublicActivationPostgresIntegration.sql")
  appendFileSync(logPath,"\nFANVUE_LAUNCH_EXECUTION_POSTGRES_INTEGRATION_PASSED\n");console.log("FANVUE_LAUNCH_EXECUTION_POSTGRES_INTEGRATION_PASSED")
 }catch(error){appendFileSync(logPath,`\nFAILED: ${error?.stack||error}\n`);try{console.error(readFileSync(logPath,"utf8").split(/\n/).slice(-260).join("\n"))}catch{}process.exit(1)}
