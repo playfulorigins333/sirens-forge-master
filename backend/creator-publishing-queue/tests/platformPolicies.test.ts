@@ -13,18 +13,38 @@ assert.equal(onlyFansPolicy.disclosure_policy.disclosure_position, 'start')
 assert.equal(onlyFansPolicy.disclosure_policy.default_disclosure, '#ai')
 assert.equal(onlyFansPolicy.disclosure_policy.disclosure_removable, false)
 assert.equal(onlyFansPolicy.disclosure_policy.copy_caption_must_include_disclosure, true)
-assert.ok(onlyFansPolicy.ai_policy.hard_blocked.some((item) => item.includes('fictional explicit AI persona')))
-assert.ok(onlyFansPolicy.ai_policy.allowed.some((item) => item.includes('verified creator')))
+assert.equal(onlyFansPolicy.policy_effective_date, '2026-07-09')
+assert.deepEqual(onlyFansPolicy.source_references.map((source) => source.url), [
+  'https://onlyfans.com/terms',
+  'https://onlyfans.com/acceptable-use-policy',
+  'https://onlyfans.com/help/196/205/211',
+])
+assert.deepEqual(onlyFansPolicy.source_references.map((source) => source.retrieved_or_verified_date), ['2026-07-09', '2026-07-09', '2026-07-09'])
 assert.equal(onlyFansPolicy.capabilities.direct_posting, false)
 assert.equal(onlyFansPolicy.capabilities.platform_credentials, false)
 assert.equal(onlyFansPolicy.capabilities.platform_sessions, false)
 assert.equal(onlyFansPolicy.capabilities.browser_automation, false)
+assert.ok(onlyFansPolicy.ai_policy.hard_blocked.some((item) => item.includes('fictional explicit AI persona')))
+assert.ok(onlyFansPolicy.ai_policy.allowed.some((item) => item.includes('verified creator')))
 
 assert.equal(fanslyPolicy.mode, 'manual_handoff')
 assert.equal(fanslyPolicy.enabled_for_queue, false)
 assert.ok(fanslyPolicy.ai_policy.hard_blocked.includes('photorealistic AI twin content'))
 assert.ok(fanslyPolicy.ai_policy.hard_blocked.includes('LoRA-generated photorealistic content'))
+assert.ok(fanslyPolicy.ai_policy.manual_review.includes('AI background edits'))
+assert.ok(fanslyPolicy.ai_policy.manual_review.includes('AI outfit edits'))
+assert.equal(fanslyPolicy.ai_policy.non_photorealistic_requires_virtual_entity_registration, true)
 assert.equal(fanslyPolicy.disclosure_policy.disclosure_cures_prohibited_ai, false)
+assert.equal(fanslyPolicy.capabilities.direct_posting, false)
+assert.equal(fanslyPolicy.capabilities.unofficial_api, false)
+assert.equal(fanslyPolicy.policy_effective_date, '2026-07-09')
+assert.deepEqual(fanslyPolicy.source_references.map((source) => source.url), [
+  'https://fansly.com/tos',
+  'https://help.fansly.com/en/articles/12315578-ai-generated-content-on-fansly',
+  'https://help.fansly.com/en/articles/10544523-how-to-verify-and-publish-content-featuring-others-on-fansly',
+  'https://help.fansly.com/en/articles/12328724-post-scheduling',
+])
+assert.deepEqual(fanslyPolicy.source_references.map((source) => source.retrieved_or_verified_date), ['2026-07-09', '2026-07-09', '2026-07-09', '2026-07-09'])
 
 assert.equal(fanvuePolicy.mode, 'direct_api')
 assert.equal(fanvuePolicy.enabled_for_queue, false)
@@ -43,19 +63,35 @@ assert.equal(getCreatorPublishingPlatformPolicy('fanvue'), fanvuePolicy)
 assert.deepEqual(listCreatorPublishingPlatformPolicies().map((policy) => policy.platform), ['onlyfans', 'fansly', 'fanvue'])
 assert.equal(creatorPublishingPlatformPolicies.onlyfans.policy_version, 'onlyfans-manual-handoff-2026-07-10-v1')
 
-const invalidManualDirectPosting = { ...onlyFansPolicy, capabilities: { ...onlyFansPolicy.capabilities, direct_posting: true } } as PlatformPolicy
+const invalidManualDirectPosting = {
+  ...onlyFansPolicy,
+  capabilities: { ...onlyFansPolicy.capabilities, direct_posting: true },
+} as PlatformPolicy
 assert.throws(() => validatePlatformPolicy(Object.freeze(invalidManualDirectPosting)), /manual_handoff cannot enable direct_posting/)
-const invalidFanslyDisclosureOverride = { ...fanslyPolicy, disclosure_policy: { ...fanslyPolicy.disclosure_policy, disclosure_cures_prohibited_ai: true } } as PlatformPolicy
+
+const invalidFanslyDisclosureOverride = {
+  ...fanslyPolicy,
+  disclosure_policy: { ...fanslyPolicy.disclosure_policy, disclosure_cures_prohibited_ai: true },
+} as PlatformPolicy
 assert.throws(() => validatePlatformPolicy(Object.freeze(invalidFanslyDisclosureOverride)), /Fansly disclosure cannot cure prohibited AI/)
+
 const invalidFanvueQueue = { ...fanvuePolicy, enabled_for_queue: true } as PlatformPolicy
 assert.throws(() => validatePlatformPolicy(Object.freeze(invalidFanvueQueue)), /Fanvue policy must not be routed through the manual queue/)
+
 const invalidFanvueDisclosure = { ...fanvuePolicy, disclosure_policy: { ...fanvuePolicy.disclosure_policy, disclosure_required_for_ai: false } } as PlatformPolicy
 assert.throws(() => validatePlatformPolicy(Object.freeze(invalidFanvueDisclosure)), /Fanvue AI policy must require transparent AI disclosure/)
+
 const invalidFanvueFictionalPersona = { ...fanvuePolicy, ai_policy: { ...fanvuePolicy.ai_policy, allowed: ['creator likeness only'] } } as PlatformPolicy
 assert.throws(() => validatePlatformPolicy(Object.freeze(invalidFanvueFictionalPersona)), /Fanvue policy must allow fully synthetic fictional AI personas/)
 
 assert.equal(Object.isFrozen(onlyFansPolicy), true)
+assert.equal(Object.isFrozen(onlyFansPolicy.disclosure_policy), true)
+assert.equal(Object.isFrozen(onlyFansPolicy.disclosure_policy.allowed_signifiers), true)
+assert.throws(() => { (onlyFansPolicy as unknown as { mode: string }).mode = 'direct_api' }, /read only|Cannot assign/)
+assert.equal(onlyFansPolicy.mode, 'manual_handoff')
 assert.equal(Object.isFrozen(fanvuePolicy), true)
+assert.equal(Object.isFrozen(fanvuePolicy.ai_policy), true)
+
 assert.deepEqual(findForbiddenNetworkCalls([
   'lib/creator-publishing-queue/policies/schema.ts',
   'lib/creator-publishing-queue/policies/onlyfans.ts',
