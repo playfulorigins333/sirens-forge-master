@@ -58,5 +58,48 @@ for (const row of rows) {
   assert.ok(allowedStatuses.has(row[12]), `invalid reviewed status: ${row[12]}`)
 }
 
+function inventoryRow(route: string, method: string): string[] {
+  const row = rows.find((candidate) => candidate[0] === `\`${route}\`` && candidate[2] === `\`${method}\``)
+  assert.ok(row, `missing semantic inventory row for ${method} ${route}`)
+  return row
+}
+
+function authorizationClasses(row: string[]): Set<string> {
+  return new Set(row[4].split("+").map((value) => value.trim()))
+}
+
+const webhookPostClasses = authorizationClasses(inventoryRow("/api/webhook", "POST"))
+assert.ok(webhookPostClasses.has("WEBHOOK_SIGNATURE"), "POST /api/webhook must record signature authentication")
+assert.ok(!webhookPostClasses.has("PUBLIC"), "POST /api/webhook must not be public")
+
+const webhookGetClasses = authorizationClasses(inventoryRow("/api/webhook", "GET"))
+assert.ok(webhookGetClasses.has("PUBLIC"), "GET /api/webhook must record its public status contract")
+assert.ok(!webhookGetClasses.has("WEBHOOK_SIGNATURE"), "GET /api/webhook does not verify a webhook signature")
+
+const inertLegacyEntries = [
+  ["/api/autopost/platforms/fanvue", "POST"],
+  ["/api/autopost/platforms/fansly", "POST"],
+  ["/api/autopost/platforms/manyvids", "POST"],
+  ["/api/autopost/platforms/manyvids", "GET"],
+  ["/api/autopost/platforms/onlyfans", "POST"],
+  ["/api/autopost/platforms/onlyfans", "GET"],
+  ["/api/autopost/platforms/reddit", "POST"],
+  ["/api/autopost/platforms/reddit", "GET"],
+  ["/api/autopost/platforms/x", "GET"],
+] as const
+const forbiddenInertClaims = ["AUTHENTICATED", "OWNER", "SCHEDULER_SECRET", "WEBHOOK_SIGNATURE", "OAUTH_CALLBACK"]
+for (const [route, method] of inertLegacyEntries) {
+  const classes = authorizationClasses(inventoryRow(route, method))
+  assert.ok(classes.has("PUBLIC"), `${method} ${route} must record its unauthenticated inert contract`)
+  for (const claim of forbiddenInertClaims) assert.ok(!classes.has(claim), `${method} ${route} must not claim ${claim}`)
+}
+
+const xPost = inventoryRow("/api/autopost/platforms/x", "POST")
+const xPostClasses = authorizationClasses(xPost)
+assert.ok(xPostClasses.has("INTERNAL_CONTROLLED"), "POST /api/autopost/platforms/x must record its internal control")
+assert.ok(!xPostClasses.has("PUBLIC"), "POST /api/autopost/platforms/x must not be public")
+assert.match(xPost[5], /x-autopost-internal-secret.+AUTOPOST_INTERNAL_ADAPTER_SECRET/i, "X POST authentication metadata must name its header and configured secret")
+assert.match(xPost[10], /Supabase admin.+X account.+decrypt\/refresh.+POST to X/i, "X POST privileged-use metadata must record downstream account, token, and provider access")
+
 assert.match(markdown, new RegExp(`\\*\\*Inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries`))
 console.log(`API authorization inventory contract passed (${actualFiles.length} files, ${expectedEntries.length} route-method entries).`)
