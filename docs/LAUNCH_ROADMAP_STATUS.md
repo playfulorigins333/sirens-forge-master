@@ -2,7 +2,7 @@
 
 **Canonical practical launch checklist — 2026-08-19**
 
-**Verified main / current Production frontend:** `a11f1b9e73fc3d9dfc4793757257480d160d56f5` (PR #257)
+**Verified pre-PR #259 Production frontend:** `c765639044994456315bdb0a6e35316bc29fc9cc` (PR #258)
 
 **Launch posture:** dark launch; internal access only
 
@@ -14,9 +14,9 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 | ID | Area | Gate / deliverable | Status | Evidence | Remaining action | Dependency / blocker |
 |---:|---|---|---|---|---|---|
-| 01 | Repository | Current main and PR #257 baseline reconciled | DONE | Git main evidence at `a11f1b9`; PR #257 commit title; operator identifies it as current Production/frontend main | Keep docs aligned after merges | None; $0 today: maintenance only |
-| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Operator-verified current Production/frontend main after PR #257 | Reverify after any separately authorized promotion | Deployment actions require separate authorization |
-| 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Read-only Vercel verification: deployment `dpl_3qbD2Ep4WJYoj2a2kKgVtDs47z14`; `READY`; target `production`; Git ref `main`; PR #257 SHA `a11f1b9e73fc3d9dfc4793757257480d160d56f5`; alias error none; aliases `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app` | Re-verify deployment and aliases after each future authorized Production promotion | Maintenance only; future promotions separately authorized |
+| 01 | Repository | Current main and roadmap baseline reconciled | DONE | Git main evidence through PR #258; canonical roadmap/current-state reconciliation | Keep docs aligned after merges | None; $0 today: maintenance only |
+| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Read-only Vercel verification of pre-PR #259 Production at PR #258 merge SHA | Reverify after any separately authorized promotion | Deployment actions require separate authorization |
+| 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Read-only Vercel verification after PR #258; deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN` `READY`, target `production`, Git ref `main`, SHA `c765639044994456315bdb0a6e35316bc29fc9cc` | Re-verify deployment and aliases after each future authorized Production promotion | Maintenance only; future promotions separately authorized |
 | 04 | Public site | Homepage anonymous response and launch posture | DONE | Operator-verified public route matrix; PRs #239, #250, #257 | Preserve dark-launch truth in regression tests | None; $0 today: maintenance only |
 | 05 | Public site | Intended policy/legal routes anonymously reachable | DONE | Operator-verified Production matrix; PR #239; `backend/security/tests/publicPathContract.test.ts` | Maintain route contract | None; $0 today: maintenance only |
 | 06 | Public site | FAQ/footer/pricing copy truthfully reflects launch scope | DONE | PR #257 correction/regression protection; PRs #216–#218 pricing alignment | Review on offer/scope changes | None; $0 today: maintenance only |
@@ -25,7 +25,7 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 | 09 | Identity | Authentication/session boundary | DONE | Supabase server-auth patterns; PRs #221–#225 and #234 | Maintain server-authenticated identity | None |
 | 10 | Identity | Profile/account ownership and Auth FK model | DONE | PRs #231, #234, #238; account/billing tests and migration contracts | Maintain identity-scoped reads/writes | Protected admin must not be altered |
 | 11 | Authorization | Protected-page authorization | DONE | `proxy.ts`; PR #250 frontend launch-readiness sweep | Maintain when adding pages | None |
-| 12 | Authorization | Comprehensive route-local API authorization inventory | DONE | `docs/security/api-authorization-inventory.md`: 88 route files / 102 exported route-methods reviewed; `test:api-authorization-inventory` enforces exact bidirectional completeness and required metadata | Maintain the inventory whenever API routes or authorization boundaries change | None; $0 source/test maintenance |
+| 12 | Authorization | Comprehensive route-local API authorization inventory | DONE | Frontend PR #259 inventory: 88 `app/api/**/route.ts` files / 102 exported route-methods with bidirectional completeness and semantic regression assertions. Separate Railway/FastAPI repo API PR #4 merged at `2c84f8620dc626a449740b6e946fef1388605cee`: 10 business endpoints plus public framework docs/schema routes inventoried, with regression coverage for the centralized fail-closed privileged-ingress predicate; Railway Production successfully deployed that exact API merge SHA. | Maintain both repository inventories whenever routes or authorization boundaries change | None; $0 source/test maintenance |
 | 13 | Database security | All public Production tables protected by RLS | DONE | Operator-verified Production re-audit; PR #226 repository hardening | Re-audit read-only after schema changes | No Production mutation authorized |
 | 14 | Database security | No `SECURITY DEFINER` function executable by `PUBLIC` | DONE | Operator-verified audit; PRs #228–#229 | Maintain signature/exposure guards | No Production mutation authorized |
 | 15 | Pricing | Launch prices and lifetime/monthly semantics | LOCKED / FROZEN | PRs #216–#218; `app/pricing/PricingClient.tsx`: $1,333 one-time and $29.99/month | Copy-only maintenance if facts change | Payment V2 frozen |
