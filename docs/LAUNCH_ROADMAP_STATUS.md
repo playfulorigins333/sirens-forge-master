@@ -2,7 +2,9 @@
 
 **Canonical practical launch checklist — 2026-08-19**
 
-**Verified pre-PR #259 Production frontend:** `c765639044994456315bdb0a6e35316bc29fc9cc` (PR #258)
+**Current operator-verified Production frontend:** `84c22b3337b3faf608965da84803c2d15cf1258a` (PR #260)
+
+**Current operator-verified Vercel deployment:** `dpl_CzqyGKH4zpQF9mV2jqwWrJAtmCVC` — `READY`, target `production`, Git ref `main`, exact SHA above. This task performed no deployment action.
 
 **Launch posture:** dark launch; internal access only
 
@@ -14,9 +16,9 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 | ID | Area | Gate / deliverable | Status | Evidence | Remaining action | Dependency / blocker |
 |---:|---|---|---|---|---|---|
-| 01 | Repository | Current main and roadmap baseline reconciled | DONE | Git main evidence through PR #258; canonical roadmap/current-state reconciliation | Keep docs aligned after merges | None; $0 today: maintenance only |
-| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Read-only Vercel verification of pre-PR #259 Production at PR #258 merge SHA | Reverify after any separately authorized promotion | Deployment actions require separate authorization |
-| 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Read-only Vercel verification after PR #258; deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN` `READY`, target `production`, Git ref `main`, SHA `c765639044994456315bdb0a6e35316bc29fc9cc` | Re-verify deployment and aliases after each future authorized Production promotion | Maintenance only; future promotions separately authorized |
+| 01 | Repository | Current main and roadmap baseline reconciled | DONE | Git main evidence through PR #260; canonical roadmap/current-state reconciliation | Keep docs aligned after merges | None; $0 today: maintenance only |
+| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Operator-supplied verified Vercel Production deployment `dpl_CzqyGKH4zpQF9mV2jqwWrJAtmCVC`: `READY`, target `production`, ref `main`, exact PR #260 SHA `84c22b3337b3faf608965da84803c2d15cf1258a` | Reverify after any separately authorized promotion | Deployment actions require separate authorization; this task did not deploy |
+| 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Historical read-only alias verification exists for PR #258 deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN`; PR #260 deployment identity/state/SHA is operator-verified, but this task did not independently recheck aliases | Re-verify deployment and aliases separately after each future authorized Production promotion | Maintenance only; future promotions separately authorized |
 | 04 | Public site | Homepage anonymous response and launch posture | DONE | Operator-verified public route matrix; PRs #239, #250, #257 | Preserve dark-launch truth in regression tests | None; $0 today: maintenance only |
 | 05 | Public site | Intended policy/legal routes anonymously reachable | DONE | Operator-verified Production matrix; PR #239; `backend/security/tests/publicPathContract.test.ts` | Maintain route contract | None; $0 today: maintenance only |
 | 06 | Public site | FAQ/footer/pricing copy truthfully reflects launch scope | DONE | PR #257 correction/regression protection; PRs #216–#218 pricing alignment | Review on offer/scope changes | None; $0 today: maintenance only |
@@ -61,7 +63,7 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 | 45 | Governance | Creator likeness and AI-persona consent controls | DONE | PR #255; migration `20260818164748_cpq_fanvue_ai_persona_policy_correction.sql`; AI-twin consent tests | Maintain consent version/hash and provider policy | Human legal review remains distinct |
 | 46 | Governance | Complaints/removal operating workflow | DONE | `docs/operations/complaints-removal-operations.md`; `backend/governance/tests/complaintsRemovalOperations.test.ts`; truthful `app/content-removal/page.tsx` alignment. Repository review found no dedicated case-management schema/service/admin UI. | Maintain the runbook, public intake/policy truth, CI contract, and operator-approved internal targets | Human legal sufficiency and real staffing/execution remain separate; no Production action authorized |
 | 47 | Frontend | Accessibility, SEO, sitemap, error/loading shell | DONE | PR #250 sweep; PR #257 regressions; sitemap and app shell files | Maintain regression coverage | None |
-| 48 | Operations | Sanitized observability, alerts and recovery closure | OPEN | Payment/CPQ finite errors and recovery docs exist, but no complete launch-wide alert/ownership matrix is recorded | Inventory critical signals, owners, thresholds, redaction, runbooks and tabletop procedures | $0 today: yes; no external mutation needed |
+| 48 | Operations | Sanitized observability, alerts and recovery closure | DONE | `docs/operations/launch-observability-alerts-recovery.md`; `backend/operations/tests/launchObservabilityRecovery.test.ts`; current API read-only audit at `2c84f8620dc626a449740b6e946fef1388605cee`; Railway Production `SUCCESS` on that exact SHA. The audit confirms 10 business routes, centralized fail-closed ingress, no custom API health endpoint, and no proven secret leak; the API repository was not modified. | Keep matrix/runbooks aligned when routes or signals change; perform safe launch-period checks; separately authorize real recovery mutations | Maintenance only; no automated paging or 24/7 staffing implied |
 | 49 | Operations | Public/legal route operational regression check | DONE | Operator-verified current Production matrix; PRs #239 and #257 | Repeat safe GET/HEAD check after authorized promotions | No mutating smoke tests |
 | 50 | Security | Protected sole Production admin preserved | LOCKED / FROZEN | Operator fact; PR #254 sole-admin founder bootstrap | Never alter/delete during testing or audits | Absolute safety boundary |
 | 51 | Launch scope | Economic tokens excluded from Phase 1 | LOCKED / FROZEN | PR #232 token retirement migration/tests; operator scope fact | Do not reintroduce for launch | Frozen scope |
@@ -69,19 +71,17 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 ## Next zero-spend engineering candidates
 
-Only OPEN, non-frozen, non-budget-blocked work is ranked here. None authorizes Production, payment, database, OAuth, provider, or generation actions.
-
-1. **Sanitized observability, alerts, and recovery closure (row 48).** Build a launch-wide signal/owner/runbook matrix from existing finite Payment V2 and CPQ errors; document redaction and tabletop recovery without invoking any external or mutating path.
+There is no presently actionable zero-spend engineering gate. `OPEN = 0` does not complete deferred funding, external-dependency, frozen, or post-launch scope and authorizes no Production, payment, database, OAuth, provider, or generation action.
 
 ## Count by status
 
 | Status | Rows |
 |---|---:|
-| DONE | 28 |
+| DONE | 29 |
 | LOCKED / FROZEN | 12 |
 | DEFERRED — BUDGET | 5 |
 | DEFERRED — DEPENDENCY | 3 |
-| OPEN | 1 |
+| OPEN | 0 |
 | POST-LAUNCH | 3 |
 | UNKNOWN — VERIFY | 0 |
 | **Total** | **52** |
