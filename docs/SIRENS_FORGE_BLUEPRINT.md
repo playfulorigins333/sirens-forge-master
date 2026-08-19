@@ -122,7 +122,7 @@ Use diff/scope checks first, then focused source/route tests, domain suites, sta
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
 - **DONE:** comprehensive cross-repo API authorization inventory: frontend 88 route files / 102 route-methods plus separate Railway/FastAPI API PR #4 covering 10 business endpoints and framework routes, with regression contracts in both repositories.
 - **DONE:** complaints/removal source/documentation/testing operating workflow and regression contract.
-- **OPEN:** remaining observability, alerting, and manual-recovery closure.
+- **OPEN:** observability/alerting/recovery now has a launch-wide zero-spend operating contract and CI regression coverage, but row 48 remains open until the current private Railway/FastAPI repository SHA and source (including logging and any actual health/readiness surface) can be inspected. No universal automated paging platform is established.
 - **POST-LAUNCH:** Muse Store and expanded affiliate payout automation. Video generation remains Coming Soon/execution-disabled rather than a Phase 1 capability.
 - **UNKNOWN — VERIFY:** human legal sufficiency and any operational fact not covered by current operator evidence.
 

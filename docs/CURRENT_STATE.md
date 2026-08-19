@@ -2,7 +2,7 @@
 
 **As of:** 2026-08-19
 
-**Verified pre-PR #259 Production frontend:** `c765639044994456315bdb0a6e35316bc29fc9cc` (PR #258)
+**Current operator-verified Production frontend:** `84c22b3337b3faf608965da84803c2d15cf1258a` (PR #260)
 
 **Access posture:** dark launch; internal access only
 
@@ -12,8 +12,8 @@ This document separates operator-verified operational facts from repository evid
 
 ## Current verified facts
 
-- **Repository and public site:** PR #258 is present at the verified pre-PR #259 Production frontend above. The intended anonymous public/legal route matrix has been checked on Production. PR #239 repaired the missing public allowlisting, PR #250 completed a frontend launch-readiness/security/accessibility sweep, PR #257 corrected stale FAQ/footer launch claims and added regression coverage, and PR #258 reconciled the canonical 52-gate roadmap/current-state documentation. The site remains dark-launch/internal-access only.
-- **Current verified pre-PR #259 Production deployment and aliases:** Independent read-only Vercel verification records deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN` as `READY`, targeted to `production`, from Git ref `main` at PR #258 merge SHA `c765639044994456315bdb0a6e35316bc29fc9cc`. Any PR #259 Production deployment remains a separate post-merge verification gate.
+- **Repository and public site:** PR #260 is present at the current operator-verified Production frontend above. The intended anonymous public/legal route matrix was checked on Production as historical evidence; this task did not repeat a public or alias verification. PR #260 added the complaints/removal operating gate after PR #259's API inventory. The site remains dark-launch/internal-access only.
+- **Current verified Production deployment:** Operator-supplied verification records Vercel deployment `dpl_CzqyGKH4zpQF9mV2jqwWrJAtmCVC` as `READY`, targeted to `production`, from Git ref `main` at exact PR #260 merge SHA `84c22b3337b3faf608965da84803c2d15cf1258a`. This task performed no deployment/promotion and does not infer current custom-domain aliases from deployment readiness.
 - **Payment V2 — DONE and LOCKED / FROZEN:** The engineering contract spans PRs #197–#240, including Checkout, webhook inbox/event handling, claim/entitlement lifecycle, affiliate attribution, lifecycle behavior, inventory correction, readiness, and tests. Production configuration readiness is operator-verified green. Do not reopen this system as unfinished development.
 - **Founder offer:** OG Founder is **$1,333 one-time** for lifetime founder access, capped at **50 paid seats**. Early Bird is **$29.99/month while active**, capped at **150 paid seats**. The separate 25 beta testers are outside the 200 paid founder-seat pool. PR #236 and `backend/payment-v2/tests/lock05fLaunchInventory.test.ts` record the inventory correction.
 - **Payment operational hold:** A real-money V2 Production canary has not been performed and is **DEFERRED — BUDGET**, not unfinished engineering. There is no spare operating cash for a dummy charge/refund. Before any future live Stripe validation, Stripe must first be updated with the new Sirens Forge LLC business bank-account information. While that hold remains, do not recommend a charge, refund, Checkout canary, Connect onboarding, or other financial mutation.
@@ -29,7 +29,7 @@ This document separates operator-verified operational facts from repository evid
 
 - **API authorization inventory:** DONE across both application repositories. Frontend: 88 route files / 102 route-methods plus semantic/completeness regression coverage. Railway/FastAPI: merged API PR #4 covering 10 business endpoints plus public framework docs/schema routes with privileged-ingress regression coverage.
 - **Complaints/removal operations — source gate DONE:** `docs/operations/complaints-removal-operations.md` defines the mailbox owner role, finite case states, proposed internal triage targets, minimum-necessary evidence, escalation/decision authority, notices, append-only audit record, and five synthetic tabletops. `backend/governance/tests/complaintsRemovalOperations.test.ts` protects the workflow, public routes/intake, and truthful policy copy in hosted CI. Repository review found no dedicated complaint/removal case-management schema, service, or admin UI; the restricted non-Production record is therefore the documented launch mechanism. This does not establish human legal sufficiency, staffed execution, or Production action.
-- **OPEN, zero-spend candidate:** close remaining observability/manual-recovery documentation and alerting gaps (roadmap row 48).
+- **Observability/recovery row 48 remains OPEN:** `docs/operations/launch-observability-alerts-recovery.md` now supplies the launch-wide roles, severity/thresholds, signal/recovery matrix, redaction rules, manual cadence, incident template, and safe tabletops, protected by hosted CI. No universal automated monitoring/paging platform was found. The current private API repository could not be fetched in this environment, so its exact current SHA/source/logging/health posture is not re-verified; that explicit cross-repository audit blocker prevents honest closure.
 - **DEFERRED — BUDGET:** Stripe bank-account prerequisite and real-money canary; live Stripe Connect onboarding; identity-training and image-generation real-compute proof.
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
 - **POST-LAUNCH:** Muse Store and affiliate payout automation expansion. Video execution is not a Phase 1 capability.
