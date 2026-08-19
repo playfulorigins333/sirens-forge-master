@@ -4,33 +4,33 @@ export default function FAQPage() {
   return (
     <LegalPageLayout
       title="Frequently Asked Questions"
-      lastUpdated="April 11, 2026"
+      lastUpdated="August 18, 2026"
     >
       <section>
         <h2 className="text-xl font-semibold">1. What is Sirens Forge?</h2>
         <p>
-          Sirens Forge is an identity-first AI generation platform that allows you to create images, videos, and guided creative content using advanced AI tools.
+          Sirens Forge is an identity-first AI creation platform centered on reusable AI Twin identities and creator workflows.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">2. Do I need an identity (LoRA) to generate?</h2>
+        <h2 className="text-xl font-semibold">2. Do I need an AI Twin identity to generate?</h2>
         <p>
-          No. You can generate content immediately without creating an identity. Identities are optional and allow for more consistent, personalized results across generations.
+          Yes. Generation requires you to create and select an AI Twin identity, which anchors your generations and supports consistent, personalized results.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">3. What is an identity?</h2>
+        <h2 className="text-xl font-semibold">3. What is an AI Twin identity?</h2>
         <p>
-          An identity is a custom-trained AI model (LoRA) that represents a specific character or persona. Once created, it can be reused across images and videos to maintain consistency.
+          An AI Twin identity is a custom-trained AI model (LoRA) that represents a specific character or persona. Once created, it can be reused across generations to maintain consistency.
         </p>
       </section>
 
       <section>
         <h2 className="text-xl font-semibold">4. What can I create?</h2>
         <p>
-          You can create AI-generated images, videos, and guided creative outputs using prompts or the Siren’s Mind assistant.
+          Sirens Forge supports identity-anchored creative workflows using prompts or the Siren’s Mind assistant. Image generation availability is shown in the generator. Video generation is Coming Soon.
         </p>
       </section>
 
@@ -44,14 +44,14 @@ export default function FAQPage() {
       <section>
         <h2 className="text-xl font-semibold">6. How does billing work?</h2>
         <p>
-          Sirens Forge operates on a subscription model. You are billed on a recurring basis through our payment provider. You can cancel your subscription at any time.
+          The OG Founder offer is $1,333 one-time with lifetime founder access and no recurring subscription. Early Bird is $29.99/month while the subscription remains active.
         </p>
       </section>
 
       <section>
         <h2 className="text-xl font-semibold">7. Can I cancel anytime?</h2>
         <p>
-          Yes. You can cancel your subscription at any time through your account settings. Access will continue until the end of your billing period.
+          Early Bird is a recurring plan that you can manage or cancel through your account and billing controls. Access continues until the end of the active billing period. OG Founder is a one-time purchase, so there is no recurring subscription to cancel.
         </p>
       </section>
 
