@@ -25,7 +25,7 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 | 09 | Identity | Authentication/session boundary | DONE | Supabase server-auth patterns; PRs #221–#225 and #234 | Maintain server-authenticated identity | None |
 | 10 | Identity | Profile/account ownership and Auth FK model | DONE | PRs #231, #234, #238; account/billing tests and migration contracts | Maintain identity-scoped reads/writes | Protected admin must not be altered |
 | 11 | Authorization | Protected-page authorization | DONE | `proxy.ts`; PR #250 frontend launch-readiness sweep | Maintain when adding pages | None |
-| 12 | Authorization | Comprehensive route-local API authorization inventory | OPEN | API bypass risk recorded in blueprint; PRs #221–#225 cover high-risk subsets, not a documented complete inventory | Inventory every API route; prove auth, ownership, entitlement/admin role, and safe errors | $0 today: yes; highest-priority engineering candidate |
+| 12 | Authorization | Comprehensive route-local API authorization inventory | DONE | `docs/security/api-authorization-inventory.md`: 88 route files / 102 exported route-methods reviewed; `test:api-authorization-inventory` enforces exact bidirectional completeness and required metadata | Maintain the inventory whenever API routes or authorization boundaries change | None; $0 source/test maintenance |
 | 13 | Database security | All public Production tables protected by RLS | DONE | Operator-verified Production re-audit; PR #226 repository hardening | Re-audit read-only after schema changes | No Production mutation authorized |
 | 14 | Database security | No `SECURITY DEFINER` function executable by `PUBLIC` | DONE | Operator-verified audit; PRs #228–#229 | Maintain signature/exposure guards | No Production mutation authorized |
 | 15 | Pricing | Launch prices and lifetime/monthly semantics | LOCKED / FROZEN | PRs #216–#218; `app/pricing/PricingClient.tsx`: $1,333 one-time and $29.99/month | Copy-only maintenance if facts change | Payment V2 frozen |
@@ -71,19 +71,18 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 Only OPEN, non-frozen, non-budget-blocked work is ranked here. None authorizes Production, payment, database, OAuth, provider, or generation actions.
 
-1. **Comprehensive route-local API authorization inventory (row 12).** Highest launch/security impact: enumerate every API route and close evidence gaps for authentication, resource ownership, paid entitlement or admin role, input limits, and sanitized errors. This precedes broader operational readiness and can be completed with source/tests for $0.
-2. **Complaints/removal operating workflow (row 46).** Define accountable intake-to-resolution operations, evidence handling, escalation/deadlines, notifications, and a safe tabletop. Public pages alone are not operational proof; the workflow can be designed without touching Production.
-3. **Sanitized observability, alerts, and recovery closure (row 48).** Build a launch-wide signal/owner/runbook matrix from existing finite Payment V2 and CPQ errors; document redaction and tabletop recovery without invoking any external or mutating path.
+1. **Complaints/removal operating workflow (row 46).** Define accountable intake-to-resolution operations, evidence handling, escalation/deadlines, notifications, and a safe tabletop. Public pages alone are not operational proof; the workflow can be designed without touching Production.
+2. **Sanitized observability, alerts, and recovery closure (row 48).** Build a launch-wide signal/owner/runbook matrix from existing finite Payment V2 and CPQ errors; document redaction and tabletop recovery without invoking any external or mutating path.
 
 ## Count by status
 
 | Status | Rows |
 |---|---:|
-| DONE | 26 |
+| DONE | 27 |
 | LOCKED / FROZEN | 12 |
 | DEFERRED — BUDGET | 5 |
 | DEFERRED — DEPENDENCY | 3 |
-| OPEN | 3 |
+| OPEN | 2 |
 | POST-LAUNCH | 3 |
 | UNKNOWN — VERIFY | 0 |
 | **Total** | **52** |

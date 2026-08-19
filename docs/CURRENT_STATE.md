@@ -26,7 +26,8 @@ This document separates operator-verified operational facts from repository evid
 
 ## Current open and deferred work
 
-- **OPEN, zero-spend candidates:** complete the API authorization review, formalize the complaints/removal operating workflow, and close remaining observability/manual-recovery documentation and alerting gaps. These are ranked with evidence and dependencies in the canonical roadmap.
+- **API authorization inventory:** DONE. The canonical inventory covers all 88 current `app/api/**/route.ts` files and 102 exported HTTP route-methods; its focused test fails on route drift, method drift, duplicates, or missing classification metadata.
+- **OPEN, zero-spend candidates:** formalize the complaints/removal operating workflow and close remaining observability/manual-recovery documentation and alerting gaps. These are ranked with evidence and dependencies in the canonical roadmap.
 - **DEFERRED — BUDGET:** Stripe bank-account prerequisite and real-money canary; live Stripe Connect onboarding; identity-training and image-generation real-compute proof.
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
 - **POST-LAUNCH:** Muse Store and affiliate payout automation expansion. Video execution is not a Phase 1 capability.

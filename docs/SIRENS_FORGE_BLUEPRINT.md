@@ -20,7 +20,7 @@ Pages exist for the homepage, pricing, FAQ, contact, terms, privacy, acceptable 
 
 Supabase Auth provides cookie-backed, server-validated identity. Profiles connect Auth users to application, billing, affiliate, and Connect state. Protected pages pass through `proxy.ts`; API routes must enforce their own authentication, ownership, entitlement, and administrator boundaries. PRs #221–#225 hardened generation, Siren’s Mind, legacy LoRA, admin-X, and authenticated API caller boundaries; PRs #234 and #238 hardened account/billing and profile-FK behavior.
 
-**Operator-verified Production security:** all public tables are protected by RLS and no `SECURITY DEFINER` function is executable by `PUBLIC`. PRs #226–#229 provide repository hardening contracts. The single real dark-launch auth/admin user is expected and protected; it must never be altered. These facts do not remove the need for route-local authorization review as APIs evolve.
+**Operator-verified Production security:** all public tables are protected by RLS and no `SECURITY DEFINER` function is executable by `PUBLIC`. PRs #226–#229 provide repository hardening contracts. The single real dark-launch auth/admin user is expected and protected; it must never be altered. The exhaustive route-local inventory in `docs/security/api-authorization-inventory.md` records all 88 current API route files and 102 exported HTTP methods; its focused regression contract requires future route and authorization changes to remain classified.
 
 ## 4. Pricing, founder inventory, and launch entitlements
 
@@ -115,14 +115,15 @@ Use diff/scope checks first, then focused source/route tests, domain suites, sta
 - **DONE:** intended public/legal matrix verification; Production Payment V2 readiness; Production RLS and privileged-function audit; Fanvue capability and recurring scheduler activation.
 - **DEFERRED — BUDGET:** Stripe business-bank prerequisite and real-money V2 canary, live Connect onboarding, identity-training compute proof, image-generation compute proof.
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
-- **OPEN:** comprehensive API authorization review; complaints/removal operating workflow; remaining observability, alerting, and manual-recovery closure.
+- **DONE:** comprehensive API authorization inventory (88 route files / 102 route-methods) with a bidirectional completeness contract.
+- **OPEN:** complaints/removal operating workflow; remaining observability, alerting, and manual-recovery closure.
 - **POST-LAUNCH:** Muse Store and expanded affiliate payout automation. Video generation remains Coming Soon/execution-disabled rather than a Phase 1 capability.
 - **UNKNOWN — VERIFY:** human legal sufficiency and any operational fact not covered by current operator evidence.
 
 ## 17. Recommended engineering sequence
 
 1. Preserve Payment V2 and its 50/150 inventory as frozen; keep provider and compute holds explicit.
-2. Complete the zero-spend API authorization inventory and close any route-local ownership/admin/entitlement evidence gaps without external actions.
+2. Maintain the completed API authorization inventory whenever a route or boundary changes.
 3. Formalize and tabletop the complaints/removal workflow using non-Production fixtures and documented roles.
 4. Close sanitized observability, alerting, and manual-recovery documentation gaps for asynchronous systems.
 5. Maintain public copy/route regression coverage and independently verify deployment identity, target, aliases, and safe responses after every authorized Production promotion.
