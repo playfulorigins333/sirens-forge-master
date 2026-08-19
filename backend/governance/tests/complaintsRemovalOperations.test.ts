@@ -7,6 +7,7 @@ await access(runbookPath);
 const runbook = await readFile(runbookPath, "utf8");
 const removal = await readFile("app/content-removal/page.tsx", "utf8");
 const complaints = await readFile("app/complaints/page.tsx", "utf8");
+const underage = await readFile("app/underage-policy/page.tsx", "utf8");
 const sitemap = await readFile("app/sitemap.ts", "utf8");
 
 assert(runbook.includes("admin@sirensforge.vip"), "runbook must preserve the public intake address");
@@ -40,18 +41,21 @@ for (const route of ["/complaints", "/content-removal"]) {
   assert(sitemap.includes(`"${route}"`), `${route} must remain in the sitemap contract`);
 }
 
-const publicPolicyCopy = `${removal}\n${complaints}`;
+const consentPolicyCopy = `${removal}\n${complaints}\n${underage}`;
 assert.doesNotMatch(
-  publicPolicyCopy,
+  consentPolicyCopy,
   /Sirens Forge[^.]{0,120}does not verify[^.]{0,120}consent/i,
   "stale blanket consent-verification disclaimer must not return",
 );
 assert(removal.includes("applies platform consent, likeness, safety, and policy"));
 assert.match(removal, /do not\s+independently establish legal ownership/);
 assert.match(removal, /Users remain responsible for obtaining the rights and/);
+assert(underage.includes("applies platform age, consent, likeness, safety, and policy"));
+assert.match(underage, /do not\s+independently establish legal ownership/);
 
+const publicComplaintRemovalCopy = `${removal}\n${complaints}`;
 const hardDeadline = /(?:respond|acknowledge|review|resolve|remove|action)[^.!?\n]{0,80}\b(?:within|in)\s+\d+\s+(?:hours?|business days?|calendar days?|days?)\b/i;
-assert.doesNotMatch(publicPolicyCopy, hardDeadline, "public policy must not promise a hard response deadline");
+assert.doesNotMatch(publicComplaintRemovalCopy, hardDeadline, "public policy must not promise a hard response deadline");
 assert.match(runbook, /not public promises, service-level guarantees, or statutory deadlines/i);
 
 console.log("complaints/removal operations regression contract: PASS");
