@@ -2,7 +2,7 @@ import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function UnderagePolicyPage() {
   return (
-    <LegalPageLayout title="Underage Content Policy" lastUpdated="April 27, 2026">
+    <LegalPageLayout title="Underage Content Policy" lastUpdated="August 19, 2026">
       <section>
         <p>
           Sirens Forge maintains a strict zero-tolerance policy for any content
@@ -59,10 +59,12 @@ export default function UnderagePolicyPage() {
           4. User Responsibility
         </h2>
         <p>
-          Users are solely responsible for ensuring that all prompts, uploads,
-          identity references, and generated content comply with this policy.
-          Sirens Forge does not verify age, consent, or identity ownership of
-          submitted materials.
+          Users are responsible for ensuring that all prompts, uploads, identity
+          references, and generated content comply with this policy and for
+          obtaining necessary rights and authorization. Sirens Forge applies
+          platform age, consent, likeness, safety, and policy controls where
+          supported by the product; those controls do not independently
+          establish legal ownership or every jurisdiction-specific right.
         </p>
       </section>
 

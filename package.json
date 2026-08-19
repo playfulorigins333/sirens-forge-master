@@ -6,6 +6,7 @@
   "main": "next.config.js",
   "scripts": {
     "test:frontend-launch-readiness": "tsx backend/security/tests/frontendLaunchReadiness.test.ts",
+    "test:complaints-removal-operations": "tsx backend/governance/tests/complaintsRemovalOperations.test.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

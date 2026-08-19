@@ -8,6 +8,8 @@ on:
       - 'lib/autopost/**'
       - 'lib/creator-publishing-queue/fanvue/**'
       - 'backend/security/tests/frontendLaunchReadiness.test.ts'
+      - 'backend/governance/tests/complaintsRemovalOperations.test.ts'
+      - 'docs/operations/complaints-removal-operations.md'
       - 'backend/security/tests/apiAuthorizationInventory.test.ts'
       - 'docs/security/api-authorization-inventory.md'
       - 'package.json'
@@ -26,6 +28,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:frontend-launch-readiness
+      - run: npm run test:complaints-removal-operations
+      - run: npm run test:public-paths
       - run: npm run test:api-authorization-inventory
       - run: npx tsc --noEmit
       - run: git diff --check
