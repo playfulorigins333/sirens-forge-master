@@ -1,59 +1,48 @@
 # Sirens Forge Current State
 
-**State:** Recovered Production-only application baseline; generation compute offline.
+**As of:** 2026-08-19
 
-**As of:** 2026-08-01
+**Verified main / current Production frontend:** `a11f1b9e73fc3d9dfc4793757257480d160d56f5` (PR #257)
 
-**Verified main and Production commit:** `7522c54e83c02b0fff15b7ab57364f711cb1bf67`
+**Access posture:** dark launch; internal access only
 
-## Snapshot
+**Canonical practical checklist:** [`LAUNCH_ROADMAP_STATUS.md`](./LAUNCH_ROADMAP_STATUS.md)
 
-- **Verified in Production — deployment:** The recorded current main/Production commit is the PR #195 merge commit above, following Checkout recovery PR #194. This does not by itself prove any external transaction or every route.
-- **Verified in Production — public domains:** Read-only Vercel inspection verified that deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi`, serving commit `7522c54e83c02b0fff15b7ab57364f711cb1bf67`, owns `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`. Safe public GET requests on 2026-08-01 verified that `https://sirensforge.vip/` returns `307` to `www.sirensforge.vip`, while `https://www.sirensforge.vip/`, `/pricing`, `/contact`, and `/content-removal` return `200`.
-- **Verified in Production — application baseline:** The application uses the authenticated pre-incident Checkout baseline restored in PR #194, with server-authenticated Stripe Connect protection restored in PR #195.
-- **Verified in Production — database migrations:** Applied Checkout incident migrations 02100–02600 were preserved. Forward cleanup migration `20260731002700_remove_checkout_incident_objects.sql` was applied exactly once after the recorded final read-only audit and separate authorization. A future audit should still compare the complete remote migration ledger and schema with the repository.
-- **Verified in Production — Checkout:** Guest/pay-first incident objects are removed and current Checkout requires a server-authenticated user. **Unknown / requires verification:** the recovered contract has not been established here as a current end-to-end paid Checkout/webhook/entitlement test.
-- **Verified in Production — Stripe Connect security:** PR #195 restores server-authenticated identity, identity-scoped profile lookup/update, delayed privileged-client construction, and sanitized provider errors. **Unknown / requires verification:** no live Connect onboarding was executed as part of that restoration.
-- **Offline — generation pods:** Real image/video generation and identity-training compute are not operational. Post-generation flows have not been validated while pods are offline. Static UI/routes/workflow payloads are not substitutes for real output.
-- **Verified in Production — public policy/contact subset:** Safe GET requests verified the root, pricing, contact, and content-removal responses described above, and the Contact page displays `admin@sirensforge.vip`. **Unknown / requires verification:** the complete public-policy response matrix and anonymous accessibility of remaining policy pages not explicitly included in `proxy.ts` have not been verified.
-- **Present but inactive — Reddit:** Reddit remains a truthful manual-only placeholder and has a lockdown source-contract test. OAuth/autopost must not be implied.
-- **Unknown / requires verification — Autopost:** Provider-specific implementation exists, but configuration, approvals, scopes, gates, credentials, connected-account health, and live posting status must be verified independently. The last repository operations record describes creator-publishing recurring scheduling as disabled.
+This document separates operator-verified operational facts from repository evidence. A route, test, migration, build, or deployment record does not by itself prove current external operation.
 
-## Not live-tested by this baseline record
+## Current verified facts
 
-- A paid current-contract Checkout through verified webhook delivery, entitlement grant, billing lifecycle, and reconciliation.
-- Stripe Connect account creation/onboarding or a real affiliate destination transfer after PR #195.
-- Any generation, training, video, persisted real asset, or post-generation workflow while pods are offline.
-- The complete policy/contact route matrix, especially anonymous access to pages outside the proxy’s explicit allowlist.
-- Every OAuth, refresh, posting, scheduling, operator, and provider-specific publishing path.
+- **Repository and public site:** PR #257 is present at the verified main above. The intended anonymous public/legal route matrix has been checked on current Production. PR #239 repaired the missing public allowlisting, PR #250 completed a frontend launch-readiness/security/accessibility sweep, and PR #257 corrected stale FAQ/footer launch claims and added regression coverage. The site remains dark-launch/internal-access only.
+- **Current Production deployment and aliases:** Independent read-only Vercel verification records deployment `dpl_3qbD2Ep4WJYoj2a2kKgVtDs47z14` as `READY`, targeted to `production`, from Git ref `main` at PR #257 SHA `a11f1b9e73fc3d9dfc4793757257480d160d56f5`, with no alias error. Its current aliases are `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`.
+- **Payment V2 — DONE and LOCKED / FROZEN:** The engineering contract spans PRs #197–#240, including Checkout, webhook inbox/event handling, claim/entitlement lifecycle, affiliate attribution, lifecycle behavior, inventory correction, readiness, and tests. Production configuration readiness is operator-verified green. Do not reopen this system as unfinished development.
+- **Founder offer:** OG Founder is **$1,333 one-time** for lifetime founder access, capped at **50 paid seats**. Early Bird is **$29.99/month while active**, capped at **150 paid seats**. The separate 25 beta testers are outside the 200 paid founder-seat pool. PR #236 and `backend/payment-v2/tests/lock05fLaunchInventory.test.ts` record the inventory correction.
+- **Payment operational hold:** A real-money V2 Production canary has not been performed and is **DEFERRED — BUDGET**, not unfinished engineering. There is no spare operating cash for a dummy charge/refund. Before any future live Stripe validation, Stripe must first be updated with the new Sirens Forge LLC business bank-account information. While that hold remains, do not recommend a charge, refund, Checkout canary, Connect onboarding, or other financial mutation.
+- **Generation — compute offline:** Real image generation, identity training, and downstream real-output proof are **DEFERRED — BUDGET**. No fake, mock, or placeholder output may count as evidence. Video generation is Coming Soon and execution-disabled. The architecture remains identity-first with at most one body LoRA plus one identity LoRA. Safe static/source/schema review may continue without compute.
+- **Production database security:** The operator-supplied current Production re-audit found every public table protected by RLS and no `SECURITY DEFINER` function executable by `PUBLIC`. PRs #226–#229 contain the repository hardening evidence. The protected Production admin account must never be altered; the expected dark-launch state is one real auth/admin user.
+- **Creator Publishing Queue:** CPQ is the authoritative publishing state machine; legacy Autopost is not the Fanvue launch state machine. Fanvue provider posting machinery was proven separately. PRs #246–#255 bridge and activate Fanvue with creator/persona consent and trust gates.
+- **Fanvue scheduler — active:** PR #256 installed the controlled scheduler architecture. Operator evidence records one `fanvue_cpq_cron_secret` in Supabase Vault, the `pg_net` prerequisite applied, canonical cron `sirens_forge_cpq_fanvue_runner` active every minute, and its first scheduled execution successful with HTTP 200. No publication job or post was created merely to prove activation. Recurring Fanvue scheduling is not inactive or unwired.
+- **Other providers:** OnlyFans remains assisted/manual, with final live verification parked behind the legitimate external dependency tracked in issue #230. X is unavailable/non-selectable for launch. Reddit is unavailable/non-selectable and a manual placeholder. Provider capabilities are not interchangeable.
+- **Phase 1 boundaries:** Tokens are not in Phase 1 (PR #232 retired the token architecture). Muse Store is post-launch. Video remains Coming Soon.
 
-## Current known risks
+## Current open and deferred work
 
-- Future route/build/deployment evidence could be mistaken for end-to-end or alias proof unless each new deployment is independently checked.
-- API paths bypass the proxy’s page gate and depend on correct route-local authentication/authorization.
-- Payment and entitlement behavior spans Stripe, webhooks, Supabase, capacity UI, and reconciliation; redesign without a staged contract could repeat the incident.
-- Repository schema/history may drift from remote migration, RLS, cron, or environment state unless checked read-only.
-- Provider integrations have unequal maturity; generic “Autopost supported” language can overstate them.
-- Generation UI and routes remain visible in a codebase whose compute is offline.
-- Existing policy pages and the proxy public allowlist do not fully align.
+- **OPEN, zero-spend candidates:** complete the API authorization review, formalize the complaints/removal operating workflow, and close remaining observability/manual-recovery documentation and alerting gaps. These are ranked with evidence and dependencies in the canonical roadmap.
+- **DEFERRED — BUDGET:** Stripe bank-account prerequisite and real-money canary; live Stripe Connect onboarding; identity-training and image-generation real-compute proof.
+- **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
+- **POST-LAUNCH:** Muse Store and affiliate payout automation expansion. Video execution is not a Phase 1 capability.
+- **UNKNOWN — VERIFY:** Human legal sufficiency and some end-to-end operational recovery exercises require explicit verification. Do not infer these from policy copy, routes, or code.
 
-## Immediate engineering priorities
+## Historical recovery context (2026-08-01; not current status)
 
-1. Maintain the recovered stable baseline.
-2. Finish and maintain repository-native documentation.
-3. Conduct a read-only architecture audit before redesigning Checkout.
-4. Design the future payment-first flow from a clean contract before writing code.
-5. Review entitlement, webhook, idempotency, claim, expiration, and reconciliation requirements.
-6. Restore generation infrastructure separately when compute is available.
-7. Do not mix generation restoration with Checkout redesign.
-8. Keep social integrations provider-specific and separately authorized.
+On 2026-08-01, the recovery snapshot recorded commit `7522c54e83c02b0fff15b7ab57364f711cb1bf67` (PR #195), deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi`, selected domain aliases/responses, authenticated Checkout recovery, forward cleanup migration `20260731002700_remove_checkout_incident_objects.sql`, and restored Stripe Connect server-authentication protection. At that historical checkpoint, the complete public-policy route matrix, Payment V2, and recurring Fanvue scheduler were not yet established.
 
-## Do not assume
+Those August 1 unknowns were valid recovery evidence then, but they must not override later merged PRs and the operator-verified facts above. Applied migration history remains immutable; any correction requires a forward-only migration and separate authorization.
 
-- Do not assume generation or post-generation behavior works because routes and UI exist.
-- Do not assume Checkout was end-to-end tested because the authenticated contract was restored.
-- Do not assume Connect onboarding ran because its route is protected.
-- Do not assume a future green build or Production-target deployment moved custom-domain aliases; verify each future promotion independently.
-- Do not assume all policy pages are public merely because page files exist.
-- Do not assume repository migrations equal remote state, or that a scheduled-job implementation means cron is active.
-- Do not assume one provider’s OAuth/posting evidence applies to another provider.
+## Safety boundaries
+
+1. Keep audits read-only. Never use Checkout, Stripe Connect onboarding, OAuth, posting, payments, subscriptions, entitlements, database writes, or destructive operations as probes.
+2. Production changes, database or migration application, Stripe actions, environment changes, OAuth actions, provider actions, and deployment promotions each require separate explicit authorization.
+3. Do not alter the protected Production admin account or manufacture users/jobs/posts as validation artifacts.
+4. Do not bring generation pods online until operating cash exists; never substitute synthetic output for real-compute proof.
+5. A green build does not prove Production deployment, and a Production-target deployment does not prove aliases moved. Verify commit, deployment, aliases, and safe public responses separately.
+6. Preserve provider-specific truth: CPQ/Fanvue activation says nothing about OnlyFans, X, or Reddit capability.

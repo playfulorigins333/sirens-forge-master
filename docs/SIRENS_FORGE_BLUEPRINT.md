@@ -2,177 +2,136 @@
 
 ## How to read this blueprint
 
-Every material statement uses one of these evidence labels:
+This architectural overview is reconciled through 2026-08-19 at verified main `a11f1b9e73fc3d9dfc4793757257480d160d56f5` (PR #257). Operational claims explicitly identified as **operator-verified** are supplied current-state evidence. Repository files, tests, migrations, and routes establish implementation evidence only; they do not independently prove Production configuration or an external action. See [`CURRENT_STATE.md`](./CURRENT_STATE.md) and the canonical [`LAUNCH_ROADMAP_STATUS.md`](./LAUNCH_ROADMAP_STATUS.md).
 
-- **Verified in Production** — supported by the recorded Production recovery state supplied for the 2026-08-01 baseline; this label does not imply an unrecorded end-to-end provider test.
-- **Implemented but not live-tested** — code, migrations, or tests exist, but the complete external workflow is not proven live.
-- **Present but inactive** — repository support exists behind a disabled gate, dormant scheduler, placeholder, or unavailable dependency.
-- **Offline** — a required runtime service is known to be unavailable.
-- **Planned** — an intended future capability, not a present capability.
-- **Unknown / requires verification** — repository evidence cannot establish the operational fact.
+## 1. Product and launch posture
 
-The source priority is application code, migrations/schema files, tests, Git history/merged-PR metadata, then existing documentation. A route proves only that a route is present. It does not prove provider configuration, Production reachability, a successful external action, or end-to-end behavior.
+Sirens Forge is a creator application for identity-first AI image composition, reusable AI identities, media management, controlled creator publishing, subscriptions, and affiliate operations. It is still dark-launch/internal-access only. Tokens are not part of Phase 1, Muse Store is post-launch, and video generation is Coming Soon with execution disabled.
 
-## 1. Product purpose and positioning
+Current Production/frontend main is operator-verified at PR #257. Generation compute is offline for budget reasons. Product surfaces and static contracts must never be represented as real-compute proof.
 
-**Implemented but not live-tested.** Sirens Forge is a subscription-oriented Next.js application for creators to build reusable AI identities, compose image/video creation requests, manage generated or uploaded media, and prepare controlled publishing workflows. The repository also contains affiliate billing and provider-specific social integration surfaces. “AI creative operating environment” is a useful description of the implemented surfaces, not proof that every workflow is operational.
+## 2. Public site, access shell, and policy routes
 
-**Verified in Production.** The recovered application baseline is operating in Production-only mode at commit `7522c54e83c02b0fff15b7ab57364f711cb1bf67`. Generation compute is separately **Offline**.
+Pages exist for the homepage, pricing, FAQ, contact, terms, privacy, acceptable use, content removal, DMCA, complaints, community guidelines, underage policy, age, blocked content, 2257 exemption, and affiliate terms. PR #239 aligned anonymous allowlisting with the intended policy set; `backend/security/tests/publicPathContract.test.ts` protects the contract. PR #250 performed the current frontend security/accessibility/readiness sweep, and PR #257 corrected FAQ/footer claims and regression-tested them.
 
-## 2. Current user-facing product areas
+**Operator-verified:** the full intended anonymous public/legal route matrix has been checked on current Production and that gate is closed. The sitemap contains the correct public route set. Independent read-only Vercel verification records current deployment `dpl_3qbD2Ep4WJYoj2a2kKgVtDs47z14` as `READY`, targeted to `production`, from Git ref `main` at PR #257 SHA `a11f1b9e73fc3d9dfc4793757257480d160d56f5`, with no alias error. Its aliases are `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`.
 
-**Implemented but not live-tested.** The App Router contains landing, login, pricing, dashboard, account/billing, affiliate, Generator (`/generate`), Siren’s Mind (`/sirens-mind`), identities, library, Autopost, and creator publishing-queue views. Operator and compliance-review views also exist under the creator publishing queue.
+## 3. Authentication, accounts, and authorization
 
-**Unknown / requires verification.** Route presence and a successful build do not establish that every view has been exercised against the current Production database, provider configuration, authorization policy, and custom domain.
+Supabase Auth provides cookie-backed, server-validated identity. Profiles connect Auth users to application, billing, affiliate, and Connect state. Protected pages pass through `proxy.ts`; API routes must enforce their own authentication, ownership, entitlement, and administrator boundaries. PRs #221–#225 hardened generation, Siren’s Mind, legacy LoRA, admin-X, and authenticated API caller boundaries; PRs #234 and #238 hardened account/billing and profile-FK behavior.
 
-## 3. Public website and policy routes
+**Operator-verified Production security:** all public tables are protected by RLS and no `SECURITY DEFINER` function is executable by `PUBLIC`. PRs #226–#229 provide repository hardening contracts. The single real dark-launch auth/admin user is expected and protected; it must never be altered. These facts do not remove the need for route-local authorization review as APIs evolve.
 
-**Implemented but not live-tested.** Repository pages exist for `/`, `/pricing`, `/faq`, `/contact`, `/terms`, `/privacy`, `/acceptable-use`, `/content-removal`, `/dmca`, `/complaints`, `/community-guidelines`, `/underage-policy`, `/age`, `/blocked-content`, `/2257-exemption`, and `/affiliate-terms`. The proxy’s explicit public allowlist is narrower: `/`, `/login`, `/pricing`, `/faq`, `/contact`, `/content-removal`, `/terms`, `/privacy`, and `/acceptable-use` (plus static/API/auth prefixes). Therefore “a page exists” and “the page is anonymously public” are not interchangeable.
+## 4. Pricing, founder inventory, and launch entitlements
 
-**Verified in Production.** Read-only Vercel inspection verified that deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi`, serving commit `7522c54e83c02b0fff15b7ab57364f711cb1bf67`, owns these aliases: `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`. Safe public GET requests on 2026-08-01 verified that `https://sirensforge.vip/` returns `307` to `www.sirensforge.vip`; `https://www.sirensforge.vip/`, `/pricing`, `/contact`, and `/content-removal` return `200`. The Contact page displays `admin@sirensforge.vip`.
+The paid founder pool is exactly 200 seats:
 
-**Unknown / requires verification.** The complete public-policy route matrix remains unverified. In particular, an existing page file does not prove anonymous access when its path is absent from the proxy’s explicit public allowlist.
+- **OG Founder:** 50 paid seats; $1,333 one-time; lifetime founder access.
+- **Early Bird:** 150 paid seats; $29.99/month while active.
+- **Beta:** 25 separate testers, not counted within those 200 paid seats.
 
-## 4. Authentication and account model
+PR #236 and `backend/payment-v2/tests/lock05fLaunchInventory.test.ts` record the 50/150 correction. Pricing and seat-count surfaces were aligned in PRs #216–#218. Do not reintroduce the obsolete lower capacity from historical migration text or fold beta testers into founder inventory.
 
-**Implemented but not live-tested.** Supabase Auth supplies server-validated users and cookie-backed sessions. Protected UI requests pass through `proxy.ts`; API routes are public at the proxy layer and must perform their own authorization. Profiles connect an Auth user to application, Stripe-customer, affiliate, and Stripe Connect data. Active/trialing rows in `user_subscriptions` are used by subscription gates.
+## 5. Payment V2 contract — DONE and LOCKED / FROZEN
 
-**Unknown / requires verification.** The complete RLS posture and the consistency of legacy `profiles.id` versus `profiles.user_id` assumptions require a fresh schema/RLS audit for any changed workflow.
+Payment V2 is not a future design proposal. Its engineering is complete and frozen. PRs #197–#203 created the database, public Checkout, webhook, claim, success/auth-continuation, protection, and launch-inventory layers. PRs #206–#219 added event-inbox isolation, affiliate security and attribution, authenticated read boundaries, payout controls, live seat tracking, pricing alignment, and fail-closed public behavior. PRs #234–#240 completed account/billing lifecycle, Early Bird subscription lifecycle, final inventory cleanup, profile integrity, public paths, and readiness handling.
 
-## 5. Pricing, subscription, founder-seat, and entitlement concepts
+The system covers Checkout implementation, verified webhook/event ingestion, idempotent claim/entitlement lifecycle, subscription transitions, affiliate attribution/obligations, seat accounting, and reconciliation/readiness contracts. Production configuration readiness is operator-verified green.
 
-**Implemented but not live-tested.** Pricing presents launch tiers named `og_throne`, `early_bird`, and `prime_access`; code describes OG as one-time and Early Bird/Prime as subscriptions. Pricing displays founder-seat concepts and retrieves counts from `/api/subscription/seat-count` rather than using fallback counts. Stripe webhook code writes subscription/access state to `user_subscriptions`.
+No real-money V2 Production canary has run. This is **DEFERRED — BUDGET**, not an unfinished engineering gate. Before future live validation, Stripe must be updated with the new Sirens Forge LLC business bank account. Until operating cash exists and separate authorization is supplied, do not recommend or execute a charge, refund, Checkout canary, Connect onboarding, or other financial mutation.
 
-**Unknown / requires verification.** UI copy, configured Stripe prices, database tier rows, seat-count semantics, webhook state, cancellation behavior, and actual availability must be reconciled before changing promises or capacity. Do not infer an entitlement solely from a successful redirect or Stripe session.
+## 6. Affiliate and Stripe Connect boundary
 
-## 6. Current Checkout contract
+Payment V2 carries immutable referral attribution into commission obligations. PRs #207–#213 cover affiliate security, attribution, recurring commission/payout contracts, scheduling, and authenticated summary reads. Stripe Connect remains server-authenticated and identity-scoped (PR #195); payout and onboarding actions remain separately authorized financial operations.
 
-**Verified in Production.** The recovered baseline uses the authenticated pre-incident Checkout contract. `/api/checkout/subscription` obtains the server-authenticated Supabase user, resolves a profile and Stripe customer, accepts only a launch-tier name plus an optional referral code, and creates a Stripe-hosted Checkout session. The abandoned guest/pay-first database objects were removed by forward migration `20260731002700_remove_checkout_incident_objects.sql`.
+Repository automation does not prove a live payout. Live Connect onboarding is budget-deferred with the Stripe hold. Broader payout automation is post-launch; current controls must remain fail-closed.
 
-**Implemented but not live-tested.** OG uses Stripe payment mode; Early Bird and Prime use subscription mode. Referral metadata is carried into provider objects and an onboarded Connect destination may receive a destination charge. Webhook handlers cover Checkout completion and subscription lifecycle events.
+## 7. Identity-first generation architecture
 
-**Unknown / requires verification.** This blueprint does not claim a paid end-to-end Checkout, webhook, entitlement, failure/retry, refund, cancellation, cross-tier, or reconciliation test on the current baseline. A future payment-first contract is **Planned**, not implemented.
+Generation remains identity-first. A generation may use at most **one body LoRA plus one identity LoRA**. PRs #221, #223, #241, and #250 provide subscription, mutation, ownership, and frontend gate hardening. Identity ownership and dataset/training routes must preserve authenticated ownership, storage isolation, finite state transitions, and safe errors.
 
-## 7. Affiliate system and Stripe Connect boundary
+Generation pods remain offline because the operating budget cannot support compute. Real image-generation proof and real identity-training proof are **DEFERRED — BUDGET**. Only static UI, source, payload/workflow, schema/RLS, build, route, and non-generation checks may continue. Fake, mock, or placeholder output is never launch evidence.
 
-**Implemented but not live-tested.** The affiliate page and summary API expose referral, commission, qualification, and payout concepts. Checkout resolves referral records and uses a Connect destination only when the stored profile is marked onboarded and has an account identifier.
+Video routes may remain as guarded repository history, but video execution is disabled and the product promise is Coming Soon. Video is not currently available.
 
-**Verified in Production.** PR #195 restored the Connect route’s server-authentication boundary: it resolves the authenticated user on the server, selects exactly that user’s profile, delays privileged clients until authentication succeeds, scopes writes to the same identity, and sanitizes provider failures.
+## 8. Siren’s Mind, Generator, library, and media
 
-**Unknown / requires verification.** Restoration did **not** execute or prove live Stripe Connect account creation or onboarding. Payout eligibility, webhook synchronization, provider capabilities, and real commission transfer/reconciliation need separately authorized verification.
+`/sirens-mind` supplies the prompt-oriented experience and `/generate` composes image requests. Library/media, upload, signed-access, and generated-asset selection surfaces exist. Siren’s Mind access is subscription-gated (PR #220); generation authorization and identity ownership were hardened in PRs #221 and #250.
 
-## 8. Image-generation and identity-training architecture
+Static contracts can be reviewed today, but any statement depending on a real generated asset, identity-training result, persistence callback, or post-generation action remains compute-dependent. Library/uploaded-media behavior is distinct from real-generated-media proof.
 
-**Implemented but not live-tested.** Image requests flow through `/api/generate`, build a ComfyUI workflow, resolve identity LoRA inputs, call configured RunPod infrastructure, and best-effort log generation metadata/results in Supabase. Video routes are also present. Identity-training routes accept datasets, use object storage for inputs, maintain `user_loras` state, and expose create/upload/train/status operations.
+## 9. Creator Publishing Queue architecture
 
-**Unknown / requires verification.** Route implementations vary in their authentication and ownership checks; audit each server boundary, RLS policy, object-storage policy, job transition, and signed URL before enabling compute. Repository support does not prove the worker image, model assets, queues, callbacks, or output persistence are currently usable.
+CPQ is the authoritative publishing state machine. It owns creator packages, media, consent/compliance facts, platform accounts, plans/jobs, scheduler events, attempts, history, manual review, recovery, and provider execution gates. Legacy Autopost is not the authoritative Fanvue launch state machine.
 
-## 9. Current generation-pod status
+The repository contains migrations, services, routes, and focused tests for these layers. PR #242 gates CPQ by paid entitlement. Provider capability remains provider-specific; one provider’s result cannot approve another provider.
 
-**Offline.** Generation pods are offline. The application is in Production-only mode without operational generation compute. Do not claim real generation, identity training, video generation, asset persistence, or downstream post-generation behavior is operational.
+## 10. Fanvue capability and recurring scheduler
 
-**Present but inactive.** Pre-pod QA may cover builds/deploy mechanics, static UI, route existence, payload/workflow review, schema/RLS review, and non-generation flows. Fake, mock, or placeholder output is not acceptable evidence of generation.
+Fanvue engineering/provider posting machinery has already been proven separately and must not be reopened merely to obtain another proof post. PRs #243–#249 locked the architecture, bridged OAuth/account state into CPQ, extracted the execution core, and installed the worker/capability machinery. PRs #251–#255 enabled generated-media preparation, public/trust gates, and Fanvue V2 creator/persona consent.
 
-## 10. Siren’s Mind and Generator workflows
+PR #256 installed the guarded scheduler architecture. **Operator-verified Production state:** `fanvue_cpq_cron_secret` exists exactly once in Supabase Vault; the `pg_net` prerequisite migration is applied; canonical cron `sirens_forge_cpq_fanvue_runner` runs every minute; and its first scheduled execution succeeded with HTTP 200. No publication job or provider post was created solely for scheduler proof. Fanvue public activation, worker, and scheduler application gates are on. Recurring Fanvue scheduling is active, not disabled or unwired.
 
-**Implemented but not live-tested.** `/sirens-mind` provides a chat-oriented prompt workflow backed by `/api/nsfw-gpt/headless`; `/generate` provides the creation interface and is connected in code to image-generation contracts. Prompt routing, vault, macro, Comfy workflow, identity-selection, and post-generation action components are present.
+## 11. Other provider capabilities
 
-**Offline.** Any step requiring generation pods—and every conclusion that depends on a real resulting asset—remains unvalidated. No post-generation workflow may be represented as validated while pods are offline.
+- **OnlyFans:** assisted/manual only. Final live verification is **DEFERRED — DEPENDENCY** behind the legitimate external condition recorded in issue #230. Internal CPQ scheduling/history does not imply direct OnlyFans posting.
+- **X:** unavailable and non-selectable for launch, irrespective of dormant/historical integration code.
+- **Reddit:** unavailable and non-selectable; truthful manual-placeholder behavior is protected by `backend/autopost/tests/redditPlaceholderLockdown.test.ts`.
 
-## 11. Creator publishing queue
+Never summarize these providers as equally supported, and never use OAuth/posting/provider actions as audit probes.
 
-**Implemented but not live-tested.** The repository contains migrations, services, pages, API routes, and a substantial source/integration-test suite for package composition, media association/upload, creator approval, compliance/manual review, platform accounts, scheduling, operator work, completion evidence, history, consent, retry exhaustion, and recovery.
+## 12. Consent, likeness, and complaints/removal governance
 
-**Present but inactive.** Existing operations documentation records the recurring creator-publishing scheduler as disabled and without a registered cron at its documented checkpoint. That historical record must be rechecked before any current claim. Provider execution and a legitimate nonzero Production canary remain separately gated.
+Policy routes and CPQ controls cover acceptable use, underage/blocked content, creator consent, AI-twin/AI-persona facts, compliance review, complaints, DMCA, and content removal. PR #255 and migration `20260818164748_cpq_fanvue_ai_persona_policy_correction.sql` apply Fanvue V2 creator/persona consent.
 
-## 12. Social-platform integrations and autopost boundaries
+Policy copy and schema controls are not proof of a staffed operational workflow or legal sufficiency. The complaints/removal operational workflow remains an appropriate zero-spend OPEN gate: document ownership, intake, triage, deadlines, evidence retention, escalation, action, notification, and audit proof without mutating Production during design.
 
-**Implemented but not live-tested.** Provider-specific code exists for Fanvue and X OAuth/connection, diagnostics, availability, and controlled dispatch; platform metadata/routes also exist for OnlyFans, Fansly, ManyVids, and Reddit. Creator publishing includes assisted/manual operator boundaries, and Autopost has explicit rules, approval, pause/resume, revoke, preview, and run surfaces.
+## 13. Supabase and migration discipline
 
-**Unknown / requires verification.** Implementation depth, provider approval, scopes, credentials, account state, runtime gates, and live proof differ by provider. Never generalize a test for one provider to another. OAuth, posting, reconnect, token refresh, live canaries, and external actions require provider-specific authorization.
+Supabase supplies Auth, Postgres, RLS, storage-related state, RPCs, subscriptions, affiliate obligations, identities/generations, and CPQ orchestration. Service-role access belongs only behind server-authenticated, authorization-checked routes. Current Production RLS/function exposure facts are recorded in Section 3.
 
-## 13. Reddit placeholder lockdown status
+Applied migrations are immutable history. Never edit, reorder, or delete them. Any correction requires read-only evidence, a new forward-only migration, safe preconditions and failure behavior, preservation/repair reasoning, review, and separate authorization to apply. Repository SQL does not authorize a Production write.
 
-**Present but inactive.** Reddit is deliberately locked to truthful manual-only/placeholder metadata, supported by a dedicated source-contract test. It must remain a placeholder until Reddit work is separately authorized and implemented. A route or platform card is not evidence of OAuth or posting support.
+## 14. Deployment, domains, and observability
 
-## 14. Safety, acceptable-use, consent, likeness, removal, and compliance controls
+PR #257 is the current operator-verified Production/frontend main. Current deployment `dpl_3qbD2Ep4WJYoj2a2kKgVtDs47z14` is independently verified `READY` on the `production` target from `main` at SHA `a11f1b9e73fc3d9dfc4793757257480d160d56f5`, with no alias error and the apex, `www`, and three Vercel aliases recorded in Section 2. Historical August 1 evidence for PR #195 and deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi` remains useful history, not current deployment truth.
 
-**Implemented but not live-tested.** Public-facing acceptable-use, privacy, terms, community, underage, blocked-content, complaints, DMCA, content-removal, age, and 2257-exemption pages exist. Creator-publishing code and migrations include AI-twin consent, compliance submissions, verification, manual review, approval gates, platform policies, media access controls, and safety-guard tests.
+For every authorized promotion, verify Git SHA, deployment identifier/target, apex and `www` aliases, and safe public responses as separate facts. A green build, Production target, or route file proves none of the others. Continue zero-spend work on sanitized observability, finite error codes, scheduler/payment recovery runbooks, and operator-safe alerting without exercising external mutations.
 
-**Unknown / requires verification.** Legal sufficiency, anonymous accessibility of every policy route, operational complaint/removal handling, retention/deletion execution, age/consent enforcement throughout generation, and jurisdiction/provider compliance require human legal/operational review. Do not treat policy copy alone as enforcement proof.
+## 15. Repository and testing map
 
-## 15. Supabase responsibilities
-
-**Implemented but not live-tested.** Supabase supplies authentication, Postgres persistence, RLS/policies, RPCs, webhook-derived subscription data, profiles, generation/identity records, affiliate data, connected-account state, Autopost state, and publishing-queue orchestration. Service-role clients are privileged and belong only behind server-authenticated, authorization-checked routes.
-
-**Unknown / requires verification.** Repository migrations describe intended schema evolution but do not by themselves prove the remote schema, migration ledger, RLS state, cron state, data integrity, or environment-to-project mapping. Confirm those read-only before planning a write.
-
-## 16. Migration policy
-
-**Verified in Production.** Checkout incident migrations 02100–02600 remain immutable history; cleanup was performed forward-only in 02700.
-
-Applied migrations must never be edited, reordered, or deleted. Research the remote ledger and schema read-only first. A correction requires a new, idempotent where practical, forward migration with preconditions, safe failure, preservation checks, rollback/repair reasoning, review, and separate authorization to apply. Committing SQL does not authorize a database write.
-
-## 17. Stripe responsibilities
-
-**Implemented but not live-tested.** Stripe owns customer/payment/subscription Checkout sessions, billing portal behavior, webhook events, Connect accounts/account links, destination charges, and external payment state. Sirens Forge maps authenticated profiles and tiers to these objects and projects relevant state into Supabase.
-
-Use server-authenticated identity on every privileged route, verify webhook signatures, sanitize provider errors, avoid exposing identifiers unnecessarily, and design idempotency plus reconciliation before payment-first work. Provider object creation, Checkout, refunds, subscription changes, Connect onboarding, and other Stripe actions require separate authorization.
-
-## 18. Vercel deployment model
-
-**Verified in Production.** Deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi` serves commit `7522c54e83c02b0fff15b7ab57364f711cb1bf67` after the recovery and Connect-security PRs. It currently owns `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`; the apex redirect and selected `www` responses are verified in Section 3.
-
-For every future authorized promotion, treat Git state, a green build, a successful Vercel deployment, a Production-target label, and custom-domain aliases as separate facts. Record the Git SHA and deployment identifier, verify the target, explicitly verify apex/`www` aliases, and make safe public GET/HEAD requests. Never use an external mutation as a smoke test.
-
-## 19. Repository structure
-
-- `app/`: Next.js App Router pages and API routes.
-- `components/`, `hooks/`: shared UI and client state.
-- `lib/`: application contracts, Supabase/Stripe helpers, generation workflow logic, Autopost adapters, and publishing services.
-- `backend/`: domain services, provider/runbook documentation, fixtures, and tests.
-- `supabase/migrations/`: immutable database evolution history.
-- `scripts/`: safety and operational helpers.
-- `prompts/`: Siren’s Mind/headless prompt assets and routing contracts.
-- `docs/`: operational evidence, research, runbooks, this blueprint, and incident records.
-- `.github/workflows/`: repository CI definitions.
-
-## 20. Testing strategy
-
-**Implemented but not live-tested.** The repository uses TypeScript/source-contract tests, dependency-injected route tests, safety guards, SQL/Postgres integration harnesses, and Next.js builds. `package.json` exposes focused suites for creator publishing, X Autopost, and Reddit lockdown; additional tests are invoked individually or by workflows.
-
-For each change, start with diff/scope checks, then run the narrowest relevant tests, broader domain suites, type/build validation where warranted, migration/static policy checks, and authorized environment verification. Separate tests that require external credentials or Postgres. A passing build is not Production proof; a route test is not provider proof; dry-run evidence is not a live external action.
-
-## 21. Operational safety rules
-
-1. Verify branch, SHA, worktree, repository evidence, remote state, deployment, and terminal output.
-2. Mark fact, inference, theory, and unknown distinctly; record conflicts.
-3. Use one task branch, one narrow PR, and the smallest controlled change; never work directly on `main`.
-4. Treat database, migration, Stripe, environment, OAuth, deployment, alias, provider, and Production actions as separately authorized gates.
-5. Keep audits read-only; never invoke Checkout, Connect onboarding, OAuth, posting, payments, subscriptions, entitlements, or destructive operations as probes.
-6. Preserve applied migrations and use forward-only repairs.
-7. Protect privileged APIs with server-authenticated identity plus resource authorization and sanitized errors.
-8. Verify deployments, aliases, and public responses independently.
-9. Never use placeholder output to claim generation success.
-
-## 22. Known incomplete or unverified areas
-
-- **Offline:** generation pods and all real-compute/post-generation proof.
-- **Planned:** a redesigned payment-first Checkout contract.
-- **Present but inactive:** Reddit placeholder; creator-publishing recurring scheduling at its last documented checkpoint.
-- **Unknown / requires verification:** the complete public-route and policy-route response matrix; anonymous accessibility of routes not explicitly allowlisted; remote migration/RLS/cron state beyond the recorded checkout recovery; current provider configuration/scopes; comprehensive API authorization; complete paid Checkout/webhook/entitlement/reconciliation behavior; live Connect onboarding; legal/operational execution of safety policies; provider-by-provider publishing readiness.
-- **Conflict to preserve:** several policy pages exist, but `proxy.ts` does not explicitly list all of them as public. Public accessibility must be tested rather than inferred.
-
-## 23. Recommended engineering sequence
-
-1. Preserve the recovered stable baseline and keep this documentation current.
-2. Perform a read-only architecture, remote-schema/RLS, provider-contract, and deployment/alias audit.
-3. Define future payment-first state transitions, authenticated claim rules, provider metadata, and UI/API contracts before code.
-4. Design webhook idempotency, entitlement uniqueness, expiration, retry, concurrency, reconciliation, observability, and manual repair.
-5. Implement in narrow layers with tests and forward-only migrations; stage schema, server, webhook, and UI activation.
-6. Restore generation infrastructure as a separate effort when compute is available; validate real outputs without mixing it with Checkout redesign.
-7. Advance social integrations one provider at a time under separate authorization.
-
-## 24. Definition of done for future features
-
-A feature is done only when its contract and non-goals are documented; code, authorization, ownership, validation, errors, telemetry, tests, and policy implications are reviewed; schema changes are forward-only and safely applied under separate authorization; secrets stay server-side; idempotency/reconciliation and rollback/repair paths exist where money or asynchronous providers are involved; the exact commit is deployed under authorization; custom aliases and safe public responses are verified; and the intended legitimate workflow is tested at the authorized level. Remaining offline, inactive, planned, and unverified behavior must be stated explicitly. Build or deployment success alone is never the definition of done.
+- `app/`: App Router pages and API routes.
+- `components/`, `hooks/`, `lib/`: shared UI/state and domain/application contracts.
+- `backend/`: domain services, provider logic, and focused tests.
+- `supabase/migrations/`: immutable forward schema history; `supabase/manual/`: separately authorized operator artifacts.
+- `docs/`: architecture decisions, audit evidence, runbooks, current state, and roadmap.
+- `.github/workflows/`: CI contracts.
+
+Use diff/scope checks first, then focused source/route tests, domain suites, static migration/security checks, type/build validation when warranted, and finally separately authorized environment verification. A test is not Production proof; dry-run evidence is not an external action.
+
+## 16. Known incomplete, deferred, and unknown areas
+
+- **LOCKED / FROZEN:** Payment V2 engineering.
+- **DONE:** intended public/legal matrix verification; Production Payment V2 readiness; Production RLS and privileged-function audit; Fanvue capability and recurring scheduler activation.
+- **DEFERRED — BUDGET:** Stripe business-bank prerequisite and real-money V2 canary, live Connect onboarding, identity-training compute proof, image-generation compute proof.
+- **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
+- **OPEN:** comprehensive API authorization review; complaints/removal operating workflow; remaining observability, alerting, and manual-recovery closure.
+- **POST-LAUNCH:** Muse Store and expanded affiliate payout automation. Video generation remains Coming Soon/execution-disabled rather than a Phase 1 capability.
+- **UNKNOWN — VERIFY:** human legal sufficiency and any operational fact not covered by current operator evidence.
+
+## 17. Recommended engineering sequence
+
+1. Preserve Payment V2 and its 50/150 inventory as frozen; keep provider and compute holds explicit.
+2. Complete the zero-spend API authorization inventory and close any route-local ownership/admin/entitlement evidence gaps without external actions.
+3. Formalize and tabletop the complaints/removal workflow using non-Production fixtures and documented roles.
+4. Close sanitized observability, alerting, and manual-recovery documentation gaps for asynchronous systems.
+5. Maintain public copy/route regression coverage and independently verify deployment identity, target, aliases, and safe responses after every authorized Production promotion.
+6. When operating cash exists, update Stripe business bank information under separate authorization, then separately authorize a minimal real-money V2 canary and reconciliation. Do not treat this as engineering continuation.
+7. Restore identity-training/image-generation compute only when funded; validate genuine outputs without mixing the effort with payments or publishing.
+8. Keep OnlyFans parked on issue #230; keep X and Reddit unavailable; advance providers only through provider-specific gates.
+
+## 18. Operating safety and definition of done
+
+Verify branch, SHA, worktree, evidence, deployment, aliases, and terminal output before claims. Keep audits read-only. Production, database, migration application, Stripe, environment, OAuth, provider, generation, and deployment actions each need separate explicit authorization. Protect the Production admin account and preserve applied history.
+
+A feature may be engineering-complete while an external validation is legitimately deferred. Definition of done must therefore state both the completed contract and any separate operational proof gate. It includes documented contract/non-goals, authorization and ownership review, validation/errors/telemetry, tests, policy implications, idempotency/reconciliation and repair for asynchronous or monetary work, and the precisely authorized level of environment proof. It never permits fake generation output or turns a budget hold into new engineering scope.
