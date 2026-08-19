@@ -2,7 +2,7 @@
 
 ## How to read this blueprint
 
-This architectural overview is reconciled through 2026-08-19 at verified pre-PR #259 Production frontend `c765639044994456315bdb0a6e35316bc29fc9cc` (PR #258). Operational claims explicitly identified as **operator-verified** are supplied current-state evidence. Repository files, tests, migrations, and routes establish implementation evidence only; they do not independently prove Production configuration or an external action. See [`CURRENT_STATE.md`](./CURRENT_STATE.md) and the canonical [`LAUNCH_ROADMAP_STATUS.md`](./LAUNCH_ROADMAP_STATUS.md).
+This architectural overview is reconciled through 2026-08-19. The latest operator-verified Production baseline recorded before PR #262 is PR #261 merge SHA `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9`, represented by Vercel deployment `dpl_FH8TgDhN45S43ri4QcufnTE6TsJ3` (`READY`, target `production`, Git ref `main`). PR #262 remains Preview/source evidence and is not represented as merged or deployed to Production. Operational claims explicitly identified as **operator-verified** are supplied current-state evidence. Repository files, tests, migrations, and routes establish implementation evidence only; they do not independently prove Production configuration or an external action. See [`CURRENT_STATE.md`](./CURRENT_STATE.md) and the canonical [`LAUNCH_ROADMAP_STATUS.md`](./LAUNCH_ROADMAP_STATUS.md).
 
 ## 1. Product and launch posture
 
@@ -98,9 +98,9 @@ Applied migrations are immutable history. Never edit, reorder, or delete them. A
 
 ## 14. Deployment, domains, and observability
 
-The current operator-verified Production frontend is PR #260 merge SHA `84c22b3337b3faf608965da84803c2d15cf1258a`. Vercel deployment `dpl_CzqyGKH4zpQF9mV2jqwWrJAtmCVC` is operator-verified `READY` on the `production` target from `main`; this evidence does not itself prove current aliases. Historical PR #258 and August 1 deployment evidence remains useful history, not current deployment truth. The separate Railway/FastAPI source was independently audited read-only at `main` SHA `2c84f8620dc626a449740b6e946fef1388605cee`, and Railway Production is `SUCCESS` at that exact SHA; the API repository was not modified.
+The latest operator-verified Production baseline recorded before PR #262 is PR #261 merge SHA `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9`. Vercel deployment `dpl_FH8TgDhN45S43ri4QcufnTE6TsJ3` is operator-verified `READY` on the `production` target from Git ref `main` at that exact SHA; this evidence does not itself prove current aliases. PR #262 remains Preview/source evidence until a separate merge, Production promotion, and post-promotion verification. Historical PR #258 public-route/alias evidence, PR #260 deployment evidence, and the August 1 recovery evidence remain useful history rather than the latest deployment identity. The separate Railway/FastAPI source was independently audited read-only at `main` SHA `2c84f8620dc626a449740b6e946fef1388605cee`, and Railway Production is `SUCCESS` at that exact SHA; the API repository was not modified.
 
-For every authorized promotion, verify Git SHA, deployment identifier/target, apex and `www` aliases, and safe public responses as separate facts. A green build, Production target, or route file proves none of the others. Continue zero-spend work on sanitized observability, finite error codes, scheduler/payment recovery runbooks, and operator-safe alerting without exercising external mutations.
+For every authorized promotion, verify Git SHA, deployment identifier/target, apex and `www` aliases, and safe public responses as separate facts. A green build, Production target, or route file proves none of the others. Maintain the completed sanitized observability, alerting, and recovery operating contract and regression coverage without exercising external mutations.
 
 ## 15. Repository and testing map
 
@@ -131,7 +131,7 @@ Use diff/scope checks first, then focused source/route tests, domain suites, sta
 1. Preserve Payment V2 and its 50/150 inventory as frozen; keep provider and compute holds explicit.
 2. Maintain both completed API authorization inventories whenever a route or boundary changes.
 3. Maintain the complaints/removal runbook and synthetic tabletop contract; keep human legal review and real actions separately authorized.
-4. Close sanitized observability, alerting, and manual-recovery documentation gaps for asynchronous systems.
+4. Maintain the sanitized observability, alerting, and recovery operating contract and regression coverage for asynchronous systems.
 5. Maintain public copy/route regression coverage and independently verify deployment identity, target, aliases, and safe responses after every authorized Production promotion.
 6. When operating cash exists, update Stripe business bank information under separate authorization, then separately authorize a minimal real-money V2 canary and reconciliation. Do not treat this as engineering continuation.
 7. Restore identity-training/image-generation compute only when funded; validate genuine outputs without mixing the effort with payments or publishing.
