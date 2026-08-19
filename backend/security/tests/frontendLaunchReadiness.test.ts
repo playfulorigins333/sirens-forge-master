@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { ensureUserLoraCached, type LoraCacheDependencies } from "../../../lib/generation/ensureUserLoraCached";
+import { resolveOwnedIdentityLoraMetadata, type IdentityLoraMetadataDependencies } from "../../../lib/generation/identityLoraMetadata";
 import { isGenerationExecutionEnabled } from "../../../lib/generation/executionAvailability";
 import { getAutopostPlatformRegistry } from "../../../lib/autopost/platformRegistry";
 import {
@@ -13,13 +13,12 @@ import { isPublicPath } from "../../../proxy";
 import { parseGenerationSuccess } from "../../../lib/generation/upstreamResponse";
 
 const owner="11111111-1111-4111-8111-111111111111", foreign="22222222-2222-4222-8222-222222222222", lora="33333333-3333-4333-8333-333333333333";
-function deps(rowOwner=owner,status="completed",cached=true){let downloads=0;const files=new Set<string>();const value:LoraCacheDependencies={async loadOwnedCompletedLora(_id,userId){return userId===rowOwner&&status==="completed"?{artifact_r2_bucket:null,artifact_r2_key:"owned/key",trigger_token:"owner_token"}:null},async lstat(file){if(cached||files.has(file))return{isFile:()=>true,isSymbolicLink:()=>false,size:1};throw new Error("ENOENT")},async download(){downloads++;return new Uint8Array([1])},async write(file){files.add(file)},async publish(source,destination){if(files.has(destination)) throw new Error("EEXIST"); files.add(destination)},async remove(file){files.delete(file)}};return{value,get downloads(){return downloads}}}
+function deps(rowOwner=owner,status="completed"){let queries=0;const value:IdentityLoraMetadataDependencies={async loadOwnedCompletedLora(_id,userId){queries++;return userId===rowOwner&&status==="completed"?{artifact_r2_bucket:null,artifact_r2_key:"owned/key",trigger_token:"owner_token"}:null}};return{value,get queries(){return queries}}}
 
-const own=deps(); const resolved=await ensureUserLoraCached(lora,owner,own.value); assert.equal(resolved.metadata.trigger_token,"owner_token");
-const denied=deps(owner,"completed",true); await assert.rejects(()=>ensureUserLoraCached(lora,foreign,denied.value),/IDENTITY_LORA_UNAVAILABLE/); assert.equal(denied.downloads,0,"foreign cached file must not bypass ownership or call R2");
-const pending=deps(owner,"training",false); await assert.rejects(()=>ensureUserLoraCached(lora,owner,pending.value),/IDENTITY_LORA_UNAVAILABLE/); assert.equal(pending.downloads,0);
-const cold=deps(owner,"completed",false); const coldResult=await ensureUserLoraCached(lora,owner,cold.value); assert(coldResult.localPath.endsWith(`${lora}.safetensors`)); assert.equal(cold.downloads,1);
-await assert.rejects(()=>ensureUserLoraCached("not-a-uuid",owner,own.value),/IDENTITY_LORA_UNAVAILABLE/);
+const own=deps(); const resolved=await resolveOwnedIdentityLoraMetadata(lora,owner,own.value); assert.equal(resolved.trigger_token,"owner_token");
+const denied=deps(owner); await assert.rejects(()=>resolveOwnedIdentityLoraMetadata(lora,foreign,denied.value),/IDENTITY_LORA_UNAVAILABLE/);
+const pending=deps(owner,"training"); await assert.rejects(()=>resolveOwnedIdentityLoraMetadata(lora,owner,pending.value),/IDENTITY_LORA_UNAVAILABLE/);
+await assert.rejects(()=>resolveOwnedIdentityLoraMetadata("not-a-uuid",owner,own.value),/IDENTITY_LORA_UNAVAILABLE/);
 assert.equal(isGenerationExecutionEnabled({GENERATION_EXECUTION_ENABLED:"true"} as NodeJS.ProcessEnv),true); assert.equal(isGenerationExecutionEnabled({GENERATION_EXECUTION_ENABLED:"TRUE"} as NodeJS.ProcessEnv),false); assert.equal(isGenerationExecutionEnabled({} as NodeJS.ProcessEnv),false);
 assert.equal(isPublicPath("/privacy"),true); assert.equal(isPublicPath("/api/generate"),true); assert.equal(isPublicPath("/dashboard"),false);
 assert(parseGenerationSuccess({success:true,images:["https://assets.test/a.png"],prompt_id:"p"}));
