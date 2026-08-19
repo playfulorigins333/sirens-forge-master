@@ -16,8 +16,7 @@ export default function Footer() {
               Sirens Forge
             </div>
             <p className="text-gray-400">
-              The next evolution of AI generation for images, video, and
-              creator-driven workflows.
+              Identity-first AI media and creator workflows.
             </p>
           </div>
 
