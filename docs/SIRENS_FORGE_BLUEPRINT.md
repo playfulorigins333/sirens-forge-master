@@ -88,7 +88,7 @@ Never summarize these providers as equally supported, and never use OAuth/postin
 
 Policy routes and CPQ controls cover acceptable use, underage/blocked content, creator consent, AI-twin/AI-persona facts, compliance review, complaints, DMCA, and content removal. PR #255 and migration `20260818164748_cpq_fanvue_ai_persona_policy_correction.sql` apply Fanvue V2 creator/persona consent.
 
-Policy copy and schema controls are not proof of a staffed operational workflow or legal sufficiency. The complaints/removal operational workflow remains an appropriate zero-spend OPEN gate: document ownership, intake, triage, deadlines, evidence retention, escalation, action, notification, and audit proof without mutating Production during design.
+`docs/operations/complaints-removal-operations.md` now defines accountable mailbox intake, finite case states, proposed internal triage targets, minimum-necessary evidence handling, decision/escalation authority, notices, append-only audit records, and five synthetic tabletops. Its focused regression contract is hosted in Frontend Launch Readiness CI, and public content-removal copy now truthfully distinguishes platform consent/likeness controls from legal ownership and user responsibility. Repository review found no dedicated complaint/removal case-management schema, service, or admin UI, so the runbook uses a restricted non-Production case record without authorizing a database or Production mutation. This closes the source/documentation/testing gate, not human legal sufficiency or proof of staffed execution.
 
 ## 13. Supabase and migration discipline
 
@@ -121,7 +121,8 @@ Use diff/scope checks first, then focused source/route tests, domain suites, sta
 - **DEFERRED — BUDGET:** Stripe business-bank prerequisite and real-money V2 canary, live Connect onboarding, identity-training compute proof, image-generation compute proof.
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
 - **DONE:** comprehensive cross-repo API authorization inventory: frontend 88 route files / 102 route-methods plus separate Railway/FastAPI API PR #4 covering 10 business endpoints and framework routes, with regression contracts in both repositories.
-- **OPEN:** complaints/removal operating workflow; remaining observability, alerting, and manual-recovery closure.
+- **DONE:** complaints/removal source/documentation/testing operating workflow and regression contract.
+- **OPEN:** remaining observability, alerting, and manual-recovery closure.
 - **POST-LAUNCH:** Muse Store and expanded affiliate payout automation. Video generation remains Coming Soon/execution-disabled rather than a Phase 1 capability.
 - **UNKNOWN — VERIFY:** human legal sufficiency and any operational fact not covered by current operator evidence.
 
@@ -129,7 +130,7 @@ Use diff/scope checks first, then focused source/route tests, domain suites, sta
 
 1. Preserve Payment V2 and its 50/150 inventory as frozen; keep provider and compute holds explicit.
 2. Maintain both completed API authorization inventories whenever a route or boundary changes.
-3. Formalize and tabletop the complaints/removal workflow using non-Production fixtures and documented roles.
+3. Maintain the complaints/removal runbook and synthetic tabletop contract; keep human legal review and real actions separately authorized.
 4. Close sanitized observability, alerting, and manual-recovery documentation gaps for asynchronous systems.
 5. Maintain public copy/route regression coverage and independently verify deployment identity, target, aliases, and safe responses after every authorized Production promotion.
 6. When operating cash exists, update Stripe business bank information under separate authorization, then separately authorize a minimal real-money V2 canary and reconciliation. Do not treat this as engineering continuation.

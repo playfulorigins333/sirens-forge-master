@@ -28,7 +28,8 @@ This document separates operator-verified operational facts from repository evid
 ## Current open and deferred work
 
 - **API authorization inventory:** DONE across both application repositories. Frontend: 88 route files / 102 route-methods plus semantic/completeness regression coverage. Railway/FastAPI: merged API PR #4 covering 10 business endpoints plus public framework docs/schema routes with privileged-ingress regression coverage.
-- **OPEN, zero-spend candidates:** formalize the complaints/removal operating workflow and close remaining observability/manual-recovery documentation and alerting gaps. These are ranked with evidence and dependencies in the canonical roadmap.
+- **Complaints/removal operations — source gate DONE:** `docs/operations/complaints-removal-operations.md` defines the mailbox owner role, finite case states, proposed internal triage targets, minimum-necessary evidence, escalation/decision authority, notices, append-only audit record, and five synthetic tabletops. `backend/governance/tests/complaintsRemovalOperations.test.ts` protects the workflow, public routes/intake, and truthful policy copy in hosted CI. Repository review found no dedicated complaint/removal case-management schema, service, or admin UI; the restricted non-Production record is therefore the documented launch mechanism. This does not establish human legal sufficiency, staffed execution, or Production action.
+- **OPEN, zero-spend candidate:** close remaining observability/manual-recovery documentation and alerting gaps (roadmap row 48).
 - **DEFERRED — BUDGET:** Stripe bank-account prerequisite and real-money canary; live Stripe Connect onboarding; identity-training and image-generation real-compute proof.
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
 - **POST-LAUNCH:** Muse Store and affiliate payout automation expansion. Video execution is not a Phase 1 capability.

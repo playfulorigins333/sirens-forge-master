@@ -59,7 +59,7 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 | 43 | X | Launch availability | DEFERRED — DEPENDENCY | Operator states unavailable/non-selectable for launch | Keep non-selectable; reassess only in provider-specific future scope | External/provider availability |
 | 44 | Reddit | Launch availability/manual placeholder | DEFERRED — DEPENDENCY | Operator fact; `backend/autopost/tests/redditPlaceholderLockdown.test.ts` | Keep unavailable/non-selectable and truthful | External/provider scope |
 | 45 | Governance | Creator likeness and AI-persona consent controls | DONE | PR #255; migration `20260818164748_cpq_fanvue_ai_persona_policy_correction.sql`; AI-twin consent tests | Maintain consent version/hash and provider policy | Human legal review remains distinct |
-| 46 | Governance | Complaints/removal operating workflow | OPEN | Policy routes and schema/UI exist; repository evidence does not prove staffed intake-to-resolution operations | Document owner, intake, SLA, evidence, escalation, removal, notices and audit record; tabletop safely | $0 today: yes; human legal/ops review |
+| 46 | Governance | Complaints/removal operating workflow | DONE | `docs/operations/complaints-removal-operations.md`; `backend/governance/tests/complaintsRemovalOperations.test.ts`; truthful `app/content-removal/page.tsx` alignment. Repository review found no dedicated case-management schema/service/admin UI. | Maintain the runbook, public intake/policy truth, CI contract, and operator-approved internal targets | Human legal sufficiency and real staffing/execution remain separate; no Production action authorized |
 | 47 | Frontend | Accessibility, SEO, sitemap, error/loading shell | DONE | PR #250 sweep; PR #257 regressions; sitemap and app shell files | Maintain regression coverage | None |
 | 48 | Operations | Sanitized observability, alerts and recovery closure | OPEN | Payment/CPQ finite errors and recovery docs exist, but no complete launch-wide alert/ownership matrix is recorded | Inventory critical signals, owners, thresholds, redaction, runbooks and tabletop procedures | $0 today: yes; no external mutation needed |
 | 49 | Operations | Public/legal route operational regression check | DONE | Operator-verified current Production matrix; PRs #239 and #257 | Repeat safe GET/HEAD check after authorized promotions | No mutating smoke tests |
@@ -71,18 +71,17 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 Only OPEN, non-frozen, non-budget-blocked work is ranked here. None authorizes Production, payment, database, OAuth, provider, or generation actions.
 
-1. **Complaints/removal operating workflow (row 46).** Define accountable intake-to-resolution operations, evidence handling, escalation/deadlines, notifications, and a safe tabletop. Public pages alone are not operational proof; the workflow can be designed without touching Production.
-2. **Sanitized observability, alerts, and recovery closure (row 48).** Build a launch-wide signal/owner/runbook matrix from existing finite Payment V2 and CPQ errors; document redaction and tabletop recovery without invoking any external or mutating path.
+1. **Sanitized observability, alerts, and recovery closure (row 48).** Build a launch-wide signal/owner/runbook matrix from existing finite Payment V2 and CPQ errors; document redaction and tabletop recovery without invoking any external or mutating path.
 
 ## Count by status
 
 | Status | Rows |
 |---|---:|
-| DONE | 27 |
+| DONE | 28 |
 | LOCKED / FROZEN | 12 |
 | DEFERRED — BUDGET | 5 |
 | DEFERRED — DEPENDENCY | 3 |
-| OPEN | 2 |
+| OPEN | 1 |
 | POST-LAUNCH | 3 |
 | UNKNOWN — VERIFY | 0 |
 | **Total** | **52** |
