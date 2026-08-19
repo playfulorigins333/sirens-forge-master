@@ -50,7 +50,7 @@ assert.doesNotMatch(
 assert(removal.includes("applies platform consent, likeness, safety, and policy"));
 assert.match(removal, /do not\s+independently establish legal ownership/);
 assert.match(removal, /Users remain responsible for obtaining the rights and/);
-assert(underage.includes("applies platform age, consent, likeness, safety, and policy"));
+assert.match(underage, /applies\s+platform age, consent, likeness, safety, and policy/);
 assert.match(underage, /do not\s+independently establish legal ownership/);
 
 const publicComplaintRemovalCopy = `${removal}\n${complaints}`;
