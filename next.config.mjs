@@ -18,9 +18,6 @@ const nextConfig = {
   // ⭐ CRITICAL: silence Turbopack + webpack conflict
   turbopack: {},
 
-  // ⭐ CRITICAL: force standalone output for Vercel functions
-  output: "standalone",
-
   async redirects() {
     return [];
   },

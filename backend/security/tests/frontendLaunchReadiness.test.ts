@@ -32,6 +32,7 @@ const route=await readFile("app/api/generate/route.ts","utf8"); assert(route.ind
 assert(route.includes("parseGenerationSuccess")); assert(route.includes("GENERATION_HISTORY_PERSISTENCE_FAILED")); assert(route.includes("retry_generation: false"));
 const proxySource=await readFile("proxy.ts","utf8"); assert(proxySource.includes("supabase.auth.getUser()")); assert(proxySource.includes('const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"]')); assert(proxySource.includes("if (!user)")); assert(proxySource.includes("NextResponse.redirect"));
 const nextConfig=await readFile("next.config.mjs","utf8"); for(const header of ["Content-Security-Policy","Strict-Transport-Security","X-Content-Type-Options","X-Frame-Options","Referrer-Policy","Permissions-Policy"]) assert(nextConfig.includes(header),header);
+assert(!/output\s*:\s*["']standalone["']/.test(nextConfig), "Vercel frontend must not force standalone output");
 const workflow=await readFile(".github/workflows/frontend-launch-readiness.yml","utf8"); assert(!workflow.includes("paths:")); assert(workflow.includes("npm audit --omit=dev --audit-level=high")); assert(workflow.includes("npm run build")); assert(workflow.includes('GENERATION_EXECUTION_ENABLED: "false"'));
 
 for (const videoPath of ["app/api/video/route.ts", "app/api/generate_video/route.ts"]) {
