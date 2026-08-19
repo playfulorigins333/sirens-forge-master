@@ -1,5 +1,7 @@
 # Sirens Forge Current State
 
+> **Pre-launch source hardening (not deployment evidence):** the current hardening branch updates vulnerable frontend dependencies, adds a conservative global response-header baseline, removes the launch-readiness workflow's pull-request path-filter bypass, validates successful generation gateway responses, exposes a finite non-retrying history-persistence failure state, and makes identity-LoRA cache materialization atomic/race-aware. This statement does not claim that the branch is merged, deployed, or serving Production. Payment V2 and Fanvue remain frozen, generation execution remains default-off, and all budget/dependency deferrals are unchanged.
+
 **As of:** 2026-08-19
 
 **Current operator-verified Production frontend:** `84c22b3337b3faf608965da84803c2d15cf1258a` (PR #260)

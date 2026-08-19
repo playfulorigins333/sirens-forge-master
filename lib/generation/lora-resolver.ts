@@ -1,6 +1,7 @@
 import type { BodyMode } from "./contract";
 import path from "path";
 import fs from "fs/promises";
+import { constants as fsConstants } from "fs";
 import { ensureUserLoraCached, type LoraCacheDependencies } from "./ensureUserLoraCached";
 
 export type ResolvedLora = { path: string; strength: number };
@@ -28,7 +29,17 @@ export async function resolveLoraStack(
     const comfyFileName = `identity_${identityLoraId}.safetensors`;
     const comfyPath = path.join(COMFY_LORA_DIR, comfyFileName);
     try { await fs.access(comfyPath); } catch {
-      try { await fs.mkdir(COMFY_LORA_DIR, { recursive: true }); await fs.copyFile(localPath, comfyPath); } catch { /* the generation host may already own materialization */ }
+      try {
+        await fs.mkdir(COMFY_LORA_DIR, { recursive: true });
+        await fs.copyFile(localPath, comfyPath, fsConstants.COPYFILE_EXCL);
+      } catch {
+        try {
+          const stat = await fs.stat(comfyPath);
+          if (!stat.isFile() || stat.size === 0) throw new Error("invalid");
+        } catch {
+          throw new Error("IDENTITY_LORA_MATERIALIZATION_FAILED");
+        }
+      }
     }
     loras.push({ path: comfyFileName, strength: IDENTITY_LORA_STRENGTH });
     trigger_token = metadata.trigger_token?.trim() || null;

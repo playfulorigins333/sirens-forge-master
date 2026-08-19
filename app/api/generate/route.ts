@@ -14,6 +14,7 @@ import {
   sirensApiFetch,
 } from "../../../lib/sirensApi";
 import { isGenerationExecutionEnabled } from "../../../lib/generation/executionAvailability";
+import { parseGenerationSuccess } from "../../../lib/generation/upstreamResponse";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -313,14 +314,13 @@ export async function POST(req: NextRequest) {
         {
           error: "UPSTREAM_ERROR",
           status: upstream.status,
-          body: text,
           generation_id: logged?.id ?? null,
         },
         { status: upstream.status },
       );
     }
 
-    let upstreamJson: any = null;
+    let upstreamJson: unknown = null;
 
     try {
       upstreamJson = JSON.parse(text);
@@ -349,27 +349,30 @@ export async function POST(req: NextRequest) {
         {
           error: "UPSTREAM_INVALID_JSON",
           generation_id: logged?.id ?? null,
-          body: text,
         },
         { status: 502 },
       );
     }
 
-    const legacyImages = Array.isArray(upstreamJson?.images)
-      ? upstreamJson.images.filter((url: unknown) => typeof url === "string")
+    const validated = parseGenerationSuccess(upstreamJson);
+    if (!validated) {
+      return NextResponse.json({ error: "UPSTREAM_INVALID_RESPONSE" }, { status: 502 });
+    }
+    const legacyImages = Array.isArray(validated.images)
+      ? validated.images
       : [];
 
     const normalizedUpstreamJson =
-      upstreamJson?.success === true && legacyImages.length > 0
+      legacyImages.length > 0
         ? {
-            ...upstreamJson,
-            image_url: upstreamJson.image_url ?? legacyImages[0],
+            ...validated,
+            image_url: validated.image_url ?? legacyImages[0],
             outputs:
-              upstreamJson.outputs ??
+              validated.outputs ??
               legacyImages.map((url: string) => ({ kind: "image", url })),
-            generation_id: upstreamJson.generation_id ?? upstreamJson.prompt_id,
+            generation_id: validated.generation_id ?? validated.prompt_id,
           }
-        : upstreamJson;
+        : validated;
 
     const inferredImageUrl =
       typeof normalizedUpstreamJson?.image_url === "string"
@@ -451,6 +454,9 @@ export async function POST(req: NextRequest) {
         image_url: finalImageUrl,
         outputs: finalOutputs,
         placeholder: upstreamPlaceholder,
+        history_persistence: logged
+          ? { status: "PERSISTED" }
+          : { status: "FAILED", code: "GENERATION_HISTORY_PERSISTENCE_FAILED", retry_generation: false },
       },
       { status: 200 },
     );
@@ -464,6 +470,13 @@ export async function POST(req: NextRequest) {
           message: "Selected AI Twin is unavailable.",
         },
         { status: 400 },
+      );
+    }
+
+    if (message === "IDENTITY_LORA_MATERIALIZATION_FAILED") {
+      return NextResponse.json(
+        { error: "IDENTITY_LORA_MATERIALIZATION_FAILED", message: "Selected AI Twin could not be prepared." },
+        { status: 503 },
       );
     }
 

@@ -9,20 +9,30 @@ import {
   hasFanvueGrantedPublicationScopes,
 } from "../../../lib/creator-publishing-queue/fanvue/capability";
 import { LAUNCH_CAPACITY } from "../../../lib/launch-capacity";
+import { isPublicPath } from "../../../proxy";
+import { parseGenerationSuccess } from "../../../lib/generation/upstreamResponse";
 
 const owner="11111111-1111-4111-8111-111111111111", foreign="22222222-2222-4222-8222-222222222222", lora="33333333-3333-4333-8333-333333333333";
-function deps(rowOwner=owner,status="completed",cached=true){let downloads=0;const value:LoraCacheDependencies={async loadOwnedCompletedLora(_id,userId){return userId===rowOwner&&status==="completed"?{artifact_r2_bucket:null,artifact_r2_key:"owned/key",trigger_token:"owner_token"}:null},async fileExists(){return cached},async download(){downloads++;return new Uint8Array([1])},async write(){}};return{value,get downloads(){return downloads}}}
+function deps(rowOwner=owner,status="completed",cached=true){let downloads=0;const files=new Set<string>();const value:LoraCacheDependencies={async loadOwnedCompletedLora(_id,userId){return userId===rowOwner&&status==="completed"?{artifact_r2_bucket:null,artifact_r2_key:"owned/key",trigger_token:"owner_token"}:null},async fileExists(file){return cached||files.has(file)},async download(){downloads++;return new Uint8Array([1])},async write(file){files.add(file)},async publish(source,destination){if(files.has(destination)) throw new Error("EEXIST"); files.add(destination)},async remove(file){files.delete(file)}};return{value,get downloads(){return downloads}}}
 
 const own=deps(); const resolved=await ensureUserLoraCached(lora,owner,own.value); assert.equal(resolved.metadata.trigger_token,"owner_token");
 const denied=deps(owner,"completed",true); await assert.rejects(()=>ensureUserLoraCached(lora,foreign,denied.value),/IDENTITY_LORA_UNAVAILABLE/); assert.equal(denied.downloads,0,"foreign cached file must not bypass ownership or call R2");
 const pending=deps(owner,"training",false); await assert.rejects(()=>ensureUserLoraCached(lora,owner,pending.value),/IDENTITY_LORA_UNAVAILABLE/); assert.equal(pending.downloads,0);
+const cold=deps(owner,"completed",false); const coldResult=await ensureUserLoraCached(lora,owner,cold.value); assert(coldResult.localPath.endsWith(`${lora}.safetensors`)); assert.equal(cold.downloads,1);
 await assert.rejects(()=>ensureUserLoraCached("not-a-uuid",owner,own.value),/IDENTITY_LORA_UNAVAILABLE/);
 assert.equal(isGenerationExecutionEnabled({GENERATION_EXECUTION_ENABLED:"true"} as NodeJS.ProcessEnv),true); assert.equal(isGenerationExecutionEnabled({GENERATION_EXECUTION_ENABLED:"TRUE"} as NodeJS.ProcessEnv),false); assert.equal(isGenerationExecutionEnabled({} as NodeJS.ProcessEnv),false);
+assert.equal(isPublicPath("/privacy"),true); assert.equal(isPublicPath("/api/generate"),true); assert.equal(isPublicPath("/dashboard"),false);
+assert(parseGenerationSuccess({success:true,images:["https://assets.test/a.png"],prompt_id:"p"}));
+for(const malformed of [{success:false,images:["https://assets.test/a.png"]},{success:true},{success:true,images:["file:///etc/passwd"]},{success:true,outputs:[{kind:"video",url:"https://assets.test/a.png"}]}]) assert.equal(parseGenerationSuccess(malformed),null);
 
 assert.deepEqual(LAUNCH_CAPACITY,{beta_reserved:25,og_throne:50,early_bird:150});
 const home=await readFile("app/page.tsx","utf8"); assert(!home.includes("/120 LEFT")); assert(home.includes("LAUNCH_CAPACITY.early_bird")); assert(home.includes("useReducedMotion")); assert(home.includes("motion-reduce:animate-none")); assert(home.includes("Identity-first creation")); assert(home.includes("Your AI Twin identity anchors every generation.")); assert(!home.includes("Identity training is optional, not required.")); assert(!home.includes("Create without a LoRA"));
 const generator=await readFile("app/generate/page.tsx","utf8"); assert(!generator.includes('subscriptionStatus: "active"')); assert(generator.includes('disabled={mode.unavailable}')); assert(generator.includes("Image generation is temporarily unavailable."));
 const route=await readFile("app/api/generate/route.ts","utf8"); assert(route.indexOf("isGenerationExecutionEnabled()")<route.indexOf("requireSirensApiConfig()")); assert(route.includes("resolveLoraStack(bodyMode, identityLora, userId)")); assert(route.includes('message === "IDENTITY_LORA_UNAVAILABLE"')); assert(route.includes('message: "Selected AI Twin is unavailable."')); assert(route.includes("{ status: 400 }"));
+assert(route.includes("parseGenerationSuccess")); assert(route.includes("GENERATION_HISTORY_PERSISTENCE_FAILED")); assert(route.includes("retry_generation: false"));
+const proxySource=await readFile("proxy.ts","utf8"); assert(proxySource.includes("supabase.auth.getUser()")); assert(proxySource.includes('const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"]')); assert(proxySource.includes("if (!user)")); assert(proxySource.includes("NextResponse.redirect"));
+const nextConfig=await readFile("next.config.mjs","utf8"); for(const header of ["Content-Security-Policy","Strict-Transport-Security","X-Content-Type-Options","X-Frame-Options","Referrer-Policy","Permissions-Policy"]) assert(nextConfig.includes(header),header);
+const workflow=await readFile(".github/workflows/frontend-launch-readiness.yml","utf8"); assert(!workflow.includes("paths:")); assert(workflow.includes("npm audit --omit=dev --audit-level=high")); assert(workflow.includes("npm run build")); assert(workflow.includes('GENERATION_EXECUTION_ENABLED: "false"'));
 
 for (const videoPath of ["app/api/video/route.ts", "app/api/generate_video/route.ts"]) {
   const videoRoute = await readFile(videoPath, "utf8");
