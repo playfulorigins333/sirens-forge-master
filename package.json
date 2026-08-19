@@ -5,8 +5,9 @@
   "description": "Unified frontend + backend for Sirens Forge (Next.js 16 & Tailwind)",
   "main": "next.config.js",
   "scripts": {
+    "test:identity-lora-artifacts": "tsx backend/security/tests/identityLoraArtifactBehavior.test.ts",
     "test:launch-observability-recovery": "tsx backend/operations/tests/launchObservabilityRecovery.test.ts",
-    "test:frontend-launch-readiness": "tsx backend/security/tests/frontendLaunchReadiness.test.ts",
+    "test:frontend-launch-readiness": "npm run test:identity-lora-artifacts && tsx backend/security/tests/frontendLaunchReadiness.test.ts",
     "test:final-launch-hardening": "node --experimental-test-module-mocks --import tsx backend/security/tests/lock02bGenerateAuthorization.test.ts",
     "test:complaints-removal-operations": "tsx backend/governance/tests/complaintsRemovalOperations.test.ts",
     "dev": "next dev",

@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs/promises";
 import { constants as fsConstants } from "fs";
 import { ensureUserLoraCached, type LoraCacheDependencies } from "./ensureUserLoraCached";
+import { isValidIdentityLoraArtifact, type IdentityLoraLstat } from "./identityLoraArtifact";
 
 export type ResolvedLora = { path: string; strength: number };
 export type ResolvedLoraStack = { base_model: { path: string }; loras: ResolvedLora[]; trigger_token: string | null };
@@ -15,11 +16,26 @@ const BODY_LORA_NAMES: Record<Exclude<BodyMode, "none">, string> = {
   body_mtf: "body_mtf.safetensors", body_ftm: "body_ftm.safetensors",
 };
 
+export type LoraMaterializationDependencies = {
+  lstat: IdentityLoraLstat;
+  mkdir(directory: string): Promise<void>;
+  copyExclusive(source: string, destination: string): Promise<void>;
+  remove(filePath: string): Promise<void>;
+};
+
+const materializationDependencies: LoraMaterializationDependencies = {
+  lstat: fs.lstat,
+  async mkdir(directory) { await fs.mkdir(directory, { recursive: true }); },
+  async copyExclusive(source, destination) { await fs.copyFile(source, destination, fsConstants.COPYFILE_EXCL); },
+  async remove(filePath) { await fs.rm(filePath, { force: true, recursive: true }); },
+};
+
 export async function resolveLoraStack(
   bodyMode: BodyMode,
   identityLoraId: string | null | undefined,
   authenticatedUserId: string,
   cacheDeps?: LoraCacheDependencies,
+  materializationDeps: LoraMaterializationDependencies = materializationDependencies,
 ): Promise<ResolvedLoraStack> {
   if (bodyMode === "body_mtf" || bodyMode === "body_ftm") throw new Error(`Unsupported body mode for launch: ${bodyMode}`);
   const loras: ResolvedLora[] = bodyMode === "none" ? [] : [{ path: BODY_LORA_NAMES[bodyMode], strength: BODY_LORA_STRENGTH }];
@@ -28,15 +44,13 @@ export async function resolveLoraStack(
     const { localPath, metadata } = await ensureUserLoraCached(identityLoraId, authenticatedUserId, cacheDeps);
     const comfyFileName = `identity_${identityLoraId}.safetensors`;
     const comfyPath = path.join(COMFY_LORA_DIR, comfyFileName);
-    try { await fs.access(comfyPath); } catch {
+    if (!(await isValidIdentityLoraArtifact(comfyPath, materializationDeps.lstat))) {
+      await materializationDeps.remove(comfyPath).catch(() => undefined);
       try {
-        await fs.mkdir(COMFY_LORA_DIR, { recursive: true });
-        await fs.copyFile(localPath, comfyPath, fsConstants.COPYFILE_EXCL);
+        await materializationDeps.mkdir(COMFY_LORA_DIR);
+        await materializationDeps.copyExclusive(localPath, comfyPath);
       } catch {
-        try {
-          const stat = await fs.stat(comfyPath);
-          if (!stat.isFile() || stat.size === 0) throw new Error("invalid");
-        } catch {
+        if (!(await isValidIdentityLoraArtifact(comfyPath, materializationDeps.lstat))) {
           throw new Error("IDENTITY_LORA_MATERIALIZATION_FAILED");
         }
       }

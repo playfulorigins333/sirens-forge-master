@@ -2,7 +2,7 @@
 
 ## How to read this blueprint
 
-This architectural overview is reconciled through 2026-08-19. The latest operator-verified Production baseline recorded before PR #262 is PR #261 merge SHA `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9`, represented by Vercel deployment `dpl_FH8TgDhN45S43ri4QcufnTE6TsJ3` (`READY`, target `production`, Git ref `main`). PR #262 remains Preview/source evidence and is not represented as merged or deployed to Production. Operational claims explicitly identified as **operator-verified** are supplied current-state evidence. Repository files, tests, migrations, and routes establish implementation evidence only; they do not independently prove Production configuration or an external action. See [`CURRENT_STATE.md`](./CURRENT_STATE.md) and the canonical [`LAUNCH_ROADMAP_STATUS.md`](./LAUNCH_ROADMAP_STATUS.md).
+This architectural overview is reconciled through 2026-08-19. The current operator-supplied frontend Production baseline is merged PR #262/main SHA `8aba6d16716ef0d3c35a899342fee5e9c26990a9`. The current operator-supplied API Production baseline is merged API PR #5/main SHA `b357ff918a30ba4e771b798f591a1611cf8a4d97`. No custom-domain alias or public-response verification was performed in this cleanup. Operational claims explicitly identified as **operator-verified** are supplied current-state evidence. Repository files, tests, migrations, and routes establish implementation evidence only; they do not independently prove Production configuration or an external action. See [`CURRENT_STATE.md`](./CURRENT_STATE.md) and the canonical [`LAUNCH_ROADMAP_STATUS.md`](./LAUNCH_ROADMAP_STATUS.md).
 
 ## 1. Product and launch posture
 
@@ -52,9 +52,9 @@ Repository automation does not prove a live payout. Live Connect onboarding is b
 
 Generation remains identity-first. A generation may use at most **one body LoRA plus one identity LoRA**. PRs #221, #223, #241, and #250 provide subscription, mutation, ownership, and frontend gate hardening. Identity ownership and dataset/training routes must preserve authenticated ownership, storage isolation, finite state transitions, and safe errors.
 
-The separate Railway/FastAPI API is proxy/gateway infrastructure for generation and Dataset Doctor. Its privileged business ingress is server-to-server secret protected; that authorization contract is now inventoried in API PR #4. This does not change the locked Option A architecture: the frontend builds the full Comfy workflow JSON and the API remains proxy/gateway infrastructure rather than owning workflow composition.
+The separate Railway/FastAPI API is proxy/gateway infrastructure for generation and Dataset Doctor. Its privileged business ingress is server-to-server secret protected; that authorization contract is now inventoried in API PR #4. This does not change the locked Option A architecture: the frontend builds the full Comfy workflow JSON and the API remains proxy/validation/execution/storage gateway infrastructure rather than owning workflow composition. API PR #5 is merged/Production and fails identity-bearing generation closed until worker-side/shared-filesystem identity-LoRA materialization is proven. Frontend-local cache/materialization integrity does not claim to solve that cross-host runtime boundary.
 
-Generation pods remain offline because the operating budget cannot support compute. Real image-generation proof and real identity-training proof are **DEFERRED — BUDGET**. Only static UI, source, payload/workflow, schema/RLS, build, route, and non-generation checks may continue. Fake, mock, or placeholder output is never launch evidence.
+Generation pods remain intentionally offline because the operating budget cannot support compute. No live generation canary has been performed while they are offline. Real image-generation proof and real identity-training proof are **DEFERRED — BUDGET**. Only static UI, source, payload/workflow, schema/RLS, build, route, and non-generation checks may continue. Fake, mock, or placeholder output is never launch evidence.
 
 Video routes may remain as guarded repository history, but video execution is disabled and the product promise is Coming Soon. Video is not currently available.
 
@@ -98,7 +98,7 @@ Applied migrations are immutable history. Never edit, reorder, or delete them. A
 
 ## 14. Deployment, domains, and observability
 
-The latest operator-verified Production baseline recorded before PR #262 is PR #261 merge SHA `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9`. Vercel deployment `dpl_FH8TgDhN45S43ri4QcufnTE6TsJ3` is operator-verified `READY` on the `production` target from Git ref `main` at that exact SHA; this evidence does not itself prove current aliases. PR #262 remains Preview/source evidence until a separate merge, Production promotion, and post-promotion verification. Historical PR #258 public-route/alias evidence, PR #260 deployment evidence, and the August 1 recovery evidence remain useful history rather than the latest deployment identity. The separate Railway/FastAPI source was independently audited read-only at `main` SHA `2c84f8620dc626a449740b6e946fef1388605cee`, and Railway Production is `SUCCESS` at that exact SHA; the API repository was not modified.
+The current operator-supplied frontend Production baseline is PR #262/main SHA `8aba6d16716ef0d3c35a899342fee5e9c26990a9`, and the current operator-supplied API Production baseline is API PR #5/main SHA `b357ff918a30ba4e771b798f591a1611cf8a4d97`. This evidence does not itself prove current aliases, public responses, or generation compute availability. Historical PR #258 public-route/alias evidence, PR #260 deployment evidence, and the August 1 recovery evidence remain useful history rather than the latest deployment identity. The separate Railway/FastAPI source was historically audited read-only at `main` SHA `2c84f8620dc626a449740b6e946fef1388605cee`; that historical audit SHA is not the current API Production baseline. This frontend cleanup did not modify the API repository.
 
 For every authorized promotion, verify Git SHA, deployment identifier/target, apex and `www` aliases, and safe public responses as separate facts. A green build, Production target, or route file proves none of the others. Maintain the completed sanitized observability, alerting, and recovery operating contract and regression coverage without exercising external mutations.
 
@@ -111,6 +111,8 @@ For every authorized promotion, verify Git SHA, deployment identifier/target, ap
 - `supabase/migrations/`: immutable forward schema history; `supabase/manual/`: separately authorized operator artifacts.
 - `docs/`: architecture decisions, audit evidence, runbooks, current state, and roadmap.
 - `.github/workflows/`: CI contracts.
+
+**Future dependency maintenance (not a current launch blocker):** track the AWS SDK's announced future Node.js runtime floor and plan a Node runtime upgrade before that floor becomes required; current dependency installation, tests, and build determine present compatibility.
 
 Use diff/scope checks first, then focused source/route tests, domain suites, static migration/security checks, type/build validation when warranted, and finally separately authorized environment verification. A test is not Production proof; dry-run evidence is not an external action.
 
