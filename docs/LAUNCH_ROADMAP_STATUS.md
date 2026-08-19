@@ -16,7 +16,7 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 |---:|---|---|---|---|---|---|
 | 01 | Repository | Current main and PR #257 baseline reconciled | DONE | Git main evidence at `a11f1b9`; PR #257 commit title; operator identifies it as current Production/frontend main | Keep docs aligned after merges | None; $0 today: maintenance only |
 | 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Operator-verified current Production/frontend main after PR #257 | Reverify after any separately authorized promotion | Deployment actions require separate authorization |
-| 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | UNKNOWN — VERIFY | August 1 record covers PR #195 only; no supplied post-PR-257 alias record | Read-only record of deployment ID, apex/`www` ownership, redirect and safe responses | $0 today: yes; Vercel read-only access |
+| 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Read-only Vercel verification: deployment `dpl_3qbD2Ep4WJYoj2a2kKgVtDs47z14`; `READY`; target `production`; Git ref `main`; PR #257 SHA `a11f1b9e73fc3d9dfc4793757257480d160d56f5`; alias error none; aliases `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app` | Re-verify deployment and aliases after each future authorized Production promotion | Maintenance only; future promotions separately authorized |
 | 04 | Public site | Homepage anonymous response and launch posture | DONE | Operator-verified public route matrix; PRs #239, #250, #257 | Preserve dark-launch truth in regression tests | None; $0 today: maintenance only |
 | 05 | Public site | Intended policy/legal routes anonymously reachable | DONE | Operator-verified Production matrix; PR #239; `backend/security/tests/publicPathContract.test.ts` | Maintain route contract | None; $0 today: maintenance only |
 | 06 | Public site | FAQ/footer/pricing copy truthfully reflects launch scope | DONE | PR #257 correction/regression protection; PRs #216–#218 pricing alignment | Review on offer/scope changes | None; $0 today: maintenance only |
@@ -79,13 +79,13 @@ Only OPEN, non-frozen, non-budget-blocked work is ranked here. None authorizes P
 
 | Status | Rows |
 |---|---:|
-| DONE | 25 |
+| DONE | 26 |
 | LOCKED / FROZEN | 12 |
 | DEFERRED — BUDGET | 5 |
 | DEFERRED — DEPENDENCY | 3 |
 | OPEN | 3 |
 | POST-LAUNCH | 3 |
-| UNKNOWN — VERIFY | 1 |
+| UNKNOWN — VERIFY | 0 |
 | **Total** | **52** |
 
 ## Non-action safety record

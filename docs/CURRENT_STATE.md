@@ -13,6 +13,7 @@ This document separates operator-verified operational facts from repository evid
 ## Current verified facts
 
 - **Repository and public site:** PR #257 is present at the verified main above. The intended anonymous public/legal route matrix has been checked on current Production. PR #239 repaired the missing public allowlisting, PR #250 completed a frontend launch-readiness/security/accessibility sweep, and PR #257 corrected stale FAQ/footer launch claims and added regression coverage. The site remains dark-launch/internal-access only.
+- **Current Production deployment and aliases:** Independent read-only Vercel verification records deployment `dpl_3qbD2Ep4WJYoj2a2kKgVtDs47z14` as `READY`, targeted to `production`, from Git ref `main` at PR #257 SHA `a11f1b9e73fc3d9dfc4793757257480d160d56f5`, with no alias error. Its current aliases are `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`.
 - **Payment V2 — DONE and LOCKED / FROZEN:** The engineering contract spans PRs #197–#240, including Checkout, webhook inbox/event handling, claim/entitlement lifecycle, affiliate attribution, lifecycle behavior, inventory correction, readiness, and tests. Production configuration readiness is operator-verified green. Do not reopen this system as unfinished development.
 - **Founder offer:** OG Founder is **$1,333 one-time** for lifetime founder access, capped at **50 paid seats**. Early Bird is **$29.99/month while active**, capped at **150 paid seats**. The separate 25 beta testers are outside the 200 paid founder-seat pool. PR #236 and `backend/payment-v2/tests/lock05fLaunchInventory.test.ts` record the inventory correction.
 - **Payment operational hold:** A real-money V2 Production canary has not been performed and is **DEFERRED — BUDGET**, not unfinished engineering. There is no spare operating cash for a dummy charge/refund. Before any future live Stripe validation, Stripe must first be updated with the new Sirens Forge LLC business bank-account information. While that hold remains, do not recommend a charge, refund, Checkout canary, Connect onboarding, or other financial mutation.
@@ -29,7 +30,7 @@ This document separates operator-verified operational facts from repository evid
 - **DEFERRED — BUDGET:** Stripe bank-account prerequisite and real-money canary; live Stripe Connect onboarding; identity-training and image-generation real-compute proof.
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
 - **POST-LAUNCH:** Muse Store and affiliate payout automation expansion. Video execution is not a Phase 1 capability.
-- **UNKNOWN — VERIFY:** Current custom-domain alias ownership has not been independently re-recorded in the supplied post-PR-257 evidence; legal sufficiency and some end-to-end operational recovery exercises also require explicit verification. Do not infer these from code.
+- **UNKNOWN — VERIFY:** Human legal sufficiency and some end-to-end operational recovery exercises require explicit verification. Do not infer these from policy copy, routes, or code.
 
 ## Historical recovery context (2026-08-01; not current status)
 

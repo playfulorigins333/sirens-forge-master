@@ -14,7 +14,7 @@ Current Production/frontend main is operator-verified at PR #257. Generation com
 
 Pages exist for the homepage, pricing, FAQ, contact, terms, privacy, acceptable use, content removal, DMCA, complaints, community guidelines, underage policy, age, blocked content, 2257 exemption, and affiliate terms. PR #239 aligned anonymous allowlisting with the intended policy set; `backend/security/tests/publicPathContract.test.ts` protects the contract. PR #250 performed the current frontend security/accessibility/readiness sweep, and PR #257 corrected FAQ/footer claims and regression-tested them.
 
-**Operator-verified:** the full intended anonymous public/legal route matrix has been checked on current Production and that gate is closed. The sitemap contains the correct public route set. Current custom-domain alias ownership must still be separately re-recorded rather than inferred from a successful deployment or the historical August 1 alias check.
+**Operator-verified:** the full intended anonymous public/legal route matrix has been checked on current Production and that gate is closed. The sitemap contains the correct public route set. Independent read-only Vercel verification records current deployment `dpl_3qbD2Ep4WJYoj2a2kKgVtDs47z14` as `READY`, targeted to `production`, from Git ref `main` at PR #257 SHA `a11f1b9e73fc3d9dfc4793757257480d160d56f5`, with no alias error. Its aliases are `www.sirensforge.vip`, `sirensforge.vip`, `sirens-forge-master.vercel.app`, `sirens-forge-master-sirens-forges-projects.vercel.app`, and `sirens-forge-master-git-main-sirens-forges-projects.vercel.app`.
 
 ## 3. Authentication, accounts, and authorization
 
@@ -94,7 +94,7 @@ Applied migrations are immutable history. Never edit, reorder, or delete them. A
 
 ## 14. Deployment, domains, and observability
 
-PR #257 is the current operator-verified Production/frontend main. Historical August 1 evidence for PR #195 and deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi` remains useful history, not current deployment truth.
+PR #257 is the current operator-verified Production/frontend main. Current deployment `dpl_3qbD2Ep4WJYoj2a2kKgVtDs47z14` is independently verified `READY` on the `production` target from `main` at SHA `a11f1b9e73fc3d9dfc4793757257480d160d56f5`, with no alias error and the apex, `www`, and three Vercel aliases recorded in Section 2. Historical August 1 evidence for PR #195 and deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi` remains useful history, not current deployment truth.
 
 For every authorized promotion, verify Git SHA, deployment identifier/target, apex and `www` aliases, and safe public responses as separate facts. A green build, Production target, or route file proves none of the others. Continue zero-spend work on sanitized observability, finite error codes, scheduler/payment recovery runbooks, and operator-safe alerting without exercising external mutations.
 
@@ -117,7 +117,7 @@ Use diff/scope checks first, then focused source/route tests, domain suites, sta
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
 - **OPEN:** comprehensive API authorization review; complaints/removal operating workflow; remaining observability, alerting, and manual-recovery closure.
 - **POST-LAUNCH:** Muse Store and expanded affiliate payout automation. Video generation remains Coming Soon/execution-disabled rather than a Phase 1 capability.
-- **UNKNOWN — VERIFY:** fresh custom-domain alias ownership record; human legal sufficiency; any operational fact not covered by current operator evidence.
+- **UNKNOWN — VERIFY:** human legal sufficiency and any operational fact not covered by current operator evidence.
 
 ## 17. Recommended engineering sequence
 
@@ -125,7 +125,7 @@ Use diff/scope checks first, then focused source/route tests, domain suites, sta
 2. Complete the zero-spend API authorization inventory and close any route-local ownership/admin/entitlement evidence gaps without external actions.
 3. Formalize and tabletop the complaints/removal workflow using non-Production fixtures and documented roles.
 4. Close sanitized observability, alerting, and manual-recovery documentation gaps for asynchronous systems.
-5. Maintain public copy/route regression coverage and separately re-record aliases after any authorized deployment.
+5. Maintain public copy/route regression coverage and independently verify deployment identity, target, aliases, and safe responses after every authorized Production promotion.
 6. When operating cash exists, update Stripe business bank information under separate authorization, then separately authorize a minimal real-money V2 canary and reconciliation. Do not treat this as engineering continuation.
 7. Restore identity-training/image-generation compute only when funded; validate genuine outputs without mixing the effort with payments or publishing.
 8. Keep OnlyFans parked on issue #230; keep X and Reddit unavailable; advance providers only through provider-specific gates.
