@@ -3,6 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { createClient } from "@supabase/supabase-js";
+import { isValidIdentityLoraArtifact, type IdentityLoraLstat } from "./identityLoraArtifact";
 
 const CACHE_DIR = "/tmp/loras";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -16,7 +17,7 @@ export type OwnedLoraMetadata = {
 
 export type LoraCacheDependencies = {
   loadOwnedCompletedLora(loraId: string, userId: string): Promise<OwnedLoraMetadata | null>;
-  fileExists(filePath: string): Promise<boolean>;
+  lstat: IdentityLoraLstat;
   download(bucket: string, key: string): Promise<Uint8Array>;
   write(filePath: string, bytes: Uint8Array): Promise<void>;
   publish(source: string, destination: string): Promise<void>;
@@ -40,7 +41,7 @@ function serverDependencies(): LoraCacheDependencies {
         .eq("id", loraId).eq("user_id", userId).eq("status", "completed").maybeSingle();
       return error || !data?.artifact_r2_key ? null : data as OwnedLoraMetadata;
     },
-    async fileExists(filePath) { try { await fs.access(filePath); return true; } catch { return false; } },
+    lstat: fs.lstat,
     async download(bucket, objectKey) {
       const result = await r2.send(new GetObjectCommand({ Bucket: bucket, Key: objectKey }));
       if (!result.Body) throw new Error("IDENTITY_LORA_DOWNLOAD_FAILED");
@@ -48,7 +49,7 @@ function serverDependencies(): LoraCacheDependencies {
     },
     async write(filePath, bytes) { await fs.mkdir(CACHE_DIR, { recursive: true }); await fs.writeFile(filePath, bytes, { flag: "wx" }); },
     async publish(source, destination) { await fs.link(source, destination); },
-    async remove(filePath) { await fs.rm(filePath, { force: true }); },
+    async remove(filePath) { await fs.rm(filePath, { force: true, recursive: true }); },
   };
 }
 
@@ -62,17 +63,19 @@ export async function ensureUserLoraCached(
   const metadata = await deps.loadOwnedCompletedLora(loraId, userId);
   if (!metadata) throw new Error(IDENTITY_UNAVAILABLE);
   const localPath = path.join(CACHE_DIR, `${loraId}.safetensors`);
-  if (await deps.fileExists(localPath)) return { localPath, metadata };
+  if (await isValidIdentityLoraArtifact(localPath, deps.lstat)) return { localPath, metadata };
+  await deps.remove(localPath).catch(() => undefined);
   const bucket = metadata.artifact_r2_bucket?.trim() || process.env.R2_BUCKET || "identity-loras";
   const bytes = await deps.download(bucket, metadata.artifact_r2_key);
   if (bytes.byteLength === 0) throw new Error(IDENTITY_UNAVAILABLE);
   const temporaryPath = `${localPath}.${crypto.randomUUID()}.tmp`;
   try {
     await deps.write(temporaryPath, bytes);
-    if (await deps.fileExists(localPath)) return { localPath, metadata };
+    if (await isValidIdentityLoraArtifact(localPath, deps.lstat)) return { localPath, metadata };
+    await deps.remove(localPath).catch(() => undefined);
     await deps.publish(temporaryPath, localPath);
   } catch {
-    if (!(await deps.fileExists(localPath))) throw new Error(IDENTITY_UNAVAILABLE);
+    if (!(await isValidIdentityLoraArtifact(localPath, deps.lstat))) throw new Error(IDENTITY_UNAVAILABLE);
   } finally {
     await deps.remove(temporaryPath).catch(() => undefined);
   }
