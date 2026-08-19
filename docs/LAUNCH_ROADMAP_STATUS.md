@@ -2,9 +2,9 @@
 
 **Canonical practical launch checklist — 2026-08-19**
 
-**Current operator-verified Production frontend:** `84c22b3337b3faf608965da84803c2d15cf1258a` (PR #260)
+**Latest repository-recorded operator-verified Production baseline before PR #262:** `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9` (PR #261)
 
-**Current operator-verified Vercel deployment:** `dpl_CzqyGKH4zpQF9mV2jqwWrJAtmCVC` — `READY`, target `production`, Git ref `main`, exact SHA above. This task performed no deployment action.
+**Associated operator-verified Vercel deployment:** `dpl_FH8TgDhN45S43ri4QcufnTE6TsJ3` — `READY`, target `production`, Git ref `main`, exact SHA above. PR #262 is not recorded as merged or deployed to Production. This task performed no deployment action.
 
 **Launch posture:** dark launch; internal access only
 
@@ -16,9 +16,9 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 | ID | Area | Gate / deliverable | Status | Evidence | Remaining action | Dependency / blocker |
 |---:|---|---|---|---|---|---|
-| 01 | Repository | Current main and roadmap baseline reconciled | DONE | Git main evidence through PR #260; canonical roadmap/current-state reconciliation | Keep docs aligned after merges | None; $0 today: maintenance only |
-| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Operator-supplied verified Vercel Production deployment `dpl_CzqyGKH4zpQF9mV2jqwWrJAtmCVC`: `READY`, target `production`, ref `main`, exact PR #260 SHA `84c22b3337b3faf608965da84803c2d15cf1258a` | Reverify after any separately authorized promotion | Deployment actions require separate authorization; this task did not deploy |
-| 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Historical read-only alias verification exists for PR #258 deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN`; PR #260 deployment identity/state/SHA is operator-verified, but this task did not independently recheck aliases | Re-verify deployment and aliases separately after each future authorized Production promotion | Maintenance only; future promotions separately authorized |
+| 01 | Repository | Current main and roadmap baseline reconciled | DONE | Git main evidence through PR #261 SHA `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9`; canonical roadmap/current-state reconciliation. PR #262 remains unmerged Preview/source evidence. | Keep docs aligned after merges | None; $0 today: maintenance only |
+| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Latest repository-recorded operator verification before PR #262: Vercel Production deployment `dpl_FH8TgDhN45S43ri4QcufnTE6TsJ3`, `READY`, target `production`, ref `main`, exact PR #261 SHA `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9` | Reverify after any separately authorized promotion | Deployment actions require separate authorization; this task did not deploy |
+| 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Historical read-only alias verification exists for PR #258 deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN`; the PR #261 deployment identity/state/SHA is operator-verified, but aliases were not independently rechecked for that promotion | Re-verify deployment identity, aliases, and custom-domain serving separately after every future authorized Production promotion | Maintenance only; future promotions separately authorized |
 | 04 | Public site | Homepage anonymous response and launch posture | DONE | Operator-verified public route matrix; PRs #239, #250, #257 | Preserve dark-launch truth in regression tests | None; $0 today: maintenance only |
 | 05 | Public site | Intended policy/legal routes anonymously reachable | DONE | Operator-verified Production matrix; PR #239; `backend/security/tests/publicPathContract.test.ts` | Maintain route contract | None; $0 today: maintenance only |
 | 06 | Public site | FAQ/footer/pricing copy truthfully reflects launch scope | DONE | PR #257 correction/regression protection; PRs #216–#218 pricing alignment | Review on offer/scope changes | None; $0 today: maintenance only |

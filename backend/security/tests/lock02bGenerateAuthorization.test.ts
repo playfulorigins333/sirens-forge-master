@@ -19,6 +19,7 @@ const originalEnv = {
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
   NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  GENERATION_EXECUTION_ENABLED: process.env.GENERATION_EXECUTION_ENABLED,
 }
 
 let authResult: AuthResult
@@ -27,6 +28,7 @@ let resolverCalls = 0
 let workflowCalls = 0
 let downstreamCalls = 0
 let insertedRecords: Record<string, unknown>[] = []
+let persistenceFails = false
 let lastResolverArgs: unknown[] = []
 let lastWorkflowArgs: any
 let lastDownstreamPayload: any
@@ -81,7 +83,7 @@ mock.module("@supabase/supabase-js", {
                 return {
                   single: async () => ({
                     data: { id: `mock-log-${insertedRecords.length}` },
-                    error: null,
+                    error: persistenceFails ? { message: "mock persistence failure" } : null,
                   }),
                 }
               },
@@ -132,6 +134,7 @@ function configureAuth(next: AuthResult) {
   workflowCalls = 0
   downstreamCalls = 0
   insertedRecords = []
+  persistenceFails = false
   lastResolverArgs = []
   lastWorkflowArgs = undefined
   lastDownstreamPayload = undefined
@@ -141,6 +144,7 @@ function configureAuth(next: AuthResult) {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "https://supabase.test"
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "mock-anon"
   process.env.SUPABASE_SERVICE_ROLE_KEY = "mock-service-role"
+  process.env.GENERATION_EXECUTION_ENABLED = "true"
   upstreamResponse = async () =>
     new Response(
       JSON.stringify({
@@ -194,6 +198,7 @@ try {
     assert.equal(result.status, "ok")
     assert.equal(result.image_url, "https://assets.test/generated.png")
     assert.equal(result.generation_id, "runpod-job-1")
+    assert.deepEqual(result.history_persistence, { status: "PERSISTED" })
     assert.equal(authCalls, 1)
     assert.equal(resolverCalls, 1)
     assert.equal(workflowCalls, 1)
@@ -204,7 +209,7 @@ try {
   }
 
   // Representative normalization and downstream workflow payload are preserved.
-  assert.deepEqual(lastResolverArgs, ["body_feminine", "identity/mock.safetensors"])
+  assert.deepEqual(lastResolverArgs, ["body_feminine", "identity/mock.safetensors", "verified-trialing-user"])
   assert.equal(lastWorkflowArgs.prompt, "mocktoken portrait lighting")
   assert.equal(lastWorkflowArgs.negative, "blur")
   assert.deepEqual(
@@ -252,7 +257,6 @@ try {
   assert.deepEqual(await response.json(), {
     error: "UPSTREAM_ERROR",
     status: 503,
-    body: "mock unavailable",
     generation_id: "mock-log-1",
   })
   assert.equal(downstreamCalls, 1)
@@ -265,10 +269,25 @@ try {
   assert.deepEqual(await response.json(), {
     error: "UPSTREAM_INVALID_JSON",
     generation_id: "mock-log-1",
-    body: "not-json",
   })
   assert.equal(downstreamCalls, 1)
   assert.equal(insertedRecords[0].user_id, "verified-json-user")
+
+  configureAuth({ ok: true, status: 200, user: { id: "verified-malformed-user" } })
+  upstreamResponse = async () => new Response(JSON.stringify({ success: true, images: ["file:///private/output"] }), { status: 200 })
+  response = await invoke(validBody)
+  assert.equal(response.status, 502)
+  assert.deepEqual(await response.json(), { error: "UPSTREAM_INVALID_RESPONSE" })
+  assert.equal(insertedRecords.length, 0, "malformed success is never persisted")
+
+  configureAuth({ ok: true, status: 200, user: { id: "verified-persistence-user" } })
+  persistenceFails = true
+  response = await invoke(validBody)
+  assert.equal(response.status, 200)
+  const persistenceResult = await response.json()
+  assert.equal(persistenceResult.image_url, "https://assets.test/generated.png")
+  assert.deepEqual(persistenceResult.history_persistence, { status: "FAILED", code: "GENERATION_HISTORY_PERSISTENCE_FAILED", retry_generation: false })
+  assert.equal(downstreamCalls, 1, "persistence failure never repeats generation")
 
   console.log("lock02bGenerateAuthorization behavioral contract ok")
 } finally {

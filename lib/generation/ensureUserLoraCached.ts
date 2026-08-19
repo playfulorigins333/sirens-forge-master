@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import crypto from "crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { createClient } from "@supabase/supabase-js";
 
@@ -18,6 +19,8 @@ export type LoraCacheDependencies = {
   fileExists(filePath: string): Promise<boolean>;
   download(bucket: string, key: string): Promise<Uint8Array>;
   write(filePath: string, bytes: Uint8Array): Promise<void>;
+  publish(source: string, destination: string): Promise<void>;
+  remove(filePath: string): Promise<void>;
 };
 
 function serverDependencies(): LoraCacheDependencies {
@@ -43,7 +46,9 @@ function serverDependencies(): LoraCacheDependencies {
       if (!result.Body) throw new Error("IDENTITY_LORA_DOWNLOAD_FAILED");
       return result.Body.transformToByteArray();
     },
-    async write(filePath, bytes) { await fs.mkdir(CACHE_DIR, { recursive: true }); await fs.writeFile(filePath, bytes); },
+    async write(filePath, bytes) { await fs.mkdir(CACHE_DIR, { recursive: true }); await fs.writeFile(filePath, bytes, { flag: "wx" }); },
+    async publish(source, destination) { await fs.link(source, destination); },
+    async remove(filePath) { await fs.rm(filePath, { force: true }); },
   };
 }
 
@@ -60,6 +65,16 @@ export async function ensureUserLoraCached(
   if (await deps.fileExists(localPath)) return { localPath, metadata };
   const bucket = metadata.artifact_r2_bucket?.trim() || process.env.R2_BUCKET || "identity-loras";
   const bytes = await deps.download(bucket, metadata.artifact_r2_key);
-  await deps.write(localPath, bytes);
+  if (bytes.byteLength === 0) throw new Error(IDENTITY_UNAVAILABLE);
+  const temporaryPath = `${localPath}.${crypto.randomUUID()}.tmp`;
+  try {
+    await deps.write(temporaryPath, bytes);
+    if (await deps.fileExists(localPath)) return { localPath, metadata };
+    await deps.publish(temporaryPath, localPath);
+  } catch {
+    if (!(await deps.fileExists(localPath))) throw new Error(IDENTITY_UNAVAILABLE);
+  } finally {
+    await deps.remove(temporaryPath).catch(() => undefined);
+  }
   return { localPath, metadata };
 }

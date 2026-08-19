@@ -1,8 +1,10 @@
 # Sirens Forge Current State
 
+> **Pre-launch source hardening (not deployment evidence):** the current hardening branch updates vulnerable frontend dependencies, adds a conservative global response-header baseline, removes the launch-readiness workflow's pull-request path-filter bypass, validates successful generation gateway responses, exposes a finite non-retrying history-persistence failure state, and makes identity-LoRA cache materialization atomic/race-aware. This statement does not claim that the branch is merged, deployed, or serving Production. Payment V2 and Fanvue remain frozen, generation execution remains default-off, and all budget/dependency deferrals are unchanged.
+
 **As of:** 2026-08-19
 
-**Current operator-verified Production frontend:** `84c22b3337b3faf608965da84803c2d15cf1258a` (PR #260)
+**Latest operator-verified Production baseline recorded before PR #262:** PR #261 merge SHA `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9`; Vercel deployment `dpl_FH8TgDhN45S43ri4QcufnTE6TsJ3` — `READY`, target `production`, Git ref `main`, exact SHA above. PR #262 is not recorded here as merged or deployed to Production.
 
 **Access posture:** dark launch; internal access only
 
@@ -12,8 +14,8 @@ This document separates operator-verified operational facts from repository evid
 
 ## Current verified facts
 
-- **Repository and public site:** PR #260 is present at the current operator-verified Production frontend above. The intended anonymous public/legal route matrix was checked on Production as historical evidence; this task did not repeat a public or alias verification. PR #260 added the complaints/removal operating gate after PR #259's API inventory. The site remains dark-launch/internal-access only.
-- **Current verified Production deployment:** Operator-supplied verification records Vercel deployment `dpl_CzqyGKH4zpQF9mV2jqwWrJAtmCVC` as `READY`, targeted to `production`, from Git ref `main` at exact PR #260 merge SHA `84c22b3337b3faf608965da84803c2d15cf1258a`. This task performed no deployment/promotion and does not infer current custom-domain aliases from deployment readiness.
+- **Repository and public site:** PR #261 is present at the latest operator-verified pre-PR-262 Production baseline above. The intended anonymous public/legal route matrix was checked on Production as historical evidence; this task did not repeat a public or alias verification. PR #260 added the complaints/removal operating gate after PR #259's API inventory, and PR #261 added the observability/recovery gate. The site remains dark-launch/internal-access only.
+- **Latest verified pre-PR-262 Production deployment:** Operator-supplied verification records Vercel deployment `dpl_FH8TgDhN45S43ri4QcufnTE6TsJ3` as `READY`, targeted to `production`, from Git ref `main` at exact PR #261 merge SHA `6d38cd1009b52c3ac9462fc997f79baf6fb25bf9`. This task performed no deployment/promotion and does not infer current custom-domain aliases from deployment readiness. PR #262 remains Preview/source evidence until a separate merge, Production promotion, and post-promotion verification occur.
 - **Payment V2 — DONE and LOCKED / FROZEN:** The engineering contract spans PRs #197–#240, including Checkout, webhook inbox/event handling, claim/entitlement lifecycle, affiliate attribution, lifecycle behavior, inventory correction, readiness, and tests. Production configuration readiness is operator-verified green. Do not reopen this system as unfinished development.
 - **Founder offer:** OG Founder is **$1,333 one-time** for lifetime founder access, capped at **50 paid seats**. Early Bird is **$29.99/month while active**, capped at **150 paid seats**. The separate 25 beta testers are outside the 200 paid founder-seat pool. PR #236 and `backend/payment-v2/tests/lock05fLaunchInventory.test.ts` record the inventory correction.
 - **Payment operational hold:** A real-money V2 Production canary has not been performed and is **DEFERRED — BUDGET**, not unfinished engineering. There is no spare operating cash for a dummy charge/refund. Before any future live Stripe validation, Stripe must first be updated with the new Sirens Forge LLC business bank-account information. While that hold remains, do not recommend a charge, refund, Checkout canary, Connect onboarding, or other financial mutation.
