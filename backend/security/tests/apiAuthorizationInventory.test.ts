@@ -94,6 +94,28 @@ for (const [route, method] of inertLegacyEntries) {
   for (const claim of forbiddenInertClaims) assert.ok(!classes.has(claim), `${method} ${route} must not claim ${claim}`)
 }
 
+const publicXAdminGetRoutes = [
+  "/api/admin/autopost/x/controlled-refresh",
+  "/api/admin/autopost/x/crypto-envelope-diagnostic",
+  "/api/admin/autopost/x/identity-diagnostic",
+  "/api/admin/autopost/x/live-text-canary",
+  "/api/admin/autopost/x/reauthorize",
+] as const
+const forbiddenPublicXAdminGetClaims = ["AUTHENTICATED", "OWNER", "ADMIN", "INTERNAL_CONTROLLED", "SCHEDULER_SECRET", "WEBHOOK_SIGNATURE", "OAUTH_CALLBACK"]
+for (const route of publicXAdminGetRoutes) {
+  const getRow = inventoryRow(route, "GET")
+  const getClasses = authorizationClasses(getRow)
+  assert.ok(getClasses.has("PUBLIC"), `GET ${route} must record its static public 405 contract`)
+  for (const claim of forbiddenPublicXAdminGetClaims) assert.ok(!getClasses.has(claim), `GET ${route} must not claim ${claim}`)
+  assert.match(getRow[11], /405.+no privileged action/i, `GET ${route} must record the static 405/no-privileged-action contract`)
+
+  const postClasses = authorizationClasses(inventoryRow(route, "POST"))
+  assert.ok(postClasses.has("AUTHENTICATED"), `POST ${route} must remain authenticated`)
+  assert.ok(postClasses.has("ADMIN"), `POST ${route} must remain admin-protected`)
+  assert.ok(postClasses.has("INTERNAL_CONTROLLED"), `POST ${route} must remain internally controlled`)
+  assert.ok(!postClasses.has("PUBLIC"), `POST ${route} must not be public`)
+}
+
 const xPost = inventoryRow("/api/autopost/platforms/x", "POST")
 const xPostClasses = authorizationClasses(xPost)
 assert.ok(xPostClasses.has("INTERNAL_CONTROLLED"), "POST /api/autopost/platforms/x must record its internal control")
