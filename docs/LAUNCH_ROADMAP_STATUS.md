@@ -63,7 +63,7 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 | 45 | Governance | Creator likeness and AI-persona consent controls | DONE | PR #255; migration `20260818164748_cpq_fanvue_ai_persona_policy_correction.sql`; AI-twin consent tests | Maintain consent version/hash and provider policy | Human legal review remains distinct |
 | 46 | Governance | Complaints/removal operating workflow | DONE | `docs/operations/complaints-removal-operations.md`; `backend/governance/tests/complaintsRemovalOperations.test.ts`; truthful `app/content-removal/page.tsx` alignment. Repository review found no dedicated case-management schema/service/admin UI. | Maintain the runbook, public intake/policy truth, CI contract, and operator-approved internal targets | Human legal sufficiency and real staffing/execution remain separate; no Production action authorized |
 | 47 | Frontend | Accessibility, SEO, sitemap, error/loading shell | DONE | PR #250 sweep; PR #257 regressions; sitemap and app shell files | Maintain regression coverage | None |
-| 48 | Operations | Sanitized observability, alerts and recovery closure | OPEN | `docs/operations/launch-observability-alerts-recovery.md` and its CI regression contract now cover the frontend/hosting/dependency matrix, roles, P0–P3 thresholds, truthful mechanisms, redaction, recovery, cadence, incident template, and 12 tabletops. Current private API source/SHA could not be fetched in this environment, so the required current `app/main.py`/route/logging/health audit is not complete. | Obtain read-only access, inspect current API source, record exact SHA/health finding, and close only if no source blocker remains | $0 today: yes; API repository read access required; no external mutation needed |
+| 48 | Operations | Sanitized observability, alerts and recovery closure | DONE | `docs/operations/launch-observability-alerts-recovery.md`; `backend/operations/tests/launchObservabilityRecovery.test.ts`; current API read-only audit at `2c84f8620dc626a449740b6e946fef1388605cee`; Railway Production `SUCCESS` on that exact SHA. The audit confirms 10 business routes, centralized fail-closed ingress, no custom API health endpoint, and no proven secret leak; the API repository was not modified. | Keep matrix/runbooks aligned when routes or signals change; perform safe launch-period checks; separately authorize real recovery mutations | Maintenance only; no automated paging or 24/7 staffing implied |
 | 49 | Operations | Public/legal route operational regression check | DONE | Operator-verified current Production matrix; PRs #239 and #257 | Repeat safe GET/HEAD check after authorized promotions | No mutating smoke tests |
 | 50 | Security | Protected sole Production admin preserved | LOCKED / FROZEN | Operator fact; PR #254 sole-admin founder bootstrap | Never alter/delete during testing or audits | Absolute safety boundary |
 | 51 | Launch scope | Economic tokens excluded from Phase 1 | LOCKED / FROZEN | PR #232 token retirement migration/tests; operator scope fact | Do not reintroduce for launch | Frozen scope |
@@ -71,19 +71,17 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 ## Next zero-spend engineering candidates
 
-Only OPEN, non-frozen, non-budget-blocked work is ranked here. None authorizes Production, payment, database, OAuth, provider, or generation actions.
-
-1. **Sanitized observability, alerts, and recovery closure (row 48).** Build a launch-wide signal/owner/runbook matrix from existing finite Payment V2 and CPQ errors; document redaction and tabletop recovery without invoking any external or mutating path.
+There is no presently actionable zero-spend engineering gate. `OPEN = 0` does not complete deferred funding, external-dependency, frozen, or post-launch scope and authorizes no Production, payment, database, OAuth, provider, or generation action.
 
 ## Count by status
 
 | Status | Rows |
 |---|---:|
-| DONE | 28 |
+| DONE | 29 |
 | LOCKED / FROZEN | 12 |
 | DEFERRED — BUDGET | 5 |
 | DEFERRED — DEPENDENCY | 3 |
-| OPEN | 1 |
+| OPEN | 0 |
 | POST-LAUNCH | 3 |
 | UNKNOWN — VERIFY | 0 |
 | **Total** | **52** |

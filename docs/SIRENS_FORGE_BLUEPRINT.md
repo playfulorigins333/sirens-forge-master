@@ -98,7 +98,7 @@ Applied migrations are immutable history. Never edit, reorder, or delete them. A
 
 ## 14. Deployment, domains, and observability
 
-The verified pre-PR #259 Production frontend is PR #258 merge SHA `c765639044994456315bdb0a6e35316bc29fc9cc`. Deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN` is independently verified `READY` on the `production` target from `main`. Historical August 1 evidence for PR #195 and deployment `dpl_5CoPfkQ2c2jkfgwqfVwWQzok6WRi` remains useful history, not current deployment truth. The separate Railway/FastAPI service is independently verified deployed successfully at merged API PR #4 SHA `2c84f8620dc626a449740b6e946fef1388605cee`.
+The current operator-verified Production frontend is PR #260 merge SHA `84c22b3337b3faf608965da84803c2d15cf1258a`. Vercel deployment `dpl_CzqyGKH4zpQF9mV2jqwWrJAtmCVC` is operator-verified `READY` on the `production` target from `main`; this evidence does not itself prove current aliases. Historical PR #258 and August 1 deployment evidence remains useful history, not current deployment truth. The separate Railway/FastAPI source was independently audited read-only at `main` SHA `2c84f8620dc626a449740b6e946fef1388605cee`, and Railway Production is `SUCCESS` at that exact SHA; the API repository was not modified.
 
 For every authorized promotion, verify Git SHA, deployment identifier/target, apex and `www` aliases, and safe public responses as separate facts. A green build, Production target, or route file proves none of the others. Continue zero-spend work on sanitized observability, finite error codes, scheduler/payment recovery runbooks, and operator-safe alerting without exercising external mutations.
 
@@ -122,7 +122,7 @@ Use diff/scope checks first, then focused source/route tests, domain suites, sta
 - **DEFERRED — DEPENDENCY:** OnlyFans final live verification (issue #230).
 - **DONE:** comprehensive cross-repo API authorization inventory: frontend 88 route files / 102 route-methods plus separate Railway/FastAPI API PR #4 covering 10 business endpoints and framework routes, with regression contracts in both repositories.
 - **DONE:** complaints/removal source/documentation/testing operating workflow and regression contract.
-- **OPEN:** observability/alerting/recovery now has a launch-wide zero-spend operating contract and CI regression coverage, but row 48 remains open until the current private Railway/FastAPI repository SHA and source (including logging and any actual health/readiness surface) can be inspected. No universal automated paging platform is established.
+- **DONE:** launch-wide observability/alerting/recovery has a zero-spend operating contract and CI regression coverage plus a current read-only Railway/FastAPI audit at `2c84f8620dc626a449740b6e946fef1388605cee`. Railway Production is `SUCCESS` at the exact audited SHA; no custom API health endpoint, universal automated paging platform, or 24/7 staffing is claimed.
 - **POST-LAUNCH:** Muse Store and expanded affiliate payout automation. Video generation remains Coming Soon/execution-disabled rather than a Phase 1 capability.
 - **UNKNOWN — VERIFY:** human legal sufficiency and any operational fact not covered by current operator evidence.
 

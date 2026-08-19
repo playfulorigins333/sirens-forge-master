@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 const path = resolve(process.cwd(), "docs/operations/launch-observability-alerts-recovery.md");
 const doc = readFileSync(path, "utf8");
+const roadmap = readFileSync(resolve(process.cwd(), "docs/LAUNCH_ROADMAP_STATUS.md"), "utf8");
 let assertions = 0;
 
 function includes(value: string, label: string) {
@@ -37,8 +38,12 @@ matches(/Pods remain intentionally OFF.*pod-off is not an incident/is, "budget-d
 matches(/mock\/fake output is never proof/i, "no mock generation proof");
 includes("Protected Production admin", "protected admin boundary");
 includes("Sanitized incident record template", "incident template");
-includes("current SHA, `app/main.py`", "truthful API audit blocker");
-includes("does **not** claim that the API has a health/readiness endpoint", "no invented API health endpoint");
+includes("current `main` SHA `2c84f8620dc626a449740b6e946fef1388605cee`", "exact current API audit SHA");
+includes("independently audited read-only", "current API source audit complete");
+includes("Railway Production reports `SUCCESS` on `main` at that exact SHA", "Railway exact-SHA success evidence");
+includes("There is **no custom API health/readiness endpoint**", "no invented API health endpoint");
+includes("was **not modified**", "API repository modification explicitly false");
+includes("Operators must inspect and redact raw errors and upstream excerpts before copying them into an incident record", "restricted API logging evidence");
 
 for (const secret of [
   "passwords", "Supabase service-role keys", "database passwords", "Stripe secret keys", "webhook secret",
@@ -55,5 +60,21 @@ for (const scenario of [
   "L. Suspected authorization/RLS regression",
 ]) includes(scenario, "required tabletop");
 
-matches(/Row 48 must remain \*\*OPEN\*\*/i, "honest unresolved cross-repository audit blocker");
+matches(/Row 48 is \*\*DONE\*\*/i, "row 48 closure");
+assert.match(roadmap, /\| 48 \| Operations \| Sanitized observability, alerts and recovery closure \| DONE \|/, "canonical row 48 is DONE"); assertions += 1;
+assert.match(roadmap, /\| DONE \| 29 \|/, "canonical DONE count"); assertions += 1;
+assert.match(roadmap, /\| OPEN \| 0 \|/, "canonical OPEN count"); assertions += 1;
+for (const preserved of [
+  "Stripe | Update Sirens Forge LLC business bank account | DEFERRED — BUDGET",
+  "Real-money V2 Checkout/webhook/claim/reconciliation canary | DEFERRED — BUDGET",
+  "Stripe Connect | Live account creation/onboarding validation | DEFERRED — BUDGET",
+  "Identity-training real-compute proof | DEFERRED — BUDGET",
+  "Image-generation real-compute and persistence proof | DEFERRED — BUDGET",
+  "OnlyFans | Assisted/manual workflow and final live verification | DEFERRED — DEPENDENCY",
+  "X | Launch availability | DEFERRED — DEPENDENCY",
+  "Reddit | Launch availability/manual placeholder | DEFERRED — DEPENDENCY",
+  "Affiliate | Automated payout execution expansion | POST-LAUNCH",
+  "Video generation execution | POST-LAUNCH",
+  "Muse Store | POST-LAUNCH",
+]) { assert.ok(roadmap.includes(preserved), `preserved roadmap category: ${preserved}`); assertions += 1; }
 console.log(`Launch observability/recovery contract passed (${assertions} assertions)`);
