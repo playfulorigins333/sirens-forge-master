@@ -48,10 +48,10 @@ assert.doesNotMatch(
   "stale blanket consent-verification disclaimer must not return",
 );
 assert(removal.includes("applies platform consent, likeness, safety, and policy"));
-assert.match(removal, /do not\s+independently establish legal ownership/);
+assert.match(removal, /do not\s+independently\s+establish legal ownership/);
 assert.match(removal, /Users remain responsible for obtaining the rights and/);
 assert.match(underage, /applies\s+platform age, consent, likeness, safety, and policy/);
-assert.match(underage, /do not\s+independently establish legal ownership/);
+assert.match(underage, /do not\s+independently\s+establish legal ownership/);
 
 const publicComplaintRemovalCopy = `${removal}\n${complaints}`;
 const hardDeadline = /(?:respond|acknowledge|review|resolve|remove|action)[^.!?\n]{0,80}\b(?:within|in)\s+\d+\s+(?:hours?|business days?|calendar days?|days?)\b/i;
