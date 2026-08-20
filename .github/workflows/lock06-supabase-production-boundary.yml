@@ -47,9 +47,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
       - name: Create disposable database
         run: psql postgres://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database lock06_test'
+      - name: Generate deployable migration filename with Supabase CLI
+        shell: bash
+        run: |
+          supabase migration new lock06_supabase_production_boundary
+          LOCK06_MIGRATION_PATH="$(find supabase/migrations -maxdepth 1 -type f -name '*_lock06_supabase_production_boundary.sql' -print -quit)"
+          test -n "$LOCK06_MIGRATION_PATH"
+          cp supabase/manual/lock06_supabase_production_boundary_forward.sql "$LOCK06_MIGRATION_PATH"
+          echo "LOCK06_MIGRATION_PATH=$LOCK06_MIGRATION_PATH" >> "$GITHUB_ENV"
+          echo "LOCK06 CLI migration: $(basename "$LOCK06_MIGRATION_PATH")"
       - name: Static source contract
         run: node --test backend/security/tests/lock06SupabaseProductionBoundary.test.mjs
-      - name: Disposable PostgreSQL behavior
+      - name: Disposable PostgreSQL behavior against CLI-generated migration
         run: node backend/security/tests/runLock06SupabaseProductionBoundaryPostgres.mjs
+        env:
+          LOCK06_FORWARD_PATH: ${{ env.LOCK06_MIGRATION_PATH }}
