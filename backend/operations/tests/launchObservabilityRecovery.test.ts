@@ -62,8 +62,36 @@ for (const scenario of [
 
 matches(/Row 48 is \*\*DONE\*\*/i, "row 48 closure");
 assert.match(roadmap, /\| 48 \| Operations \| Sanitized observability, alerts and recovery closure \| DONE \|/, "canonical row 48 is DONE"); assertions += 1;
-assert.match(roadmap, /\| DONE \| 29 \|/, "canonical DONE count"); assertions += 1;
-assert.match(roadmap, /\| OPEN \| 0 \|/, "canonical OPEN count"); assertions += 1;
+
+const granularSection = roadmap.match(/## Granular launch gates\s+([\s\S]*?)\s+## Next zero-spend engineering candidates/)?.[1] ?? "";
+const granularRows = granularSection.split("\n").filter((line) => /^\|\s*\d+\s*\|/.test(line));
+assert.ok(granularRows.length > 0, "granular roadmap rows are parseable"); assertions += 1;
+const actualCounts = new Map<string, number>();
+for (const row of granularRows) {
+  const columns = row.split("|").slice(1, -1).map((column) => column.trim());
+  assert.equal(columns.length, 7, `granular roadmap row has seven columns: ${row}`); assertions += 1;
+  actualCounts.set(columns[3], (actualCounts.get(columns[3]) ?? 0) + 1);
+}
+
+const countSection = roadmap.match(/## Count by status\s+([\s\S]*?)\s+## Non-action safety record/)?.[1] ?? "";
+const reportedCounts = new Map<string, number>();
+let reportedTotal: number | undefined;
+for (const line of countSection.split("\n")) {
+  const match = line.match(/^\|\s*(?:\*\*)?([^|*]+?)(?:\*\*)?\s*\|\s*(?:\*\*)?(\d+)(?:\*\*)?\s*\|$/);
+  if (!match || match[1].trim() === "Status") continue;
+  if (match[1].trim() === "Total") reportedTotal = Number(match[2]);
+  else reportedCounts.set(match[1].trim(), Number(match[2]));
+}
+for (const [status, actual] of actualCounts) {
+  assert.equal(reportedCounts.get(status), actual, `reported ${status} count matches granular rows`); assertions += 1;
+}
+for (const [status, reported] of reportedCounts) {
+  assert.equal(reported, actualCounts.get(status) ?? 0, `reported ${status} count has no uncounted rows`); assertions += 1;
+}
+assert.equal(reportedTotal, granularRows.length, "reported total matches granular roadmap row count"); assertions += 1;
+for (const requiredStatus of ["DEFERRED — BUDGET", "DEFERRED — DEPENDENCY", "POST-LAUNCH", "LOCKED / FROZEN"]) {
+  assert.ok((actualCounts.get(requiredStatus) ?? 0) > 0, `required roadmap status remains present: ${requiredStatus}`); assertions += 1;
+}
 for (const preserved of [
   "Stripe | Update Sirens Forge LLC business bank account | DEFERRED — BUDGET",
   "Real-money V2 Checkout/webhook/claim/reconciliation canary | DEFERRED — BUDGET",

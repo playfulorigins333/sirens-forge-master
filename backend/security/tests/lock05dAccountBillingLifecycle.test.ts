@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolveCollectedBillingCustomerIds } from "../../../lib/stripe/billingCustomerResolver";
 
-const baseline = "a7c5a8d2e40f9df5acdfaa3867bb59fe628af3b3";
+const baseline = "edba41190d2edf250ef1a8684d081bd5161953d7";
 const read = (path: string) => readFileSync(path, "utf8");
 const accountAccess = read("lib/account-access.ts");
 const accountPage = read("app/account/page.tsx");
@@ -84,9 +84,10 @@ test("frozen Payment V2 permissions require service-role reads and deny authenti
 });
 
 test("portal creates only a portal session and never imports customer creation", () => {
-  assert.match(portal, /ensureAuthenticatedProfile\(\)/);
+  assert.match(portal, /deps\.ensureAuthenticatedProfile \?\? ensureAuthenticatedProfile/);
   assert.match(portal, /const profileId = auth\.profile\.id/);
-  assert.match(portal, /resolveExistingBillingCustomer\(profileId\)/);
+  assert.match(portal, /deps\.resolveExistingBillingCustomer \?\? resolveExistingBillingCustomer/);
+  assert.match(portal, /resolveCustomer\(profileId\)/);
   assert.doesNotMatch(portal, /req\.(json|formData)\(|searchParams|get\("(?:profile|profileId|customer|customerId)"\)/);
   assert.doesNotMatch(portal, /getOrCreateStripeCustomer|stripe\.customers\.(create|update)|stripe\.subscriptions\.(create|update|cancel)|stripe\.checkout\.sessions\.create/);
   assert.equal((portal.match(/stripe\.[\w.]+\.create/g) ?? []).join(","), "stripe.billingPortal.sessions.create");
