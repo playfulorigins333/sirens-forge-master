@@ -1,6 +1,6 @@
 // app/api/autopost/run/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import crypto from "crypto";
 import {
   buildXAutopostJobPayload,
@@ -31,15 +31,11 @@ export const dynamic = "force-dynamic";
 /* ──────────────────────────────────────────────
    Env / Clients
 ────────────────────────────────────────────── */
-const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const CRON_SECRET = process.env.CRON_SECRET || process.env.VERCEL_CRON_SECRET || "";
 const LOCK_TTL_MS = 15 * 60 * 1000;
 const MAX_X_DISPATCH_ATTEMPTS = 3;
 
-const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-
-type AutopostRunDbClient = typeof supabaseAdmin;
+type AutopostRunDbClient = SupabaseClient;
 type ExecuteAutopostDeps = {
   supabaseAdmin?: AutopostRunDbClient;
   cronSecret?: string;
@@ -125,6 +121,14 @@ function json(status: number, body: unknown) {
 
 function isDuplicateError(error: { code?: string | null } | null) {
   return error?.code === "23505";
+}
+
+function createSupabaseAdmin(env: Record<string, string | undefined> = process.env) {
+  const supabaseUrl = env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl?.trim() || !serviceRoleKey?.trim()) return null;
+  return createClient(supabaseUrl, serviceRoleKey);
 }
 
 function getFoundationSchedulablePlatforms(req: Request): AutopostProofPlatform[] {
@@ -459,12 +463,14 @@ async function lockJobIfAvailable(db: AutopostRunDbClient, job: AutopostJobRow, 
    Executor
 ────────────────────────────────────────────── */
 export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = {}) {
-  const db = deps.supabaseAdmin ?? supabaseAdmin;
   const env = deps.env ?? process.env;
   // Default no-dependency dispatch still resolves to postXTextOnlyAutopost(...).
   const postX = deps.postXTextOnlyAutopost ?? postXTextOnlyAutopost;
   const auth = assertCronAuth(req, deps.cronSecret);
   if (!auth.ok) return json(401, auth);
+
+  const db = deps.supabaseAdmin ?? createSupabaseAdmin(env);
+  if (!db) return json(500, { ok: false, error: "SUPABASE_ADMIN_NOT_CONFIGURED" });
 
   const capturedNow = new Date((deps.now ?? (() => new Date()))().getTime());
   const now = Number.isFinite(capturedNow.getTime()) ? capturedNow : new Date();

@@ -177,8 +177,8 @@ const { executeAutopost } = await import('../../../app/api/autopost/run/route')
 }
 
 const routeSource = readFileSync('app/api/autopost/run/route.ts', 'utf8')
-assert.match(routeSource, /const supabaseAdmin = createClient\(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY\)/)
-assert.match(routeSource, /const db = deps\.supabaseAdmin \?\? supabaseAdmin/)
+assert.doesNotMatch(routeSource, /const supabaseAdmin = createClient/)
+assert.match(routeSource, /const db = deps\.supabaseAdmin \?\? createSupabaseAdmin\(env\)/)
 assert.match(routeSource, /const postX = deps\.postXTextOnlyAutopost \?\? postXTextOnlyAutopost/)
 assert.match(routeSource, /export async function GET\(req: Request\) \{\s*return executeAutopost\(req\);\s*\}/)
 assert.match(routeSource, /export async function POST\(req: Request\) \{\s*return executeAutopost\(req\);\s*\}/)

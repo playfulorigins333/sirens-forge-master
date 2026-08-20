@@ -2,7 +2,7 @@
 
 **Canonical practical launch checklist — 2026-08-19**
 
-**Last independently verified frontend Production baseline before this change:** `7f479c9fae367d540bdcd1a51009c7760002b73d` (PR #263 merged/Production)
+**Last independently verified frontend Production baseline before this change:** `edba41190d2edf250ef1a8684d081bd5161953d7` (PR #264 merged/Production)
 
 **Last independently verified API Production baseline before this change:** `b357ff918a30ba4e771b798f591a1611cf8a4d97` (API PR #5 merged/Production). This cleanup performed no deployment, alias verification, or public-response verification.
 
@@ -16,8 +16,8 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 | ID | Area | Gate / deliverable | Status | Evidence | Remaining action | Dependency / blocker |
 |---:|---|---|---|---|---|---|
-| 01 | Repository | Current main and roadmap baseline reconciled | DONE | Operator-supplied Git main evidence through PR #263 SHA `7f479c9fae367d540bdcd1a51009c7760002b73d`; canonical roadmap/current-state reconciliation. | Keep docs aligned after merges | None; $0 today: maintenance only |
-| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Operator-supplied frontend PR #263 Production/main baseline `7f479c9fae367d540bdcd1a51009c7760002b73d`; no deployment identifier or alias claim added by this cleanup | Reverify after any separately authorized promotion | Deployment actions require separate authorization; this task did not deploy |
+| 01 | Repository | Current main and roadmap baseline reconciled | DONE | Operator-supplied Git main evidence through PR #264 SHA `edba41190d2edf250ef1a8684d081bd5161953d7`; canonical roadmap/current-state reconciliation. | Keep docs aligned after merges | None; $0 today: maintenance only |
+| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Operator-supplied frontend PR #264 Production/main baseline `edba41190d2edf250ef1a8684d081bd5161953d7`; no deployment identifier or alias claim added by this cleanup | Reverify after any separately authorized promotion | Deployment actions require separate authorization; this task did not deploy |
 | 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Historical read-only alias verification exists for PR #258 deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN`; the PR #261 deployment identity/state/SHA is operator-verified, but aliases were not independently rechecked for that promotion | Re-verify deployment identity, aliases, and custom-domain serving separately after every future authorized Production promotion | Maintenance only; future promotions separately authorized |
 | 04 | Public site | Homepage anonymous response and launch posture | DONE | Operator-verified public route matrix; PRs #239, #250, #257 | Preserve dark-launch truth in regression tests | None; $0 today: maintenance only |
 | 05 | Public site | Intended policy/legal routes anonymously reachable | DONE | Operator-verified Production matrix; PR #239; `backend/security/tests/publicPathContract.test.ts` | Maintain route contract | None; $0 today: maintenance only |
@@ -68,10 +68,11 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 | 50 | Security | Protected sole Production admin preserved | LOCKED / FROZEN | Operator fact; PR #254 sole-admin founder bootstrap | Never alter/delete during testing or audits | Absolute safety boundary |
 | 51 | Launch scope | Economic tokens excluded from Phase 1 | LOCKED / FROZEN | PR #232 token retirement migration/tests; operator scope fact | Do not reintroduce for launch | Frozen scope |
 | 52 | Post-launch | Muse Store | POST-LAUNCH | Operator scope fact; no Phase 1 requirement | Product discovery after launch | Post-launch prioritization |
+| 53 | Build | Environment-minimal production build completes without eager privileged-client construction | OPEN | This correction removed eager Supabase construction from `/api/autopost/run`, and its focused regression passes. The required environment-minimal build then progressed past that route but failed while collecting `/api/billing/portal`: module evaluation constructs Stripe without configuration and reports `Neither apiKey nor config.authenticator provided`. | Correct the independently discovered billing-portal import-time Stripe construction in a separate narrowly scoped change, without changing Payment V2 behavior or Production configuration | $0 source/test correction; no Stripe action authorized |
 
 ## Next zero-spend engineering candidates
 
-There is no presently actionable zero-spend engineering gate. `OPEN = 0` does not complete deferred funding, external-dependency, frozen, or post-launch scope and authorizes no Production, payment, database, OAuth, provider, or generation action.
+One newly discovered zero-spend source/test gate remains: row 53's environment-minimal `/api/billing/portal` build correction. `OPEN = 1` does not reopen frozen Payment V2 architecture or authorize Production, payment, database, OAuth, provider, or generation action.
 
 ## Count by status
 
@@ -81,10 +82,10 @@ There is no presently actionable zero-spend engineering gate. `OPEN = 0` does no
 | LOCKED / FROZEN | 12 |
 | DEFERRED — BUDGET | 5 |
 | DEFERRED — DEPENDENCY | 3 |
-| OPEN | 0 |
+| OPEN | 1 |
 | POST-LAUNCH | 3 |
 | UNKNOWN — VERIFY | 0 |
-| **Total** | **52** |
+| **Total** | **53** |
 
 ## Non-action safety record
 
