@@ -10,10 +10,24 @@ declare
   v_sale oid := to_regclass('public.sale_counters');
   v_muses oid := to_regclass('public.muses');
   v_trigger_fn oid := to_regprocedure('public.record_lora_terminal_status()');
+  v_public_default_execute boolean;
   v_bad boolean := false;
 begin
+  select exists (
+    select 1
+    from pg_roles r
+    left join pg_default_acl d
+      on d.defaclrole=r.oid
+     and d.defaclnamespace=0
+     and d.defaclobjtype='f'
+    cross join lateral aclexplode(coalesce(d.defaclacl, acldefault('f', r.oid))) a
+    where r.rolname='postgres' and a.grantee=0 and a.privilege_type='EXECUTE'
+  ) into v_public_default_execute;
+
+  v_bad := v_bad or v_public_default_execute;
+
   v_bad := v_bad or v_sale is null
-    or not exists (select 1 from pg_class c where c.oid=v_sale and c.relkind='v' and coalesce(c.reloptions,'{}'::text[]) @> array['security_invoker=true'])
+    or not exists(select 1 from pg_class c where c.oid=v_sale and c.relkind='v' and coalesce(c.reloptions,'{}'::text[]) @> array['security_invoker=true'])
     or has_table_privilege('anon',v_sale,'SELECT') or has_table_privilege('authenticated',v_sale,'SELECT')
     or not has_table_privilege('service_role',v_sale,'SELECT');
   v_bad := v_bad or v_muses is null
@@ -39,16 +53,30 @@ alter default privileges for role postgres in schema public
   grant execute on functions to anon, authenticated, service_role;
 alter default privileges for role postgres in schema public
   grant usage, select on sequences to anon, authenticated, service_role;
-alter default privileges for role postgres in schema public
-  revoke execute on functions from public;
+alter default privileges for role postgres
+  grant execute on functions to public;
 
 do $lock06_rollback_post$
 declare
   v_sale oid := to_regclass('public.sale_counters');
   v_muses oid := to_regclass('public.muses');
   v_trigger_fn oid := to_regprocedure('public.record_lora_terminal_status()');
+  v_public_default_execute boolean;
   v_bad boolean := false;
 begin
+  select exists (
+    select 1
+    from pg_roles r
+    left join pg_default_acl d
+      on d.defaclrole=r.oid
+     and d.defaclnamespace=0
+     and d.defaclobjtype='f'
+    cross join lateral aclexplode(coalesce(d.defaclacl, acldefault('f', r.oid))) a
+    where r.rolname='postgres' and a.grantee=0 and a.privilege_type='EXECUTE'
+  ) into v_public_default_execute;
+
+  v_bad := v_bad or not v_public_default_execute;
+
   v_bad := v_bad or v_sale is null
     or not exists(select 1 from pg_class c where c.oid=v_sale and c.relkind='v' and not (coalesce(c.reloptions,'{}'::text[]) @> array['security_invoker=true']))
     or not has_table_privilege('anon',v_sale,'SELECT') or not has_table_privilege('authenticated',v_sale,'SELECT')
