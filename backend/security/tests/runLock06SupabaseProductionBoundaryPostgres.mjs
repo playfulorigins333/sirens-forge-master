@@ -11,7 +11,8 @@ if (!['postgres:', 'postgresql:'].includes(url.protocol)
   throw new Error('LOCK06 safety boundary rejected non-local or unexpected database URL');
 }
 
-const forward = readFileSync('supabase/manual/lock06_supabase_production_boundary_forward.sql', 'utf8');
+const forwardPath = process.env.LOCK06_FORWARD_PATH ?? 'supabase/manual/lock06_supabase_production_boundary_forward.sql';
+const forward = readFileSync(forwardPath, 'utf8');
 const rollback = readFileSync('supabase/manual/lock06_supabase_production_boundary_rollback.sql', 'utf8');
 
 function psql(sql, expectSuccess = true) {
@@ -84,6 +85,16 @@ function triggerHash() {
 function futureFixture(prefix) {
   psql(`create table public.${prefix}_table(id integer primary key); create sequence public.${prefix}_seq; create function public.${prefix}_fn() returns integer language sql as 'select 1';`);
 }
+function publicFunctionExecute(prefix) {
+  return bool(`select exists(
+    select 1
+    from pg_proc p
+    cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+    where p.oid='public.${prefix}_fn()'::regprocedure
+      and a.grantee=0
+      and a.privilege_type='EXECUTE'
+  )`);
+}
 function assertFutureDataApiGrants(prefix, expected) {
   for (const role of ['anon','authenticated','service_role']) {
     assert.equal(bool(`select has_table_privilege('${role}','public.${prefix}_table','SELECT')`), expected, `${role} future table SELECT`);
@@ -91,7 +102,7 @@ function assertFutureDataApiGrants(prefix, expected) {
     assert.equal(bool(`select has_sequence_privilege('${role}','public.${prefix}_seq','USAGE')`), expected, `${role} future sequence USAGE`);
     assert.equal(bool(`select has_sequence_privilege('${role}','public.${prefix}_seq','SELECT')`), expected, `${role} future sequence SELECT`);
   }
-  assert.equal(bool(`select has_function_privilege('public','public.${prefix}_fn()','EXECUTE')`), false, 'PUBLIC default EXECUTE remains revoked');
+  assert.equal(publicFunctionExecute(prefix), false, 'PUBLIC default EXECUTE remains revoked');
 }
 
 psql(fixture);
