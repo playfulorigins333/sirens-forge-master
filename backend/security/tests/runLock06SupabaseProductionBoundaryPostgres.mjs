@@ -86,14 +86,7 @@ function futureFixture(prefix) {
   psql(`create table public.${prefix}_table(id integer primary key); create sequence public.${prefix}_seq; create function public.${prefix}_fn() returns integer language sql as 'select 1';`);
 }
 function publicFunctionExecute(prefix) {
-  return bool(`select exists(
-    select 1
-    from pg_proc p
-    cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
-    where p.oid='public.${prefix}_fn()'::regprocedure
-      and a.grantee=0
-      and a.privilege_type='EXECUTE'
-  )`);
+  return bool(`select has_function_privilege('public','public.${prefix}_fn()','EXECUTE')`);
 }
 function assertFutureDataApiGrants(prefix, expected) {
   for (const role of ['anon','authenticated','service_role']) {
@@ -102,7 +95,11 @@ function assertFutureDataApiGrants(prefix, expected) {
     assert.equal(bool(`select has_sequence_privilege('${role}','public.${prefix}_seq','USAGE')`), expected, `${role} future sequence USAGE`);
     assert.equal(bool(`select has_sequence_privilege('${role}','public.${prefix}_seq','SELECT')`), expected, `${role} future sequence SELECT`);
   }
-  assert.equal(publicFunctionExecute(prefix), false, 'PUBLIC default EXECUTE remains revoked');
+  assert.equal(
+    publicFunctionExecute(prefix),
+    expected,
+    expected ? 'PUBLIC default EXECUTE restored' : 'PUBLIC default EXECUTE remains revoked',
+  );
 }
 
 psql(fixture);
