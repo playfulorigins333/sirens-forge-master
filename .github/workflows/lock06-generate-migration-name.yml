@@ -1,0 +1,26 @@
+name: LOCK-06 Generate Migration Name
+
+on:
+  push:
+    branches:
+      - supabase/harden-production-boundaries-20260820
+    paths:
+      - .github/workflows/lock06-generate-migration-name.yml
+
+permissions:
+  contents: read
+
+jobs:
+  generate-name:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Generate migration filename only
+        shell: bash
+        run: |
+          supabase migration new lock06_supabase_production_boundary
+          basename "$(find supabase/migrations -maxdepth 1 -type f -name '*_lock06_supabase_production_boundary.sql' -print -quit)"
