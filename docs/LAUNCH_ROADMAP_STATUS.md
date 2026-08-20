@@ -68,21 +68,21 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 | 50 | Security | Protected sole Production admin preserved | LOCKED / FROZEN | Operator fact; PR #254 sole-admin founder bootstrap | Never alter/delete during testing or audits | Absolute safety boundary |
 | 51 | Launch scope | Economic tokens excluded from Phase 1 | LOCKED / FROZEN | PR #232 token retirement migration/tests; operator scope fact | Do not reintroduce for launch | Frozen scope |
 | 52 | Post-launch | Muse Store | POST-LAUNCH | Operator scope fact; no Phase 1 requirement | Product discovery after launch | Post-launch prioritization |
-| 53 | Build | Environment-minimal production build completes without eager privileged-client construction | OPEN | This correction removed eager Supabase construction from `/api/autopost/run`, and its focused regression passes. The required environment-minimal build then progressed past that route but failed while collecting `/api/billing/portal`: module evaluation constructs Stripe without configuration and reports `Neither apiKey nor config.authenticator provided`. | Correct the independently discovered billing-portal import-time Stripe construction in a separate narrowly scoped change, without changing Payment V2 behavior or Production configuration | $0 source/test correction; no Stripe action authorized |
+| 53 | Build | Environment-minimal production build completes without eager privileged-client construction | DONE | PR #265 removes eager privileged-client construction from `/api/autopost/run`, `/api/billing/portal`, the legacy Stripe webhook, and the cutover-disabled legacy Checkout route. It also marks two authenticated CPQ operator/reviewer pages as runtime-dynamic. Focused regressions pass, and the environment-minimal Production build completes without Stripe or Supabase privileged configuration. | Maintain import-safe runtime configuration and rerun the environment-minimal build when server routes or authenticated pages change | None; repository/build proof only, with no Production or provider action implied |
 
 ## Next zero-spend engineering candidates
 
-One newly discovered zero-spend source/test gate remains: row 53's environment-minimal `/api/billing/portal` build correction. `OPEN = 1` does not reopen frozen Payment V2 architecture or authorize Production, payment, database, OAuth, provider, or generation action.
+There is no presently actionable zero-spend engineering gate. Row 53 records the completed environment-minimal build correction without reopening frozen Payment V2 architecture or authorizing Production, payment, database, OAuth, provider, or generation action.
 
 ## Count by status
 
 | Status | Rows |
 |---|---:|
-| DONE | 29 |
+| DONE | 30 |
 | LOCKED / FROZEN | 12 |
 | DEFERRED — BUDGET | 5 |
 | DEFERRED — DEPENDENCY | 3 |
-| OPEN | 1 |
+| OPEN | 0 |
 | POST-LAUNCH | 3 |
 | UNKNOWN — VERIFY | 0 |
 | **Total** | **53** |

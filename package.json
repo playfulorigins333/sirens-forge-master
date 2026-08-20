@@ -54,7 +54,9 @@
     "test:creator-publishing-fanvue-launch-postgres": "node backend/creator-publishing-queue/tests/runFanvueLaunchExecutionPostgresIntegration.mjs",
     "test:cpq-fanvue-scheduler-contract": "tsx backend/creator-publishing-queue/tests/cpqFanvueSchedulerSourceContract.test.ts",
     "test:api-authorization-inventory": "tsx backend/security/tests/apiAuthorizationInventory.test.ts",
-    "test:autopost-lazy-supabase-config": "tsx backend/autopost/tests/autopostLazySupabaseConfig.test.ts"
+    "test:autopost-lazy-supabase-config": "tsx backend/autopost/tests/autopostLazySupabaseConfig.test.ts",
+    "test:billing-portal-lazy-stripe": "tsx backend/security/tests/billingPortalLazyStripe.test.ts",
+    "test:legacy-webhook-lazy-stripe": "tsx backend/security/tests/legacyWebhookLazyStripe.test.ts"
   },
   "repository": {
     "type": "git",

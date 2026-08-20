@@ -6,9 +6,12 @@ import { resolveExistingBillingCustomer } from "@/lib/stripe/billingCustomerReso
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: "2025-11-17.clover" as any,
-})
+type BillingPortalDeps = {
+  stripeSecretKey?: string
+  ensureAuthenticatedProfile?: typeof ensureAuthenticatedProfile
+  resolveExistingBillingCustomer?: typeof resolveExistingBillingCustomer
+  createPortalSession?: (args: { customer: string; return_url: string }) => Promise<{ url: string }>
+}
 
 function safeString(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
@@ -26,15 +29,24 @@ function getBaseUrl(req: Request) {
   return host ? `${proto}://${host}`.replace(/\/+$/, "") : ""
 }
 
-export async function POST(req: Request) {
-  if (!safeString(process.env.STRIPE_SECRET_KEY)) {
+export async function executeBillingPortal(req: Request, deps: BillingPortalDeps = {}) {
+  const stripeSecretKey = safeString(deps.stripeSecretKey ?? process.env.STRIPE_SECRET_KEY)
+  if (!stripeSecretKey) {
     return NextResponse.json(
       { error: "Billing portal is not configured", code: "BILLING_PORTAL_NOT_CONFIGURED" },
       { status: 500 }
     )
   }
 
-  const auth = await ensureAuthenticatedProfile()
+  const authenticate = deps.ensureAuthenticatedProfile ?? ensureAuthenticatedProfile
+  const resolveCustomer = deps.resolveExistingBillingCustomer ?? resolveExistingBillingCustomer
+  const createPortalSession = deps.createPortalSession ?? ((args) => {
+    const stripe = new Stripe(stripeSecretKey, {
+      apiVersion: "2025-11-17.clover" as any,
+    })
+    return stripe.billingPortal.sessions.create(args)
+  })
+  const auth = await authenticate()
 
   if (auth.ok === false) {
     return NextResponse.json(
@@ -57,7 +69,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const resolution = await resolveExistingBillingCustomer(profileId)
+    const resolution = await resolveCustomer(profileId)
     if (resolution.ok === false) {
       const error = resolution.code === "BILLING_CUSTOMER_NOT_FOUND"
         ? "No existing Stripe billing account is linked to this profile yet."
@@ -65,7 +77,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error, code: resolution.code }, { status: 409 })
     }
 
-    const portalSession = await stripe.billingPortal.sessions.create({
+    const portalSession = await createPortalSession({
       customer: resolution.customerId,
       return_url: `${baseUrl}/billing`,
     })
@@ -78,4 +90,8 @@ export async function POST(req: Request) {
       { status: 500 }
     )
   }
+}
+
+export async function POST(req: Request) {
+  return executeBillingPortal(req)
 }

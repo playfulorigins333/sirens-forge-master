@@ -5,10 +5,6 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-11-17.clover" as any,
-})
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -441,10 +437,21 @@ export async function handleLegacyStripeWebhook(payload: string, signature: stri
 }
 
 export async function POST(req: Request) {
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim()
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim()
+  if (!stripeSecretKey || !webhookSecret) {
+    return NextResponse.json(
+      { error: "Stripe webhook is not configured", code: "STRIPE_WEBHOOK_NOT_CONFIGURED" },
+      { status: 500 },
+    )
+  }
+  const stripe = new Stripe(stripeSecretKey, {
+    apiVersion: "2025-11-17.clover" as any,
+  })
   const signature = req.headers.get("stripe-signature")
   const payload = await req.text()
   return handleLegacyStripeWebhook(payload, signature, {
-    constructEvent: (body, sig) => stripe.webhooks.constructEvent(body, sig!, process.env.STRIPE_WEBHOOK_SECRET!),
+    constructEvent: (body, sig) => stripe.webhooks.constructEvent(body, sig!, webhookSecret),
     getSupabaseAdmin,
     retrieveSubscription: (id) => stripe.subscriptions.retrieve(id),
   })

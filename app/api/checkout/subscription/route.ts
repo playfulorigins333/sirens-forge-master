@@ -1,19 +1,12 @@
 // app/api/checkout/subscription/route.ts
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { getOrCreateStripeCustomer } from "@/lib/stripe/customers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-/* ──────────────────────────────────────────────
-   Stripe setup
-────────────────────────────────────────────── */
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: "2025-11-17.clover" as any,
-});
 
 /* ──────────────────────────────────────────────
    Supabase (service role – authoritative)
@@ -27,8 +20,6 @@ const SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   "";
-
-const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
 /* ──────────────────────────────────────────────
    Launch rules
@@ -91,7 +82,7 @@ type ReferralResolution = {
   connectOnboarded: boolean;
 };
 
-async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolution> {
+async function resolveReferral(supabase: SupabaseClient, referralCodeRaw: unknown): Promise<ReferralResolution> {
   const referralCode = safeString(referralCodeRaw);
 
   if (!referralCode) {
@@ -182,6 +173,7 @@ async function resolveReferral(referralCodeRaw: unknown): Promise<ReferralResolu
 }
 
 async function computePlatformFeeAmountCents(
+  stripe: Stripe,
   priceId: string,
   platformFeePercent: number
 ): Promise<number> {
@@ -221,6 +213,11 @@ export async function POST(req: Request) {
         { status: 500 }
       );
     }
+
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      apiVersion: "2025-11-17.clover" as any,
+    });
+    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
     const authSupabase = await supabaseServer();
     const {
@@ -299,7 +296,7 @@ export async function POST(req: Request) {
     /* ──────────────────────────────────────────────
        2.5️⃣ Resolve referral (optional)
     ────────────────────────────────────────────── */
-    const referral = await resolveReferral(referralCode);
+    const referral = await resolveReferral(supabase, referralCode);
 
     const platformFeePercent = clampPercent(100 - referral.commissionPercent);
 
@@ -323,7 +320,7 @@ export async function POST(req: Request) {
     // OG = ONE-TIME PAYMENT
     if (tierName === "og_throne") {
       if (referral.connectOnboarded && referral.connectAccountId) {
-        const applicationFeeAmount = await computePlatformFeeAmountCents(priceId, platformFeePercent);
+        const applicationFeeAmount = await computePlatformFeeAmountCents(stripe, priceId, platformFeePercent);
 
         const session = await stripe.checkout.sessions.create({
           mode: "payment",
