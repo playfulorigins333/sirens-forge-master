@@ -1,10 +1,10 @@
 # Sirens Forge Current State
 
-> **Production baselines supplied by the operator:** frontend PR #262 is merged and in Production at main SHA `7f479c9fae367d540bdcd1a51009c7760002b73d`; API PR #5 is merged and in Production at API main SHA `b357ff918a30ba4e771b798f591a1611cf8a4d97`. These source/deployment facts do not prove current custom-domain aliases, live generation, or worker filesystem materialization. Payment V2 and Fanvue remain locked/frozen, generation execution remains default-off, and all budget/dependency deferrals are unchanged.
+> **Production baselines supplied by the operator:** frontend PR #263 is merged and in Production at main SHA `7f479c9fae367d540bdcd1a51009c7760002b73d`; API PR #5 is merged and in Production at API main SHA `b357ff918a30ba4e771b798f591a1611cf8a4d97`. These source/deployment facts do not prove current custom-domain aliases, live generation, or worker filesystem materialization. Payment V2 and Fanvue remain locked/frozen, generation execution remains default-off, and all budget/dependency deferrals are unchanged.
 
 **As of:** 2026-08-19
 
-**Last independently verified frontend Production baseline before this change:** PR #262 merge/main SHA `7f479c9fae367d540bdcd1a51009c7760002b73d`. **Last independently verified API Production baseline before this change:** API PR #5/main SHA `b357ff918a30ba4e771b798f591a1611cf8a4d97`. No alias or public-response verification was performed in this cleanup.
+**Last independently verified frontend Production baseline before this change:** PR #263 merge/main SHA `7f479c9fae367d540bdcd1a51009c7760002b73d`. **Last independently verified API Production baseline before this change:** API PR #5/main SHA `b357ff918a30ba4e771b798f591a1611cf8a4d97`. No alias or public-response verification was performed in this cleanup.
 
 **Access posture:** dark launch; internal access only
 
@@ -14,8 +14,8 @@ This document separates operator-verified operational facts from repository evid
 
 ## Current verified facts
 
-- **Repository and public site:** PR #262 is present at the current operator-supplied frontend Production baseline above. The intended anonymous public/legal route matrix was checked on Production as historical evidence; this task did not repeat a public or alias verification. PR #260 added the complaints/removal operating gate after PR #259's API inventory, and PR #261 added the observability/recovery gate. The site remains dark-launch/internal-access only.
-- **Current frontend Production source baseline:** Operator-supplied verification records frontend PR #262 merged/Production at `7f479c9fae367d540bdcd1a51009c7760002b73d`. This cleanup performed no deployment/promotion and does not infer current custom-domain aliases or public responses.
+- **Repository and public site:** PR #263 is present at the current operator-supplied frontend Production baseline above. The intended anonymous public/legal route matrix was checked on Production as historical evidence; this task did not repeat a public or alias verification. PR #260 added the complaints/removal operating gate after PR #259's API inventory, and PR #261 added the observability/recovery gate. The site remains dark-launch/internal-access only.
+- **Current frontend Production source baseline:** Operator-supplied verification records frontend PR #263 merged/Production at `7f479c9fae367d540bdcd1a51009c7760002b73d`. This cleanup performed no deployment/promotion and does not infer current custom-domain aliases or public responses.
 - **Payment V2 — DONE and LOCKED / FROZEN:** The engineering contract spans PRs #197–#240, including Checkout, webhook inbox/event handling, claim/entitlement lifecycle, affiliate attribution, lifecycle behavior, inventory correction, readiness, and tests. Production configuration readiness is operator-verified green. Do not reopen this system as unfinished development.
 - **Founder offer:** OG Founder is **$1,333 one-time** for lifetime founder access, capped at **50 paid seats**. Early Bird is **$29.99/month while active**, capped at **150 paid seats**. The separate 25 beta testers are outside the 200 paid founder-seat pool. PR #236 and `backend/payment-v2/tests/lock05fLaunchInventory.test.ts` record the inventory correction.
 - **Payment operational hold:** A real-money V2 Production canary has not been performed and is **DEFERRED — BUDGET**, not unfinished engineering. There is no spare operating cash for a dummy charge/refund. Before any future live Stripe validation, Stripe must first be updated with the new Sirens Forge LLC business bank-account information. While that hold remains, do not recommend a charge, refund, Checkout canary, Connect onboarding, or other financial mutation.
