@@ -1,8 +1,8 @@
 # Sirens Forge Launch Roadmap Status
 
-**Canonical practical launch checklist — 2026-08-19**
+**Canonical practical launch checklist — 2026-08-20**
 
-**Last independently verified frontend Production baseline before this change:** `edba41190d2edf250ef1a8684d081bd5161953d7` (PR #264 merged/Production)
+**Last externally verified frontend Production baseline before this source revision:** PR #265/main SHA `7dfb59209f6f3d2df5b9de2d8d665d7988674a0c`; Vercel Production `dpl_28Jkau4orQtNLCFZMj2iFRhomoQT` was `READY` at that exact SHA. This is historical pre-change evidence, not a self-updating assertion. A merge advances `main`; verify live GitHub/Vercel state externally whenever exact-current proof is required. A missing newer SHA in this static file does not prove Production remains on this baseline.
 
 **Last independently verified API Production baseline before this change:** `b357ff918a30ba4e771b798f591a1611cf8a4d97` (API PR #5 merged/Production). This cleanup performed no deployment, alias verification, or public-response verification.
 
@@ -16,8 +16,8 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 
 | ID | Area | Gate / deliverable | Status | Evidence | Remaining action | Dependency / blocker |
 |---:|---|---|---|---|---|---|
-| 01 | Repository | Current main and roadmap baseline reconciled | DONE | Operator-supplied Git main evidence through PR #264 SHA `edba41190d2edf250ef1a8684d081bd5161953d7`; canonical roadmap/current-state reconciliation. | Keep docs aligned after merges | None; $0 today: maintenance only |
-| 02 | Deployment | Current frontend deployment corresponds to verified main | DONE | Operator-supplied frontend PR #264 Production/main baseline `edba41190d2edf250ef1a8684d081bd5161953d7`; no deployment identifier or alias claim added by this cleanup | Reverify after any separately authorized promotion | Deployment actions require separate authorization; this task did not deploy |
+| 01 | Repository | Baseline provenance and reconciliation procedure documented | DONE | Canonical docs record the externally verified pre-change PR #265 SHA `7dfb59209f6f3d2df5b9de2d8d665d7988674a0c` and explicitly distinguish static history from live current-state proof. | Record future verified baselines as historical evidence; externally verify exact-current state when needed | None; $0 today: maintenance only |
+| 02 | Deployment | Last externally verified frontend deployment baseline and re-verification boundary recorded | DONE | Pre-change evidence: Vercel Production `dpl_28Jkau4orQtNLCFZMj2iFRhomoQT` was `READY` for PR #265/main `7dfb59209f6f3d2df5b9de2d8d665d7988674a0c`. Static docs do not prove post-merge live state. | Reverify GitHub main, deployment identity, aliases, and public responses externally when exact-current proof is required | Deployment actions require separate authorization; this task did not deploy |
 | 03 | Domains | Current apex/`www` and Vercel aliases recorded against current deployment | DONE | Historical read-only alias verification exists for PR #258 deployment `dpl_JDBkmjJFYX8oZtfATL88Tmp6L5zN`; the PR #261 deployment identity/state/SHA is operator-verified, but aliases were not independently rechecked for that promotion | Re-verify deployment identity, aliases, and custom-domain serving separately after every future authorized Production promotion | Maintenance only; future promotions separately authorized |
 | 04 | Public site | Homepage anonymous response and launch posture | DONE | Operator-verified public route matrix; PRs #239, #250, #257 | Preserve dark-launch truth in regression tests | None; $0 today: maintenance only |
 | 05 | Public site | Intended policy/legal routes anonymously reachable | DONE | Operator-verified Production matrix; PR #239; `backend/security/tests/publicPathContract.test.ts` | Maintain route contract | None; $0 today: maintenance only |
@@ -68,24 +68,26 @@ Only the status labels in this table are valid. **DONE** means the stated gate h
 | 50 | Security | Protected sole Production admin preserved | LOCKED / FROZEN | Operator fact; PR #254 sole-admin founder bootstrap | Never alter/delete during testing or audits | Absolute safety boundary |
 | 51 | Launch scope | Economic tokens excluded from Phase 1 | LOCKED / FROZEN | PR #232 token retirement migration/tests; operator scope fact | Do not reintroduce for launch | Frozen scope |
 | 52 | Post-launch | Muse Store | POST-LAUNCH | Operator scope fact; no Phase 1 requirement | Product discovery after launch | Post-launch prioritization |
-| 53 | Build | Environment-minimal production build completes without eager privileged-client construction | DONE | PR #265 removes eager privileged-client construction from `/api/autopost/run`, `/api/billing/portal`, the legacy Stripe webhook, and the cutover-disabled legacy Checkout route. It also marks two authenticated CPQ operator/reviewer pages as runtime-dynamic. Focused regressions pass, and the environment-minimal Production build completes without Stripe or Supabase privileged configuration. | Maintain import-safe runtime configuration and rerun the environment-minimal build when server routes or authenticated pages change | None; repository/build proof only, with no Production or provider action implied |
+| 53 | Build | Environment-minimal production build completes without eager privileged-client construction | DONE | PR #265 removes eager privileged-client construction from `/api/autopost/run`, `/api/billing/portal`, the legacy Stripe webhook, and the cutover-disabled legacy Checkout route. It also marks two authenticated CPQ operator/reviewer pages as runtime-dynamic. PR #265 import/build-focused regressions passed and the environment-minimal Production build completes without Stripe or Supabase privileged configuration. | Maintain import-safe runtime configuration and rerun the environment-minimal build when server routes or authenticated pages change | None; repository/build proof only, with no Production or provider action implied |
+
+| 54 | Corrections | Post-PR265 adversarial trust-but-verify corrections | DONE | Trusted Billing Portal origin, resilient legacy-cutover ordering coverage, strict roadmap integrity fixtures, and durable pre-change baseline documentation; focused and launch regression validation completed on this branch. | Maintain the focused security and roadmap contracts | None; $0 correction gate complete |
 
 ## Next zero-spend engineering candidates
 
-There is no presently actionable zero-spend engineering gate. Row 53 records the completed environment-minimal build correction without reopening frozen Payment V2 architecture or authorizing Production, payment, database, OAuth, provider, or generation action.
+There is no presently actionable zero-spend engineering gate. Rows 53–54 record the completed environment-minimal build and adversarial correction gates without reopening frozen Payment V2 architecture or authorizing Production, payment, database, OAuth, provider, or generation action.
 
 ## Count by status
 
 | Status | Rows |
 |---|---:|
-| DONE | 30 |
+| DONE | 31 |
 | LOCKED / FROZEN | 12 |
 | DEFERRED — BUDGET | 5 |
 | DEFERRED — DEPENDENCY | 3 |
 | OPEN | 0 |
 | POST-LAUNCH | 3 |
 | UNKNOWN — VERIFY | 0 |
-| **Total** | **53** |
+| **Total** | **54** |
 
 ## Non-action safety record
 

@@ -63,35 +63,94 @@ for (const scenario of [
 matches(/Row 48 is \*\*DONE\*\*/i, "row 48 closure");
 assert.match(roadmap, /\| 48 \| Operations \| Sanitized observability, alerts and recovery closure \| DONE \|/, "canonical row 48 is DONE"); assertions += 1;
 
-const granularSection = roadmap.match(/## Granular launch gates\s+([\s\S]*?)\s+## Next zero-spend engineering candidates/)?.[1] ?? "";
-const granularRows = granularSection.split("\n").filter((line) => /^\|\s*\d+\s*\|/.test(line));
-assert.ok(granularRows.length > 0, "granular roadmap rows are parseable"); assertions += 1;
-const actualCounts = new Map<string, number>();
-for (const row of granularRows) {
-  const columns = row.split("|").slice(1, -1).map((column) => column.trim());
-  assert.equal(columns.length, 7, `granular roadmap row has seven columns: ${row}`); assertions += 1;
-  actualCounts.set(columns[3], (actualCounts.get(columns[3]) ?? 0) + 1);
+const canonicalStatuses = ["DONE", "LOCKED / FROZEN", "DEFERRED — BUDGET", "DEFERRED — DEPENDENCY", "OPEN", "POST-LAUNCH", "UNKNOWN — VERIFY"] as const;
+const canonicalStatusSet = new Set<string>(canonicalStatuses);
+
+function tableSection(source: string, start: string, end: string) {
+  const section = source.match(new RegExp(`${start}\\s+([\\s\\S]*?)\\s+${end}`))?.[1];
+  assert.ok(section, `roadmap section exists: ${start}`);
+  return section;
 }
 
-const countSection = roadmap.match(/## Count by status\s+([\s\S]*?)\s+## Non-action safety record/)?.[1] ?? "";
-const reportedCounts = new Map<string, number>();
-let reportedTotal: number | undefined;
-for (const line of countSection.split("\n")) {
-  const match = line.match(/^\|\s*(?:\*\*)?([^|*]+?)(?:\*\*)?\s*\|\s*(?:\*\*)?(\d+)(?:\*\*)?\s*\|$/);
-  if (!match || match[1].trim() === "Status") continue;
-  if (match[1].trim() === "Total") reportedTotal = Number(match[2]);
-  else reportedCounts.set(match[1].trim(), Number(match[2]));
+function tableLines(section: string, label: string) {
+  const lines = section.split("\n").map(line => line.trim()).filter(Boolean);
+  assert.ok(lines.length >= 3, `${label} table has header, separator, and data`);
+  assert.ok(lines.every(line => line.startsWith("|") && line.endsWith("|")), `${label} contains only structurally delimited table lines`);
+  assert.match(lines[1], /^\|(?:\s*:?-+:?\s*\|)+$/, `${label} separator is valid`);
+  return lines.slice(2);
 }
-for (const [status, actual] of actualCounts) {
-  assert.equal(reportedCounts.get(status), actual, `reported ${status} count matches granular rows`); assertions += 1;
+
+function cells(line: string) { return line.slice(1, -1).split("|").map(column => column.trim()); }
+
+function validateRoadmap(source: string) {
+  const granularRows = tableLines(tableSection(source, "## Granular launch gates", "## Next zero-spend engineering candidates"), "granular roadmap");
+  const actualCounts = new Map<string, number>(canonicalStatuses.map(status => [status, 0]));
+  const ids = new Set<number>();
+  for (const row of granularRows) {
+    const columns = cells(row);
+    assert.equal(columns.length, 7, `granular roadmap row has seven columns: ${row}`);
+    assert.match(columns[0], /^\d{2}$/, `granular roadmap ID is two-digit numeric: ${row}`);
+    const id = Number(columns[0]);
+    assert.ok(id > 0 && !ids.has(id), `granular roadmap ID is positive and unique: ${columns[0]}`);
+    ids.add(id);
+    assert.ok(canonicalStatusSet.has(columns[3]), `granular roadmap status is canonical: ${columns[3]}`);
+    actualCounts.set(columns[3], (actualCounts.get(columns[3]) ?? 0) + 1);
+  }
+  const highestId = Math.max(...ids);
+  assert.deepEqual([...ids].sort((a, b) => a - b), Array.from({ length: highestId }, (_, index) => index + 1), "granular roadmap IDs are contiguous from 01");
+
+  const countRows = tableLines(tableSection(source, "## Count by status", "## Non-action safety record"), "status count");
+  const reportedCounts = new Map<string, number>();
+  let reportedTotal: number | undefined;
+  for (const row of countRows) {
+    const columns = cells(row).map(value => value.replace(/^\*\*|\*\*$/g, ""));
+    assert.equal(columns.length, 2, `status count row has two columns: ${row}`);
+    assert.match(columns[1], /^\d+$/, `status count is a non-negative integer: ${row}`);
+    if (columns[0] === "Total") {
+      assert.equal(reportedTotal, undefined, "status count table has exactly one Total row");
+      reportedTotal = Number(columns[1]);
+      continue;
+    }
+    assert.ok(canonicalStatusSet.has(columns[0]), `reported status is canonical: ${columns[0]}`);
+    assert.ok(!reportedCounts.has(columns[0]), `reported status is unique: ${columns[0]}`);
+    reportedCounts.set(columns[0], Number(columns[1]));
+  }
+  assert.equal(reportedCounts.size, canonicalStatuses.length, "count table has exactly one row for every canonical status");
+  for (const status of canonicalStatuses) assert.equal(reportedCounts.get(status), actualCounts.get(status), `reported ${status} count matches granular rows`);
+  assert.notEqual(reportedTotal, undefined, "status count table has one Total row");
+  assert.equal(reportedTotal, granularRows.length, "reported total matches granular roadmap row count");
+  return { granularRows, actualCounts };
 }
-for (const [status, reported] of reportedCounts) {
-  assert.equal(reported, actualCounts.get(status) ?? 0, `reported ${status} count has no uncounted rows`); assertions += 1;
-}
-assert.equal(reportedTotal, granularRows.length, "reported total matches granular roadmap row count"); assertions += 1;
+
+const { granularRows, actualCounts } = validateRoadmap(roadmap); assertions += 1;
 for (const requiredStatus of ["DEFERRED — BUDGET", "DEFERRED — DEPENDENCY", "POST-LAUNCH", "LOCKED / FROZEN"]) {
   assert.ok((actualCounts.get(requiredStatus) ?? 0) > 0, `required roadmap status remains present: ${requiredStatus}`); assertions += 1;
 }
+
+function fixture(statuses: string[], countOverrides: Partial<Record<string, number>> = {}) {
+  const rows = statuses.map((status, index) => `| ${String(index + 1).padStart(2, "0")} | Area | Gate ${index + 1} | ${status} | Evidence | Action | None |`).join("\n");
+  const counts = canonicalStatuses.map(status => `| ${status} | ${countOverrides[status] ?? statuses.filter(value => value === status).length} |`).join("\n");
+  return `## Granular launch gates\n\n| ID | Area | Gate / deliverable | Status | Evidence | Remaining action | Dependency / blocker |\n|---:|---|---|---|---|---|---|\n${rows}\n\n## Next zero-spend engineering candidates\n\nNone.\n\n## Count by status\n\n| Status | Rows |\n|---|---:|\n${counts}\n| **Total** | **${statuses.length}** |\n\n## Non-action safety record\n`;
+}
+
+const validOpenFixture = fixture(["DONE", "OPEN"]);
+assert.equal(validateRoadmap(validOpenFixture).actualCounts.get("OPEN"), 1, "legitimate OPEN > 0 roadmap validates"); assertions += 1;
+const validZeroFixture = fixture(["DONE"]);
+assert.equal(validateRoadmap(validZeroFixture).actualCounts.get("OPEN"), 0, "legitimate OPEN = 0 roadmap validates only with its displayed row"); assertions += 1;
+const invalidFixtures: Array<[string, string]> = [
+  ["missing zero-count OPEN row", validZeroFixture.replace(/^\| OPEN \| 0 \|\n/m, "")],
+  ["missing zero-count UNKNOWN row", validZeroFixture.replace(/^\| UNKNOWN — VERIFY \| 0 \|\n/m, "")],
+  ["duplicate DONE count row", validOpenFixture.replace("| DONE | 1 |", "| DONE | 1 |\n| DONE | 1 |")],
+  ["duplicate Total row", validOpenFixture.replace("| **Total** | **2** |", "| **Total** | **2** |\n| **Total** | **2** |")],
+  ["duplicate granular ID", validOpenFixture.replace("| 02 | Area", "| 01 | Area")],
+  ["missing granular ID", fixture(["DONE", "OPEN", "DONE"]).replace("| 02 | Area", "| 04 | Area")],
+  ["malformed granular row", validOpenFixture.replace("| 02 | Area", "02 | Area")],
+  ["wrong granular column count", validOpenFixture.replace("| Evidence | Action | None |", "| Evidence | Action |")],
+  ["unknown granular status", validOpenFixture.replace("| OPEN | Evidence", "| SURPRISE | Evidence")],
+  ["contradictory displayed count", validOpenFixture.replace("| DONE | 1 |", "| DONE | 0 |")],
+  ["wrong Total", validOpenFixture.replace("| **Total** | **2** |", "| **Total** | **3** |")],
+];
+for (const [label, invalid] of invalidFixtures) { assert.throws(() => validateRoadmap(invalid), undefined, label); assertions += 1; }
 for (const preserved of [
   "Stripe | Update Sirens Forge LLC business bank account | DEFERRED — BUDGET",
   "Real-money V2 Checkout/webhook/claim/reconciliation canary | DEFERRED — BUDGET",
