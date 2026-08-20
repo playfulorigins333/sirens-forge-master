@@ -46,7 +46,11 @@ state = await derivePublicPurchaseState(env, { ...deps, loadInventoryRows: async
 const legacy = readFileSync("app/api/checkout/subscription/route.ts", "utf8");
 const legacyGuard = legacy.indexOf('process.env.PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED === "true"');
 check(legacyGuard > 0 && legacyGuard < legacy.indexOf("  try {", legacyGuard), "legacy guard is first POST operation");
-for (const token of ["supabaseServer()", "req.json()", "getOrCreateStripeCustomer(", "computePlatformFeeAmountCents(priceId", "stripe.checkout.sessions.create("]) check(legacyGuard < legacy.indexOf(token, legacyGuard), `legacy cutoff precedes ${token}`);
+for (const token of ["new Stripe(", "createClient(", "supabaseServer()", "req.json()", "getOrCreateStripeCustomer(", "computePlatformFeeAmountCents(", "stripe.checkout.sessions.create("]) {
+  const operation = legacy.indexOf(token, legacyGuard);
+  check(operation > legacyGuard, `legacy runtime operation remains present after cutoff: ${token}`);
+  check(legacyGuard < operation, `legacy cutoff precedes ${token}`);
+}
 check(legacy.includes("PAYMENT_FIRST_LEGACY_CHECKOUT_CUTOVER") && legacy.includes("status: 503"), "legacy cutoff has stable contract");
 Object.assign(process.env, { PAYMENT_FIRST_PUBLIC_CUTOVER_V2_ENABLED: "true", STRIPE_SECRET_KEY: "sk_test_local_only", SUPABASE_URL: "https://local.invalid", SUPABASE_SERVICE_ROLE_KEY: "local-test-only" });
 const { POST: legacyPost } = await import("../../../app/api/checkout/subscription/route");

@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic"
 
 type BillingPortalDeps = {
   stripeSecretKey?: string
+  appUrl?: string
   ensureAuthenticatedProfile?: typeof ensureAuthenticatedProfile
   resolveExistingBillingCustomer?: typeof resolveExistingBillingCustomer
   createPortalSession?: (args: { customer: string; return_url: string }) => Promise<{ url: string }>
@@ -17,16 +18,16 @@ function safeString(value: unknown) {
   return typeof value === "string" ? value.trim() : ""
 }
 
-function getBaseUrl(req: Request) {
-  const envUrl = safeString(process.env.NEXT_PUBLIC_APP_URL)
-  if (envUrl) return envUrl.replace(/\/+$/, "")
-
-  const origin = safeString(req.headers.get("origin"))
-  if (origin) return origin.replace(/\/+$/, "")
-
-  const proto = req.headers.get("x-forwarded-proto") || "https"
-  const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || ""
-  return host ? `${proto}://${host}`.replace(/\/+$/, "") : ""
+function getTrustedBaseUrl(value: unknown) {
+  const configured = safeString(value)
+  if (!configured) return ""
+  try {
+    const url = new URL(configured)
+    if (url.protocol !== "https:" && url.protocol !== "http:") return ""
+    return url.origin
+  } catch {
+    return ""
+  }
 }
 
 export async function executeBillingPortal(req: Request, deps: BillingPortalDeps = {}) {
@@ -60,7 +61,7 @@ export async function executeBillingPortal(req: Request, deps: BillingPortalDeps
 
   const profileId = auth.profile.id
 
-  const baseUrl = getBaseUrl(req)
+  const baseUrl = getTrustedBaseUrl(deps.appUrl ?? process.env.NEXT_PUBLIC_APP_URL)
   if (!baseUrl) {
     return NextResponse.json(
       { error: "Billing portal return URL is not configured", code: "APP_URL_NOT_CONFIGURED" },
