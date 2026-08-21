@@ -1,0 +1,57 @@
+name: Final Supabase Least-Privilege Hardening
+
+on:
+  push:
+    branches: [supabase/final-least-privilege-hardening-20260820]
+    paths:
+      - supabase/migrations/20260821040658_final_supabase_least_privilege_hardening.sql
+      - supabase/manual/final_supabase_least_privilege_hardening_rollback.sql
+      - backend/security/tests/finalSupabaseLeastPrivilegeHardening.test.ts
+      - backend/security/tests/runFinalSupabaseLeastPrivilegeHardeningPostgres.mjs
+      - .github/workflows/final-supabase-least-privilege-hardening.yml
+      - lib/supabaseAdmin.ts
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  final-least-privilege:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      FINAL_SUPABASE_LEAST_PRIVILEGE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/final_supabase_least_privilege_test
+      LOCK06_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lock06_test
+      LOCK06_FORWARD_PATH: supabase/migrations/20260820195941_lock06_supabase_production_boundary.sql
+      CALLABLE_FUNCTION_HARDENING_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/callable_function_hardening_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Create disposable databases
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database final_supabase_least_privilege_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database lock06_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database callable_function_hardening_test'
+      - name: Static contracts
+        run: npx tsx backend/security/tests/finalSupabaseLeastPrivilegeHardening.test.ts && node --test backend/security/tests/lock06SupabaseProductionBoundary.test.mjs && npx tsx backend/security/tests/callableFunctionHardening.test.ts
+      - name: Disposable PostgreSQL 17 tests
+        run: node backend/security/tests/runFinalSupabaseLeastPrivilegeHardeningPostgres.mjs && node backend/security/tests/runLock06SupabaseProductionBoundaryPostgres.mjs && node backend/security/tests/runCallableFunctionHardeningPostgres.mjs
+      - name: Type and build checks
+        run: npx tsc --noEmit && npm run build
