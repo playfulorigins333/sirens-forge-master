@@ -24,7 +24,7 @@ alter default privileges for role postgres in schema public grant all privileges
 alter default privileges for role supabase_admin in schema public grant select on tables to anon;
 `;
 psql(fixture);
-const snapshot=()=>psql(`select md5(string_agg(x,'|' order by x))from(select 'r:'||c.relname||':'||coalesce(c.relacl::text,'NULL') x from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' union all select 'p:'||p.oid::regprocedure::text||':'||coalesce(p.proacl::text,'NULL') from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' union all select 'd:'||d.defaclrole||':'||d.defaclnamespace||':'||d.defaclobjtype||':'||d.defaclacl::text from pg_default_acl d where d.defaclrole in('postgres'::regrole,'supabase_admin'::regrole))s`);
+const snapshot=()=>psql(`select md5(string_agg(x,'|' order by x))from(select 'r:'||c.relname||':'||coalesce(c.relacl::text,'NULL') x from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' union all select 'p:'||p.oid::regprocedure::text||':'||coalesce(p.proacl::text,'NULL') from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' union all select 'd:'||d.defaclrole||':'||d.defaclnamespace||':'||d.defaclobjtype::text||':'||d.defaclacl::text from pg_default_acl d where d.defaclrole in('postgres'::regrole,'supabase_admin'::regrole))s`);
 const before=snapshot();
 const affiliate=psql(`select proacl::text||':'||md5(prosrc) from pg_proc where oid='public.get_my_affiliate_ledger_summary()'::regprocedure`);
 const policyCount=psql(`select count(*)from pg_policy where polrelid in(select oid from pg_class where relnamespace='public'::regnamespace)`);
