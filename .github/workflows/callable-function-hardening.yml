@@ -1,0 +1,58 @@
+name: Callable Function Hardening
+
+on:
+  push:
+    branches:
+      - codex/perform-callable-function-source-hardening
+    paths:
+      - supabase/migrations/20260821005423_harden_callable_function_boundaries.sql
+      - supabase/manual/harden_callable_function_boundaries_rollback.sql
+      - backend/security/tests/callableFunctionHardening.test.ts
+      - backend/security/tests/runCallableFunctionHardeningPostgres.mjs
+      - .github/workflows/callable-function-hardening.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - supabase/migrations/20260821005423_harden_callable_function_boundaries.sql
+      - supabase/manual/harden_callable_function_boundaries_rollback.sql
+      - backend/security/tests/callableFunctionHardening.test.ts
+      - backend/security/tests/runCallableFunctionHardeningPostgres.mjs
+      - .github/workflows/callable-function-hardening.yml
+
+permissions:
+  contents: read
+
+jobs:
+  callable-function-hardening-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      CALLABLE_FUNCTION_HARDENING_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/callable_function_hardening_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Create disposable database
+        run: psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database callable_function_hardening_test'
+      - name: Static source contract
+        run: npx tsx backend/security/tests/callableFunctionHardening.test.ts
+      - name: Disposable PostgreSQL behavior against committed migration
+        run: node backend/security/tests/runCallableFunctionHardeningPostgres.mjs
