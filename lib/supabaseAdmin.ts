@@ -1,3 +1,4 @@
+import "server-only"
 // lib/supabaseAdmin.ts
 import { createClient } from "@supabase/supabase-js"
 
