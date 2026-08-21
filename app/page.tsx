@@ -438,7 +438,8 @@ export default function HomePage() {
               <motion.div
                 key={index}
                 initial={{ opacity: 0, y: 30 }}
-                animate={{ opacity: 1, y: 0 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
                 transition={{ duration: 0.7, delay: index * 0.08 }}
                 className="rounded-3xl border border-white/10 bg-white/5 p-8 backdrop-blur-xl"
               >
