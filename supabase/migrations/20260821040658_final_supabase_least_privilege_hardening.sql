@@ -137,7 +137,7 @@ begin
       ('user_subscriptions','DELETE'),
       ('user_subscriptions','INSERT'),
       ('user_subscriptions','UPDATE'),
-      ('creator_publishing_fanvue_attempts','SELECT')) expected(rel,priv) cross join (values ('anon'),('authenticated')) role_name(role) where not (expected.rel='creator_publishing_fanvue_attempts' and role.role='authenticated') and (to_regclass('public.'||expected.rel) is null or not has_table_privilege(role.role,'public.'||expected.rel,expected.priv))) then raise exception 'FINAL_LP_STALE_GRANT_DRIFT'; end if;
+      ('creator_publishing_fanvue_attempts','SELECT')) expected(rel,priv) cross join (values ('anon'),('authenticated')) role_name(role) where not (expected.rel='creator_publishing_fanvue_attempts' and role_name.role='authenticated') and (to_regclass('public.'||expected.rel) is null or not has_table_privilege(role_name.role,'public.'||expected.rel,expected.priv))) then raise exception 'FINAL_LP_STALE_GRANT_DRIFT'; end if;
   if exists (select 1 from (values ('_backup_autopost_rules_before_content_payload_20250628_001'),
       ('ai_influencers'),
       ('approved_media'),
@@ -192,8 +192,8 @@ begin
       ('system_stats'),
       ('user_loras'),
       ('user_subscriptions'),
-      ('webhook_logs')) expected(rel) cross join (values ('anon'),('authenticated')) role_name(role) cross join (values ('TRUNCATE'),('TRIGGER'),('REFERENCES'),('MAINTAIN')) privilege(priv) where to_regclass('public.'||expected.rel) is null or not has_table_privilege(role.role,'public.'||expected.rel,privilege.priv)) then raise exception 'FINAL_LP_NON_DATA_API_DRIFT'; end if;
-  if exists (select 1 from (values ('autopost_accounts'),('creator_publishing_fanvue_attempts')) expected(rel) cross join (values ('anon'),('authenticated')) role_name(role) where to_regclass('public.'||expected.rel) is null or not has_table_privilege(role.role,'public.'||expected.rel,'MAINTAIN')) then raise exception 'FINAL_LP_MAINTAIN_DRIFT'; end if;
+      ('webhook_logs')) expected(rel) cross join (values ('anon'),('authenticated')) role_name(role) cross join (values ('TRUNCATE'),('TRIGGER'),('REFERENCES'),('MAINTAIN')) privilege(priv) where to_regclass('public.'||expected.rel) is null or not has_table_privilege(role_name.role,'public.'||expected.rel,privilege.priv)) then raise exception 'FINAL_LP_NON_DATA_API_DRIFT'; end if;
+  if exists (select 1 from (values ('autopost_accounts'),('creator_publishing_fanvue_attempts')) expected(rel) cross join (values ('anon'),('authenticated')) role_name(role) where to_regclass('public.'||expected.rel) is null or not has_table_privilege(role_name.role,'public.'||expected.rel,'MAINTAIN')) then raise exception 'FINAL_LP_MAINTAIN_DRIFT'; end if;
   if exists (select 1 from (values ('autopost_accounts_preserve_fanvue_provider_identity()'),
       ('creator_publishing_aggregate_plan_status(uuid)'),
       ('creator_publishing_autopost_source_fingerprint(uuid)'),
@@ -203,7 +203,7 @@ begin
   if to_regclass('public.creator_publishing_fanvue_history') is null or not has_table_privilege('anon','public.creator_publishing_fanvue_history','SELECT') or not has_table_privilege('authenticated','public.creator_publishing_fanvue_history','SELECT') or not has_table_privilege('service_role','public.creator_publishing_fanvue_history','SELECT') then raise exception 'FINAL_LP_FANVUE_VIEW_DRIFT'; end if;
   if exists (select 1 from (values ('autopost_job_logs_id_seq'),
       ('creator_publishing_audit_events_id_seq'),
-      ('purchases_id_seq')) expected(rel) cross join (values ('anon'),('authenticated'),('service_role')) role_name(role) cross join (values ('USAGE'),('SELECT'),('UPDATE')) privilege(priv) where to_regclass('public.'||expected.rel) is null or not has_sequence_privilege(role.role,'public.'||expected.rel,privilege.priv)) then raise exception 'FINAL_LP_SEQUENCE_DRIFT'; end if;
+      ('purchases_id_seq')) expected(rel) cross join (values ('anon'),('authenticated'),('service_role')) role_name(role) cross join (values ('USAGE'),('SELECT'),('UPDATE')) privilege(priv) where to_regclass('public.'||expected.rel) is null or not has_sequence_privilege(role_name.role,'public.'||expected.rel,privilege.priv)) then raise exception 'FINAL_LP_SEQUENCE_DRIFT'; end if;
   select count(*) <> 10 from pg_default_acl d cross join lateral aclexplode(d.defaclacl) a join pg_roles r on r.oid=a.grantee where d.defaclrole='postgres'::regrole and d.defaclnamespace='public'::regnamespace and ((d.defaclobjtype='r' and r.rolname in ('anon','authenticated') and a.privilege_type in ('TRUNCATE','TRIGGER','REFERENCES','MAINTAIN')) or (d.defaclobjtype='S' and r.rolname in ('anon','authenticated') and a.privilege_type='UPDATE')) into bad;
   if coalesce(bad,true) then raise exception 'FINAL_LP_DEFAULT_PRIVILEGE_DRIFT'; end if;
 end $preflight$;
@@ -369,7 +369,7 @@ begin
       ('user_subscriptions','DELETE'),
       ('user_subscriptions','INSERT'),
       ('user_subscriptions','UPDATE'),
-      ('creator_publishing_fanvue_attempts','SELECT')) expected(rel,priv) cross join (values ('anon'),('authenticated')) role_name(role) where not (expected.rel='creator_publishing_fanvue_attempts' and role.role='authenticated') and has_table_privilege(role.role,'public.'||expected.rel,expected.priv)) then raise exception 'FINAL_LP_STALE_POSTCONDITION_FAILED'; end if;
+      ('creator_publishing_fanvue_attempts','SELECT')) expected(rel,priv) cross join (values ('anon'),('authenticated')) role_name(role) where not (expected.rel='creator_publishing_fanvue_attempts' and role_name.role='authenticated') and has_table_privilege(role_name.role,'public.'||expected.rel,expected.priv)) then raise exception 'FINAL_LP_STALE_POSTCONDITION_FAILED'; end if;
   if exists (select 1 from (values ('_backup_autopost_rules_before_content_payload_20250628_001'),
       ('ai_influencers'),
       ('approved_media'),
@@ -424,7 +424,7 @@ begin
       ('system_stats'),
       ('user_loras'),
       ('user_subscriptions'),
-      ('webhook_logs')) expected(rel) cross join (values ('anon'),('authenticated')) role_name(role) cross join (values ('TRUNCATE'),('TRIGGER'),('REFERENCES'),('MAINTAIN')) privilege(priv) where has_table_privilege(role.role,'public.'||expected.rel,privilege.priv)) then raise exception 'FINAL_LP_NON_DATA_API_POSTCONDITION_FAILED'; end if;
+      ('webhook_logs')) expected(rel) cross join (values ('anon'),('authenticated')) role_name(role) cross join (values ('TRUNCATE'),('TRIGGER'),('REFERENCES'),('MAINTAIN')) privilege(priv) where has_table_privilege(role_name.role,'public.'||expected.rel,privilege.priv)) then raise exception 'FINAL_LP_NON_DATA_API_POSTCONDITION_FAILED'; end if;
   if exists (select 1 from (values ('autopost_accounts_preserve_fanvue_provider_identity()'),
       ('creator_publishing_aggregate_plan_status(uuid)'),
       ('creator_publishing_autopost_source_fingerprint(uuid)'),
@@ -433,7 +433,7 @@ begin
   if has_table_privilege('anon','public.creator_publishing_fanvue_history','SELECT') or has_table_privilege('authenticated','public.creator_publishing_fanvue_history','SELECT') or not has_table_privilege('service_role','public.creator_publishing_fanvue_history','SELECT') then raise exception 'FINAL_LP_VIEW_POSTCONDITION_FAILED'; end if;
   if exists (select 1 from (values ('autopost_job_logs_id_seq'),
       ('creator_publishing_audit_events_id_seq'),
-      ('purchases_id_seq')) expected(rel) cross join (values ('anon'),('authenticated')) role_name(role) cross join (values ('USAGE'),('SELECT'),('UPDATE')) privilege(priv) where has_sequence_privilege(role.role,'public.'||expected.rel,privilege.priv)) or exists (select 1 from (values ('autopost_job_logs_id_seq'),
+      ('purchases_id_seq')) expected(rel) cross join (values ('anon'),('authenticated')) role_name(role) cross join (values ('USAGE'),('SELECT'),('UPDATE')) privilege(priv) where has_sequence_privilege(role_name.role,'public.'||expected.rel,privilege.priv)) or exists (select 1 from (values ('autopost_job_logs_id_seq'),
       ('creator_publishing_audit_events_id_seq'),
       ('purchases_id_seq')) expected(rel) cross join (values ('USAGE'),('SELECT'),('UPDATE')) privilege(priv) where not has_sequence_privilege('service_role','public.'||expected.rel,privilege.priv)) then raise exception 'FINAL_LP_SEQUENCE_POSTCONDITION_FAILED'; end if;
   if exists(select 1 from pg_default_acl d cross join lateral aclexplode(d.defaclacl) a join pg_roles r on r.oid=a.grantee where d.defaclrole='postgres'::regrole and d.defaclnamespace='public'::regnamespace and ((d.defaclobjtype='r' and r.rolname in ('anon','authenticated') and a.privilege_type in ('TRUNCATE','TRIGGER','REFERENCES','MAINTAIN')) or (d.defaclobjtype='S' and r.rolname in ('anon','authenticated') and a.privilege_type='UPDATE'))) then raise exception 'FINAL_LP_DEFAULT_POSTCONDITION_FAILED'; end if;
