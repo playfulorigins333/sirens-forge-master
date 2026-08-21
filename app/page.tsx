@@ -300,7 +300,7 @@ export default function HomePage() {
               {
                 icon: Wand2,
                 title: 'Identity-first creation',
-                desc: 'Select or create your AI Twin before generating so every output starts from a consistent identity.',
+                desc: 'Generate directly, or add an AI Twin when you want a reusable identity that stays consistent across prompts and scenes.',
                 gradient: 'from-purple-500 to-pink-500',
               },
               {
@@ -408,7 +408,7 @@ export default function HomePage() {
               </span>
             </h2>
             <p className="text-xl font-medium text-gray-300">
-              Start guided or go direct. Your AI Twin identity anchors every generation.
+              Start guided or go direct. Add an AI Twin when you want a consistent reusable identity.
             </p>
           </motion.div>
 
@@ -426,13 +426,13 @@ export default function HomePage() {
               },
               {
                 number: '03',
-                title: 'Generate with your AI Twin',
-                desc: 'Select your identity, then create new prompts and scenes while keeping the same person consistent.',
+                title: 'Choose whether to add an AI Twin',
+                desc: 'Generate without one, or select an AI Twin when you want the same identity to stay consistent across new prompts and scenes.',
               },
               {
                 number: '04',
                 title: 'Reuse and refine',
-                desc: 'Carry your AI Twin into future generations and refine creative direction without giving up identity consistency.',
+                desc: 'If you use an AI Twin, carry it into future generations while refining creative direction without giving up identity consistency.',
               },
             ].map((step, index) => (
               <motion.div

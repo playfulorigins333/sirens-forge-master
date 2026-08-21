@@ -4,7 +4,7 @@ export default function FAQPage() {
   return (
     <LegalPageLayout
       title="Frequently Asked Questions"
-      lastUpdated="August 18, 2026"
+      lastUpdated="August 21, 2026"
     >
       <section>
         <h2 className="text-xl font-semibold">1. What is Sirens Forge?</h2>
@@ -16,21 +16,21 @@ export default function FAQPage() {
       <section>
         <h2 className="text-xl font-semibold">2. Do I need an AI Twin identity to generate?</h2>
         <p>
-          Yes. Generation requires you to create and select an AI Twin identity, which anchors your generations and supports consistent, personalized results.
+          No. You can generate images without training or selecting an AI Twin. If you want a reusable character or consistent identity across generations, you can create and select an AI Twin identity.
         </p>
       </section>
 
       <section>
         <h2 className="text-xl font-semibold">3. What is an AI Twin identity?</h2>
         <p>
-          An AI Twin identity is a custom-trained AI model (LoRA) that represents a specific character or persona. Once created, it can be reused across generations to maintain consistency.
+          An AI Twin identity is an optional custom-trained AI model (LoRA) that represents a specific character or persona. You can reuse it across generations when you want consistent identity features.
         </p>
       </section>
 
       <section>
         <h2 className="text-xl font-semibold">4. What can I create?</h2>
         <p>
-          Sirens Forge supports identity-anchored creative workflows using prompts or the Siren’s Mind assistant. Image generation availability is shown in the generator. Video generation is Coming Soon.
+          Sirens Forge supports prompt-driven image creation with optional identity-anchored workflows using an AI Twin or the Siren’s Mind assistant. Image generation availability is shown in the generator. Video generation is Coming Soon.
         </p>
       </section>
 
