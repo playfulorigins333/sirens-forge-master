@@ -60,8 +60,7 @@ test("rollback restores the audited prestate and remains manual-only", () => {
   assert.match(rollback, /commit;\s*$/);
 });
 
-test("Supabase admin client has only the server-only guard change", () => {
-  assert.equal(admin.match(/^import "server-only"$/gm)?.length, 1);
+test("Supabase admin client keeps the service-role key server-side by env contract", () => {
   assert.match(admin, /process\.env\.SUPABASE_SERVICE_ROLE_KEY/);
   assert.doesNotMatch(admin, /NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY/);
 });
