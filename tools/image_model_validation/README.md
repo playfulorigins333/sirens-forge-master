@@ -17,6 +17,8 @@ This offline subsystem validates registered image checkpoints before GPU technic
 
 The evidence JSON must contain a record for every `requiredEvidence` entry in the registry, with the exact category and source reference plus an absolute path to its preserved file. The gate hashes each actual file. Manually confirming every rights field cannot compensate for a missing category or file, and Cyber remains incomplete while its creator-controlled source is `OPERATOR_EVIDENCE_REQUIRED`.
 
+Both SDXL-derived candidates require preserved files for all five upstream legal records: `SDXL_MODEL_PROVENANCE` (the Hugging Face model page), `SDXL_OPEN_RAIL_LICENSE` (the repository's `LICENSE.md` text), `STABILITY_CORE_MODELS_SCOPE` (the Stability Core Models page), `STABILITY_TERMS_CONFLICT_CLAUSE` (the Stability Terms of Service), and `STABILITY_ACCEPTABLE_USE_POLICY` (the Stability Acceptable Use Policy). These references are evidence-register entries only; this subsystem never fetches them.
+
 The verifier streams SHA-256 and tensor data, retaining only the SafeTensor header and a small data chunk in memory. It checks every tensor record and emits deterministic name-sorted JSON containing dtype, shape, NaN, positive-infinity, and negative-infinity counts. F16 and F32 non-finite semantics are reference-tested. Other floating-point dtypes fail closed until equivalent tests are added; integer and boolean tensors are structurally validated and have zero non-finite counts.
 
 ## Failures and states

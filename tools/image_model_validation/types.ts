@@ -7,7 +7,7 @@ export type RightState = "CONFIRMED" | "UNKNOWN" | "REJECTED";
 export const RIGHT_FIELDS = ["commercial_outputs", "outside_paid_saas", "lora_training", "cloud_operation", "lawful_explicit_nsfw", "upstream_chain"] as const;
 export type Rights = Record<(typeof RIGHT_FIELDS)[number], RightState>;
 
-export const EVIDENCE_CATEGORIES = ["MODEL_PROVENANCE", "MODEL_LICENSE", "BASE_MODEL_PROVENANCE", "BASE_MODEL_USE_POLICY", "CREATOR_CONTROLLED_SOURCE"] as const;
+export const EVIDENCE_CATEGORIES = ["MODEL_PROVENANCE", "MODEL_LICENSE", "SDXL_MODEL_PROVENANCE", "SDXL_OPEN_RAIL_LICENSE", "STABILITY_CORE_MODELS_SCOPE", "STABILITY_TERMS_CONFLICT_CLAUSE", "STABILITY_ACCEPTABLE_USE_POLICY", "CREATOR_CONTROLLED_SOURCE"] as const;
 export type EvidenceCategory = (typeof EVIDENCE_CATEGORIES)[number];
 export interface EvidenceRequirement { category: EvidenceCategory; sourceReference: string }
 

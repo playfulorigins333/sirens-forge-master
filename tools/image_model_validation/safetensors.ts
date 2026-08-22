@@ -30,7 +30,8 @@ export async function parseHeader(handle: FileHandle, fileSize: number): Promise
     if (name === "__metadata__") continue;
     if (!value || typeof value !== "object") throw new Error(`MALFORMED_SAFETENSOR: invalid tensor ${name}`);
     const v = value as Partial<RecordValue>;
-    if (!v.dtype || !DTYPE_BYTES[v.dtype] || !Array.isArray(v.shape) || !v.shape.every((n) => Number.isSafeInteger(n) && n >= 0) || !Array.isArray(v.data_offsets) || v.data_offsets.length !== 2 || !v.data_offsets.every((n) => Number.isSafeInteger(n) && n >= 0)) throw new Error(`MALFORMED_SAFETENSOR: invalid tensor record ${name}`);
+    if (typeof v.dtype === "string" && !DTYPE_BYTES[v.dtype]) throw new Error(`UNSUPPORTED_DTYPE: ${v.dtype} is not approved or reference-tested`);
+    if (!v.dtype || !Array.isArray(v.shape) || !v.shape.every((n) => Number.isSafeInteger(n) && n >= 0) || !Array.isArray(v.data_offsets) || v.data_offsets.length !== 2 || !v.data_offsets.every((n) => Number.isSafeInteger(n) && n >= 0)) throw new Error(`MALFORMED_SAFETENSOR: invalid tensor record ${name}`);
     const [start,end] = v.data_offsets; const elements = v.shape.reduce((a,b) => a * b, 1);
     if (!Number.isSafeInteger(elements) || end < start || end - start !== elements * DTYPE_BYTES[v.dtype] || 8 + length + end > fileSize) throw new Error(`MALFORMED_SAFETENSOR: invalid tensor extent ${name}`);
     tensors.push({ name, dtype:v.dtype, shape:v.shape, data_offsets:[start,end] });
