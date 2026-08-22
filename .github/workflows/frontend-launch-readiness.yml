@@ -21,6 +21,7 @@ jobs:
       - run: npm run test:public-paths
       - run: npm run test:api-authorization-inventory
       - run: npm run test:launch-observability-recovery
+      - run: npm run test:image-model-validation
       - run: npm run test:billing-portal-lazy-stripe
       - run: npm run test:pfc-core-02a
       - run: npx tsc --noEmit

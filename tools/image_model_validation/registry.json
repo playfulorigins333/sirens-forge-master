@@ -22,6 +22,12 @@
         "https://civitai.com/api/download/models/991916",
         "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
         "https://stability.ai/use-policy"
+      ],
+      "requiredEvidence": [
+        { "category": "MODEL_PROVENANCE", "sourceReference": "https://civitai.com/models/502468/bigasp" },
+        { "category": "MODEL_LICENSE", "sourceReference": "https://tensor.art/models/788403623261562537" },
+        { "category": "BASE_MODEL_PROVENANCE", "sourceReference": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0" },
+        { "category": "BASE_MODEL_USE_POLICY", "sourceReference": "https://stability.ai/use-policy" }
       ]
     },
     {
@@ -44,6 +50,13 @@
         "OPERATOR_EVIDENCE_REQUIRED",
         "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
         "https://stability.ai/use-policy"
+      ],
+      "requiredEvidence": [
+        { "category": "MODEL_PROVENANCE", "sourceReference": "https://civitai.com/models/312530/cyberrealistic-xl" },
+        { "category": "MODEL_LICENSE", "sourceReference": "https://civitai.com/models/license/2840768" },
+        { "category": "CREATOR_CONTROLLED_SOURCE", "sourceReference": "OPERATOR_EVIDENCE_REQUIRED" },
+        { "category": "BASE_MODEL_PROVENANCE", "sourceReference": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0" },
+        { "category": "BASE_MODEL_USE_POLICY", "sourceReference": "https://stability.ai/use-policy" }
       ]
     }
   ]

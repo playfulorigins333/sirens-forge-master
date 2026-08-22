@@ -1,7 +1,8 @@
 import { open, type FileHandle } from "node:fs/promises";
 import type { TensorResult } from "./types";
 
-const DTYPE_BYTES: Record<string, number> = { BOOL:1,I8:1,U8:1,F8_E4M3:1,F8_E5M2:1,I16:2,U16:2,F16:2,BF16:2,I32:4,U32:4,F32:4,I64:8,U64:8,F64:8 };
+// Floating-point formats are admitted only after reference-bit-pattern tests exist.
+const DTYPE_BYTES: Record<string, number> = { BOOL:1,I8:1,U8:1,I16:2,U16:2,F16:2,I32:4,U32:4,F32:4,I64:8,U64:8 };
 const MAX_HEADER_BYTES = 100 * 1024 * 1024;
 type RecordValue = { dtype: string; shape: number[]; data_offsets: [number, number] };
 export interface ParsedHeader { dataStart: number; tensors: Array<{ name: string } & RecordValue> }
@@ -44,8 +45,7 @@ export async function parseHeader(handle: FileHandle, fileSize: number): Promise
 }
 
 function half(bits: number): number { const s=(bits&0x8000)?-1:1,e=(bits>>10)&31,f=bits&1023; return e===31?(f?NaN:s*Infinity):e===0?s*2**-14*(f/1024):s*2**(e-15)*(1+f/1024); }
-function float8(bits:number, mantissaBits:number, exponentBits:number, bias:number):number { const sign=bits&0x80?-1:1, mantissa=bits&((1<<mantissaBits)-1), exp=(bits>>mantissaBits)&((1<<exponentBits)-1), max=(1<<exponentBits)-1; if(exp===max) return mantissa?NaN:sign*Infinity; return exp===0?sign*2**(1-bias)*(mantissa/2**mantissaBits):sign*2**(exp-bias)*(1+mantissa/2**mantissaBits); }
-function valueAt(b:Buffer,o:number,d:string):number|null { switch(d){case"F64":return b.readDoubleLE(o);case"F32":return b.readFloatLE(o);case"F16":return half(b.readUInt16LE(o));case"BF16":{const x=Buffer.allocUnsafe(4);x.writeUInt16LE(0,0);x.writeUInt16LE(b.readUInt16LE(o),2);return x.readFloatLE(0);}case"F8_E4M3":return float8(b[o],3,4,7);case"F8_E5M2":return float8(b[o],2,5,15);default:return null;} }
+function valueAt(b:Buffer,o:number,d:string):number|null { switch(d){case"F32":return b.readFloatLE(o);case"F16":return half(b.readUInt16LE(o));default:return null;} }
 
 export async function scanSafeTensor(filePath: string): Promise<TensorResult[]> {
   const handle = await open(filePath, "r");
