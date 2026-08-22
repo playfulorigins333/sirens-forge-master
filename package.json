@@ -12,6 +12,7 @@
     "test:frontend-launch-readiness": "npm run test:identity-lora-metadata && tsx backend/security/tests/frontendLaunchReadiness.test.ts",
     "test:final-launch-hardening": "node --experimental-test-module-mocks --import tsx backend/security/tests/lock02bGenerateAuthorization.test.ts",
     "test:complaints-removal-operations": "tsx backend/governance/tests/complaintsRemovalOperations.test.ts",
+    "test:public-policy-privacy-truth": "tsx backend/governance/tests/publicPolicyPrivacyTruth.test.ts",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

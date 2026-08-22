@@ -7,12 +7,16 @@ await access(runbookPath);
 const runbook = await readFile(runbookPath, "utf8");
 const removal = await readFile("app/content-removal/page.tsx", "utf8");
 const complaints = await readFile("app/complaints/page.tsx", "utf8");
+const intimateReport = await readFile("app/report-intimate-content/page.tsx", "utf8");
 const underage = await readFile("app/underage-policy/page.tsx", "utf8");
 const sitemap = await readFile("app/sitemap.ts", "utf8");
 
 assert(runbook.includes("admin@sirensforge.vip"), "runbook must preserve the public intake address");
 assert(removal.includes("admin@sirensforge.vip"), "removal policy must preserve the public intake address");
 assert(complaints.includes("admin@sirensforge.vip"), "complaints policy must preserve the public intake address");
+assert(intimateReport.includes("admin@sirensforge.vip"), "NCII route must use the existing intake address");
+assert(runbook.includes("`/report-intimate-content`"), "runbook must map the public NCII route");
+assert.match(runbook, /does not submit to a case-management API or trigger a Production action/i);
 
 for (const state of [
   "RECEIVED", "TRIAGED", "INFORMATION_NEEDED", "UNDER_REVIEW", "ESCALATED",
@@ -36,7 +40,7 @@ for (const scenario of [
   "Ordinary complaint with insufficient evidence",
 ]) assert(runbook.includes(scenario), `missing tabletop scenario: ${scenario}`);
 
-for (const route of ["/complaints", "/content-removal"]) {
+for (const route of ["/complaints", "/content-removal", "/report-intimate-content"]) {
   assert.equal(isPublicPath(route), true, `${route} must remain public`);
   assert(sitemap.includes(`"${route}"`), `${route} must remain in the sitemap contract`);
 }
@@ -53,7 +57,7 @@ assert.match(removal, /Users remain responsible for obtaining the rights and/);
 assert.match(underage, /applies\s+platform age, consent, likeness, safety, and policy/);
 assert.match(underage, /do not\s+independently\s+establish legal ownership/);
 
-const publicComplaintRemovalCopy = `${removal}\n${complaints}`;
+const publicComplaintRemovalCopy = `${removal}\n${complaints}\n${intimateReport}`;
 const hardDeadline = /(?:respond|acknowledge|review|resolve|remove|action)[^.!?\n]{0,80}\b(?:within|in)\s+\d+\s+(?:hours?|business days?|calendar days?|days?)\b/i;
 assert.doesNotMatch(publicComplaintRemovalCopy, hardDeadline, "public policy must not promise a hard response deadline");
 assert.match(runbook, /not public promises, service-level guarantees, or statutory deadlines/i);

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import LegalPageLayout from "@/components/legal/LegalPageLayout";
 
 export default function ContactPage() {
@@ -20,6 +21,11 @@ export default function ContactPage() {
             admin@sirensforge.vip
           </a>
         </p>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold">Safety and removal reports</h2>
+        <p className="mt-2">For nonconsensual intimate imagery or unauthorized intimate deepfakes, use the public <Link className="text-cyan-400 hover:underline" href="/report-intimate-content">intimate-content reporting route</Link>. General support and other complaints may use the email above.</p>
       </section>
 
       <section>

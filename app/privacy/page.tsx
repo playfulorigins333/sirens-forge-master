@@ -1,8 +1,9 @@
+import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function PrivacyPage() {
   return (
-    <LegalPageLayout title="Privacy Policy" lastUpdated="July 27, 2026">
+    <LegalPageLayout title="Privacy Policy" lastUpdated="August 22, 2026">
       <section>
         <p>
           This Privacy Policy explains how Sirens Forge collects, uses, stores,
@@ -28,7 +29,7 @@ export default function PrivacyPage() {
         <h2 className="text-xl font-semibold">2. How We Use Information</h2>
         <p>We may use information to:</p>
         <ul className="list-disc pl-6 space-y-2">
-          <li>Operate, maintain, secure, and improve Sirens Forge</li>
+          <li>Operate, maintain, and secure Sirens Forge</li>
           <li>Create accounts, authenticate users, and manage platform access</li>
           <li>Process payments, subscriptions, refunds, disputes, and billing records</li>
           <li>Generate, store, display, and deliver user-requested outputs</li>
@@ -46,23 +47,37 @@ export default function PrivacyPage() {
         <p>
           Prompts, uploaded files, reference images, identity materials,
           LoRA-related materials, and generated outputs may be processed, stored,
-          analyzed, displayed, transmitted, or retained as needed to provide,
-          secure, improve, and enforce the service.
+          displayed, transmitted, or retained only as needed to provide requested
+          features, secure the service, provide legitimate support and
+          troubleshooting, conduct safety or compliance review, prevent fraud or
+          abuse, satisfy legal obligations, and operate implemented automated
+          policy controls.
         </p>
         <p>
           You should not submit sensitive personal information, confidential
           material, private third-party data, or content you do not have the
           legal right or consent to use.
         </p>
+        <p>
+          Private creator uploads, identity or Twin materials, prompts, and
+          generated content are not used for generalized model training by
+          default. Any future generalized model-training or improvement use of
+          private creator content requires a separate explicit opt-in. Sirens
+          Forge never sells creator personal data or creator content, and private
+          creator content is not used to build advertising or marketing profiles.
+        </p>
       </section>
 
       <section>
         <h2 className="text-xl font-semibold">4. Safety, Compliance, and Review</h2>
         <p>
-          We may monitor, log, review, analyze, preserve, or remove user inputs,
-          uploads, prompts, account activity, identity materials, generated
-          outputs, and system activity for safety, compliance, abuse prevention,
-          troubleshooting, legal compliance, and platform security.
+          Automated safety, security, and policy controls may analyze inputs and
+          system or account activity where implemented. Automated processing does
+          not imply casual human browsing of private creator content. Human
+          access to private creator content is purpose-limited to
+          creator-requested support, genuine technical troubleshooting, safety or
+          NCII investigation, fraud or security investigation, or a legal
+          requirement.
         </p>
         <p>
           We may restrict access, suspend accounts, remove content, preserve
@@ -87,8 +102,8 @@ export default function PrivacyPage() {
           Sirens Forge may use third-party services for hosting, storage,
           authentication, analytics, email, payments, AI processing, content
           delivery, security, infrastructure, customer support, and business
-          operations. These providers may process information as needed to
-          deliver and support the service.
+          operations. Provider processing is purpose-limited to the minimum
+          information necessary to deliver and support the assigned service.
         </p>
       </section>
 
@@ -131,12 +146,12 @@ export default function PrivacyPage() {
       <section>
         <h2 className="text-xl font-semibold">10. Data Retention</h2>
         <p>
-          We retain information for as long as necessary to operate the platform,
-          provide services, maintain business records, comply with legal
-          obligations, resolve disputes, process payments, prevent fraud,
-          investigate abuse, enforce policies, maintain backups, and protect the
-          platform. We may delete, anonymize, or retain data at our discretion
-          unless prohibited by law.
+          We retain information only as needed to provide the service, maintain
+          necessary business and billing records, comply with legal obligations,
+          resolve disputes, prevent fraud, investigate abuse, maintain backups,
+          secure the platform, and support documented enforcement decisions.
+          Retention varies by the type of data and the purpose for which it is
+          held.
         </p>
       </section>
 
@@ -147,7 +162,10 @@ export default function PrivacyPage() {
           stored data. We may deny, delay, or limit deletion where retention is
           required or permitted for billing, security, legal compliance, abuse
           prevention, dispute resolution, enforcement, backups, fraud prevention,
-          or legitimate business purposes.
+          or other documented necessary purposes. Requests use the current manual
+          contact process; this policy does not represent that automated account
+          deletion, reactivation, Recently Deleted, full export, or purge controls
+          are currently available.
         </p>
       </section>
 
@@ -185,9 +203,11 @@ export default function PrivacyPage() {
         <p>
           If you believe content on or generated through Sirens Forge violates
           your rights, privacy, consent, likeness, copyright, or our policies,
-          you may contact us with a removal request or complaint. We may request
-          additional information to evaluate the report and may take action at
-          our discretion or where required by law.
+          you may contact us with a removal request or complaint. Reports of
+          nonconsensual or unauthorized intimate content may use the dedicated
+          <Link className="text-cyan-400 hover:underline" href="/report-intimate-content"> public reporting route</Link>. We may request additional information to
+          evaluate the report and may take action under our policies or where
+          required by law.
         </p>
       </section>
 
@@ -230,9 +250,10 @@ export default function PrivacyPage() {
       <section>
         <h2 className="text-xl font-semibold">17. Changes to This Policy</h2>
         <p>
-          We may update this Privacy Policy at any time. Continued use of the
-          platform after changes are posted constitutes acceptance of the updated
-          policy.
+          We may update this Privacy Policy. We will post the updated version and
+          date and provide additional notice or obtain acceptance when required.
+          This provision does not claim that a general automated material-policy
+          re-consent system currently exists.
         </p>
       </section>
 

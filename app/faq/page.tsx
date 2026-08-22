@@ -1,3 +1,4 @@
+import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function FAQPage() {
@@ -58,7 +59,7 @@ export default function FAQPage() {
       <section>
         <h2 className="text-xl font-semibold">8. Is my content private?</h2>
         <p>
-          Your content is stored and processed to provide the service. However, you should avoid submitting sensitive or personal information. See our Privacy Policy for more details.
+          Creator content is processed to provide requested features and for limited support, security, safety, compliance, and legal purposes. Private creator material is not used for generalized model training by default, and any future such use requires separate explicit opt-in. No online service can promise absolute confidentiality or security; see our <Link className="text-cyan-400 hover:underline" href="/privacy">Privacy Policy</Link>.
         </p>
       </section>
 

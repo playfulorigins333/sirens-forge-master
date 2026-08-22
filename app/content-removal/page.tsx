@@ -1,3 +1,4 @@
+import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function ContentRemovalPage() {
@@ -46,6 +47,10 @@ export default function ContentRemovalPage() {
           <li>Any supporting information or documentation</li>
           <li>Contact information for follow-up</li>
         </ul>
+      </section>
+
+      <section>
+        <p>For nonconsensual intimate imagery or unauthorized intimate AI/deepfake content, use the dedicated public <Link className="text-cyan-400 hover:underline" href="/report-intimate-content">intimate-content reporting route</Link>. General removal and copyright requests remain available here.</p>
       </section>
 
       <section>

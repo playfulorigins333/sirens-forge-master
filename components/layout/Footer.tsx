@@ -39,6 +39,7 @@ export default function Footer() {
               <Link href="/underage-policy" className="hover:text-cyan-400 transition">Underage Policy</Link>
               <Link href="/blocked-content" className="hover:text-cyan-400 transition">Blocked Content</Link>
               <Link href="/content-removal" className="hover:text-cyan-400 transition">Content Removal</Link>
+              <Link href="/report-intimate-content" className="hover:text-cyan-400 transition">Report Intimate Content</Link>
               <Link href="/complaints" className="hover:text-cyan-400 transition">Complaints</Link>
             </div>
 
