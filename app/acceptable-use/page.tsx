@@ -132,9 +132,9 @@ export default function AcceptableUsePage() {
         <p>
           Automated safety and service processing does not imply casual human
           browsing of private creator content. Human access is purpose-limited
-          to legitimate support or technical troubleshooting, safety or NCII
-          investigation, fraud or security investigation, policy enforcement,
-          or a legal requirement. We may preserve or remove material where
+          to creator-requested support, genuine technical troubleshooting,
+          safety or NCII investigation, fraud or security investigation, or a
+          legal requirement. We may preserve or remove material where
           supported by those purposes.
         </p>
       </section>

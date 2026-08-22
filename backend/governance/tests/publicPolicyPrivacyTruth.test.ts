@@ -8,21 +8,30 @@ const [terms, privacy, aup, report, sitemap, account] = await Promise.all([
   read("app/report-intimate-content/page.tsx"), read("app/sitemap.ts"), read("app/account/page.tsx"),
 ])
 const policies = `${terms}\n${privacy}`
+const normalizedPolicies = policies.replace(/\s+/g, " ")
+const normalizedTerms = terms.replace(/\s+/g, " ")
+const humanAccessCopy = [terms, privacy, aup].flatMap((source) => source.match(/<p>[^<]*(?:Human access|Human\s+access)[\s\S]*?<\/p>/gi) ?? []).join("\n")
 
 assert.doesNotMatch(policies, /outputs are not guaranteed[^.]{0,40}private/i)
 assert.doesNotMatch(policies, /we do not verify ownership, consent, or authorization/i)
 assert.doesNotMatch(policies, /continued use[^.]{0,80}constitutes acceptance/i)
 assert.doesNotMatch(policies, /private creator[^.]{0,120}(?:improve|improvement)[^.]{0,80}(?:service|model)/i)
-for (const phrase of ["not used for generalized model training by default", "separate explicit opt-in"]) assert(policies.includes(phrase))
-assert.match(privacy, /never sell creator personal data or creator content/i)
-assert.match(privacy, /do not use private creator content to build advertising or marketing profiles/i)
-assert.match(policies, /Human access is purpose-limited/i)
-assert.match(policies, /Automated processing does not imply casual human browsing/i)
+for (const phrase of ["not used for generalized model training by default", "separate explicit opt-in"]) assert(normalizedPolicies.includes(phrase))
+assert.match(normalizedPolicies, /never sells? creator personal data or creator content/i)
+assert.match(normalizedPolicies, /private creator content is not used to build advertising or marketing profiles/i)
+assert.match(normalizedPolicies, /Human access (?:to private creator content )?is purpose-limited/i)
+assert.match(policies, /Automated processing does not imply\s+casual human browsing/i)
+assert(humanAccessCopy.length > 0, "human-access paragraphs must remain present")
+assert.doesNotMatch(
+  humanAccessCopy,
+  /Human\s+access[\s\S]{0,500}policy enforcement/i,
+  "human private-content access must not use generic policy enforcement as a standalone basis",
+)
 
-assert.match(terms, /OnlyFans launch workflow[^.]*different/i)
-assert.match(terms, /Fanvue may permit a fully synthetic fictional AI persona/i)
-assert.match(terms, /General generation may use a fully synthetic fictional persona/i)
-assert.match(terms, /does not require every persona to resemble the creator/i)
+assert.match(normalizedTerms, /OnlyFans launch workflow[^.]*likeness-bound/i)
+assert.match(normalizedTerms, /Fanvue may permit a fully synthetic fictional AI persona/i)
+assert.match(normalizedTerms, /General generation may use a fully synthetic fictional persona/i)
+assert.match(normalizedTerms, /does not require every persona to resemble the creator/i)
 
 assert.match(aup, /nonconsensual intimate imagery/i)
 assert.match(aup, /AI-generated[\s\S]{0,100}deepfakes and face swaps/i)
