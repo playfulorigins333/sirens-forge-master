@@ -7,12 +7,15 @@ on:
       - 'supabase/migrations/20260807003100_payment_v2_affiliate_attribution.sql'
       - 'supabase/migrations/20260807003200_affiliate_public_cutover_hardening.sql'
       - 'supabase/migrations/20260807003300_affiliate_summary_payment_v2_read_boundary.sql'
+      - 'supabase/migrations/20260822090000_material_policy_acceptance_receipts.sql'
       - 'supabase/manual/**'
       - 'backend/affiliate/tests/**'
       - 'app/api/affiliate/**'
       - 'app/api/admin/affiliate-payouts/**'
       - 'app/api/stripe/connect/**'
       - 'backend/payment-v2/tests/**'
+      - 'backend/governance/tests/materialPolicyAcceptance.test.ts'
+      - 'backend/governance/tests/runMaterialPolicyAcceptancePostgres.mjs'
       - 'app/api/payment-v2/**'
       - 'app/login/**'
       - 'app/auth/callback/**'
@@ -20,6 +23,7 @@ on:
       - 'app/api/webhook/route.ts'
       - 'app/billing/**'
       - 'lib/payment-v2/**'
+      - 'lib/material-policy/**'
       - '.github/workflows/payment-v2-postgres.yml'
       - 'package.json'
       - 'app/api/checkout/subscription-v2/**'
@@ -86,3 +90,6 @@ jobs:
         run: npm run test:pfc-core-03c-postgres
       - name: Disposable PostgreSQL behavior and concurrency
         run: npm run test:payment-v2-postgres
+      # This runner resets disposable schemas, so it must remain the final database step.
+      - name: Material-policy receipt disposable PostgreSQL behavior
+        run: npm run test:material-policy-acceptance-postgres

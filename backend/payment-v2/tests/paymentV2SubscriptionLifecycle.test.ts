@@ -48,7 +48,14 @@ for(const [label,current] of [["wrong price",{...subscription(),items:{data:[{qu
 {const h=claimHarness("og_throne");await paymentFirstClaim(h.input);equal(h.retrieves,0,"OG claim performs no subscription lookup");}
 
 const baseline="eff1aa6e96c21dfd2b17f59b292476da164f0073";
-for(const path of ["app/api/checkout/subscription-v2/route.ts","lib/payment-v2/checkoutService.ts","lib/payment-v2/checkoutRequestProtection.ts","lib/subscription-checker.ts"]){execFileSync("git",["diff","--quiet",baseline,"--",path]);assertions++;}
+// Only these three baselines advanced for the approved material-policy integration in PR #273.
+const protectedSurfaceBaselines:Record<string,string>={
+  "app/api/checkout/subscription-v2/route.ts":"a8928e3c43595422a13fc7879e37f5b571c09c99",
+  "lib/payment-v2/checkoutService.ts":"a8928e3c43595422a13fc7879e37f5b571c09c99",
+  "lib/subscription-checker.ts":"a8928e3c43595422a13fc7879e37f5b571c09c99",
+  "lib/payment-v2/checkoutRequestProtection.ts":baseline,
+};
+for(const [path,pathBaseline] of Object.entries(protectedSurfaceBaselines)){execFileSync("git",["diff","--quiet",pathBaseline,"--",path]);assertions++;}
 const historicalMigrationMutations=(statusLines:string[])=>statusLines.filter(line=>line.length>0&&!line.startsWith("A\t"));
 const migrationChanges=execFileSync("git",["diff","--name-status",baseline,"--","supabase/migrations"],{encoding:"utf8"}).trim().split(/\r?\n/).filter(Boolean);
 equal(historicalMigrationMutations(migrationChanges),[],"historical migrations remain immutable while later forward-only additions are allowed");
