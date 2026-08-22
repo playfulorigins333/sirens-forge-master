@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { LOCKED_PAYMENT_V2_PRICES } from "./publicPurchaseReadiness";
+import { validateAcceptanceDeclaration } from "../material-policy/service";
 
 export const PAYMENT_V2_COOKIE = "sf_payment_v2_claim";
 export const PAYMENT_V2_CONTRACT_VERSION = "pfc-03-v2";
@@ -19,6 +20,7 @@ export interface CheckoutDependencies {
   randomCredential(): Buffer;
   loadTier(name: PaymentTier): Promise<TierRow[]>;
   acquireHold(hash: Uint8Array, tier: PaymentTier, expiresAt: string, referralCode: string | null): Promise<Hold>;
+  recordPolicyAcceptance(holdId: string, hash: Uint8Array): Promise<string>;
   loadAssociatedSessionId(holdId: string, hash: Uint8Array): Promise<string | null>;
   associateSession(holdId: string, hash: Uint8Array, sessionId: string): Promise<string>;
   createSession(params: Record<string, unknown>, idempotencyKey: string): Promise<Session>;
@@ -35,18 +37,19 @@ export type CheckoutResult = {
 const error = (status: number, message: string, code: string): CheckoutResult => ({ status, body: { error: message, code } });
 const serverError = () => error(500, "Unable to start Checkout", "PAYMENT_FIRST_CHECKOUT_V2_ERROR");
 
-export type ValidatedCheckoutRequest = { tierName: PaymentTier; referralCode?: string };
+export type ValidatedCheckoutRequest = { tierName: PaymentTier; referralCode?: string; materialPolicyAcceptance: { accepted: true; materialBundleVersion: string } };
 
 export function parseCheckoutBody(body: unknown): ValidatedCheckoutRequest | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const record = body as Record<string, unknown>;
-  if (!Object.hasOwn(record, "tierName") || Object.keys(record).some((key) => key !== "tierName" && key !== "referralCode")) return null;
+  if (!Object.hasOwn(record, "tierName") || Object.keys(record).some((key) => !["tierName", "referralCode", "materialPolicyAcceptance"].includes(key))) return null;
   if (record.tierName !== "og_throne" && record.tierName !== "early_bird") return null;
-  if (record.referralCode === undefined) return { tierName: record.tierName };
+  const acceptance = record.materialPolicyAcceptance as ValidatedCheckoutRequest["materialPolicyAcceptance"];
+  if (record.referralCode === undefined) return { tierName: record.tierName, materialPolicyAcceptance: acceptance };
   if (typeof record.referralCode !== "string") return null;
   const referralCode = record.referralCode.toUpperCase();
   if (!/^[A-Z0-9_-]{4,20}$/.test(referralCode)) return null;
-  return { tierName: record.tierName, referralCode };
+  return { tierName: record.tierName, referralCode, materialPolicyAcceptance: acceptance };
 }
 
 function credential(rawCookie: string | undefined, deps: CheckoutDependencies) {
@@ -87,6 +90,9 @@ export async function paymentFirstCheckout(input: {
   if (input.enabled !== "true") return error(503, "Payment-first Checkout is not active", "PAYMENT_FIRST_CHECKOUT_V2_DISABLED");
   const request = parseCheckoutBody(input.body);
   if (!request) return error(400, "Invalid Checkout request", "INVALID_CHECKOUT_REQUEST");
+  const acceptance = validateAcceptanceDeclaration(request.materialPolicyAcceptance);
+  if (!acceptance.ok) return error(acceptance.code === "MATERIAL_POLICY_VERSION_MISMATCH" ? 409 : 428,
+    acceptance.code === "MATERIAL_POLICY_VERSION_MISMATCH" ? "The policy bundle has changed. Review and accept the current policies." : "Current policy acceptance is required.", acceptance.code);
   const origin = trustedOrigin(input.configuredOrigin, input.production);
   if (!origin) return serverError();
   let claim;
@@ -115,6 +121,8 @@ export async function paymentFirstCheckout(input: {
     const authoritativeExpirationMs = Date.parse(hold.expiresAt);
     if (!Number.isFinite(authoritativeExpirationMs) || authoritativeExpirationMs <= deps.now().getTime())
       return { ...serverError(), cookie };
+
+    await deps.recordPolicyAcceptance(hold.holdId, claim.hash);
 
     if (hold.state === "SESSION_ASSOCIATED") {
       const id = await deps.loadAssociatedSessionId(hold.holdId, claim.hash);

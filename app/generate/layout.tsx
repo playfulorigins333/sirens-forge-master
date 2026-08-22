@@ -2,6 +2,7 @@
 import React from "react";
 import { redirect } from "next/navigation";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { policyConsentPath } from "@/lib/material-policy/redirect";
 
 export const metadata = {
   title: "Sirens Forge — Generator",
@@ -18,6 +19,8 @@ export default async function GenerateLayout({
   if (!auth.ok) {
     if (auth.error === "UNAUTHENTICATED") {
       redirect("/login");
+    } else if (auth.error === "POLICY_ACCEPTANCE_REQUIRED") {
+      redirect(policyConsentPath("/generate"));
     } else {
       redirect("/pricing");
     }

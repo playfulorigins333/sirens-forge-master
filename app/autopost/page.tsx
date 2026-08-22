@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { randomUUID } from "node:crypto";
 import AutopostPageClient from "./AutopostPageClient";
 import { Task14AutopostOrchestration } from "./Task14AutopostOrchestration";
@@ -27,6 +28,8 @@ export default async function AutopostPage() {
   if (!auth.ok) {
     if (auth.error === "UNAUTHENTICATED") {
       redirect("/login");
+    } else if (auth.error === "POLICY_ACCEPTANCE_REQUIRED") {
+      redirect(policyConsentPath("/autopost"));
     } else {
       redirect("/pricing");
     }

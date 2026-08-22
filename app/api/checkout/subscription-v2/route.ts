@@ -6,6 +6,7 @@ import { checkRateLimit } from "@vercel/firewall";
 import { defaultCheckoutDependencies, paymentFirstCheckout, PAYMENT_V2_COOKIE, type PaymentTier } from "@/lib/payment-v2/checkoutService";
 import { protectPaymentV2Checkout, PAYMENT_V2_CHECKOUT_RATE_LIMIT_ID } from "@/lib/payment-v2/checkoutRequestProtection";
 import { derivePublicPurchaseState } from "@/lib/payment-v2/publicPurchaseReadiness";
+import { recordCheckoutAcceptance } from "@/lib/material-policy/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,7 @@ export async function POST(req: Request) {
       const deps = defaultCheckoutDependencies({
         async loadTier(name: PaymentTier) { const { data, error } = await supabase.from("subscription_tiers").select("name,is_active,stripe_price_id").eq("name", name); if (error) throw error; return data || []; },
         async acquireHold(hash, tier, expiresAt, referralCode) { const { data, error } = await supabase.rpc("payment_v2_acquire_hold", { p_purchaser_hash: `\\x${Buffer.from(hash).toString("hex")}`, p_tier: tier, p_expires_at: expiresAt, p_referral_code: referralCode }); if (error) throw new Error(error.message); const row = data?.[0]; if (!row) throw new Error("invalid_request"); return { holdId: row.hold_id, state: row.state, expiresAt: row.expires_at, connectDestination: row.connect_destination, commissionPercent: row.commission_percent == null ? null : Number(row.commission_percent) }; },
+        recordPolicyAcceptance: (holdId, hash) => recordCheckoutAcceptance(supabase, holdId, hash),
         async loadAssociatedSessionId(holdId, hash) { const { data, error } = await supabase.from("payment_v2_holds").select("stripe_checkout_session_id").eq("id", holdId).eq("purchaser_credential_hash", `\\x${Buffer.from(hash).toString("hex")}`).eq("state", "SESSION_ASSOCIATED"); if (error || data?.length !== 1) return null; return data[0].stripe_checkout_session_id; },
         async associateSession(holdId, hash, sessionId) { const { data, error } = await supabase.rpc("payment_v2_associate_session", { p_hold_id: holdId, p_purchaser_hash: `\\x${Buffer.from(hash).toString("hex")}`, p_session_id: sessionId }); if (error) throw error; return data; },
         async createSession(params, idempotencyKey) { return stripe.checkout.sessions.create(params as Stripe.Checkout.SessionCreateParams, { idempotencyKey }); },

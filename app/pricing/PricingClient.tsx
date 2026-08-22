@@ -7,6 +7,8 @@ import { useSearchParams } from "next/navigation";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Crown, Star, Sparkles, AlertTriangle, Check } from "lucide-react";
 import { captureReferral, clearStoredReferral, normalizeReferralCode, readCurrentReferral } from "@/lib/referralAttribution";
+import { MATERIAL_POLICY_MANIFEST } from "@/lib/material-policy/manifest";
+import Link from "next/link";
 
 type ViewMode = "cards" | "compare";
 type CheckoutTier = "og_throne" | "early_bird";
@@ -95,6 +97,7 @@ export default function PricingClient() {
 
   const [checkoutLoading, setCheckoutLoading] = useState<CheckoutTier | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [policiesAccepted, setPoliciesAccepted] = useState(false);
   const [publicPurchase, setPublicPurchase] = useState<PublicPurchaseState | null>(null);
 
   // Referral / affiliate code
@@ -223,7 +226,7 @@ export default function PricingClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // PRICING PAGE IS PUBLIC (NO AUTH). Stripe Checkout happens first.
-        body: JSON.stringify({ tierName, ...(normalizeReferralCode(referralCode) ? { referralCode: normalizeReferralCode(referralCode)! } : {}) }),
+        body: JSON.stringify({ tierName, ...(normalizeReferralCode(referralCode) ? { referralCode: normalizeReferralCode(referralCode)! } : {}), materialPolicyAcceptance: { accepted: policiesAccepted, materialBundleVersion: MATERIAL_POLICY_MANIFEST.materialBundleVersion } }),
       });
 
       const json = await res.json().catch(() => ({} as any));
@@ -299,7 +302,7 @@ export default function PricingClient() {
     },
   ];
 
-  const canCheckout = availabilityLoaded && checkoutLoading === null;
+  const canCheckout = availabilityLoaded && checkoutLoading === null && policiesAccepted;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-slate-950 to-black text-white relative overflow-hidden">
@@ -482,6 +485,23 @@ export default function PricingClient() {
             </div>
           </div>
         </motion.section>
+
+        <section className="mb-6 rounded-2xl border border-cyan-400/30 bg-cyan-950/20 px-4 py-4 text-sm text-slate-200">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={policiesAccepted}
+              onChange={(event) => setPoliciesAccepted(event.target.checked)}
+              className="mt-1 h-4 w-4 accent-cyan-400"
+            />
+            <span>
+              I have read and agree to the <Link className="text-cyan-300 underline" href="/terms" target="_blank">Terms of Service</Link>,{" "}
+              <Link className="text-cyan-300 underline" href="/privacy" target="_blank">Privacy Policy</Link>, and{" "}
+              <Link className="text-cyan-300 underline" href="/acceptable-use" target="_blank">Acceptable Use Policy</Link>.
+              This box is required before Checkout and is not selected by default.
+            </span>
+          </label>
+        </section>
 
         {/* Checkout error */}
         {checkoutError && (

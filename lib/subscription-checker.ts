@@ -1,5 +1,6 @@
 // lib/subscription-checker.ts
 import { supabaseServer } from "@/lib/supabaseServer";
+import { hasCurrentMaterialPolicyAcceptance, POLICY_ACCEPTANCE_REQUIRED } from "@/lib/material-policy/service";
 
 export type ActiveSubscriptionResult = {
   ok: boolean;
@@ -140,6 +141,30 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
         error: "NO_ACTIVE_SUBSCRIPTION",
         message: "An active subscription is required to access this area.",
         status: 402,
+      };
+    }
+
+    try {
+      if (!(await hasCurrentMaterialPolicyAcceptance(user.id, profile.id))) {
+        return {
+          ok: false,
+          user: { id: user.id, email: user.email ?? null },
+          profile,
+          subscription,
+          error: POLICY_ACCEPTANCE_REQUIRED,
+          message: "Current material policy acceptance is required.",
+          status: 428,
+        };
+      }
+    } catch {
+      return {
+        ok: false,
+        user: { id: user.id, email: user.email ?? null },
+        profile,
+        subscription,
+        error: "POLICY_ACCEPTANCE_LOOKUP_FAILED",
+        message: "Policy acceptance status is temporarily unavailable.",
+        status: 503,
       };
     }
 

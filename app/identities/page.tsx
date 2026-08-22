@@ -1,6 +1,7 @@
 // app/identities/page.tsx
 import { redirect } from "next/navigation";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { supabaseServer } from "@/lib/supabaseServer";
 import IdentitiesClient, { IdentityCardItem } from "./IdentitiesClient";
 
@@ -119,6 +120,8 @@ export default async function IdentitiesPage() {
   if (!auth.ok) {
     if (auth.error === "UNAUTHENTICATED") {
       redirect("/login");
+    } else if (auth.error === "POLICY_ACCEPTANCE_REQUIRED") {
+      redirect(policyConsentPath("/identities"));
     } else {
       redirect("/pricing");
     }

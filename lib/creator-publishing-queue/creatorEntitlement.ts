@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation"
 import { ensureActiveSubscription } from "../subscription-checker"
+import { policyConsentPath } from "../material-policy/redirect"
 
 export async function activeCreatorIdOrNull(): Promise<string | null> {
   const auth = await ensureActiveSubscription()
@@ -28,10 +29,11 @@ export async function requireActiveCreatorId(): Promise<string> {
   return auth.user.id
 }
 
-export async function requireActiveCreatorPageIdentity(): Promise<{ authUserId: string; profileId: string | null }> {
+export async function requireActiveCreatorPageIdentity(next = "/creator/publishing-queue"): Promise<{ authUserId: string; profileId: string | null }> {
   const auth = await ensureActiveSubscription()
   if (!auth.ok || !auth.user?.id) {
     if (auth.error === "UNAUTHENTICATED") redirect("/login")
+    if (auth.error === "POLICY_ACCEPTANCE_REQUIRED") redirect(policyConsentPath(next))
     redirect("/pricing")
   }
   return { authUserId: auth.user.id, profileId: auth.profile?.id ?? null }

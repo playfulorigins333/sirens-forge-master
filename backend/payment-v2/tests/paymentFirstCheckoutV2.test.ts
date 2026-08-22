@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { paymentFirstCheckout, PAYMENT_V2_CONTRACT_VERSION, PAYMENT_V2_COOKIE, PAYMENT_V2_HOLD_MINUTES, type CheckoutDependencies } from "../../../lib/payment-v2/checkoutService";
 import { LOCKED_PAYMENT_V2_PRICES } from "../../../lib/payment-v2/publicPurchaseReadiness";
+import { MATERIAL_POLICY_MANIFEST } from "../../../lib/material-policy/manifest";
 
 let assertions = 0;
 const check = (value: unknown, message: string) => { assert.ok(value, message); assertions++; };
@@ -16,13 +17,14 @@ function harness(overrides: Partial<CheckoutDependencies> = {}) {
     now: () => new Date("2026-08-02T00:00:00Z"), randomCredential: () => Buffer.from(fixedRaw),
     async loadTier(name) { calls.tier.push(name); return [{ name, is_active: true, stripe_price_id: LOCKED_PAYMENT_V2_PRICES[name] }]; },
     async acquireHold(hash, tier, expiresAt) { calls.acquire.push([Buffer.from(hash), tier, expiresAt]); return { holdId, state: "HELD", expiresAt: "2026-08-02T01:00:00.000Z" }; },
+    async recordPolicyAcceptance() { return "20000000-0000-0000-0000-000000000001"; },
     async loadAssociatedSessionId() { return "cs_existing"; },
     async associateSession(id, hash, session) { calls.associate.push([id, Buffer.from(hash), session]); return "associated"; },
     async createSession(params, key) { calls.create.push([params, key]); return { id: "cs_new", url: "https://checkout.stripe.test/new" }; },
     async retrieveSession(id) { calls.retrieve.push(id); return { id, url: "https://checkout.stripe.test/existing", status: "open", payment_status: "unpaid", expires_at: 1785636000, metadata: { payment_v2_hold_id: holdId, tier_name: "og_throne", checkout_contract_version: PAYMENT_V2_CONTRACT_VERSION } }; },
     ...overrides,
   };
-  const run = (body: unknown = { tierName: "og_throne" }, more: Record<string, unknown> = {}) => paymentFirstCheckout({ enabled: "true", body, production: true, configuredOrigin: "https://sirensforge.com", ...more }, deps);
+  const run = (body: unknown = { tierName: "og_throne" }, more: Record<string, unknown> = {}) => paymentFirstCheckout({ enabled: "true", body: body && typeof body === "object" && !Array.isArray(body) ? { ...body, materialPolicyAcceptance: { accepted: true, materialBundleVersion: MATERIAL_POLICY_MANIFEST.materialBundleVersion } } : body, production: true, configuredOrigin: "https://sirensforge.com", ...more }, deps);
   return { calls, deps, run };
 }
 

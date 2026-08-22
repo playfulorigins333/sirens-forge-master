@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { policyConsentPath } from "@/lib/material-policy/redirect";
 import TrainPageClient from "./TrainPageClient";
 
 export default async function TrainPage() {
@@ -8,6 +9,8 @@ export default async function TrainPage() {
   if (!auth.ok) {
     if (auth.error === "UNAUTHENTICATED") {
       redirect("/login");
+    } else if (auth.error === "POLICY_ACCEPTANCE_REQUIRED") {
+      redirect(policyConsentPath("/lora/train"));
     } else {
       redirect("/pricing");
     }

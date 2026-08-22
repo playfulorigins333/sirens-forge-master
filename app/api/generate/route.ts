@@ -180,6 +180,7 @@ export async function POST(req: NextRequest) {
         {
           error: auth.error,
           message: auth.message,
+          ...(auth.error === "POLICY_ACCEPTANCE_REQUIRED" ? { acceptancePath: "/account/policy-consent" } : {}),
         },
         { status: auth.status },
       );

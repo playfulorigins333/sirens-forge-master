@@ -14,6 +14,7 @@ import {
   Video as VideoIcon,
 } from "lucide-react";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { supabaseServer } from "@/lib/supabaseServer";
 import LogoutButton from "@/components/LogoutButton";
 
@@ -818,6 +819,8 @@ export default async function DashboardPage() {
   if (!auth.ok) {
     if (auth.error === "UNAUTHENTICATED") {
       redirect("/login");
+    } else if (auth.error === "POLICY_ACCEPTANCE_REQUIRED") {
+      redirect(policyConsentPath("/dashboard"));
     } else {
       redirect("/pricing");
     }

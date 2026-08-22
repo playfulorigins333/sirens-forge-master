@@ -11,7 +11,7 @@ export async function GET(req: Request) {
     const auth = await ensureActiveSubscription();
     if (!auth.ok) {
       return NextResponse.json(
-        { error: auth.error, message: auth.message },
+        { error: auth.error, message: auth.message, ...(auth.error === "POLICY_ACCEPTANCE_REQUIRED" ? { acceptancePath: "/account/policy-consent" } : {}) },
         { status: auth.status },
       );
     }
