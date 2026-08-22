@@ -10,6 +10,7 @@ const publicPaths = [
   "/faq",
   "/contact",
   "/content-removal",
+  "/report-intimate-content",
   "/terms",
   "/privacy",
   "/acceptable-use",
@@ -41,7 +42,7 @@ for (const pathname of protectedPaths) {
   assert.equal(isPublicPath(pathname), false, `${pathname} is protected`);
 }
 
-for (const pathname of ["/dmca/extra", "/age-gate", "/affiliate-terms-old"]) {
+for (const pathname of ["/report-intimate-content/extra", "/dmca/extra", "/age-gate", "/affiliate-terms-old"]) {
   assert.equal(isPublicPath(pathname), false, `${pathname} is not made public by a partial match`);
 }
 

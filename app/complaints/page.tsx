@@ -1,3 +1,4 @@
+import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function ComplaintsPage() {
@@ -46,6 +47,8 @@ export default function ComplaintsPage() {
           <li>Any supporting information</li>
         </ul>
       </section>
+
+      <section><p>Reports about nonconsensual intimate imagery or unauthorized intimate deepfakes should use the dedicated public <Link className="text-cyan-400 hover:underline" href="/report-intimate-content">intimate-content reporting route</Link>. This general complaints process remains available for other concerns and appeals.</p></section>
 
       <section>
         <h2 className="text-xl font-semibold">3. Review Process</h2>

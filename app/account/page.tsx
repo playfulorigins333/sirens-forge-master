@@ -338,6 +338,16 @@ export default async function AccountPage() {
             </div>
           </section>
         </div>
+        <section className="mt-6 rounded-[28px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
+          <h3 className="mb-3 text-2xl font-bold text-white">Privacy and safety resources</h3>
+          <p className="mb-4 text-sm text-gray-300">Review our policies or reach the existing support and removal processes.</p>
+          <div className="flex flex-wrap gap-4 text-sm">
+            <Link className="text-cyan-300 hover:text-cyan-200" href="/privacy">Privacy</Link>
+            <Link className="text-cyan-300 hover:text-cyan-200" href="/content-removal">Content Removal</Link>
+            <Link className="text-cyan-300 hover:text-cyan-200" href="/report-intimate-content">Report Intimate Content</Link>
+            <Link className="text-cyan-300 hover:text-cyan-200" href="/contact">Contact Support</Link>
+          </div>
+        </section>
       </div>
     </main>
   );

@@ -1,3 +1,4 @@
+import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function CommunityGuidelinesPage() {
@@ -96,8 +97,7 @@ export default function CommunityGuidelinesPage() {
         </h2>
         <p>
           If you see content or behavior that violates these guidelines, you are
-          encouraged to report it. Maintaining a safe platform is a shared
-          responsibility.
+          encouraged to report it. Nonconsensual intimate imagery and unauthorized intimate deepfakes may be reported through the public <Link className="text-cyan-400 hover:underline" href="/report-intimate-content">intimate-content reporting route</Link>. Maintaining a safe platform is a shared responsibility.
         </p>
       </section>
 

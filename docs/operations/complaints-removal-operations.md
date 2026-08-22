@@ -2,7 +2,7 @@
 
 **Launch runbook — source-only operating contract**
 **Accountable intake:** `admin@sirensforge.vip`
-**Last reviewed:** 2026-08-19
+**Last reviewed:** 2026-08-22
 
 ## 1. Purpose and scope
 
@@ -12,7 +12,7 @@ This is an operational procedure, not legal advice and not evidence of legal suf
 
 ## 2. Accountable intake owner
 
-The public intake is `admin@sirensforge.vip`. The accountable operational owner is the authorized Sirens Forge operator responsible for that mailbox. That operator acknowledges intake, assigns a case ID and severity, maintains the case record, coordinates review, and confirms closure.
+The public intake is `admin@sirensforge.vip`. The public `/report-intimate-content` route directs NCII and unauthorized intimate AI/deepfake reports to that same manual mailbox; it does not submit to a case-management API or trigger a Production action. General complaints and removal routes remain separate entry points into this same runbook. The accountable operational owner is the authorized Sirens Forge operator responsible for that mailbox. That operator acknowledges intake, assigns a case ID and severity, maintains the case record, coordinates review, and confirms closure.
 
 No named employee or backup operator is established by repository evidence. If no approved backup operator is documented and the owner is unavailable, do not silently reassign access or share mailbox credentials. Record the coverage gap, keep the case in `RECEIVED`, and escalate through the approved company leadership/contact channel to appoint an authorized operator. P0 reports require immediate coverage escalation. Never place mailbox credentials in a case record.
 
@@ -28,10 +28,12 @@ Create a case with all fields below; use `unknown`, `not provided`, or `not appl
 
 - Case ID and received timestamp (UTC)
 - Requester/contact and preferred safe contact method
+- Whether an NCII reporter is the depicted/affected person or is authorized to act for them
 - Complaint category
 - Affected account, content, or other reference
 - URLs and asset IDs, where available
 - Requester's description
+- For an intimate-content report, why the depiction is believed nonconsensual or unauthorized and the reporter's good-faith accuracy statement
 - Evidence supplied, stored as restricted references rather than unnecessary copies
 - Requested outcome
 - Severity (`P0`, `P1`, `P2`, or `P3`)

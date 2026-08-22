@@ -1,3 +1,4 @@
+import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function BlockedContentPage() {
@@ -150,8 +151,7 @@ export default function BlockedContentPage() {
       <section>
         <h2 className="text-xl font-semibold">10. Contact</h2>
         <p>
-          For questions or reports regarding blocked content, contact us at
-          admin@sirensforge.vip.
+          For questions or reports regarding blocked content, contact us at admin@sirensforge.vip. Report nonconsensual intimate imagery or unauthorized intimate deepfakes through the public <Link className="text-cyan-400 hover:underline" href="/report-intimate-content">intimate-content reporting route</Link>.
         </p>
       </section>
     </LegalPageLayout>

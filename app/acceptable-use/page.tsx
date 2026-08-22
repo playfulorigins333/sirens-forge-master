@@ -1,8 +1,9 @@
+import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function AcceptableUsePage() {
   return (
-    <LegalPageLayout title="Acceptable Use Policy" lastUpdated="April 27, 2026">
+    <LegalPageLayout title="Acceptable Use Policy" lastUpdated="August 22, 2026">
       <section>
         <p>
           This Acceptable Use Policy defines the rules and restrictions for using
@@ -51,12 +52,19 @@ export default function AcceptableUsePage() {
           4. Real Person, Identity, and Deepfake Restrictions
         </h2>
         <p>
-          You may not use Sirens Forge to generate, manipulate, impersonate, or
-          sexualize real individuals without their explicit consent and legal
-          authorization. This includes deepfakes, unauthorized likeness use,
-          celebrity impersonation, revenge content, misleading representations,
-          private-person exploitation, or content intended to deceive others
-          about a person’s identity, consent, or participation.
+          You may not create, request, upload, generate, store, distribute, or
+          promote nonconsensual intimate imagery or an unauthorized intimate
+          depiction of an identifiable real person. This includes AI-generated
+          or AI-altered sexual deepfakes and face swaps made without appropriate
+          consent and authorization, revenge content, unauthorized likeness use,
+          or attempts to deceive others about a real person&apos;s identity, consent,
+          or participation.
+        </p>
+        <p>
+          This restriction does not blanket-prohibit a creator&apos;s consensual,
+          authorized Twin or a fully synthetic fictional persona that is not an
+          identifiable real person. Users remain responsible for all necessary
+          rights and consent.
         </p>
       </section>
 
@@ -122,11 +130,12 @@ export default function AcceptableUsePage() {
           10. Monitoring, Logging, and Review
         </h2>
         <p>
-          Sirens Forge reserves the right to monitor, log, review, analyze,
-          preserve, or remove user activity, prompts, uploads, identity
-          materials, generated outputs, and system activity to enforce this
-          policy, maintain platform integrity, protect users, prevent abuse,
-          investigate violations, and comply with legal obligations.
+          Automated safety and service processing does not imply casual human
+          browsing of private creator content. Human access is purpose-limited
+          to legitimate support or technical troubleshooting, safety or NCII
+          investigation, fraud or security investigation, policy enforcement,
+          or a legal requirement. We may preserve or remove material where
+          supported by those purposes.
         </p>
       </section>
 
@@ -150,6 +159,10 @@ export default function AcceptableUsePage() {
           information to evaluate a report and may take action where appropriate
           or legally required.
         </p>
+        <p>
+          To report nonconsensual intimate content or an unauthorized intimate
+          deepfake, use the public <Link className="text-cyan-400 hover:underline" href="/report-intimate-content">Report Nonconsensual Intimate Content / Request Removal</Link> page. No account is required.
+        </p>
       </section>
 
       <section>
@@ -166,8 +179,8 @@ export default function AcceptableUsePage() {
       <section>
         <h2 className="text-xl font-semibold">14. Updates to This Policy</h2>
         <p>
-          This policy may be updated at any time. Continued use of the platform
-          constitutes acceptance of the latest version.
+          We may update this policy. We will post the updated version and date
+          and provide additional notice or obtain acceptance when required.
         </p>
       </section>
 
