@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "candidates": [
+    {
+      "candidateId": "bigasp-v2",
+      "model": "bigASP",
+      "version": "v2.0",
+      "creator": "Nutbutter",
+      "architecture": "SDXL 1.0",
+      "modelId": "502468",
+      "versionId": "991916",
+      "fileId": "897883",
+      "filename": "bigasp_v20.safetensors",
+      "bytes": 6938040682,
+      "sha256": "6C77BE501B95DA35528431C224CCFB51B0AE948857431B3556DB64E213CC1EDF",
+      "status": "TECHNICAL_CANARY_CANDIDATE",
+      "productionStatus": "NOT_APPROVED",
+      "nonFinitePolicy": "BLOCKED",
+      "evidenceSources": [
+        "https://tensor.art/models/788403623261562537",
+        "https://civitai.com/models/502468/bigasp",
+        "https://civitai.com/api/download/models/991916",
+        "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
+        "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md",
+        "https://stability.ai/core-models",
+        "https://stability.ai/terms-of-service",
+        "https://stability.ai/use-policy"
+      ],
+      "requiredEvidence": [
+        { "category": "MODEL_PROVENANCE", "sourceReference": "https://civitai.com/models/502468/bigasp" },
+        { "category": "MODEL_LICENSE", "sourceReference": "https://tensor.art/models/788403623261562537" },
+        { "category": "SDXL_MODEL_PROVENANCE", "sourceReference": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0" },
+        { "category": "SDXL_OPEN_RAIL_LICENSE", "sourceReference": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md" },
+        { "category": "STABILITY_CORE_MODELS_SCOPE", "sourceReference": "https://stability.ai/core-models" },
+        { "category": "STABILITY_TERMS_CONFLICT_CLAUSE", "sourceReference": "https://stability.ai/terms-of-service" },
+        { "category": "STABILITY_ACCEPTABLE_USE_POLICY", "sourceReference": "https://stability.ai/use-policy" }
+      ]
+    },
+    {
+      "candidateId": "cyberrealistic-xl-v10",
+      "model": "CyberRealistic XL",
+      "version": "v10.0",
+      "creator": "Cyberdelia",
+      "architecture": "SDXL 1.0",
+      "modelId": "312530",
+      "versionId": "2840768",
+      "filename": "CyberRealisticXLPlay_V10.0_FP16.safetensors",
+      "bytes": 6938041288,
+      "sha256": "FD5E870B5BBCE4BDDEB64F4BB8E49C57F84AB793C0262A503F0123BE435E667D",
+      "status": "TECHNICAL_CANARY_CANDIDATE",
+      "productionStatus": "NOT_APPROVED",
+      "nonFinitePolicy": "REVIEW_REQUIRED",
+      "evidenceSources": [
+        "https://civitai.com/models/312530/cyberrealistic-xl",
+        "https://civitai.com/models/license/2840768",
+        "OPERATOR_EVIDENCE_REQUIRED",
+        "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0",
+        "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md",
+        "https://stability.ai/core-models",
+        "https://stability.ai/terms-of-service",
+        "https://stability.ai/use-policy"
+      ],
+      "requiredEvidence": [
+        { "category": "MODEL_PROVENANCE", "sourceReference": "https://civitai.com/models/312530/cyberrealistic-xl" },
+        { "category": "MODEL_LICENSE", "sourceReference": "https://civitai.com/models/license/2840768" },
+        { "category": "CREATOR_CONTROLLED_SOURCE", "sourceReference": "OPERATOR_EVIDENCE_REQUIRED" },
+        { "category": "SDXL_MODEL_PROVENANCE", "sourceReference": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0" },
+        { "category": "SDXL_OPEN_RAIL_LICENSE", "sourceReference": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md" },
+        { "category": "STABILITY_CORE_MODELS_SCOPE", "sourceReference": "https://stability.ai/core-models" },
+        { "category": "STABILITY_TERMS_CONFLICT_CLAUSE", "sourceReference": "https://stability.ai/terms-of-service" },
+        { "category": "STABILITY_ACCEPTABLE_USE_POLICY", "sourceReference": "https://stability.ai/use-policy" }
+      ]
+    }
+  ]
+}
