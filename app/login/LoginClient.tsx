@@ -35,6 +35,7 @@ export default function LoginClient({ initialMode, continuation, authError, call
   useEffect(() => {
     const flow = new LoginAuthFlow(initialMode, continuation, callbackUrl, authError, {
       getUser: () => supabase.auth.getUser(),
+      getMfaAssurance: () => supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
       passwordLogin: (loginEmail, loginPassword) => supabase.auth.signInWithPassword({
         email: loginEmail, password: loginPassword,
       }),

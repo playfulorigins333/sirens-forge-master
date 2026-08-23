@@ -1,6 +1,7 @@
 // lib/subscription-checker.ts
 import { supabaseServer } from "@/lib/supabaseServer";
 import { hasCurrentMaterialPolicyAcceptance, POLICY_ACCEPTANCE_REQUIRED } from "@/lib/material-policy/service";
+import { requireOptInMfaSatisfied } from "@/lib/security/mfa";
 
 export type ActiveSubscriptionResult = {
   ok: boolean;
@@ -48,6 +49,9 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
         status: 401,
       };
     }
+
+    const mfa = await requireOptInMfaSatisfied(supabase);
+    if (mfa.ok === false) return { ok: false, user: { id: user.id, email: user.email ?? null }, error: mfa.error, message: "Multi-factor authentication is required.", status: mfa.status };
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")

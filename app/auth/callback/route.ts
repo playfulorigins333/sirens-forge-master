@@ -10,6 +10,7 @@ import {
   trustedApplicationOrigin,
   type AuthErrorCode,
 } from "@/lib/payment-v2/authContinuation";
+import { safeInternalNext } from "@/lib/material-policy/redirect";
 
 export async function GET(request: Request) {
   const origin = trustedApplicationOrigin(
@@ -37,7 +38,12 @@ export async function GET(request: Request) {
   try {
     const supabase = await supabaseServer();
     const failure = await establishCallbackSession(supabase.auth, credentials);
-    return failure ? fail(failure) : redirect(selectCallbackRedirect(continuation));
+    if (failure) return fail(failure)
+    const destination = safeInternalNext(selectCallbackRedirect(continuation))
+    const assurance = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (assurance.error) return fail("oauth_failed")
+    return redirect(assurance.data.currentLevel === "aal1" && assurance.data.nextLevel === "aal2"
+      ? `/auth/mfa?next=${encodeURIComponent(destination)}` : destination)
   } catch {
     return fail("oauth_failed");
   }

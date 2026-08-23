@@ -141,6 +141,7 @@ function harness(options: {
   let authEvent: (() => void) | null = null;
   const users = [...(options.users ?? [{ data: { user: null }, error: null }])];
   const dependencies: LoginAuthDependencies = {
+    async getMfaAssurance() { return { data: { currentLevel: "aal1", nextLevel: "aal1" }, error: null }; },
     async getUser() {
       getUserCalls += 1;
       const value = users.shift() ?? { data: { user: null }, error: null };

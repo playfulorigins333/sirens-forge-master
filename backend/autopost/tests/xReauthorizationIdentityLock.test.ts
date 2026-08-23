@@ -13,6 +13,7 @@ export { MockResponse as NextResponse }
 `)}`
 const supabaseServer = `data:text/javascript,${encodeURIComponent(`export const requireUserId = input => globalThis.__xTest.requireUserId(input)`)}`
 const supabaseAdmin = `data:text/javascript,${encodeURIComponent(`export const getSupabaseAdmin = () => globalThis.__xTest.getSupabaseAdmin()`)}`
+const mfaRoute = `data:text/javascript,${encodeURIComponent(`export const requireFreshTotpResponse = async () => ({ ok: true, userId: "55555555-5555-4555-8555-555555555555" })`)}`
 const tokenCrypto = `data:text/javascript,${encodeURIComponent(`export const encryptAutopostToken = value => globalThis.__xTest.encryptToken(value); export const getAutopostTokenKeyVersion = () => globalThis.__xTest.getKeyVersion()`)}`
 const nextHeaders = `data:text/javascript,${encodeURIComponent(`export const cookies = () => globalThis.__xTest.cookies()`)}`
 const initialCallback = `data:text/javascript,${encodeURIComponent(`export const completeInitialXOAuthConnection = input => globalThis.__xTest.completeInitial(input)`)}`
@@ -24,6 +25,7 @@ export async function resolve(specifier, context, nextResolve) {
   if (specifier === 'next/headers') return { url: ${JSON.stringify(nextHeaders)}, shortCircuit: true }
   if (specifier === '@/lib/supabaseServer') return { url: ${JSON.stringify(supabaseServer)}, shortCircuit: true }
   if (specifier === '@/lib/supabaseAdmin') return { url: ${JSON.stringify(supabaseAdmin)}, shortCircuit: true }
+  if (specifier === '@/lib/security/mfaRoute') return { url: ${JSON.stringify(mfaRoute)}, shortCircuit: true }
   if (specifier === '@/lib/autopost/tokenCrypto') return { url: ${JSON.stringify(tokenCrypto)}, shortCircuit: true }
   if (context.parentURL?.includes('/app/api/autopost/connect/x/callback/route.ts') && specifier === '@/lib/autopost/xInitialOAuthCallback') return { url: ${JSON.stringify(initialCallback)}, shortCircuit: true }
   if (context.parentURL?.includes('/app/api/autopost/connect/x/callback/route.ts') && specifier === '@/lib/autopost/xReauthorizationCallback') return { url: ${JSON.stringify(reauthCallback)}, shortCircuit: true }

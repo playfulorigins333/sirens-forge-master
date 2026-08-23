@@ -6,7 +6,7 @@ const root = process.cwd()
 const apiRoot = path.join(root, "app/api")
 const inventoryPath = path.join(root, "docs/security/api-authorization-inventory.md")
 const methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] as const
-const allowedTaxonomy = new Set(["PUBLIC", "AUTHENTICATED", "OWNER", "ENTITLED", "ADMIN", "SCHEDULER_SECRET", "WEBHOOK_SIGNATURE", "OAUTH_CALLBACK", "INTERNAL_CONTROLLED"])
+const allowedTaxonomy = new Set(["PUBLIC", "AUTHENTICATED", "FRESH_TOTP", "OWNER", "ENTITLED", "ADMIN", "SCHEDULER_SECRET", "WEBHOOK_SIGNATURE", "OAUTH_CALLBACK", "INTERNAL_CONTROLLED"])
 const allowedStatuses = new Set(["PASS", "FIXED-IN-THIS-GATE", "BLOCKED-FROZEN", "NEEDS-SEPARATE-DESIGN"])
 
 async function routeFiles(directory: string): Promise<string[]> {

@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server"
-import { requireUserId } from "@/lib/supabaseServer"
+import { requireFreshTotpResponse } from "@/lib/security/mfaRoute"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function POST(req: Request) {
-  const userId = await requireUserId({ request: req }).catch(() => null)
-  if (!userId) {
-    return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 })
-  }
+  const mfa = await requireFreshTotpResponse()
+  if (mfa instanceof NextResponse) return mfa
+  const userId = mfa.userId
 
   const now = new Date().toISOString()
   const supabaseAdmin = getSupabaseAdmin()
