@@ -172,7 +172,7 @@ await runProofMismatchCase('empty-platform-post-id', { platform_post_id: '' })
   const db = new FakeSupabase()
   db.jobs.push({ id: 'job-direct' })
   db.failResultUpdate = true
-  const out = await persistAutopostJobResult(db as any, { job_id: 'job-direct', now: new Date('2026-07-21T00:00:00.000Z'), adapter_result: { ok: true, status: 'POSTED', platform: 'x', platform_post_id: 'local-failed-id', posted_at: '2026-07-21T00:00:00.000Z' } })
+  const out = await persistAutopostJobResult(db as any, { job_id: 'job-direct', execution_lock_id: 'lock-direct', now: new Date('2026-07-21T00:00:00.000Z'), adapter_result: { ok: true, status: 'POSTED', platform: 'x', platform_post_id: 'local-failed-id', posted_at: '2026-07-21T00:00:00.000Z' } })
   assert.deepEqual({ ok: out.ok, job_result_persisted: out.job_result_persisted, posted: out.posted, platform_post_id: out.platform_post_id, error_code: out.error_code }, { ok: false, job_result_persisted: false, posted: false, platform_post_id: null, error_code: 'JOB_RESULT_PERSIST_FAILED' })
   assert.equal(JSON.stringify(out).includes('SECRET_DB_RESULT_LEAK'), false)
 }
@@ -195,7 +195,7 @@ await runProofMismatchCase('empty-platform-post-id', { platform_post_id: '' })
   const db = new FakeSupabase()
   db.jobs.push({ id: 'job-log' })
   db.failResultLog = true
-  const out = await persistAutopostJobResult(db as any, { job_id: 'job-log', now: new Date('2026-07-21T00:00:00.000Z'), adapter_result: { ok: true, status: 'POSTED', platform: 'x', platform_post_id: 'durable-with-log-fail', posted_at: '2026-07-21T00:00:00.000Z' } })
+  const out = await persistAutopostJobResult(db as any, { job_id: 'job-log', execution_lock_id: 'lock-log', now: new Date('2026-07-21T00:00:00.000Z'), adapter_result: { ok: true, status: 'POSTED', platform: 'x', platform_post_id: 'durable-with-log-fail', posted_at: '2026-07-21T00:00:00.000Z' } })
   assert.equal(out.ok, true)
   assert.equal(out.job_result_persisted, true)
   assert.equal(out.audit_log_persisted, false)

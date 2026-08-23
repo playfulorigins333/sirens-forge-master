@@ -30,6 +30,12 @@ begin
     raise exception 'PUBLISHING_ACCOUNT_NOT_FOUND';
   end if;
 
+  if v_account.connection_status = 'REVOKED'
+     and v_account.access_token is null and v_account.refresh_token is null
+     and v_account.encrypted_access_token is null and v_account.encrypted_refresh_token is null then
+    raise exception 'PUBLISHING_ACCOUNT_ALREADY_DISCONNECTED';
+  end if;
+
   -- Do not report a completed disconnect while a provider create request may be in flight.
   if p_provider = 'fanvue' and exists (
     select 1
@@ -40,6 +46,14 @@ begin
       and j.oauth_account_id = v_account.id
       and a.provider_create_dispatched_at is not null
     for update of j, a
+  ) then
+    raise exception 'PUBLISHING_DISCONNECT_PROVIDER_CREATE_IN_FLIGHT';
+  end if;
+
+  if p_provider = 'x' and exists (
+    select 1 from public.autopost_jobs j
+    where j.user_id = p_user_id and j.platform = 'x' and j.state = 'RUNNING'
+    for update
   ) then
     raise exception 'PUBLISHING_DISCONNECT_PROVIDER_CREATE_IN_FLIGHT';
   end if;
@@ -61,6 +75,9 @@ begin
 
   update public.autopost_jobs
   set state = 'SKIPPED',
+      locked_at = null,
+      lock_id = null,
+      completed_at = v_now,
       error = null,
       result = coalesce(result, '{}'::jsonb) || jsonb_build_object(
         'cancelled', true,
@@ -82,7 +99,13 @@ begin
 
   if p_provider = 'fanvue' then
     update public.creator_platform_accounts
-    set verification_status = 'revoked', updated_at = v_now
+    set verification_status = 'revoked',
+        verification_legacy_revoked = true,
+        verification_reviewed_by = null,
+        verification_reviewed_at = null,
+        verification_evidence_reference = null,
+        verification_reason = null,
+        updated_at = v_now
     where creator_id = p_user_id
       and platform = 'fanvue'
       and oauth_account_id = v_account.id;
@@ -143,6 +166,17 @@ begin
       and j.cancellation_reason = 'provider_disconnected'
       and q.status not in ('confirmed_posted_manual', 'skipped', 'failed_manual_upload', 'blocked', 'archived');
     get diagnostics v_queue_tasks = row_count;
+
+    update public.creator_publishing_plans p
+    set status = public.creator_publishing_aggregate_plan_status(p.id), updated_at = v_now
+    where exists (
+      select 1 from public.creator_publishing_platform_jobs j
+      where j.publishing_plan_id = p.id
+        and j.creator_id = p_user_id
+        and j.oauth_account_id = v_account.id
+        and j.job_state = 'cancelled'
+        and j.cancellation_reason = 'provider_disconnected'
+    );
   end if;
 
   insert into public.creator_publishing_audit_events(
@@ -176,5 +210,59 @@ begin
 end;
 $$;
 
+-- The original aggregate predates the Fanvue `cancelled` job state. Treat a
+-- cancelled destination as a terminal non-success while preserving other jobs.
+create or replace function public.creator_publishing_aggregate_plan_status(p_plan_id uuid)
+returns text language sql stable set search_path = public, pg_temp as $$
+  with jobs as (select job_state from public.creator_publishing_platform_jobs where publishing_plan_id = p_plan_id), counts as (
+    select count(*) total,
+      count(*) filter (where job_state in ('published_direct','confirmed_posted_manual','exported')) successes,
+      count(*) filter (where job_state in ('direct_publish_failed','failed_manual_upload','skipped','blocked','platform_rejected','archived','cancelled')) failures,
+      count(*) filter (where job_state in ('scheduled_internally','scheduled_on_platform','retry_scheduled')) scheduled,
+      count(*) filter (where job_state in ('publishing_direct','direct_publish_queued','awaiting_operator','due_now','claimed','awaiting_post_confirmation','ready_to_publish')) active,
+      count(*) filter (where job_state in ('draft','package_ready','ready_for_export','authentication_required','needs_fix')) draftish
+    from jobs)
+  select case
+    when p.status = 'cancelled' then 'cancelled'
+    when c.total = 0 then 'draft'
+    when c.successes = c.total then 'completed'
+    when c.successes + c.failures = c.total and c.failures > 0 then 'completed_with_failures'
+    when c.successes > 0 then 'partially_published'
+    when c.active > 0 then 'in_progress'
+    when c.scheduled = c.total then 'scheduled'
+    when c.scheduled > 0 then 'in_progress'
+    when c.failures > 0 then 'in_progress'
+    when c.draftish = c.total then 'draft'
+    else 'in_progress' end
+  from public.creator_publishing_plans p cross join counts c where p.id = p_plan_id;
+$$;
+
+create or replace function public.autopost_begin_x_dispatch(
+  p_user_id uuid, p_job_id uuid, p_lock_id text
+) returns boolean
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare
+  v_account public.autopost_accounts%rowtype;
+  v_updated integer;
+begin
+  if p_user_id is null or p_job_id is null or nullif(btrim(coalesce(p_lock_id, '')), '') is null then
+    return false;
+  end if;
+  select * into v_account from public.autopost_accounts
+  where user_id=p_user_id and platform='x' for update;
+  if not found or v_account.connection_status<>'CONNECTED'
+     or nullif(btrim(coalesce(v_account.encrypted_access_token,'')),'') is null then
+    return false;
+  end if;
+  update public.autopost_jobs set state='RUNNING', updated_at=clock_timestamp()
+  where id=p_job_id and user_id=p_user_id and platform='x' and state='QUEUED'
+    and completed_at is null and lock_id=p_lock_id and locked_at is not null;
+  get diagnostics v_updated=row_count;
+  return v_updated=1;
+end;
+$$;
+
 revoke all on function public.disconnect_publishing_provider(uuid, text) from public, anon, authenticated;
 grant execute on function public.disconnect_publishing_provider(uuid, text) to service_role;
+revoke all on function public.autopost_begin_x_dispatch(uuid, uuid, text) from public, anon, authenticated;
+grant execute on function public.autopost_begin_x_dispatch(uuid, uuid, text) to service_role;

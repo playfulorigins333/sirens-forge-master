@@ -17,6 +17,7 @@ export type XAdapterRequest = {
   user_id?: unknown
   rule_id?: unknown
   job_id?: unknown
+  lock_id?: unknown
   payload?: XAdapterRequestPayload | null
 }
 
@@ -58,6 +59,7 @@ export type XAdapterDeps = {
   refreshAccessToken?: typeof refreshXAccessToken
   getApiBaseUrl?: () => string
   now?: () => Date
+  beginDispatch?: (input: { userId: string; jobId: string; lockId: string }) => Promise<boolean>
 }
 
 export type XAdapterResponse =
@@ -263,6 +265,10 @@ export async function postXTextOnlyAutopost(
     return failure("FAILED", "MISSING_RULE_ID", "rule_id is required")
   }
 
+  if (typeof input.job_id !== "string" || !input.job_id.trim() || typeof input.lock_id !== "string" || !input.lock_id.trim()) {
+    return failure("FAILED", "X_DISPATCH_OWNERSHIP_REQUIRED", "A claimed job execution is required")
+  }
+
   const payload = input.payload
   if (!payload || typeof payload !== "object") {
     return failure("FAILED", "MISSING_PAYLOAD", "payload is required")
@@ -288,9 +294,25 @@ export async function postXTextOnlyAutopost(
   const now = deps.now ?? (() => new Date())
 
   const userId = input.user_id.trim()
+  let supabaseAdmin: ReturnType<typeof getSupabaseAdmin>
+  try {
+    supabaseAdmin = deps.supabaseAdmin ?? getSupabaseAdmin()
+    const beginDispatch = deps.beginDispatch ?? (async ({ userId, jobId, lockId }) => {
+      const { data, error } = await supabaseAdmin.rpc("autopost_begin_x_dispatch", {
+        p_user_id: userId,
+        p_job_id: jobId,
+        p_lock_id: lockId,
+      })
+      return !error && data === true
+    })
+    if (!await beginDispatch({ userId, jobId: input.job_id.trim(), lockId: input.lock_id.trim() })) {
+      return failure("FAILED", "X_DISPATCH_OWNERSHIP_LOST", "The job is no longer authorized for dispatch")
+    }
+  } catch {
+    return failure("FAILED", "X_ACCOUNT_LOOKUP_FAILED", "Unable to load X account")
+  }
   let account: XAccountRow | null
   try {
-    const supabaseAdmin = deps.supabaseAdmin ?? getSupabaseAdmin()
     account = await loadConnectedXAccount(supabaseAdmin, userId)
   } catch {
     return failure("FAILED", "X_ACCOUNT_LOOKUP_FAILED", "Unable to load X account")

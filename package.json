@@ -14,6 +14,7 @@
     "test:complaints-removal-operations": "tsx backend/governance/tests/complaintsRemovalOperations.test.ts",
   "test:public-policy-privacy-truth": "tsx backend/governance/tests/publicPolicyPrivacyTruth.test.ts",
   "test:publishing-provider-disconnect": "tsx backend/autopost/tests/publishingProviderDisconnectSourceContract.test.ts",
+  "test:publishing-provider-disconnect-postgres": "node backend/autopost/tests/runPublishingProviderDisconnectPostgresIntegration.mjs",
     "test:material-policy-acceptance-source": "tsx backend/governance/tests/materialPolicyAcceptance.test.ts",
     "test:creator-mfa": "tsx backend/security/tests/creatorMfaFreshAuth.test.ts",
     "test:material-policy-acceptance-postgres": "node backend/governance/tests/runMaterialPolicyAcceptancePostgres.mjs",

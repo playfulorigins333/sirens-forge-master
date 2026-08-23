@@ -564,6 +564,7 @@ async function runAutopost(args: {
     getApiBaseUrl: () => API,
     env: { X_CLIENT_ID: CLIENT_ID, X_CLIENT_SECRET: CLIENT_SECRET },
     now,
+    beginDispatch: async () => true,
   }
   const adapterDeps = {
     supabaseAdmin: args.db as any,

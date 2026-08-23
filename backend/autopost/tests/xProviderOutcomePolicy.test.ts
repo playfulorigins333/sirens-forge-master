@@ -88,8 +88,12 @@ class FakePersistQuery {
   constructor(private db: FakePersistClient, private table: string, private type: 'update' | 'insert', private values: any) {}
   eq(column: string, value: unknown) {
     this.filters.push(['eq', column, value])
+    return this
+  }
+  select() { return this }
+  maybeSingle() {
     this.db.ops.push({ table: this.table, type: this.type, values: this.values, filters: this.filters })
-    return Promise.resolve({ error: null })
+    return Promise.resolve({ data: { id: 'job-x04' }, error: null })
   }
   then(resolve: any, reject: any) {
     this.db.ops.push({ table: this.table, type: this.type, values: this.values, filters: this.filters })
@@ -150,13 +154,14 @@ function makeAdapterHarness(opts: {
     },
     getApiBaseUrl: () => 'https://api.x.invalid',
     now: () => fixedNow,
+    beginDispatch: async () => true,
   }
   return { db, fetchCalls, deps, get refreshCalls() { return refreshCalls }, get decryptCalls() { return decryptCalls } }
 }
 
 async function runAdapter(opts: Parameters<typeof makeAdapterHarness>[0] = {}, input: any = {}) {
   const h = makeAdapterHarness(opts)
-  const result = await postXTextOnlyAutopost({ run_mode: 'autopost', user_id: 'user-1', rule_id: 'rule-1', payload: { text: expectedText }, ...input }, h.deps)
+  const result = await postXTextOnlyAutopost({ run_mode: 'autopost', user_id: 'user-1', rule_id: 'rule-1', job_id: 'job-1', lock_id: 'lock-1', payload: { text: expectedText }, ...input }, h.deps)
   return { ...h, result }
 }
 
@@ -302,6 +307,7 @@ for (const [status, code] of [[401, 'X_API_UNAUTHORIZED'], [403, 'X_API_FORBIDDE
   const db = new FakePersistClient()
   const out = await persistAutopostJobResult(db as any, {
     job_id: 'job-x04',
+    execution_lock_id: 'lock-x04',
     now: fixedNow,
     adapter_result: { ok: false, status: 'FAILED', platform: 'x', error_code: 'X_POST_OUTCOME_UNKNOWN', error_message: 'X post outcome could not be verified' },
   })
@@ -357,7 +363,7 @@ for (const [status, code] of [[401, 'X_API_UNAUTHORIZED'], [403, 'X_API_FORBIDDE
     },
   })
   const result = await postXTextOnlyAutopost(
-    { run_mode: 'autopost', user_id: 'user-1', rule_id: 'rule-1', payload: { text: expectedText } },
+    { run_mode: 'autopost', user_id: 'user-1', rule_id: 'rule-1', job_id: 'job-1', lock_id: 'lock-1', payload: { text: expectedText } },
     depsWithThrowingSupabase,
   )
   assert.equal(result.ok, false)
