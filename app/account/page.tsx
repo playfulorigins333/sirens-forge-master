@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { ensureAuthenticatedProfile } from "@/lib/account-access";
 import { supabaseServer } from "@/lib/supabaseServer";
+import { hasCurrentMaterialPolicyAcceptance } from "@/lib/material-policy/service";
 
 export const dynamic = "force-dynamic";
 
@@ -113,6 +114,7 @@ export default async function AccountPage() {
   const latestSubscription = subscriptions[0] ?? null;
   const displaySubscription = activeSubscription ?? latestSubscription;
   const hasActivePlan = activeSubscription !== null;
+  const policyAccepted = await hasCurrentMaterialPolicyAcceptance(auth.user.id, profileId).catch(() => false);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -338,6 +340,11 @@ export default async function AccountPage() {
             </div>
           </section>
         </div>
+        <section className="mt-6 rounded-[28px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
+          <h3 className="mb-3 text-2xl font-bold text-white">Material policy status</h3>
+          <p className={policyAccepted ? "mb-3 text-emerald-300" : "mb-3 text-amber-300"}>{policyAccepted ? "Current bundle accepted" : "Action required"}</p>
+          <Link className="text-cyan-300 hover:text-cyan-200" href="/account/policy-consent?next=%2Faccount">{policyAccepted ? "Review current policy receipt status" : "Review and accept current policies"}</Link>
+        </section>
         <section className="mt-6 rounded-[28px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
           <h3 className="mb-3 text-2xl font-bold text-white">Privacy and safety resources</h3>
           <p className="mb-4 text-sm text-gray-300">Review our policies or reach the existing support and removal processes.</p>

@@ -19,6 +19,7 @@ jobs:
       - run: npm run test:final-launch-hardening
       - run: npm run test:complaints-removal-operations
       - run: npm run test:public-policy-privacy-truth
+      - run: npm run test:material-policy-acceptance-source
       - run: npm run test:public-paths
       - run: npm run test:api-authorization-inventory
       - run: npm run test:launch-observability-recovery

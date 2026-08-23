@@ -1,6 +1,7 @@
 // app/library/page.tsx
 import { redirect } from "next/navigation";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { supabaseServer } from "@/lib/supabaseServer";
 import LibraryClient, { LibraryItem } from "./LibraryClient";
 
@@ -201,6 +202,8 @@ export default async function LibraryPage() {
   if (!auth.ok) {
     if (auth.error === "UNAUTHENTICATED") {
       redirect("/login");
+    } else if (auth.error === "POLICY_ACCEPTANCE_REQUIRED") {
+      redirect(policyConsentPath("/library"));
     } else {
       redirect("/pricing");
     }
