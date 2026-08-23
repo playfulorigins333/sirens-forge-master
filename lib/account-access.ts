@@ -1,4 +1,5 @@
 import { supabaseServer } from "@/lib/supabaseServer";
+import { requireOptInMfaSatisfied } from "@/lib/security/mfa";
 
 export type AccountAccessResult =
   | {
@@ -16,9 +17,9 @@ export type AccountAccessResult =
     }
   | {
       ok: false;
-      error: "UNAUTHENTICATED" | "PROFILE_LOOKUP_FAILED" | "NO_PROFILE" | "INTERNAL_ERROR";
+      error: "UNAUTHENTICATED" | "MFA_ENROLLMENT_REQUIRED" | "MFA_CHALLENGE_REQUIRED" | "MFA_FRESH_AUTH_REQUIRED" | "MFA_LOOKUP_FAILED" | "PROFILE_LOOKUP_FAILED" | "NO_PROFILE" | "INTERNAL_ERROR";
       message: string;
-      status: 401 | 403 | 500;
+      status: 401 | 403 | 428 | 500 | 503;
     };
 
 export async function ensureAuthenticatedProfile(): Promise<AccountAccessResult> {
@@ -29,6 +30,8 @@ export async function ensureAuthenticatedProfile(): Promise<AccountAccessResult>
     if (userError || !user) {
       return { ok: false, error: "UNAUTHENTICATED", message: "You must be logged in to access this area.", status: 401 };
     }
+    const mfa = await requireOptInMfaSatisfied(supabase);
+    if (mfa.ok === false) return { ok: false, error: mfa.error, message: "Multi-factor authentication is required.", status: mfa.status };
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")

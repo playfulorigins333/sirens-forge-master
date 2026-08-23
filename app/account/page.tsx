@@ -346,6 +346,11 @@ export default async function AccountPage() {
           <Link className="text-cyan-300 hover:text-cyan-200" href="/account/policy-consent?next=%2Faccount">{policyAccepted ? "Review current policy receipt status" : "Review and accept current policies"}</Link>
         </section>
         <section className="mt-6 rounded-[28px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
+          <h3 className="mb-3 text-2xl font-bold text-white">Security</h3>
+          <p className="mb-3 text-gray-300">Manage optional authenticator-app two-factor authentication.</p>
+          <Link className="text-cyan-300 hover:text-cyan-200" href="/account/security">Security settings</Link>
+        </section>
+        <section className="mt-6 rounded-[28px] border border-white/10 bg-white/5 p-8 backdrop-blur-xl">
           <h3 className="mb-3 text-2xl font-bold text-white">Privacy and safety resources</h3>
           <p className="mb-4 text-sm text-gray-300">Review our policies or reach the existing support and removal processes.</p>
           <div className="flex flex-wrap gap-4 text-sm">

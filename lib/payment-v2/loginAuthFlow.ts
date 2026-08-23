@@ -15,6 +15,7 @@ type SignupResult = { data: { session: { user?: unknown } | null }; error: unkno
 
 export interface LoginAuthDependencies {
   getUser(): Promise<{ data: { user: unknown | null }; error: unknown }>;
+  getMfaAssurance(): Promise<{ data: { currentLevel: string | null; nextLevel: string | null }; error: unknown }>;
   passwordLogin(email: string, password: string): Promise<AuthResult>;
   signup(email: string, password: string, emailRedirectTo: string | null): Promise<SignupResult>;
   startOAuth(provider: OAuthProvider, redirectTo: string): Promise<AuthResult>;
@@ -132,7 +133,13 @@ export class LoginAuthFlow {
         return false;
       }
       this.publish({ checkingSession: false });
-      return result.data.user ? this.navigateOnce() : false;
+      if (!result.data.user) return false
+      const assurance = await this.dependencies.getMfaAssurance()
+      if (assurance.error) { this.publish({ error: VERIFY_ERROR }); return false }
+      if (assurance.data.currentLevel === "aal1" && assurance.data.nextLevel === "aal2") {
+        this.destination = `/auth/mfa?next=${encodeURIComponent(this.destination)}`
+      }
+      return this.navigateOnce();
     } catch {
       if (!this.disposed) this.publish({ checkingSession: false, error: VERIFY_ERROR });
       return false;

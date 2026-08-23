@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { requireXAdminUserId } from "@/lib/autopost/xAdminAuthorization"
+import { requireFreshTotpResponse } from "@/lib/security/mfaRoute"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import {
   buildXAuthorizeUrl,
@@ -112,6 +113,8 @@ async function hasRequestBody(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const mfa = await requireFreshTotpResponse()
+  if (mfa instanceof NextResponse) return mfa
   const userId = await requireXAdminUserId({ request: req }).catch(() => null)
   if (!userId?.trim()) return response("X_REAUTH_START_UNAUTHENTICATED", 401)
   if (req.headers.get("x-autopost-x-reauthorize") !== CONFIRMATION) {

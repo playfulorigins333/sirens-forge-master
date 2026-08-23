@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { ensureActiveSubscription } from "@/lib/subscription-checker"
+import { requireFreshTotpResponse } from "@/lib/security/mfaRoute"
 import {
   buildFanvueAuthorizeUrl,
   createFanvueOAuthState,
@@ -11,6 +12,8 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function GET(_req: Request) {
+  const mfa = await requireFreshTotpResponse()
+  if (mfa instanceof NextResponse) return mfa
   const entitlement = await ensureActiveSubscription()
   if (!entitlement.ok || !entitlement.user) {
     return NextResponse.json(

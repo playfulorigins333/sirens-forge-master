@@ -9,11 +9,14 @@ import {
   setFanvueOAuthCookie,
 } from "@/lib/autopost/fanvueOAuth"
 import { handleFanvueWriteCreatorReconnectRoute } from "@/lib/autopost/fanvueWriteCreatorReconnectRoute"
+import { requireFreshTotpResponse } from "@/lib/security/mfaRoute"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
 export async function POST(req: Request) {
+  const mfa = await requireFreshTotpResponse()
+  if (mfa instanceof NextResponse) return mfa
   const response = await handleFanvueWriteCreatorReconnectRoute({
     request: req,
     expectedSecret: process.env.FANVUE_WRITE_CREATOR_RECONNECT_SECRET,
