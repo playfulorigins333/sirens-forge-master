@@ -2,13 +2,13 @@ import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function DMCAPage() {
   return (
-    <LegalPageLayout title="DMCA Policy" lastUpdated="April 27, 2026">
+    <LegalPageLayout title="DMCA Policy" lastUpdated="August 23, 2026">
       <section>
         <p>
           Sirens Forge respects the intellectual property rights of others and
-          complies with the Digital Millennium Copyright Act (DMCA). This policy
-          outlines the process for submitting copyright infringement claims and
-          our response procedures.
+          responds to copyright reports through the process described below.
+          This policy outlines how to submit copyright infringement claims and
+          counter-notices and describes our response procedures.
         </p>
       </section>
 
@@ -81,11 +81,23 @@ export default function DMCAPage() {
             misidentification
           </li>
           <li>
-            A statement that you consent to the jurisdiction of your local
-            federal court (or appropriate jurisdiction if outside the U.S.)
+            A statement consenting to the jurisdiction of the Federal District
+            Court for the judicial district where your address is located, or,
+            if your address is outside the United States, the judicial district
+            where Sirens Forge is located
+          </li>
+          <li>
+            A statement that you will accept service of process from the person
+            who submitted the original notice or that person&apos;s agent
           </li>
           <li>Your physical or electronic signature</li>
         </ul>
+        <p>
+          After we receive a valid counter-notice, we may restore the material
+          not earlier than 10 business days and not later than 14 business days
+          after receipt, unless the original complainant notifies us that they
+          have filed a court action seeking to restrain the alleged infringement.
+        </p>
       </section>
 
       <section>

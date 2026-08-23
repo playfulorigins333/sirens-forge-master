@@ -3,9 +3,10 @@ import { readFile } from "node:fs/promises"
 import { isPublicPath } from "../../../proxy"
 
 const read = (path: string) => readFile(path, "utf8")
-const [terms, privacy, aup, report, sitemap, account] = await Promise.all([
+const [terms, privacy, aup, report, sitemap, account, dmca, section2257] = await Promise.all([
   read("app/terms/page.tsx"), read("app/privacy/page.tsx"), read("app/acceptable-use/page.tsx"),
   read("app/report-intimate-content/page.tsx"), read("app/sitemap.ts"), read("app/account/page.tsx"),
+  read("app/dmca/page.tsx"), read("app/2257-exemption/page.tsx"),
 ])
 const policies = `${terms}\n${privacy}`
 const normalizedPolicies = policies.replace(/\s+/g, " ")
@@ -47,4 +48,16 @@ assert.doesNotMatch(report, /(?:respond|acknowledge|review|resolve|remove|action
 const fakeControls = /(?:Delete Account|Reactivate Account|Export My Data|Recently Deleted)/i
 assert.doesNotMatch(account, fakeControls)
 assert.doesNotMatch(`${terms}\n${privacy}`, /(?:available|provides?|automatically)[^.!?\n]{0,60}(?:Delete Account|Reactivate Account|Export My Data|Recently Deleted)/i)
+
+const normalizedDmca = dmca.replace(/\s+/g, " ")
+assert.match(normalizedDmca, /accept service of process from the person who submitted the original notice or that person[^.]*agent/i)
+assert.match(normalizedDmca, /not earlier than 10 business days and not later than 14 business days/i)
+assert.match(normalizedDmca, /unless the original complainant notifies us[^.]*filed a court action/i)
+assert.doesNotMatch(normalizedDmca, /registered designated agent|safe[- ]harbor compliant/i)
+
+const normalized2257 = section2257.replace(/\s+/g, " ")
+assert.match(normalized2257, /wholly synthetic fictional persona[^.]*actual human being/i)
+assert.match(normalized2257, /real-person, AI Twin, or likeness-source workflows are automatically exempt/i)
+assert.match(normalized2257, /Creators are responsible for determining and satisfying applicable[^.]*2257 and 2257A obligations/i)
+for (const unsafe of [/All content generated through Sirens Forge is artificial/i, /does not involve real human performers/i, /therefore is not considered a primary or secondary producer/i, /no such performers are used or required/i]) assert.doesNotMatch(normalized2257, unsafe)
 console.log("public policy/privacy truth regression contract: PASS")

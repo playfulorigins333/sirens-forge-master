@@ -3,14 +3,15 @@ import LegalPageLayout from "@/components/legal/LegalPageLayout"
 export default function Section2257Page() {
   return (
     <LegalPageLayout
-      title="18 U.S.C. §2257 Record-Keeping Exemption Statement"
-      lastUpdated="April 27, 2026"
+      title="18 U.S.C. §§2257 and 2257A Compliance Statement"
+      lastUpdated="August 23, 2026"
     >
       <section>
         <p>
-          Sirens Forge provides AI-generated content tools and does not produce,
-          employ, contract, manage, or record real human performers in the
-          creation of sexually explicit content.
+          Sirens Forge provides AI-generated content tools. Whether federal
+          record-keeping requirements apply can depend on the nature and source
+          of a particular depiction; this statement does not claim a blanket
+          exemption for every use of the service.
         </p>
       </section>
 
@@ -19,10 +20,11 @@ export default function Section2257Page() {
           1. Nature of the Service
         </h2>
         <p>
-          Sirens Forge is a technology platform that generates synthetic,
-          computer-generated, or AI-generated content based on user inputs. The
-          platform does not involve real human performers in the creation of such
-          content.
+          A wholly synthetic fictional persona is different from content that
+          depicts, is derived from, or uses the likeness or source material of
+          an actual human being. Sirens Forge supports workflows in both broader
+          categories, and AI processing alone does not determine whether a
+          depiction is subject to record-keeping obligations.
         </p>
       </section>
 
@@ -36,21 +38,23 @@ export default function Section2257Page() {
           explicit conduct involving real human performers.
         </p>
         <p>
-          Sirens Forge does not create or host depictions of actual sexually
-          explicit conduct involving real human performers and therefore is not
-          considered a primary or secondary producer under these regulations.
+          Sirens Forge does not represent that real-person, AI Twin, or
+          likeness-source workflows are automatically exempt, or that Sirens
+          Forge can be categorically classified the same way for every item of
+          content and every workflow.
         </p>
       </section>
 
       <section>
         <h2 className="text-xl font-semibold">
-          3. No Real Performer Content
+          3. Wholly Synthetic and Actual-Human Workflows
         </h2>
         <p>
-          All content generated through Sirens Forge is artificial, simulated,
-          or synthetic in nature. The platform does not verify, track, or
-          maintain records of real individuals as performers because no such
-          performers are used or required.
+          Content involving a wholly synthetic fictional persona may present
+          different obligations from content depicting or derived from an
+          actual human being. Creators must accurately assess their source
+          material and intended depiction rather than assuming that use of an
+          AI tool eliminates otherwise applicable responsibilities.
         </p>
       </section>
 
@@ -59,10 +63,12 @@ export default function Section2257Page() {
           4. User Responsibility
         </h2>
         <p>
-          Users are solely responsible for ensuring that any content they upload,
-          reference, or generate complies with applicable laws and does not
-          involve real individuals in violation of consent, privacy, or legal
-          standards.
+          Creators are responsible for determining and satisfying applicable
+          §§2257 and 2257A obligations for content they upload, reference,
+          direct, or publish, including any required identity, age, or
+          record-keeping measures. Creators must also comply with consent,
+          privacy, and other applicable legal requirements for actual-human or
+          likeness-source material.
         </p>
       </section>
 
