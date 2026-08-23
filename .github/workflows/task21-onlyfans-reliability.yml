@@ -29,6 +29,10 @@ on:
       - 'backend/creator-publishing-queue/tests/runFanvueLaunchExecutionPostgresIntegration.mjs'
       - 'supabase/migrations/20260814090000_cpq_fanvue_launch_execution_foundation.sql'
       - 'package.json'
+      - 'supabase/migrations/20260823090000_publishing_provider_disconnect_truth.sql'
+      - 'backend/autopost/tests/publishingProviderDisconnectPostgresIntegration.sql'
+      - 'backend/autopost/tests/runPublishingProviderDisconnectPostgresIntegration.mjs'
+      - 'docs/autopost/publishing-provider-disconnect-rollout.md'
       - 'docs/creator-publishing/task21-onlyfans-reliability-operations.md'
       - 'backend/creator-publishing-queue/tests/task22PublicAutopostScopeLockSourceContract.test.ts'
       - '.github/workflows/task22-public-autopost-scope-lock.yml'
@@ -60,6 +64,7 @@ jobs:
       TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task15_ci
       TASK17A_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task17a_ci
       CPQ_FANVUE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cpq_fanvue_ci
+      PUBLISHING_DISCONNECT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/publishing_disconnect_ci
       NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
       SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
       NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
@@ -183,6 +188,8 @@ jobs:
       - run: npm run test:creator-publishing-task15-postgres
       - name: Fanvue CPQ launch PostgreSQL integration
         run: npm run test:creator-publishing-fanvue-launch-postgres
+      - name: Publishing provider disconnect PostgreSQL integration
+        run: npm run test:publishing-provider-disconnect-postgres
       - run: npx tsx backend/creator-publishing-queue/tests/task17aOperatorQueueSourceContract.test.ts
       - run: npm run test:creator-publishing-task17a-upgrade
       - run: npm run test:creator-publishing-task17a-postgres

@@ -587,6 +587,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
               user_id: rule.user_id,
               rule_id: rule.id,
               job_id: lockResult.job.id,
+              lock_id: lockResult.job.lock_id,
               payload: { text: content.text },
             });
 
@@ -596,6 +597,7 @@ export async function executeAutopost(req: Request, deps: ExecuteAutopostDeps = 
               now,
               attempt_count: lockResult.job.attempt_count ?? null,
               max_attempts: MAX_X_DISPATCH_ATTEMPTS,
+              execution_lock_id: lockResult.job.lock_id!,
             });
 
             if (persisted.ok === false || persisted.job_result_persisted === false) {

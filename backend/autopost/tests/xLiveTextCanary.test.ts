@@ -467,10 +467,10 @@ function normalAdapterDeps(fetchImpl: Fetch) {
       return { data: { encrypted_access_token: "encrypted", encrypted_refresh_token: "refresh", token_expires_at: "2035-01-01T00:00:00Z", token_type: "Bearer", token_key_version: 7, provider_username: "name", provider_account_id: "id" }, error: null }
     },
   }
-  return { supabaseAdmin: { from: () => builder } as any, decryptToken: () => "token", now: () => new Date(NOW), fetchImpl, getApiBaseUrl: () => "https://api.x.com" }
+  return { supabaseAdmin: { from: () => builder } as any, beginDispatch: async () => true, decryptToken: () => "token", now: () => new Date(NOW), fetchImpl, getApiBaseUrl: () => "https://api.x.com" }
 }
 async function normal(fetchImpl: Fetch) {
-  const result: any = await adapter.postXTextOnlyAutopost({ run_mode: "autopost", user_id: "user", rule_id: "rule", payload: { text: "text" } }, normalAdapterDeps(fetchImpl))
+  const result: any = await adapter.postXTextOnlyAutopost({ run_mode: "autopost", user_id: "user", rule_id: "rule", job_id: "job", lock_id: "lock", payload: { text: "text" } }, normalAdapterDeps(fetchImpl))
   assert.equal("failure_kind" in result, false)
   return result
 }

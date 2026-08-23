@@ -35,6 +35,7 @@ export type JobResultPersistenceInput = {
   now?: Date;
   attempt_count?: number;
   max_attempts?: number;
+  execution_lock_id: string;
 };
 
 export type JobResultPersistenceOutcome = {
@@ -249,8 +250,13 @@ export async function persistAutopostJobResult(
     lock_id: null,
   };
 
-  const { error } = await supabase.from("autopost_jobs").update(values).eq("id", input.job_id);
-  if (error) {
+  const { data, error } = await supabase.from("autopost_jobs").update(values)
+    .eq("id", input.job_id)
+    .eq("state", "RUNNING")
+    .eq("lock_id", input.execution_lock_id)
+    .select("id")
+    .maybeSingle();
+  if (error || !data) {
     return {
       ok: false,
       job_id: input.job_id,
