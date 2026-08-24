@@ -4,6 +4,8 @@ import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { supabaseServer } from "@/lib/supabaseServer";
 import LibraryClient, { LibraryItem } from "./LibraryClient";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { isPrivateCreatorMediaEnabled } from "@/lib/private-creator-media/core";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +51,11 @@ type UserLoraRow = {
 type IdentityStats = {
   generationCount: number;
   lastUsedAt: string | null;
+};
+
+type PrivateAssetRow = {
+  id: string; generation_id: string; ordinal: number; kind: "image" | "video"; created_at: string;
+  generations: GenerationRow | GenerationRow[];
 };
 
 function getMetadata(row: GenerationRow): Record<string, unknown> {
@@ -218,7 +225,9 @@ export default async function LibraryPage() {
 
   const supabase = await supabaseServer();
 
-  const [{ data: generationData, error: generationError }, { data: loraData, error: loraError }] =
+  const admin = getSupabaseAdmin();
+  const privateMediaEnabled = isPrivateCreatorMediaEnabled();
+  const [{ data: generationData, error: generationError }, { data: loraData, error: loraError }, { data: privateAssetData, error: privateAssetError }] =
     await Promise.all([
       supabase
         .from("generations")
@@ -266,6 +275,7 @@ export default async function LibraryPage() {
         )
         .in("user_id", [authUserId, profileId])
         .order("created_at", { ascending: false }),
+      privateMediaEnabled ? admin.from("generation_assets").select(`id,generation_id,ordinal,kind,created_at,generations!inner(id,user_id,prompt,image_url,created_at,updated_at,status,job_type,body_type,metadata,lora_used,mode)`).eq("owner_id", authUserId).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
     ]);
 
   if (generationError) {
@@ -275,12 +285,15 @@ export default async function LibraryPage() {
   if (loraError) {
     console.error("[library] Failed to load identity seeds:", loraError);
   }
+  if (privateAssetError) throw new Error("Private creator media schema is unavailable while enabled.");
 
   const generationRows: GenerationRow[] = Array.isArray(generationData)
     ? (generationData as GenerationRow[])
     : [];
 
   const loraRows: UserLoraRow[] = Array.isArray(loraData) ? (loraData as UserLoraRow[]) : [];
+  const privateAssetRows: PrivateAssetRow[] = Array.isArray(privateAssetData) ? privateAssetData as unknown as PrivateAssetRow[] : [];
+  const privateGenerationIds = new Set(privateAssetRows.map((asset) => asset.generation_id));
 
   const identityStatsByLora = new Map<string, IdentityStats>();
 
@@ -319,7 +332,7 @@ export default async function LibraryPage() {
   };
 
   const generationItems: LibraryItem[] = generationRows
-    .filter((row) => isRealAsset(row))
+    .filter((row) => !privateGenerationIds.has(row.id) && isRealAsset(row))
     .map((row) => {
       const url = getRealAssetUrl(row)!;
 
@@ -342,6 +355,28 @@ export default async function LibraryPage() {
           : emptyIdentityStats,
       };
     });
+
+  const privateGenerationItems: LibraryItem[] = privateAssetRows.map((asset) => {
+    const generation = Array.isArray(asset.generations) ? asset.generations[0] : asset.generations;
+    return {
+      id: asset.id,
+      generationId: asset.generation_id,
+      itemType: "asset",
+      kind: asset.kind,
+      url: null,
+      previewUrl: null,
+      privateAsset: true,
+      prompt: generation?.prompt || "",
+      createdAt: asset.created_at || generation?.created_at || new Date().toISOString(),
+      status: generation?.status || "completed",
+      mode: generation ? getGenerationMode(generation) : "image",
+      bodyMode: generation ? getBodyMode(generation) : null,
+      identityLora: generation ? getIdentityLora(generation) : null,
+      title: null,
+      isIdentitySeed: false,
+      identityStats: generation && getIdentityLora(generation) ? identityStatsByLora.get(getIdentityLora(generation)!) || emptyIdentityStats : emptyIdentityStats,
+    };
+  });
 
   const identityItems: LibraryItem[] = loraRows
     .filter((row) => isIdentitySeed(row))
@@ -366,7 +401,7 @@ export default async function LibraryPage() {
       };
     });
 
-  const items = [...identityItems, ...generationItems].sort((a, b) => {
+  const items = [...identityItems, ...privateGenerationItems, ...generationItems].sort((a, b) => {
     const at = new Date(a.createdAt).getTime();
     const bt = new Date(b.createdAt).getTime();
     const safeAt = Number.isNaN(at) ? 0 : at;

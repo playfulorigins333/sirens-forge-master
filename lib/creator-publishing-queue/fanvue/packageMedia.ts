@@ -8,9 +8,13 @@ import {
   resolveGeneratedMediaKind,
   resolveGeneratedMediaPreviewUrl,
 } from "../media/generatedMediaEligibility"
+import { isPrivateCreatorMediaEnabled } from "../../private-creator-media/core"
 
 export type FanvuePackageGeneratedMediaCandidate = {
+  candidateId: string
   generationId: string
+  generationAssetId: string | null
+  ordinal: number | null
   kind: "image" | "video"
   previewUrl: string
   promptExcerpt: string
@@ -92,6 +96,11 @@ export async function loadCreatorFanvuePackageMedia(
   if (taskResult.error) throw new Error("Fanvue package lock state could not be loaded.")
   if (generationsResult.error) throw new Error("Generated media candidates could not be loaded.")
 
+  const privateResult = isPrivateCreatorMediaEnabled()
+    ? await admin.from("generation_assets").select("id,generation_id,ordinal,kind,created_at,generations!inner(id,user_id,status,prompt,mode,created_at,metadata)").eq("owner_id", creatorId).order("created_at", { ascending: false }).limit(320)
+    : { data: [], error: null }
+  if (privateResult.error) throw new Error("Private creator media schema is unavailable while enabled.")
+
   const mediaRows = mediaResult.data ?? []
   const attachedGenerationIds = new Set(
     mediaRows
@@ -102,6 +111,7 @@ export async function loadCreatorFanvuePackageMedia(
       )
       .map((row: any) => row.ai_generation_metadata.generation_id),
   )
+  const attachedGenerationAssetIds = new Set(mediaRows.filter((row:any) => row.source === "ai_pipeline" && typeof row.ai_generation_metadata?.generation_asset_id === "string").map((row:any) => row.ai_generation_metadata.generation_asset_id))
 
   const generatedMediaCandidates = (generationsResult.data ?? [])
     .filter(
@@ -113,7 +123,10 @@ export async function loadCreatorFanvuePackageMedia(
     .map((generation: any): FanvuePackageGeneratedMediaCandidate => {
       const previewUrl = resolveGeneratedMediaPreviewUrl(generation)!
       return {
+        candidateId: `generation:${generation.id}`,
         generationId: generation.id,
+        generationAssetId: null,
+        ordinal: null,
         kind: resolveGeneratedMediaKind(generation, previewUrl),
         previewUrl,
         promptExcerpt: promptExcerpt(generation.prompt),
@@ -122,6 +135,12 @@ export async function loadCreatorFanvuePackageMedia(
         alreadyAttached: attachedGenerationIds.has(generation.id),
       }
     })
+
+  const privateCandidates: FanvuePackageGeneratedMediaCandidate[] = (privateResult.data ?? []).flatMap((asset:any) => {
+    const generation = Array.isArray(asset.generations) ? asset.generations[0] : asset.generations
+    if (!generation || generation.user_id !== creatorId || generation.status !== "completed" || generation.metadata?.private_creator_media !== true) return []
+    return [{ candidateId:`asset:${asset.id}`, generationId:generation.id, generationAssetId:asset.id, ordinal:asset.ordinal, kind:asset.kind, previewUrl:`/api/library/assets/${asset.id}/signed-url?mode=preview&delivery=redirect`, promptExcerpt:promptExcerpt(generation.prompt), createdAt:asset.created_at ?? generation.created_at ?? null, mode:generation.mode ?? null, alreadyAttached:attachedGenerationAssetIds.has(asset.id) }]
+  })
 
   const media = await Promise.all(
     mediaRows.map(async (row: any): Promise<FanvuePackageMediaAsset> => {
@@ -155,7 +174,7 @@ export async function loadCreatorFanvuePackageMedia(
       updatedAt: pkg.updated_at,
     },
     media,
-    generatedMediaCandidates,
+    generatedMediaCandidates: [...privateCandidates, ...generatedMediaCandidates.filter((legacy) => !privateCandidates.some((candidate) => candidate.generationId === legacy.generationId))],
     generatedMediaSelectionAllowed: blockedReason == null,
     generatedMediaSelectionBlockedReason: blockedReason,
   }

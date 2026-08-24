@@ -1,6 +1,10 @@
 import assert from "node:assert/strict"
 import { mock } from "node:test"
 
+mock.module(new URL("../../../lib/private-creator-media/r2.ts", import.meta.url).href, {
+  namedExports: { verifyPrivateGenerationObject: async () => { throw new Error("unexpected private R2 verification") } },
+})
+
 // Run from the repository root with:
 // node --experimental-test-module-mocks --import tsx backend/security/tests/lock02bGenerateAuthorization.test.ts
 

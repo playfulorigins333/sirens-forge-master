@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -43,6 +43,8 @@ import {
 
 export type LibraryItem = {
   id: string;
+  generationId?: string;
+  privateAsset?: boolean;
   itemType?: "asset" | "identity_seed";
   kind: "image" | "video" | "identity";
   url: string | null;
@@ -157,6 +159,39 @@ function downloadFile(url: string | null, filename?: string) {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+}
+
+async function getPrivateAssetUrl(assetId: string, mode: "preview" | "download") {
+  const response = await fetch(`/api/library/assets/${encodeURIComponent(assetId)}/signed-url?mode=${mode}`, { cache: "no-store", credentials: "same-origin" });
+  if (!response.ok) return null;
+  const body = await response.json() as { url?: unknown };
+  return typeof body.url === "string" ? body.url : null;
+}
+
+function PrivateAssetPreview({ item, className }: { item: LibraryItem; className?: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [automaticRefreshes, setAutomaticRefreshes] = useState(0);
+  const [unavailable, setUnavailable] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setAutomaticRefreshes(0); setUnavailable(false); setUrl(null);
+    void getPrivateAssetUrl(item.id, "preview").then((value) => { if (!active) return; if (value) setUrl(value); else setUnavailable(true); });
+    return () => { active = false; };
+  }, [item.id]);
+  const failed = () => {
+    if (automaticRefreshes >= 1) { setUrl(null); setUnavailable(true); return; }
+    setAutomaticRefreshes(1); setUrl(null);
+    void getPrivateAssetUrl(item.id, "preview").then((value) => { if (value) setUrl(value); else setUnavailable(true); });
+  };
+  if (!url) return <div className={`${className || ""} flex flex-col items-center justify-center gap-2 bg-gray-900`}><Lock className="h-6 w-6 text-gray-500" />{unavailable ? <button type="button" className="text-xs text-purple-200 underline" onClick={() => { setAutomaticRefreshes(0); setUnavailable(false); void getPrivateAssetUrl(item.id, "preview").then((value) => { if (value) setUrl(value); else setUnavailable(true); }); }}>Retry preview</button> : null}</div>;
+  if (item.kind === "video") return <video className={className} src={url} controls preload="metadata" onError={failed} />;
+  return <img className={className} src={url} alt="Private creation" onError={failed} />;
+}
+
+async function downloadLibraryItem(item: LibraryItem) {
+  if (!item.privateAsset) return downloadFile(item.url, `sirens-forge-${item.id}`);
+  const url = await getPrivateAssetUrl(item.id, "download");
+  if (url) downloadFile(url, `sirens-forge-${item.id}`);
 }
 
 function shortIdentityLabel(identityId: string | null) {
@@ -544,6 +579,8 @@ function AssetCard(props: {
       <div className="relative aspect-[4/5] overflow-hidden bg-gray-950">
         {isIdentity ? (
           <IdentitySeedVisual item={item} />
+        ) : item.privateAsset ? (
+          <PrivateAssetPreview item={item} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
         ) : item.kind === "image" && displayUrl ? (
           <img
             src={displayUrl}
@@ -581,12 +618,12 @@ function AssetCard(props: {
             <Maximize2 className="h-4 w-4" />
           </Button>
 
-          {displayUrl && !isIdentity ? (
+          {(displayUrl || item.privateAsset) && !isIdentity ? (
             <Button
               size="icon"
               type="button"
               variant="ghost"
-              onClick={() => downloadFile(displayUrl, `sirensforge-${item.kind}-${item.id}`)}
+              onClick={() => { void downloadLibraryItem(item); }}
               className="h-9 w-9 border border-white/10 bg-black/55 text-white hover:bg-black/75"
             >
               <Download className="h-4 w-4" />
@@ -688,6 +725,8 @@ function IdentityGroupCard(props: {
           {hero ? (
             hero.kind === "identity" || hero.isIdentitySeed ? (
               <IdentitySeedVisual item={hero} large />
+            ) : hero.privateAsset ? (
+              <PrivateAssetPreview item={hero} className="h-full w-full object-cover" />
             ) : hero.kind === "image" && heroUrl ? (
               <img src={heroUrl} alt={hero.prompt} className="h-full w-full object-cover" />
             ) : hero.kind === "video" && heroUrl ? (
@@ -767,7 +806,9 @@ function IdentityGroupCard(props: {
                     onClick={() => onOpen(item)}
                     className="relative aspect-square overflow-hidden rounded-xl border border-gray-800 bg-gray-950 transition-colors hover:border-purple-600"
                   >
-                    {isIdentity || !url ? (
+                    {item.privateAsset ? (
+                      <PrivateAssetPreview item={item} className="h-full w-full object-cover" />
+                    ) : isIdentity || !url ? (
                       <IdentitySeedVisual item={item} />
                     ) : item.kind === "image" ? (
                       <img src={url} alt={item.prompt} className="h-full w-full object-cover" />
@@ -890,7 +931,9 @@ function VaultModal(props: {
         >
           <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_0.65fr]">
             <div className="flex max-h-[82vh] items-center justify-center overflow-hidden bg-black">
-              {isIdentity || !displayUrl ? (
+              {item.privateAsset ? (
+                <PrivateAssetPreview item={item} className="h-[70vh] w-full object-contain" />
+              ) : isIdentity || !displayUrl ? (
                 <div className="h-[70vh] w-full">
                   <IdentitySeedVisual item={item} large />
                 </div>
@@ -998,10 +1041,10 @@ function VaultModal(props: {
               </div>
 
               <div className="flex flex-wrap gap-2 pt-2">
-                {displayUrl && !isIdentity ? (
+                {(displayUrl || item.privateAsset) && !isIdentity ? (
                   <Button
                     type="button"
-                    onClick={() => downloadFile(displayUrl, `sirensforge-${item.kind}-${item.id}`)}
+                    onClick={() => { void downloadLibraryItem(item); }}
                     className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
                   >
                     <Download className="mr-2 h-4 w-4" />

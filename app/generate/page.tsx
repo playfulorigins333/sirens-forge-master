@@ -43,6 +43,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import BuildMyModelCard from "@/components/generate/BuildMyModelCard";
+import { isPrivateCreatorGenerationOutput, parseCreatorGenerationOutputs } from "@/lib/generation/clientResponse";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -93,6 +94,8 @@ interface GeneratedItem {
   settings: any;
   createdAt: string;
   dbGenerationId?: string | null;
+  generationAssetId?: string | null;
+  privateAsset?: boolean;
 }
 
 interface PackCaptionDraft {
@@ -157,6 +160,19 @@ function inferKindFromOutput(output: any): MediaKind {
 function getOutputUrl(output: any): string {
   if (typeof output === "string") return output;
   return output?.url || output?.image_url || output?.video_url || output?.output_url || "";
+}
+
+function isPrivateGenerationOutput(output: any): boolean {
+  return isPrivateCreatorGenerationOutput(output);
+}
+
+async function resolveGenerationOutputUrl(output: any): Promise<string> {
+  if (!isPrivateGenerationOutput(output)) return getOutputUrl(output);
+  const response = await fetch(`/api/library/assets/${encodeURIComponent(output.id)}/signed-url?mode=preview`, { cache: "no-store", credentials: "same-origin" });
+  if (!response.ok) throw new Error("Private generation preview is unavailable.");
+  const body = await response.json();
+  if (typeof body?.url !== "string" || !body.url) throw new Error("Private generation preview is unavailable.");
+  return body.url;
 }
 
 function isUuidLike(value?: string | null): boolean {
@@ -4019,24 +4035,21 @@ ${basePrompt}`,
           }
 
           const data = await res.json();
-          const outputs = Array.isArray(data?.images)
-            ? data.images
-            : Array.isArray(data?.outputs)
-            ? data.outputs
-            : [];
+          const outputs = parseCreatorGenerationOutputs(data);
 
           if (!outputs.length) {
             throw new Error("/api/generate did not return images[] or outputs[].");
           }
 
           const now = new Date().toISOString();
-          const generated: GeneratedItem[] = outputs.map((output: any) => {
+          const generated: GeneratedItem[] = await Promise.all(outputs.map(async (output: any) => {
             const generationRecordId = getGenerationRecordId(output, data);
+            const privateAsset = isPrivateGenerationOutput(output);
 
             return {
-              id: generationRecordId || `${now}-${Math.random().toString(36).slice(2)}`,
+              id: privateAsset ? output.id : generationRecordId || `${now}-${Math.random().toString(36).slice(2)}`,
               kind: inferKindFromOutput(output),
-              url: getOutputUrl(output),
+              url: await resolveGenerationOutputUrl(output),
               prompt: promptToUse,
               settings: {
                 ...runPayload,
@@ -4044,8 +4057,10 @@ ${basePrompt}`,
               },
               createdAt: now,
               dbGenerationId: generationRecordId,
+              generationAssetId: privateAsset ? output.id : null,
+              privateAsset,
             };
-          });
+          }));
 
           generatedAll.push(...generated);
         } else {

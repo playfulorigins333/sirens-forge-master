@@ -31,12 +31,14 @@ export function GeneratedMediaSelectionPanel({
     setSuccess(false)
     let any = false
     for(const id of selected) {
+      const candidate = candidates.find((value) => value.candidateId === id)
+      if (!candidate) continue
       setStatus((current) => ({ ...current, [id]: "pending" }))
       try {
         const response = await fetch("/api/creator-publishing-queue/media/generated-assets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contentPackageId, generationId: id }),
+          body: JSON.stringify({ contentPackageId, generationId: candidate.generationId, ...(candidate.generationAssetId ? { generationAssetId: candidate.generationAssetId } : {}) }),
         })
         if (!response.ok) {
           throw new Error((await response.json().catch(() => ({ error: "FAILED" }))).error || "FAILED")
@@ -91,7 +93,7 @@ export function GeneratedMediaSelectionPanel({
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {candidates.map((candidate) => (
             <label
-              key={candidate.generationId}
+              key={candidate.candidateId}
               className="rounded-2xl border border-white/10 bg-black/40 p-3 focus-within:ring-2 focus-within:ring-fuchsia-300"
             >
               <div className="aspect-video overflow-hidden rounded-xl bg-zinc-900">
@@ -114,13 +116,13 @@ export function GeneratedMediaSelectionPanel({
                 <input
                   type="checkbox"
                   className="mt-1 h-4 w-4 rounded border-white/20 bg-black text-fuchsia-500 focus:ring-fuchsia-300"
-                  disabled={!allowed || candidate.alreadyAttached || status[candidate.generationId] === "pending"}
-                  checked={selected.includes(candidate.generationId)}
+                  disabled={!allowed || candidate.alreadyAttached || status[candidate.candidateId] === "pending"}
+                  checked={selected.includes(candidate.candidateId)}
                   onChange={(event) =>
                     setSelected((current) =>
                       event.target.checked
-                        ? [...current, candidate.generationId]
-                        : current.filter((id) => id !== candidate.generationId),
+                        ? [...current, candidate.candidateId]
+                        : current.filter((id) => id !== candidate.candidateId),
                     )
                   }
                 />
@@ -134,17 +136,17 @@ export function GeneratedMediaSelectionPanel({
                     {candidate.createdAt ? new Date(candidate.createdAt).toLocaleString() : "Unknown date"}
                     {candidate.mode ? ` · ${candidate.mode}` : ""}
                   </p>
-                  {status[candidate.generationId] && (
+                  {status[candidate.candidateId] && (
                     <p
                       className={`mt-2 text-xs ${
-                        status[candidate.generationId] === "success"
+                        status[candidate.candidateId] === "success"
                           ? "text-emerald-300"
-                          : status[candidate.generationId] === "failure"
+                          : status[candidate.candidateId] === "failure"
                             ? "text-rose-300"
                             : "text-cyan-300"
                       }`}
                     >
-                      {status[candidate.generationId]}
+                      {status[candidate.candidateId]}
                     </p>
                   )}
                 </div>
