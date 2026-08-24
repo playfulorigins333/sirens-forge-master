@@ -15,6 +15,10 @@ import {
 } from "../../../lib/sirensApi";
 import { isGenerationExecutionEnabled } from "../../../lib/generation/executionAvailability";
 import { parseGenerationSuccess } from "../../../lib/generation/upstreamResponse";
+import { requirePrivateOutputs } from "../../../lib/generation/upstreamResponse";
+import { isPrivateCreatorMediaEnabled } from "../../../lib/private-creator-media/core";
+import { verifyPrivateGenerationObject } from "../../../lib/private-creator-media/r2";
+import { randomUUID } from "node:crypto";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -358,6 +362,61 @@ export async function POST(req: NextRequest) {
     const validated = parseGenerationSuccess(upstreamJson);
     if (!validated) {
       return NextResponse.json({ error: "UPSTREAM_INVALID_RESPONSE" }, { status: 502 });
+    }
+
+    if (isPrivateCreatorMediaEnabled()) {
+      const generationId = randomUUID();
+      let verified;
+      try {
+        const outputs = requirePrivateOutputs(validated);
+        verified = [];
+        for (let ordinal = 0; ordinal < outputs.length; ordinal += 1) {
+          const object = await verifyPrivateGenerationObject(outputs[ordinal].r2_bucket, outputs[ordinal].r2_key);
+          verified.push({
+            owner_id: userId,
+            ordinal,
+            kind: "image",
+            storage_class: "creator_generation",
+            bucket: object.bucket,
+            object_key: object.key,
+            mime_type: object.mimeType,
+            size_bytes: object.sizeBytes,
+            sha256: object.sha256,
+          });
+        }
+      } catch {
+        return NextResponse.json({ error: "PRIVATE_MEDIA_VERIFICATION_FAILED" }, { status: 502 });
+      }
+
+      const { data: finalized, error: finalizeError } = await supabase.rpc("finalize_private_generation", {
+        p_generation_id: generationId,
+        p_owner_id: userId,
+        p_generation: {
+          prompt: finalPrompt,
+          negative_prompt: negativePrompt,
+          lora_used: identityLora,
+          body_type: bodyMode,
+          steps: normalized.steps,
+          cfg_scale: normalized.cfg,
+          seed: normalized.seed,
+          width: normalized.width,
+          height: normalized.height,
+          upstream_generation_id: validated.generation_id ?? validated.prompt_id ?? null,
+          processing_time_ms: Date.now() - startedAt,
+          metadata: { private_creator_media: true, policy_version: 1, output_count: verified.length },
+        },
+        p_assets: verified,
+      });
+      if (finalizeError || !finalized || !Array.isArray(finalized.asset_ids)) {
+        return NextResponse.json({ error: "PRIVATE_MEDIA_FINALIZATION_FAILED" }, { status: 500 });
+      }
+      return NextResponse.json({
+        success: true,
+        status: "ok",
+        generation_id: finalized.generation_id,
+        assets: finalized.asset_ids.map((id: string, ordinal: number) => ({ id, kind: "image", ordinal })),
+        history_persistence: { status: "PERSISTED" },
+      }, { status: 200 });
     }
     const legacyImages = Array.isArray(validated.images)
       ? validated.images
