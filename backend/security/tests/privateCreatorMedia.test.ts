@@ -35,7 +35,17 @@ test("migration and route preserve server-only least privilege contract", () => 
   const route = readFileSync("app/api/library/assets/[assetId]/signed-url/route.ts", "utf8");
   for (const text of ["force row level security", "from public, anon, authenticated", "to service_role", "security definer", "set search_path = pg_catalog, public, pg_temp", "ordinal between 0 and 3", "^[0-9a-f]{64}$"]) assert.ok(sql.toLowerCase().includes(text.toLowerCase()), text);
   assert.match(route, /ensureActiveSubscription/); assert.match(route, /\.eq\("owner_id", auth\.user\.id\)/); assert.match(route, /Cache-Control": "no-store"/); assert.doesNotMatch(route, /NEXT_PUBLIC_.*R2|SERVICE_ROLE_KEY/);
-  assert.match(readFileSync("lib/private-creator-media/r2.ts", "utf8"), /^import "server-only";/);
+  const privateR2 = readFileSync("lib/private-creator-media/r2.ts", "utf8");
+  assert.match(privateR2, /^import "server-only";/);
+  for (const name of ["CREATOR_GENERATION_R2_ACCESS_KEY_ID", "CREATOR_GENERATION_R2_SECRET_ACCESS_KEY", "CREATOR_GENERATION_R2_BUCKET"]) assert.match(privateR2, new RegExp(name));
+  const privateConfig = readFileSync("lib/private-creator-media/r2Config.ts", "utf8");
+  assert.match(privateConfig, /env\.CREATOR_GENERATION_R2_ACCESS_KEY_ID/); assert.match(privateConfig, /env\.CREATOR_GENERATION_R2_SECRET_ACCESS_KEY/);
+  assert.doesNotMatch(privateConfig, /env\.R2_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)/);
+  assert.doesNotMatch(privateR2, /process\.env\.R2_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)/);
+  const repositoryText = [privateR2, readFileSync(".env.example", "utf8"), readFileSync("docs/operations/private-creator-media-rollout.md", "utf8")].join("\n");
+  assert.doesNotMatch(repositoryText, /NEXT_PUBLIC_CREATOR_GENERATION_R2_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY)/);
+  assert.match(repositoryText, /Railway API private credential:[\s\S]*Object Read & Write/);
+  assert.match(repositoryText, /Vercel master private credential:[\s\S]*Object Read only/);
 });
 
 test("generate response and browser parser preserve asset-level private outputs", () => {

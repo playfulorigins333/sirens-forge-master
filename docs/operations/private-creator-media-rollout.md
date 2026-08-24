@@ -14,7 +14,12 @@ Update `sirens-forge-api` to write every one through four outputs to the configu
 
 ## Phase C — live infrastructure (later, separately authorized)
 
-During this separately authorized phase, create/configure a private creator-generation R2 bucket with no public `r2.dev` or custom-public access and least-privilege credentials, and assign the server-only Vercel/Railway environment variables. Apply the two reviewed Production migrations in order:
+During this separately authorized phase, create/configure `sirens-creator-generations-private` with no public `r2.dev` or custom-public access. Do not share credentials between runtimes and do not treat either credential or feature gate as installed/enabled yet.
+
+- **Railway API private credential:** a dedicated Account API token restricted to this bucket with **Object Read & Write** only. Set `CREATOR_GENERATION_R2_ACCESS_KEY_ID`, `CREATOR_GENERATION_R2_SECRET_ACCESS_KEY`, and `CREATOR_GENERATION_R2_BUCKET` in Railway.
+- **Vercel master private credential:** a separate dedicated Account API token restricted to this same bucket with **Object Read only**. Set `CREATOR_GENERATION_R2_ACCESS_KEY_ID`, `CREATOR_GENERATION_R2_SECRET_ACCESS_KEY`, and `CREATOR_GENERATION_R2_BUCKET` in Vercel. Master needs only HeadObject, GetObject, and presigned GetObject; it needs no write, delete, bucket administration, creation, or configuration permission.
+
+Both services may reuse the account-level `R2_ENDPOINT` and `R2_REGION` / `AWS_DEFAULT_REGION` configuration, but the private token values must remain different. Apply the two reviewed Production migrations in order:
 
 1. `supabase/migrations/20260824090000_private_creator_generation_media.sql`
 2. `supabase/migrations/20260824100000_private_generation_asset_publishing.sql`

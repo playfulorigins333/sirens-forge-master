@@ -3,23 +3,24 @@ import { GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createHash } from "node:crypto";
 import { detectImageMime, MAX_PRIVATE_CREATOR_MEDIA_BYTES, PRIVATE_MEDIA_SIGNED_TTL_SECONDS, validateObjectKey } from "./core";
+import { resolvePrivateR2Config } from "./r2Config";
 
 export type VerifiedPrivateObject = { bucket: string; key: string; mimeType: string; sizeBytes: number; sha256: string };
 
-function config() {
-  if (typeof window !== "undefined") throw new Error("PRIVATE_MEDIA_SERVER_ONLY");
-  const endpointRaw = process.env.R2_ENDPOINT?.trim();
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim();
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim();
-  const bucket = process.env.CREATOR_GENERATION_R2_BUCKET?.trim();
-  if (!endpointRaw || !accessKeyId || !secretAccessKey || !bucket) throw new Error("PRIVATE_MEDIA_R2_NOT_CONFIGURED");
-  const endpoint = new URL(endpointRaw);
-  if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password) throw new Error("PRIVATE_MEDIA_R2_ENDPOINT_INVALID");
-  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) throw new Error("PRIVATE_MEDIA_R2_BUCKET_INVALID");
-  return { endpoint: endpoint.toString(), accessKeyId, secretAccessKey, bucket, region: process.env.R2_REGION || process.env.AWS_DEFAULT_REGION || "auto" };
-}
+// Dedicated inputs: CREATOR_GENERATION_R2_ACCESS_KEY_ID, CREATOR_GENERATION_R2_SECRET_ACCESS_KEY, and CREATOR_GENERATION_R2_BUCKET.
+const config = () => resolvePrivateR2Config(process.env);
 
 function client(c: ReturnType<typeof config>) { return new S3Client({ region: c.region, endpoint: c.endpoint, credentials: { accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey } }); }
+
+export type PrivateGenerationObjectRead = { body?: unknown; contentType?: string; contentLength?: number };
+
+/** Reads a canonical private generation object through the dedicated private credential boundary. */
+export async function readPrivateGenerationObject(bucket: string, objectKey: string): Promise<PrivateGenerationObjectRead> {
+  const c = config();
+  if (bucket !== c.bucket) throw new Error("PRIVATE_MEDIA_BUCKET_NOT_ALLOWED");
+  const response = await client(c).send(new GetObjectCommand({ Bucket: bucket, Key: validateObjectKey(objectKey) }));
+  return { body: response.Body, contentType: response.ContentType, contentLength: response.ContentLength };
+}
 
 export async function verifyPrivateGenerationObject(bucket: string, objectKey: string): Promise<VerifiedPrivateObject> {
   const c = config();
