@@ -25,9 +25,9 @@ do $$ begin if has_table_privilege('anon','public.private_storage_objects','sele
 
 select id as asset0 from public.generation_assets where generation_id='20000000-0000-4000-8000-000000000004' and ordinal=0 \gset
 select id as asset1 from public.generation_assets where generation_id='20000000-0000-4000-8000-000000000004' and ordinal=1 \gset
-select public.creator_publishing_attach_generated_media('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','copy/a','image/png',8,repeat('1',64),'image',now(),null,:'asset0',0);
-select public.creator_publishing_attach_generated_media('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','copy/b','image/png',8,repeat('2',64),'image',now(),null,:'asset1',1);
-select public.creator_publishing_attach_generated_media('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','copy/a','image/png',8,repeat('1',64),'image',now(),null,:'asset0',0);
+select public.creator_publishing_attach_generated_media('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','copy/a','image/png',8::bigint,repeat('1',64),'image',now(),null::text,:'asset0'::uuid,0::smallint);
+select public.creator_publishing_attach_generated_media('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','copy/b','image/png',8::bigint,repeat('2',64),'image',now(),null::text,:'asset1'::uuid,1::smallint);
+select public.creator_publishing_attach_generated_media('10000000-0000-4000-8000-000000000001','40000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000004','copy/a','image/png',8::bigint,repeat('1',64),'image',now(),null::text,:'asset0'::uuid,0::smallint);
 do $$ begin if (select count(*) from public.creator_publishing_media_assets where ai_generation_metadata->>'generation_id'='20000000-0000-4000-8000-000000000004')<>2 then raise exception 'PRIVATE_PUBLISHING_MULTI_OUTPUT_FAILED'; end if; end $$;
 
 insert into public.generations(id,user_id,status,r2_bucket,r2_key,image_url) values('20000000-0000-4000-8000-000000000009','10000000-0000-4000-8000-000000000001','completed','legacy','key','https://legacy.invalid/x.png');
