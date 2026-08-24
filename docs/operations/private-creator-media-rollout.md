@@ -6,7 +6,7 @@ This batch implements only `creator_generation`: private generated creator media
 
 ## Phase A — this code batch
 
-Ship schema, application code, rollback, and tests only. `PRIVATE_CREATOR_MEDIA_ENABLED` remains false. No Production database, deployment, or storage mutation is part of this phase. The legacy generation path remains active.
+Ship schema, application code, rollback, and tests with `PRIVATE_CREATOR_MEDIA_ENABLED` off. This code PR performs no manual Production database, storage, or environment mutation; normal merge/deployment behavior remains separate from enabling private media. The legacy generation path remains active.
 
 ## Phase B — coordinated API follow-up
 
@@ -14,7 +14,12 @@ Update `sirens-forge-api` to write every one through four outputs to the configu
 
 ## Phase C — live infrastructure (later, separately authorized)
 
-Create/configure a private creator-generation R2 bucket with no public `r2.dev` or custom-public access and least-privilege credentials. Assign server-only Vercel/Railway environment variables, apply the reviewed Supabase migration, and deploy while the feature gate remains false.
+During this separately authorized phase, create/configure a private creator-generation R2 bucket with no public `r2.dev` or custom-public access and least-privilege credentials, and assign the server-only Vercel/Railway environment variables. Apply the two reviewed Production migrations in order:
+
+1. `supabase/migrations/20260824090000_private_creator_generation_media.sql`
+2. `supabase/migrations/20260824100000_private_generation_asset_publishing.sql`
+
+Keep `PRIVATE_CREATOR_MEDIA_ENABLED=false` throughout infrastructure setup and deployment. Do not enable the private cutover until both migrations exist, the coordinated API follow-up is complete, the private bucket is configured, and the real canary passes.
 
 ## Phase D — real canary
 
@@ -32,7 +37,10 @@ Only after every consumer is proven migrated, remove the private path's `R2_PUBL
 
 R2 and PostgreSQL do not share a distributed transaction. If API-side upload succeeds but master verification or database finalization fails, an unreferenced R2 object can remain; a later retention/orphan worker must reconcile configured-bucket objects against `private_storage_objects`. Database finalization itself is atomic and idempotent.
 
-To roll back application behavior, set/keep the gate false and redeploy the prior application. Do not delete R2 objects or disable old exposure. After confirming no private-path traffic and taking a fresh backup, an explicitly authorized operator may run `supabase/manual/private_creator_generation_media_rollback.sql`; it removes only this batch's function and tables and preserves `generations` and its legacy columns.
+To roll back application behavior, set/keep `PRIVATE_CREATOR_MEDIA_ENABLED=false`, stop private-path traffic, and redeploy the prior application as appropriate. Do not delete R2 objects or disable old exposure. After taking an appropriate fresh backup, an explicitly authorized operator must run the rollback stages in this order:
+
+1. **First:** `supabase/manual/private_generation_asset_publishing_rollback.sql`. This removes the asset-level publishing RPC/index behavior and restores the legacy generation-level publishing uniqueness contract before the underlying private generation tables and functions are removed. If private multi-output publishing attachments already exist, remove or migrate them as appropriate **before** this stage; restoring the legacy generation-only unique index is not automatically safe while those rows remain.
+2. **Then:** `supabase/manual/private_creator_generation_media_rollback.sql`. This may remove `finalize_private_generation`, `generation_assets`, `private_storage_objects`, and their associated triggers/functions while preserving legacy `generations` data and columns.
 
 ## Launch cost impact
 
