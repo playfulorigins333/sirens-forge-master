@@ -43,3 +43,7 @@ Additional fixed monthly cost introduced by this code batch: **$0**.
 Variable: Cloudflare R2 storage and operations according to actual usage.
 
 Unknown pending measurement: creator media GB-month, Class A operations, Class B operations, and actual launch media volume.
+
+### API request binding requirement
+
+When the private gate is enabled, master creates the opaque generation UUID before dispatch and sends a server-only `private_media_request` containing that UUID and the fixed `creator-generations/<generation-id>/` prefix. The API follow-up must accept this context only from authenticated master ingress, reject mismatched/unsafe prefixes, write every output beneath that exact request-bound prefix, and echo complete storage metadata for that request. Gate-off payloads remain byte-for-byte structurally unchanged by this addition; no request identity or R2 key is browser-controlled.

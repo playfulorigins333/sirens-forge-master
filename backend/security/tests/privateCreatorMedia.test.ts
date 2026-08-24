@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { detectImageMime, isPrivateCreatorMediaEnabled, sanitizeDownloadFilename, validateObjectKey } from "../../../lib/private-creator-media/core";
 import { parseGenerationSuccess, requirePrivateOutputs } from "../../../lib/generation/upstreamResponse";
+import { isPrivateCreatorGenerationOutput, parseCreatorGenerationOutputs } from "../../../lib/generation/clientResponse";
 
 test("private media gate enables only for exact lowercase true", () => {
   for (const value of [undefined, "", "false", "TRUE", "True", "1"]) assert.equal(isPrivateCreatorMediaEnabled({ PRIVATE_CREATOR_MEDIA_ENABLED: value } as NodeJS.ProcessEnv), false);
@@ -34,6 +35,33 @@ test("migration and route preserve server-only least privilege contract", () => 
   const route = readFileSync("app/api/library/assets/[assetId]/signed-url/route.ts", "utf8");
   for (const text of ["force row level security", "from public, anon, authenticated", "to service_role", "security definer", "set search_path = pg_catalog, public, pg_temp", "ordinal between 0 and 3", "^[0-9a-f]{64}$"]) assert.ok(sql.toLowerCase().includes(text.toLowerCase()), text);
   assert.match(route, /ensureActiveSubscription/); assert.match(route, /\.eq\("owner_id", auth\.user\.id\)/); assert.match(route, /Cache-Control": "no-store"/); assert.doesNotMatch(route, /NEXT_PUBLIC_.*R2|SERVICE_ROLE_KEY/);
+  assert.match(readFileSync("lib/private-creator-media/r2.ts", "utf8"), /^import "server-only";/);
+});
+
+test("generate response and browser parser preserve asset-level private outputs", () => {
+  const generation_id="20000000-0000-4000-8000-000000000001", id="30000000-0000-4000-8000-000000000001";
+  const parsed=parseCreatorGenerationOutputs({generation_id,outputs:[{id,generation_id,kind:"image",ordinal:0,private_asset:true}]}); assert.equal(parsed.length,1); assert.equal(isPrivateCreatorGenerationOutput(parsed[0]),true);
+  assert.equal(parseCreatorGenerationOutputs({outputs:[{id,generation_id,kind:"image",ordinal:4,private_asset:true}]}).length,0);
+  const route=readFileSync("app/api/generate/route.ts","utf8"), page=readFileSync("app/generate/page.tsx","utf8");
+  assert.match(route,/private_media_request/); assert.match(route,/creator-generations\/\$\{privateDispatchGenerationId\}\//); assert.match(route,/outputs: finalized\.asset_ids\.map/); assert.match(route,/private_asset: true/);
+  assert.match(page,/isPrivateGenerationOutput/); assert.match(page,/generationAssetId/); assert.match(page,/resolveGenerationOutputUrl/); assert.match(page,/signed-url\?mode=preview/);
+});
+
+test("schema-absent reads are gated and preview refresh is bounded",()=>{
+  const library=readFileSync("app/library/page.tsx","utf8"), loaders=readFileSync("lib/creator-publishing-queue/ui/loaders.ts","utf8"), fanvue=readFileSync("lib/creator-publishing-queue/fanvue/packageMedia.ts","utf8"), client=readFileSync("app/library/LibraryClient.tsx","utf8");
+  for(const source of [library,loaders,fanvue]) assert.match(source,/isPrivateCreatorMediaEnabled/);
+  assert.match(client,/automaticRefreshes >= 1/); assert.match(client,/Retry preview/); assert.doesNotMatch(client,/onError=\{\(\) => \{ void getPrivateAssetUrl/);
+});
+
+test("publishing correction uses asset identity without weakening legacy identity",()=>{
+  const migration=readFileSync("supabase/migrations/20260824100000_private_generation_asset_publishing.sql","utf8"), panel=readFileSync("app/creator/publishing-queue/[contentPackageId]/GeneratedMediaSelectionPanel.tsx","utf8");
+  assert.match(migration,/generation_asset_id/); assert.match(migration,/generation_ordinal/); assert.match(migration,/creator_publishing_media_assets_ai_generation_asset_uidx/); assert.match(migration,/to service_role/); assert.match(migration,/from public,anon,authenticated/);
+  assert.match(panel,/candidate\.candidateId/); assert.match(panel,/generationAssetId/); assert.match(panel,/generationId: candidate\.generationId/);
+});
+
+test("always-on CI executes source and disposable PostgreSQL coverage",()=>{
+  const frontend=readFileSync(".github/workflows/frontend-launch-readiness.yml","utf8"), postgres=readFileSync(".github/workflows/private-creator-media-postgres.yml","utf8");
+  assert.match(frontend,/npm run test:private-creator-media/); assert.match(postgres,/image: postgres:17/); assert.match(postgres,/npm run test:private-creator-media-postgres/); assert.doesNotMatch(postgres,/SUPABASE_SERVICE_ROLE_KEY|production/i);
 });
 
 test("private library rows never use legacy image_url fallback", () => {

@@ -170,14 +170,22 @@ async function getPrivateAssetUrl(assetId: string, mode: "preview" | "download")
 
 function PrivateAssetPreview({ item, className }: { item: LibraryItem; className?: string }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [automaticRefreshes, setAutomaticRefreshes] = useState(0);
+  const [unavailable, setUnavailable] = useState(false);
   useEffect(() => {
     let active = true;
-    void getPrivateAssetUrl(item.id, "preview").then((value) => { if (active) setUrl(value); });
+    setAutomaticRefreshes(0); setUnavailable(false); setUrl(null);
+    void getPrivateAssetUrl(item.id, "preview").then((value) => { if (!active) return; if (value) setUrl(value); else setUnavailable(true); });
     return () => { active = false; };
   }, [item.id]);
-  if (!url) return <div className={`${className || ""} flex items-center justify-center bg-gray-900`}><Lock className="h-6 w-6 text-gray-500" /></div>;
-  if (item.kind === "video") return <video className={className} src={url} controls preload="metadata" onError={() => setUrl(null)} />;
-  return <img className={className} src={url} alt="Private creation" onError={() => { void getPrivateAssetUrl(item.id, "preview").then(setUrl); }} />;
+  const failed = () => {
+    if (automaticRefreshes >= 1) { setUrl(null); setUnavailable(true); return; }
+    setAutomaticRefreshes(1); setUrl(null);
+    void getPrivateAssetUrl(item.id, "preview").then((value) => { if (value) setUrl(value); else setUnavailable(true); });
+  };
+  if (!url) return <div className={`${className || ""} flex flex-col items-center justify-center gap-2 bg-gray-900`}><Lock className="h-6 w-6 text-gray-500" />{unavailable ? <button type="button" className="text-xs text-purple-200 underline" onClick={() => { setAutomaticRefreshes(0); setUnavailable(false); void getPrivateAssetUrl(item.id, "preview").then((value) => { if (value) setUrl(value); else setUnavailable(true); }); }}>Retry preview</button> : null}</div>;
+  if (item.kind === "video") return <video className={className} src={url} controls preload="metadata" onError={failed} />;
+  return <img className={className} src={url} alt="Private creation" onError={failed} />;
 }
 
 async function downloadLibraryItem(item: LibraryItem) {

@@ -266,6 +266,7 @@ export async function POST(req: NextRequest) {
       fluxLock: null,
     });
 
+    const privateDispatchGenerationId = isPrivateCreatorMediaEnabled() ? randomUUID() : null;
     const payload = {
       workflow: {
         type: "sirens_generate_v1",
@@ -275,6 +276,7 @@ export async function POST(req: NextRequest) {
         inputs: {
           workflow_json: workflowGraph,
           identity_lora: identityLora,
+          ...(privateDispatchGenerationId ? { private_media_request: { generation_id: privateDispatchGenerationId, object_prefix: `creator-generations/${privateDispatchGenerationId}/` } } : {}),
         },
       },
     };
@@ -365,7 +367,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (isPrivateCreatorMediaEnabled()) {
-      const generationId = randomUUID();
+      const generationId = privateDispatchGenerationId!;
       let verified;
       try {
         const outputs = requirePrivateOutputs(validated);
@@ -414,7 +416,7 @@ export async function POST(req: NextRequest) {
         success: true,
         status: "ok",
         generation_id: finalized.generation_id,
-        assets: finalized.asset_ids.map((id: string, ordinal: number) => ({ id, kind: "image", ordinal })),
+        outputs: finalized.asset_ids.map((id: string, ordinal: number) => ({ id, generation_id: finalized.generation_id, kind: "image", ordinal, private_asset: true })),
         history_persistence: { status: "PERSISTED" },
       }, { status: 200 });
     }

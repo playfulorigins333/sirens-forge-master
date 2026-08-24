@@ -5,6 +5,7 @@ import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { supabaseServer } from "@/lib/supabaseServer";
 import LibraryClient, { LibraryItem } from "./LibraryClient";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { isPrivateCreatorMediaEnabled } from "@/lib/private-creator-media/core";
 
 export const dynamic = "force-dynamic";
 
@@ -225,6 +226,7 @@ export default async function LibraryPage() {
   const supabase = await supabaseServer();
 
   const admin = getSupabaseAdmin();
+  const privateMediaEnabled = isPrivateCreatorMediaEnabled();
   const [{ data: generationData, error: generationError }, { data: loraData, error: loraError }, { data: privateAssetData, error: privateAssetError }] =
     await Promise.all([
       supabase
@@ -273,7 +275,7 @@ export default async function LibraryPage() {
         )
         .in("user_id", [authUserId, profileId])
         .order("created_at", { ascending: false }),
-      admin.from("generation_assets").select(`id,generation_id,ordinal,kind,created_at,generations!inner(id,user_id,prompt,image_url,created_at,updated_at,status,job_type,body_type,metadata,lora_used,mode)`).eq("owner_id", authUserId).order("created_at", { ascending: false }),
+      privateMediaEnabled ? admin.from("generation_assets").select(`id,generation_id,ordinal,kind,created_at,generations!inner(id,user_id,prompt,image_url,created_at,updated_at,status,job_type,body_type,metadata,lora_used,mode)`).eq("owner_id", authUserId).order("created_at", { ascending: false }) : Promise.resolve({ data: [], error: null }),
     ]);
 
   if (generationError) {
@@ -283,7 +285,7 @@ export default async function LibraryPage() {
   if (loraError) {
     console.error("[library] Failed to load identity seeds:", loraError);
   }
-  if (privateAssetError) console.error("[library] Failed to load private generation assets");
+  if (privateAssetError) throw new Error("Private creator media schema is unavailable while enabled.");
 
   const generationRows: GenerationRow[] = Array.isArray(generationData)
     ? (generationData as GenerationRow[])
