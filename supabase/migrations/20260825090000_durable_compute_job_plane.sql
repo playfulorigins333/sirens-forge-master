@@ -179,6 +179,8 @@ begin
  if p_action='start' and j.state='claimed' then
   update public.compute_jobs set state='running',started_at=coalesce(started_at,now()),updated_at=now() where id=j.id;
   update public.compute_job_attempts set started_at=coalesce(started_at,now()) where id=a.id;
+ elsif p_action='start' and j.state='running' and a.started_at is not null then
+  return j.state;
  elsif p_action='success' and j.state in ('running','cancel_requested') then
   if a.provider_dispatch_intent_at is null or a.provider_dispatched_at is null or a.provider_operation_ref is null then raise exception 'EXECUTION_EVIDENCE_REQUIRED'; end if;
   if a.actual_cost_micros is null then raise exception 'ACTUAL_COST_REQUIRED'; end if;

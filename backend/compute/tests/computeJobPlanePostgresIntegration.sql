@@ -52,7 +52,10 @@ end$$;
 -- Dispatch locking, post-dispatch recovery, no normal claim, and explicit reconciliation.
 do $$ declare j uuid; a uuid; l uuid; rt uuid; begin
  select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000002','image','recover',repeat('d',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('image','dispatch-worker');
- perform public.compute_worker_transition(j,a,l,'start'); assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'opaque-op'); perform public.mark_compute_provider_dispatch(j,a,l,'opaque-op');
+ assert public.compute_worker_transition(j,a,l,'start')='running';
+ assert public.compute_worker_transition(j,a,l,'start')='running';
+ begin perform public.compute_worker_transition(j,a,gen_random_uuid(),'start'); raise exception 'wrong start token accepted'; exception when others then assert sqlerrm like '%LEASE_MISMATCH%'; end;
+ assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'opaque-op'); perform public.mark_compute_provider_dispatch(j,a,l,'opaque-op');
  begin perform public.mark_compute_provider_dispatch(j,a,l,'different-op'); raise exception 'operation replacement accepted'; exception when others then assert sqlerrm like '%PROVIDER_OPERATION_CONFLICT%'; end;
  begin perform public.retry_compute_pre_dispatch(j,a,l,'TRANSIENT_FAILURE',0); raise exception 'post dispatch retry accepted'; exception when others then assert sqlerrm like '%POST_DISPATCH_RETRY_FORBIDDEN%'; end;
  update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); assert (select state='recovering' from public.compute_jobs where id=j); assert (select provider_operation_ref='opaque-op' from public.compute_job_attempts where id=a); assert not exists(select 1 from public.claim_compute_job('image','duplicate-worker') where job_id=j);
