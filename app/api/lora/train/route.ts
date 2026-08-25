@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { entitlementPriority, isDurableComputeJobsEnabled, submitComputeJob, toCreatorComputeStatus } from "@/lib/compute-jobs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,6 +93,21 @@ export async function POST(req: Request) {
 
     const dataset_r2_bucket = datasetJob.final_r2_bucket;
     const dataset_r2_prefix = datasetJob.final_r2_prefix;
+
+    if (isDurableComputeJobsEnabled()) {
+      const job = await submitComputeJob({
+        ownerId: userId,
+        workload: "trainer",
+        idempotencyKey: req.headers.get("idempotency-key"),
+        priorityClass: entitlementPriority(auth.profile?.badge, auth.subscription?.tier_name),
+        request: {
+          identity_id: lora_id,
+          dataset_doctor_job_id: datasetJob.id,
+          dataset_reference: { bucket: datasetJob.final_r2_bucket, prefix: datasetJob.final_r2_prefix },
+        },
+      });
+      return NextResponse.json({ ok: true, lora_id, ...toCreatorComputeStatus(job) }, { status: 202 });
+    }
 
     const now = new Date().toISOString();
     const { error: updateErr } = await supabaseAdmin

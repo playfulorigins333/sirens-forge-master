@@ -3277,6 +3277,8 @@ function HistorySidebar(props: {
 
 export default function GeneratePage() {
   const [generationAvailable, setGenerationAvailable] = useState<boolean | null>(null);
+  const [durableCompute, setDurableCompute] = useState(false);
+  const [queuedComputeMessage, setQueuedComputeMessage] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -3285,9 +3287,24 @@ export default function GeneratePage() {
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
   useEffect(() => {
     let current = true;
-    fetch("/api/generate/availability", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => { if (current) setGenerationAvailable(data?.available === true); }).catch(() => { if (current) setGenerationAvailable(false); });
+    fetch("/api/generate/availability", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => { if (current) { setGenerationAvailable(data?.available === true); setDurableCompute(data?.execution_mode === "durable"); } }).catch(() => { if (current) setGenerationAvailable(false); });
     return () => { current = false; };
   }, []);
+  useEffect(() => {
+    if (!durableCompute) return;
+    const jobId = localStorage.getItem("sirensforge:active-compute-job");
+    if (!jobId) return;
+    let active = true;
+    const poll = async () => {
+      const response = await fetch(`/api/compute/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" }).catch(() => null);
+      if (!active || !response?.ok) return;
+      const job = await response.json();
+      if (["queued", "running", "recovering", "cancelling"].includes(job.status)) setQueuedComputeMessage(job.message || `Your generation is ${job.status}.`);
+      else { localStorage.removeItem("sirensforge:active-compute-job"); setQueuedComputeMessage(`Generation ${job.status}.`); }
+    };
+    void poll(); const timer = window.setInterval(poll, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [durableCompute]);
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState(DEFAULT_NEGATIVE_PROMPT);
@@ -3963,6 +3980,20 @@ ${basePrompt}`,
 
       const generatedAll: GeneratedItem[] = [];
 
+      if (mode === "text_to_image" && durableCompute) {
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+          body: JSON.stringify({ ...baseParams, batch: runCount }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || res.status !== 202 || typeof data?.job_id !== "string") throw new Error(data?.error || "Durable generation submission failed.");
+        localStorage.setItem("sirensforge:active-compute-job", data.job_id);
+        setQueuedComputeMessage(data.message || "Your job is safely queued. Demand is high right now, so it may take a little longer.");
+        setIsGenerating(false);
+        return;
+      }
+
       for (let i = 0; i < runCount; i++) {
         const runSeed = lockSeed ? seedValue + i : Math.floor(Math.random() * 1_000_000_000);
 
@@ -4409,6 +4440,7 @@ ${basePrompt}`,
           />
 
           {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
+          {queuedComputeMessage && <p className="text-[11px] text-purple-300">{queuedComputeMessage}</p>}
 
           <Card className="border-gray-800 bg-gray-900/80">
             <CardContent className="p-4">

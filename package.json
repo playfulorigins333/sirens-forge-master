@@ -13,9 +13,9 @@
     "test:generator-creation-loop": "tsx backend/security/tests/generatorCreationLoopContracts.test.ts",
     "test:final-launch-hardening": "node --experimental-test-module-mocks --import tsx backend/security/tests/lock02bGenerateAuthorization.test.ts",
     "test:complaints-removal-operations": "tsx backend/governance/tests/complaintsRemovalOperations.test.ts",
-  "test:public-policy-privacy-truth": "tsx backend/governance/tests/publicPolicyPrivacyTruth.test.ts",
-  "test:publishing-provider-disconnect": "tsx backend/autopost/tests/publishingProviderDisconnectSourceContract.test.ts",
-  "test:publishing-provider-disconnect-postgres": "node backend/autopost/tests/runPublishingProviderDisconnectPostgresIntegration.mjs",
+    "test:public-policy-privacy-truth": "tsx backend/governance/tests/publicPolicyPrivacyTruth.test.ts",
+    "test:publishing-provider-disconnect": "tsx backend/autopost/tests/publishingProviderDisconnectSourceContract.test.ts",
+    "test:publishing-provider-disconnect-postgres": "node backend/autopost/tests/runPublishingProviderDisconnectPostgresIntegration.mjs",
     "test:material-policy-acceptance-source": "tsx backend/governance/tests/materialPolicyAcceptance.test.ts",
     "test:creator-mfa": "tsx backend/security/tests/creatorMfaFreshAuth.test.ts",
     "test:material-policy-acceptance-postgres": "node backend/governance/tests/runMaterialPolicyAcceptancePostgres.mjs",
@@ -68,7 +68,9 @@
     "test:private-creator-media-postgres": "node backend/security/tests/runPrivateCreatorMediaPostgres.mjs",
     "test:autopost-lazy-supabase-config": "tsx backend/autopost/tests/autopostLazySupabaseConfig.test.ts",
     "test:billing-portal-lazy-stripe": "tsx backend/security/tests/billingPortalLazyStripe.test.ts",
-    "test:legacy-webhook-lazy-stripe": "tsx backend/security/tests/legacyWebhookLazyStripe.test.ts"
+    "test:legacy-webhook-lazy-stripe": "tsx backend/security/tests/legacyWebhookLazyStripe.test.ts",
+    "test:compute-job-plane": "tsx --test backend/compute/tests/computeJobPlaneContracts.test.ts",
+    "test:compute-job-plane-postgres": "node backend/compute/tests/runComputeJobPlanePostgres.mjs"
   },
   "repository": {
     "type": "git",

@@ -1,0 +1,43 @@
+import { createHash, randomUUID } from "node:crypto";
+import { getSupabaseAdmin } from "./supabaseAdmin";
+
+export const isDurableComputeJobsEnabled = () =>
+  process.env.DURABLE_COMPUTE_JOBS_ENABLED === "true";
+
+export type ComputeWorkload = "trainer" | "image" | "video" | "stitch";
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => [key, canonicalize(item)]));
+  }
+  return value;
+}
+
+export async function submitComputeJob(args: {
+  ownerId: string; workload: ComputeWorkload; request: Record<string, unknown>;
+  idempotencyKey?: string | null; priorityClass: "og" | "standard";
+}) {
+  const canonicalRequest = canonicalize(args.request);
+  const fingerprint = createHash("sha256").update(JSON.stringify(canonicalRequest)).digest("hex");
+  const key = (args.idempotencyKey?.trim() || randomUUID()).slice(0, 128);
+  const { data, error } = await getSupabaseAdmin().rpc("submit_compute_job", {
+    p_owner_id: args.ownerId, p_workload: args.workload, p_idempotency_key: key,
+    p_request_fingerprint: fingerprint, p_request_payload: canonicalRequest,
+    p_priority_class: args.priorityClass,
+  });
+  if (error) throw new Error(error.message.includes("IDEMPOTENCY_CONFLICT") ? "IDEMPOTENCY_CONFLICT" : "COMPUTE_SUBMISSION_FAILED");
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export const entitlementPriority = (badge?: string | null, tier?: string | null) =>
+  /\bog\b/i.test(`${badge || ""} ${tier || ""}`) ? "og" as const : "standard" as const;
+
+export const toCreatorComputeStatus = (row: any) => ({
+  job_id: row.job_id ?? row.id, workload: row.workload, status: row.creator_status ?? row.state,
+  queued_at: row.queued_at, started_at: row.started_at, completed_at: row.completed_at ?? row.terminal_at,
+  result_reference: row.result_reference ?? null, safe_error_code: row.safe_error_code ?? null,
+  can_cancel: row.can_cancel ?? ["queued", "running", "recovering", "cancelling"].includes(row.creator_status),
+  ...(row.creator_status === "queued" ? { message: "Your job is safely queued. Demand is high right now, so it may take a little longer." } : {}),
+});
