@@ -45,6 +45,7 @@ import {
 import BuildMyModelCard from "@/components/generate/BuildMyModelCard";
 import { isPrivateCreatorGenerationOutput, parseCreatorGenerationOutputs } from "@/lib/generation/clientResponse";
 import { CREATION_LOOP_HANDOFF_STORAGE_KEY, parseCreationLoopHandoff } from "@/lib/creation-loop/handoff";
+import { resolveIncomingIdentity } from "@/lib/generation/identityHandoff";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -1396,7 +1397,7 @@ function LoraIdentitySection(props: {
       </CardHeader>
 
       <CardContent className="space-y-3 text-xs">
-        {props.options.length === 0 && (
+        {!props.options.some((option) => option.id !== "none") && (
           <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
             No completed AI Twins yet. Prompt-only generation is ready now; train a Twin later if you want identity consistency.
           </div>
@@ -3426,6 +3427,8 @@ export default function GeneratePage() {
 
   const generateDisabledReason = generationAvailable !== true
     ? generationAvailable === null ? "Checking generation availability…" : "Image generation is temporarily unavailable."
+    : pendingIdentityId
+      ? "Checking selected AI Twin…"
     : !hasGenerationInput
       ? mode === "image_to_video"
         ? "Upload a source image before generating video."
@@ -3750,11 +3753,14 @@ export default function GeneratePage() {
   }, [router, searchParams]);
 
   useEffect(() => {
-    if (!pendingIdentityId || !identitiesLoaded) return;
+    const resolution = resolveIncomingIdentity(
+      pendingIdentityId,
+      identitiesLoaded,
+      identityOptions.map((item) => item.id),
+    );
+    if (resolution.status === "not_requested" || resolution.status === "pending") return;
 
-    const match = identityOptions.find((item) => item.id === pendingIdentityId);
-
-    if (!match) {
+    if (resolution.status === "unavailable") {
       setLoraSelection((current) => ({ ...current, mode: "single", selected: [] }));
       setPendingIdentityId(null);
       setErrorMessage("That AI Twin is not available. Your prompt was loaded in prompt-only mode.");
@@ -3763,7 +3769,7 @@ export default function GeneratePage() {
 
     setLoraSelection({
       mode: "single",
-      selected: [pendingIdentityId],
+      selected: [resolution.identityId],
       createNew: false,
       newName: "",
     });
@@ -3903,6 +3909,11 @@ ${basePrompt}`,
       feminine: "body_feminine",
       masculine: "body_masculine",
     };
+
+    if (pendingIdentityId) {
+      setErrorMessage("Checking selected AI Twin…");
+      return;
+    }
 
     const selectedLoraId = loraSelection.selected.find((id) =>
       isUuidLike(id) && identityOptions.some((option) => option.id === id)

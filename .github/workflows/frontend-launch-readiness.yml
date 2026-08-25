@@ -16,6 +16,7 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run test:frontend-launch-readiness
+      - run: npm run test:generator-creation-loop
       - run: npm run test:private-creator-media
       - run: npm run test:final-launch-hardening
       - run: npm run test:complaints-removal-operations
