@@ -19,7 +19,7 @@ import { requirePrivateOutputs } from "../../../lib/generation/upstreamResponse"
 import { isPrivateCreatorMediaEnabled } from "../../../lib/private-creator-media/core";
 import { verifyPrivateGenerationObject } from "../../../lib/private-creator-media/r2";
 import { randomUUID } from "node:crypto";
-import { entitlementPriority, isDurableComputeJobsEnabled, submitComputeJob, toCreatorComputeStatus } from "../../../lib/compute-jobs";
+import { computePriorityForTier, isDurableComputeJobsEnabled, submitComputeJob, toCreatorComputeStatus } from "../../../lib/compute-jobs";
 import { resolveOwnedIdentityLoraMetadata } from "../../../lib/generation/identityLoraMetadata";
 
 type GenerateImageRequest = {
@@ -257,7 +257,7 @@ export async function POST(req: NextRequest) {
         ownerId: userId,
         workload: "image",
         idempotencyKey: req.headers.get("idempotency-key"),
-        priorityClass: entitlementPriority(auth.profile?.badge, auth.subscription?.tier_name),
+        priorityClass: computePriorityForTier(auth.subscription?.tier_name),
         request: {
           prompt,
           negative_prompt: negativePrompt,

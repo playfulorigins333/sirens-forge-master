@@ -24,6 +24,15 @@ are idempotent; conflicting amounts fail closed. A denied authorization finishes
 attempt, clears its lease, and queues it until the configured spend-hold interval.
 The service role executes security-definer functions but has no direct compute-table
 DML grant, keeping the ledger append-only through the control contract.
+Claim ordinals are monotonic and independent from the bounded retry counter, so
+capacity/spend holds never exhaust execution retries. Actual settlement requires
+provider-dispatch evidence and evaluates daily/monthly threshold crossings against
+the attempt's reserved policy. A service-only, idempotency-keyed correction RPC
+supports signed post-settlement adjustments without weakening worker leases.
+
+Trainer durable submission and `user_loras` projection linkage occur in one database
+transaction. Image submission priority uses only the exact canonical `og_throne`
+subscription tier, and the Generator persists/polls every nonterminal submitted job.
 
 Pass 3 must supply worker/provider adapters, reconciliation, cancellation, and result
 finalization. Video remains unavailable. No Salad configuration, provider workload,

@@ -32,8 +32,8 @@ export async function submitComputeJob(args: {
   return Array.isArray(data) ? data[0] : data;
 }
 
-export const entitlementPriority = (badge?: string | null, tier?: string | null) =>
-  /\bog\b/i.test(`${badge || ""} ${tier || ""}`) ? "og" as const : "standard" as const;
+export const computePriorityForTier = (tierName?: string | null) =>
+  tierName === "og_throne" ? "og" as const : "standard" as const;
 
 function safeResultReference(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;

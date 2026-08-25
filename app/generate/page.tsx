@@ -3278,7 +3278,7 @@ function HistorySidebar(props: {
 export default function GeneratePage() {
   const [generationAvailable, setGenerationAvailable] = useState<boolean | null>(null);
   const [durableCompute, setDurableCompute] = useState(false);
-  const [activeComputeJobId, setActiveComputeJobId] = useState<string | null>(null);
+  const [activeComputeJobIds, setActiveComputeJobIds] = useState<string[]>([]);
   const [queuedComputeMessage, setQueuedComputeMessage] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -3293,22 +3293,36 @@ export default function GeneratePage() {
   }, []);
   useEffect(() => {
     if (!durableCompute) return;
-    const restoredJobId = localStorage.getItem("sirensforge:active-compute-job");
-    if (restoredJobId && !activeComputeJobId) setActiveComputeJobId(restoredJobId);
-  }, [durableCompute, activeComputeJobId]);
+    if (activeComputeJobIds.length) return;
+    try {
+      const restored = JSON.parse(localStorage.getItem("sirensforge:active-compute-jobs") || "[]");
+      if (Array.isArray(restored)) setActiveComputeJobIds([...new Set(restored.filter((id): id is string => typeof id === "string"))]);
+    } catch { /* Invalid local state is ignored; it never marks a job complete. */ }
+  }, [durableCompute, activeComputeJobIds.length]);
   useEffect(() => {
-    if (!durableCompute || !activeComputeJobId) return;
+    if (!durableCompute || !activeComputeJobIds.length) return;
     let active = true;
     const poll = async () => {
-      const response = await fetch(`/api/compute/jobs/${encodeURIComponent(activeComputeJobId)}`, { cache: "no-store" }).catch(() => null);
-      if (!active || !response?.ok) return;
-      const job = await response.json();
-      if (["queued", "running", "recovering", "cancelling"].includes(job.status)) setQueuedComputeMessage(job.message || `Your generation is ${job.status}.`);
-      else { localStorage.removeItem("sirensforge:active-compute-job"); setActiveComputeJobId(null); setQueuedComputeMessage(`Generation ${job.status}.`); }
+      const terminalIds: string[] = [];
+      const activeStatuses: string[] = [];
+      await Promise.all(activeComputeJobIds.map(async (jobId) => {
+        const response = await fetch(`/api/compute/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" }).catch(() => null);
+        if (!active || !response?.ok) return;
+        const job = await response.json();
+        if (["queued", "running", "recovering", "cancelling"].includes(job.status)) activeStatuses.push(job.status);
+        else terminalIds.push(jobId);
+      }));
+      if (!active) return;
+      if (activeStatuses.length) setQueuedComputeMessage(`${activeStatuses.length} generation job${activeStatuses.length === 1 ? " is" : "s are"} safely queued or processing.`);
+      if (terminalIds.length) setActiveComputeJobIds((ids) => {
+        const remaining = ids.filter((id) => !terminalIds.includes(id));
+        localStorage.setItem("sirensforge:active-compute-jobs", JSON.stringify(remaining));
+        return remaining;
+      });
     };
     void poll(); const timer = window.setInterval(poll, 5000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [durableCompute, activeComputeJobId]);
+  }, [durableCompute, activeComputeJobIds]);
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState(DEFAULT_NEGATIVE_PROMPT);
@@ -3992,8 +4006,11 @@ ${basePrompt}`,
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || res.status !== 202 || typeof data?.job_id !== "string") throw new Error(data?.error || "Durable generation submission failed.");
-        localStorage.setItem("sirensforge:active-compute-job", data.job_id);
-        setActiveComputeJobId(data.job_id);
+        setActiveComputeJobIds((ids) => {
+          const next = [...new Set([...ids, data.job_id])];
+          localStorage.setItem("sirensforge:active-compute-jobs", JSON.stringify(next));
+          return next;
+        });
         setQueuedComputeMessage(data.message || "Your job is safely queued. Demand is high right now, so it may take a little longer.");
         setIsGenerating(false);
         return;

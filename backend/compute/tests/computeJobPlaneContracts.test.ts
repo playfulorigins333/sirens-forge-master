@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { toCreatorComputeStatus } from "../../../lib/compute-jobs";
+import { computePriorityForTier, toCreatorComputeStatus } from "../../../lib/compute-jobs";
 const read = (path: string) => fs.readFileSync(path, "utf8");
 const migration = read("supabase/migrations/20260825090000_durable_compute_job_plane.sql");
 
@@ -10,6 +10,18 @@ test("durable gate is server-only, exact true, and defaults off", () => {
   assert.match(source, /DURABLE_COMPUTE_JOBS_ENABLED === "true"/);
   assert.doesNotMatch(read(".env.example"), /NEXT_PUBLIC_DURABLE/);
   assert.match(read(".env.example"), /DURABLE_COMPUTE_JOBS_ENABLED=false/);
+});
+
+test("compute priority uses only the exact authoritative subscription tier", () => {
+  assert.equal(computePriorityForTier("og_throne"), "og");
+  assert.equal(computePriorityForTier("early_bird"), "standard");
+  assert.equal(computePriorityForTier(null), "standard");
+  assert.equal(computePriorityForTier("unknown_og"), "standard");
+  const image = read("app/api/generate/route.ts");
+  const trainer = read("app/api/lora/train/route.ts");
+  assert.match(image, /computePriorityForTier\(auth\.subscription\?\.tier_name\)/);
+  assert.match(trainer, /computePriorityForTier\(auth\.subscription\?\.tier_name\)/);
+  assert.doesNotMatch(`${image}\n${trainer}`, /computePriorityForTier\(auth\.profile|priorityClass:.*badge/);
 });
 
 test("compute privileges are narrow and fake processing remains absent", () => {
@@ -55,8 +67,10 @@ test("migration exposes bounded heartbeat, retry, recovery and exact-cost contra
 test("video stays unavailable and durable client tracks a submitted job immediately", () => {
   assert.match(read("app/api/generate_video/route.ts"), /VIDEO_GENERATION_UNAVAILABLE/);
   const client = read("app/generate/page.tsx");
-  assert.match(client, /setActiveComputeJobId\(data\.job_id\)/);
-  assert.match(client, /\[durableCompute, activeComputeJobId\]/);
+  assert.match(client, /activeComputeJobIds/);
+  assert.match(client, /sirensforge:active-compute-jobs/);
+  assert.match(client, /new Set\(\[\.\.\.ids, data\.job_id\]\)/);
+  assert.match(client, /ids\.filter\(\(id\) => !terminalIds\.includes\(id\)\)/);
   assert.match(client, /batch: runCount/);
 });
 
