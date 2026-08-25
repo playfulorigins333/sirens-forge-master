@@ -33,7 +33,8 @@ create table public.compute_job_attempts (
  lease_token uuid not null unique, worker_ref text not null check(length(worker_ref) between 1 and 200), claimed_at timestamptz not null default now(), started_at timestamptz,
  heartbeat_at timestamptz not null default now(), lease_expires_at timestamptz not null, provider_dispatch_intent_at timestamptz, provider_dispatched_at timestamptz, provider_operation_ref text,
  finished_at timestamptz, outcome_class text, safe_error_code text, reserved_cost_micros bigint check(reserved_cost_micros>=0), actual_cost_micros bigint check(actual_cost_micros>=0),
- runtime_ms bigint check(runtime_ms>=0), recovery_token uuid, spend_policy_id uuid references public.compute_spend_policies(id), internal_telemetry jsonb not null default '{}'::jsonb, unique(job_id,ordinal)
+ runtime_ms bigint check(runtime_ms>=0), recovery_token uuid, recovery_fingerprint text, recovery_state public.compute_job_state,
+ spend_policy_id uuid references public.compute_spend_policies(id), internal_telemetry jsonb not null default '{}'::jsonb, unique(job_id,ordinal)
 );
 create table public.compute_cost_ledger (
  id uuid primary key default gen_random_uuid(), job_id uuid not null references public.compute_jobs(id) on delete restrict,
@@ -69,7 +70,10 @@ begin if p_code is null then return null; end if; if length(p_code) not between 
 create function public.compute_creator_result(p_result jsonb) returns jsonb language sql immutable set search_path=pg_catalog,public as $$
  select case when p_result is null then null else jsonb_strip_nulls(jsonb_build_object(
   'generation_id',case when p_result->>'generation_id' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' then p_result->'generation_id' end,
-  'asset_ids',case when jsonb_typeof(p_result->'asset_ids')='array' then p_result->'asset_ids' end,
+  'asset_ids',case when jsonb_typeof(p_result->'asset_ids')='array' and not exists (
+    select 1 from jsonb_array_elements(p_result->'asset_ids') item
+    where jsonb_typeof(item)<>'string' or item#>>'{}' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+  ) then p_result->'asset_ids' end,
   'project_id',case when p_result->>'project_id' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' then p_result->'project_id' end,
   'result_id',case when p_result->>'result_id' ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' then p_result->'result_id' end)) end
 $$;
@@ -141,7 +145,7 @@ begin
  select count(*) into active_count from public.compute_jobs where workload=p_workload and state in ('claimed','running','recovering','cancel_requested'); if active_count>=p.max_global_active then return; end if;
  select * into j from public.compute_jobs q where q.workload=p_workload and q.state='queued' and q.available_at<=now() and q.retry_count<q.max_attempts
  and (q.workload='stitch' or not exists(select 1 from public.compute_jobs x where x.owner_id=q.owner_id and x.workload=q.workload and x.state in ('claimed','running','recovering','cancel_requested')))
- order by q.queued_at-(case when q.priority_class='og' then p.og_priority_seconds else 0 end)*interval '1 second',q.queued_at,q.id for update skip locked limit 1;
+ order by q.queued_at-(case when q.workload in ('trainer','image','video') and q.priority_class='og' then p.og_priority_seconds else 0 end)*interval '1 second',q.queued_at,q.id for update skip locked limit 1;
  if not found then return; end if;
  update public.compute_jobs set state='claimed',attempt_count=attempt_count+1,lease_token=gen_random_uuid(),lease_expires_at=now()+p.lease_seconds*interval '1 second',internal_hold_code=null,updated_at=now() where id=j.id returning * into j;
  insert into public.compute_job_attempts(job_id,ordinal,lease_token,worker_ref,lease_expires_at) values(j.id,j.attempt_count,j.lease_token,p_worker_ref,j.lease_expires_at) returning * into a;
@@ -160,17 +164,31 @@ end$$;
 
 create function public.compute_worker_transition(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_action text,p_safe_error_code text default null,p_result_reference jsonb default null)
 returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
-declare j public.compute_jobs; a public.compute_job_attempts; safe_code text;
+declare j public.compute_jobs; a public.compute_job_attempts; safe_code text; expected_outcome text;
 begin
- select * into j from public.compute_jobs where id=p_job_id for update;
- if (p_action='success' and j.state='succeeded') or (p_action='failure' and j.state='failed') or (p_action='cancelled' and j.state='cancelled') then return j.state; end if;
+ select * into j from public.compute_jobs where id=p_job_id for update; if not found then raise exception 'JOB_NOT_FOUND'; end if;
  select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
- if not found or j.lease_token is distinct from p_lease_token or a.lease_token<>p_lease_token or a.finished_at is not null or j.lease_expires_at<=clock_timestamp() then raise exception 'LEASE_MISMATCH'; end if;
+ if not found or a.lease_token<>p_lease_token then raise exception 'LEASE_MISMATCH'; end if;
+ expected_outcome:=case p_action when 'success' then 'succeeded' when 'failure' then 'failed' when 'cancelled' then 'cancelled' end;
+ if j.state in ('succeeded','failed','cancelled') then
+  if expected_outcome is not null and j.state::text=expected_outcome and a.finished_at is not null and a.outcome_class=expected_outcome then return j.state; end if;
+  raise exception 'TERMINAL_TRANSITION_CONFLICT';
+ end if;
+ if j.lease_token is distinct from p_lease_token or a.finished_at is not null or j.lease_expires_at<=clock_timestamp() then raise exception 'LEASE_MISMATCH'; end if;
  safe_code:=public.compute_safe_error(p_safe_error_code);
- if p_action='start' and j.state='claimed' then update public.compute_jobs set state='running',started_at=coalesce(started_at,now()),updated_at=now() where id=j.id; update public.compute_job_attempts set started_at=coalesce(started_at,now()) where id=a.id;
- elsif p_action='success' and j.state in ('running','cancel_requested') then update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=public.compute_creator_result(p_result_reference),lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='succeeded' where id=a.id;
- elsif p_action='failure' and j.state in ('claimed','running') then update public.compute_jobs set state='failed',terminal_at=now(),safe_error_code=safe_code,lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='failed',safe_error_code=safe_code where id=a.id;
- elsif p_action='cancelled' and j.state='cancel_requested' then update public.compute_jobs set state='cancelled',terminal_at=now(),lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='cancelled' where id=a.id;
+ if p_action='start' and j.state='claimed' then
+  update public.compute_jobs set state='running',started_at=coalesce(started_at,now()),updated_at=now() where id=j.id;
+  update public.compute_job_attempts set started_at=coalesce(started_at,now()) where id=a.id;
+ elsif p_action='success' and j.state in ('running','cancel_requested') then
+  if a.provider_dispatch_intent_at is null or a.provider_dispatched_at is null or a.provider_operation_ref is null then raise exception 'EXECUTION_EVIDENCE_REQUIRED'; end if;
+  if a.actual_cost_micros is null then raise exception 'ACTUAL_COST_REQUIRED'; end if;
+  update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=public.compute_creator_result(p_result_reference),lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
+  update public.compute_job_attempts set finished_at=now(),outcome_class='succeeded' where id=a.id;
+ elsif p_action in ('failure','cancelled') and ((p_action='failure' and j.state in ('claimed','running')) or (p_action='cancelled' and j.state='cancel_requested')) then
+  if a.provider_dispatch_intent_at is not null and a.actual_cost_micros is null then raise exception 'ACTUAL_COST_REQUIRED'; end if;
+  if a.provider_dispatch_intent_at is null then perform public.release_compute_reservation(a.id); end if;
+  update public.compute_jobs set state=expected_outcome::public.compute_job_state,terminal_at=now(),safe_error_code=case when p_action='failure' then safe_code else safe_error_code end,lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
+  update public.compute_job_attempts set finished_at=now(),outcome_class=expected_outcome,safe_error_code=case when p_action='failure' then safe_code else safe_error_code end where id=a.id;
  else raise exception 'ILLEGAL_COMPUTE_TRANSITION'; end if;
  select state into j.state from public.compute_jobs where id=j.id; return j.state;
 end$$;
@@ -214,7 +232,7 @@ declare j public.compute_jobs; a public.compute_job_attempts; n int:=0;
 begin
  for j in select * from public.compute_jobs where state in ('claimed','running','cancel_requested') and lease_expires_at<now() order by id for update skip locked loop
   select * into a from public.compute_job_attempts where job_id=j.id and ordinal=j.attempt_count for update;
-  if a.provider_dispatched_at is not null or a.provider_operation_ref is not null then
+  if a.provider_dispatch_intent_at is not null or a.provider_dispatched_at is not null or a.provider_operation_ref is not null then
    update public.compute_jobs set state='recovering',lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
    update public.compute_job_attempts set recovery_token=coalesce(recovery_token,gen_random_uuid()),outcome_class='dispatch_uncertain' where id=a.id;
   elsif j.state='cancel_requested' then
@@ -230,14 +248,52 @@ begin
  end loop; return n;
 end$$;
 
-create function public.reconcile_compute_recovery(p_job_id uuid,p_attempt_id uuid,p_recovery_token uuid,p_outcome text,p_provider_nonexecution_proven boolean default false,p_safe_error_code text default null,p_result_reference jsonb default null) returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
-declare j public.compute_jobs; a public.compute_job_attempts; safe_code text;
+create function public.reconcile_compute_recovery(p_job_id uuid,p_attempt_id uuid,p_recovery_token uuid,p_outcome text,p_provider_nonexecution_proven boolean default false,p_safe_error_code text default null,p_result_reference jsonb default null,p_actual_cost_micros bigint default null,p_runtime_ms bigint default 0,p_provider_operation_ref text default null) returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts; safe_code text; fingerprint text; final_state public.compute_job_state; pol public.compute_spend_policies;
 begin
- safe_code:=public.compute_safe_error(p_safe_error_code); select * into j from public.compute_jobs where id=p_job_id for update; select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
- if not found or j.state<>'recovering' or a.recovery_token is distinct from p_recovery_token or a.finished_at is not null then raise exception 'RECOVERY_AUTHORITY_MISMATCH'; end if;
- if p_outcome='requeue' then if not p_provider_nonexecution_proven then raise exception 'PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED'; end if; perform public.release_compute_reservation(a.id); if j.cancellation_requested_at is not null then update public.compute_jobs set state='cancelled',terminal_at=now(),updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='cancelled_provider_nonexecution_proven' where id=a.id; else if j.retry_count+1<j.max_attempts then update public.compute_jobs set state='queued',retry_count=retry_count+1,available_at=now(),updated_at=now() where id=j.id; else update public.compute_jobs set state='failed',retry_count=retry_count+1,terminal_at=now(),safe_error_code='RETRY_LIMIT_REACHED',updated_at=now() where id=j.id; end if; update public.compute_job_attempts set finished_at=now(),outcome_class='provider_nonexecution_proven' where id=a.id; end if;
- elsif p_outcome in ('succeeded','failed','cancelled') then update public.compute_jobs set state=p_outcome::public.compute_job_state,terminal_at=now(),result_reference=case when p_outcome='succeeded' then public.compute_creator_result(p_result_reference) else result_reference end,safe_error_code=case when p_outcome='failed' then safe_code else safe_error_code end,updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='reconciled_'||p_outcome,safe_error_code=case when p_outcome='failed' then safe_code else safe_error_code end where id=a.id;
- else raise exception 'INVALID_RECOVERY_OUTCOME'; end if; select state into j.state from public.compute_jobs where id=j.id; return j.state;
+ safe_code:=public.compute_safe_error(p_safe_error_code);
+ fingerprint:=encode(digest(jsonb_build_array(p_outcome,p_provider_nonexecution_proven,safe_code,public.compute_creator_result(p_result_reference),p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref)::text,'sha256'),'hex');
+ select * into j from public.compute_jobs where id=p_job_id for update; if not found then raise exception 'RECOVERY_AUTHORITY_MISMATCH'; end if;
+ select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or a.recovery_token is distinct from p_recovery_token then raise exception 'RECOVERY_AUTHORITY_MISMATCH'; end if;
+ if a.recovery_fingerprint is not null then
+  if a.recovery_fingerprint=fingerprint then return a.recovery_state; end if;
+  raise exception 'RECOVERY_REPLAY_CONFLICT';
+ end if;
+ if j.state<>'recovering' or a.finished_at is not null then raise exception 'RECOVERY_AUTHORITY_MISMATCH'; end if;
+ if p_outcome='requeue' then
+  if not p_provider_nonexecution_proven or p_actual_cost_micros is not null then raise exception 'PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED'; end if;
+  perform public.release_compute_reservation(a.id);
+  if j.cancellation_requested_at is not null then final_state:='cancelled';
+  elsif j.retry_count+1<j.max_attempts then final_state:='queued';
+  else final_state:='failed'; end if;
+  update public.compute_jobs set state=final_state,retry_count=case when cancellation_requested_at is null then retry_count+1 else retry_count end,
+   available_at=case when final_state='queued' then now() else available_at end,terminal_at=case when final_state in ('failed','cancelled') then now() else terminal_at end,
+   safe_error_code=case when final_state='failed' then 'RETRY_LIMIT_REACHED' else safe_error_code end,updated_at=now() where id=j.id;
+  update public.compute_job_attempts set finished_at=now(),outcome_class=case when final_state='cancelled' then 'cancelled_provider_nonexecution_proven' else 'provider_nonexecution_proven' end,
+   recovery_fingerprint=fingerprint,recovery_state=final_state where id=a.id;
+ elsif p_outcome in ('succeeded','failed','cancelled') then
+  if p_actual_cost_micros is null or p_actual_cost_micros<0 or p_runtime_ms<0 or a.provider_dispatch_intent_at is null then raise exception 'RECOVERY_EXECUTION_EVIDENCE_REQUIRED'; end if;
+  if p_provider_operation_ref is not null then
+   if length(p_provider_operation_ref) not between 1 and 500 then raise exception 'INVALID_OPERATION_REFERENCE'; end if;
+   if a.provider_operation_ref is not null and a.provider_operation_ref<>p_provider_operation_ref then raise exception 'PROVIDER_OPERATION_CONFLICT'; end if;
+   update public.compute_job_attempts set provider_operation_ref=coalesce(provider_operation_ref,p_provider_operation_ref),provider_dispatched_at=coalesce(provider_dispatched_at,now()) where id=a.id returning * into a;
+  end if;
+  if a.actual_cost_micros is not null and (a.actual_cost_micros<>p_actual_cost_micros or a.runtime_ms<>p_runtime_ms) then raise exception 'ACTUAL_COST_CONFLICT'; end if;
+  if a.actual_cost_micros is null then
+   select * into pol from public.compute_spend_policies where id=a.spend_policy_id for update; if not found then raise exception 'SPEND_POLICY_NOT_FOUND'; end if;
+   perform public.release_compute_reservation(a.id);
+   insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'actual',p_actual_cost_micros);
+   update public.compute_job_attempts set actual_cost_micros=p_actual_cost_micros,runtime_ms=p_runtime_ms where id=a.id returning * into a;
+   perform public.emit_compute_spend_thresholds(a.spend_policy_id);
+  end if;
+  final_state:=p_outcome::public.compute_job_state;
+  update public.compute_jobs set state=final_state,terminal_at=now(),result_reference=case when p_outcome='succeeded' then public.compute_creator_result(p_result_reference) else result_reference end,
+   safe_error_code=case when p_outcome='failed' then safe_code else safe_error_code end,updated_at=now() where id=j.id;
+  update public.compute_job_attempts set finished_at=now(),outcome_class='reconciled_'||p_outcome,safe_error_code=case when p_outcome='failed' then safe_code else safe_error_code end,
+   recovery_fingerprint=fingerprint,recovery_state=final_state where id=a.id;
+ else raise exception 'INVALID_RECOVERY_OUTCOME'; end if;
+ return final_state;
 end$$;
 
 create function public.creator_compute_status(p_owner_id uuid,p_job_id uuid) returns table(job_id uuid,workload public.compute_workload,creator_status text,queued_at timestamptz,started_at timestamptz,completed_at timestamptz,result_reference jsonb,safe_error_code text,can_cancel boolean)
@@ -264,12 +320,13 @@ begin
 end$$;
 
 create function public.record_compute_actual_cost(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_actual_cost_micros bigint,p_runtime_ms bigint,p_telemetry jsonb default '{}') returns void language plpgsql security definer set search_path=pg_catalog,public as $$
-declare j public.compute_jobs; a public.compute_job_attempts;
+declare j public.compute_jobs; a public.compute_job_attempts; pol public.compute_spend_policies;
 begin
  if p_actual_cost_micros<0 or p_runtime_ms<0 then raise exception 'INVALID_COST'; end if; select * into j from public.compute_jobs where id=p_job_id for update; select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
  if not found or j.lease_token is distinct from p_lease_token or a.lease_token<>p_lease_token or j.lease_expires_at<=clock_timestamp() then raise exception 'LEASE_MISMATCH'; end if;
  if a.provider_dispatched_at is null or a.provider_operation_ref is null then raise exception 'EXECUTION_EVIDENCE_REQUIRED'; end if;
  if a.actual_cost_micros is not null then if a.actual_cost_micros=p_actual_cost_micros and a.runtime_ms=p_runtime_ms then return; else raise exception 'ACTUAL_COST_CONFLICT'; end if; end if;
+ select * into pol from public.compute_spend_policies where id=a.spend_policy_id for update; if not found then raise exception 'SPEND_POLICY_NOT_FOUND'; end if;
  if a.reserved_cost_micros is not null then insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'release',-a.reserved_cost_micros); end if;
  insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'actual',p_actual_cost_micros); update public.compute_job_attempts set actual_cost_micros=p_actual_cost_micros,runtime_ms=p_runtime_ms,internal_telemetry=p_telemetry where id=a.id; perform public.emit_compute_spend_thresholds(a.spend_policy_id);
 end$$;
@@ -282,12 +339,13 @@ begin
  perform pg_advisory_xact_lock(hashtextextended('compute-cost:'||p_job_id::text,0));
  select * into existing from public.compute_cost_ledger where job_id=p_job_id and correction_key=p_correction_key and kind='correction';
  if found then if existing.amount_micros<>p_delta_micros or existing.reason_code<>p_reason_code then raise exception 'COST_CORRECTION_CONFLICT'; end if; return existing.id; end if;
- if not exists(select 1 from public.compute_cost_ledger where job_id=p_job_id and kind='actual') then raise exception 'ACTUAL_COST_REQUIRED'; end if; select coalesce(sum(amount_micros),0) into net_cost from public.compute_cost_ledger where job_id=p_job_id; if net_cost+p_delta_micros<0 then raise exception 'NEGATIVE_JOB_COST_FORBIDDEN'; end if;
+ if not exists(select 1 from public.compute_cost_ledger where job_id=p_job_id and kind='actual') then raise exception 'ACTUAL_COST_REQUIRED'; end if;
+ select a.spend_policy_id into policy_id from public.compute_job_attempts a join public.compute_cost_ledger l on l.attempt_id=a.id where l.job_id=p_job_id and l.kind='actual' limit 1; perform 1 from public.compute_spend_policies where id=policy_id for update;
+ select coalesce(sum(amount_micros),0) into net_cost from public.compute_cost_ledger where job_id=p_job_id; if net_cost+p_delta_micros<0 then raise exception 'NEGATIVE_JOB_COST_FORBIDDEN'; end if;
  insert into public.compute_cost_ledger(job_id,kind,amount_micros,correction_key,reason_code) values(p_job_id,'correction',p_delta_micros,p_correction_key,p_reason_code) returning id into inserted_id;
- select a.spend_policy_id into policy_id from public.compute_job_attempts a join public.compute_cost_ledger l on l.attempt_id=a.id where l.job_id=p_job_id and l.kind='actual' limit 1;
  if p_delta_micros>0 and policy_id is not null then perform public.emit_compute_spend_thresholds(policy_id); end if; return inserted_id;
 end$$;
 
-revoke all on function public.compute_safe_error(text),public.compute_creator_result(jsonb),public.emit_compute_spend_thresholds(uuid),public.release_compute_reservation(uuid),public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text),public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text),public.claim_compute_job(public.compute_workload,text),public.heartbeat_compute_job(uuid,uuid,uuid),public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb),public.begin_compute_provider_dispatch(uuid,uuid,uuid),public.mark_compute_provider_dispatch(uuid,uuid,uuid,text),public.retry_compute_pre_dispatch(uuid,uuid,uuid,text,integer),public.recover_stale_compute_jobs(),public.reconcile_compute_recovery(uuid,uuid,uuid,text,boolean,text,jsonb),public.creator_compute_status(uuid,uuid),public.cancel_compute_job(uuid,uuid),public.authorize_compute_dispatch(uuid,uuid,uuid,bigint),public.record_compute_actual_cost(uuid,uuid,uuid,bigint,bigint,jsonb),public.record_compute_cost_correction(uuid,text,bigint,text) from public,anon,authenticated;
-grant execute on function public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text),public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text),public.claim_compute_job(public.compute_workload,text),public.heartbeat_compute_job(uuid,uuid,uuid),public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb),public.begin_compute_provider_dispatch(uuid,uuid,uuid),public.mark_compute_provider_dispatch(uuid,uuid,uuid,text),public.retry_compute_pre_dispatch(uuid,uuid,uuid,text,integer),public.recover_stale_compute_jobs(),public.reconcile_compute_recovery(uuid,uuid,uuid,text,boolean,text,jsonb),public.creator_compute_status(uuid,uuid),public.cancel_compute_job(uuid,uuid),public.authorize_compute_dispatch(uuid,uuid,uuid,bigint),public.record_compute_actual_cost(uuid,uuid,uuid,bigint,bigint,jsonb),public.record_compute_cost_correction(uuid,text,bigint,text) to service_role;
+revoke all on function public.compute_safe_error(text),public.compute_creator_result(jsonb),public.emit_compute_spend_thresholds(uuid),public.release_compute_reservation(uuid),public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text),public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text),public.claim_compute_job(public.compute_workload,text),public.heartbeat_compute_job(uuid,uuid,uuid),public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb),public.begin_compute_provider_dispatch(uuid,uuid,uuid),public.mark_compute_provider_dispatch(uuid,uuid,uuid,text),public.retry_compute_pre_dispatch(uuid,uuid,uuid,text,integer),public.recover_stale_compute_jobs(),public.reconcile_compute_recovery(uuid,uuid,uuid,text,boolean,text,jsonb,bigint,bigint,text),public.creator_compute_status(uuid,uuid),public.cancel_compute_job(uuid,uuid),public.authorize_compute_dispatch(uuid,uuid,uuid,bigint),public.record_compute_actual_cost(uuid,uuid,uuid,bigint,bigint,jsonb),public.record_compute_cost_correction(uuid,text,bigint,text) from public,anon,authenticated;
+grant execute on function public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text),public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text),public.claim_compute_job(public.compute_workload,text),public.heartbeat_compute_job(uuid,uuid,uuid),public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb),public.begin_compute_provider_dispatch(uuid,uuid,uuid),public.mark_compute_provider_dispatch(uuid,uuid,uuid,text),public.retry_compute_pre_dispatch(uuid,uuid,uuid,text,integer),public.recover_stale_compute_jobs(),public.reconcile_compute_recovery(uuid,uuid,uuid,text,boolean,text,jsonb,bigint,bigint,text),public.creator_compute_status(uuid,uuid),public.cancel_compute_job(uuid,uuid),public.authorize_compute_dispatch(uuid,uuid,uuid,bigint),public.record_compute_actual_cost(uuid,uuid,uuid,bigint,bigint,jsonb),public.record_compute_cost_correction(uuid,text,bigint,text) to service_role;
 commit;

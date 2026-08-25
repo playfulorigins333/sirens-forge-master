@@ -10,7 +10,7 @@ drop function if exists public.authorize_compute_dispatch(uuid,uuid,uuid,bigint)
 drop function if exists public.cancel_compute_job(uuid,uuid);
 drop function if exists public.creator_compute_status(uuid,uuid);
 drop function if exists public.recover_stale_compute_jobs();
-drop function if exists public.reconcile_compute_recovery(uuid,uuid,uuid,text,boolean,text,jsonb);
+drop function if exists public.reconcile_compute_recovery(uuid,uuid,uuid,text,boolean,text,jsonb,bigint,bigint,text);
 drop function if exists public.retry_compute_pre_dispatch(uuid,uuid,uuid,text,integer);
 drop function if exists public.heartbeat_compute_job(uuid,uuid,uuid);
 drop function if exists public.mark_compute_provider_dispatch(uuid,uuid,uuid,text);

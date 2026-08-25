@@ -554,6 +554,10 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     const message = err instanceof Error ? err.message : "";
 
+    if (message.includes("IDEMPOTENCY_CONFLICT")) {
+      return NextResponse.json({ error: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
+    }
+
     if (message === "IDENTITY_LORA_UNAVAILABLE") {
       return NextResponse.json(
         {

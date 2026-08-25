@@ -64,6 +64,16 @@ test("migration exposes bounded heartbeat, retry, recovery and exact-cost contra
   assert.match(migration, /compute_job_attempts set heartbeat_at=now\(\),lease_expires_at=renewed/);
 });
 
+test("merge-blocker dispatch, recovery, result, Stitch, and Image conflict guards remain explicit", () => {
+  assert.match(migration, /a\.provider_dispatch_intent_at is not null or a\.provider_dispatched_at is not null/);
+  assert.match(migration, /recovery_fingerprint=fingerprint,recovery_state=final_state/);
+  assert.match(migration, /if a\.recovery_fingerprint=fingerprint then return a\.recovery_state/);
+  assert.match(migration, /select \* into a from public\.compute_job_attempts[\s\S]*a\.lease_token<>p_lease_token[\s\S]*TERMINAL_TRANSITION_CONFLICT/);
+  assert.match(migration, /jsonb_array_elements\(p_result->'asset_ids'\)[\s\S]*jsonb_typeof\(item\)<>'string'/);
+  assert.match(migration, /q\.workload in \('trainer','image','video'\) and q\.priority_class='og'/);
+  assert.match(read("app/api/generate/route.ts"), /message\.includes\("IDEMPOTENCY_CONFLICT"\)[\s\S]*status: 409/);
+});
+
 test("video stays unavailable and durable client tracks a submitted job immediately", () => {
   assert.match(read("app/api/generate_video/route.ts"), /VIDEO_GENERATION_UNAVAILABLE/);
   const client = read("app/generate/page.tsx");
