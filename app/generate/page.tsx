@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/select";
 import BuildMyModelCard from "@/components/generate/BuildMyModelCard";
 import { isPrivateCreatorGenerationOutput, parseCreatorGenerationOutputs } from "@/lib/generation/clientResponse";
+import { CREATION_LOOP_HANDOFF_STORAGE_KEY, parseCreationLoopHandoff } from "@/lib/creation-loop/handoff";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -52,7 +53,6 @@ const supabase = createBrowserClient(
 
 const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff";
 const NEXT_PACK_SEED_STORAGE_KEY = "sirensforge:next_pack_seed";
-const VAULT_REUSE_IDENTITY_STORAGE_KEY = "sf_reuse_identity";
 const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs";
 
@@ -126,17 +126,6 @@ type NextPackSeedPayload = {
   created_at?: number;
 };
 
-type VaultReuseIdentityPayload = {
-  prompt?: string;
-  negativePrompt?: string;
-  negative_prompt?: string;
-  baseModel?: string;
-  bodyMode?: string;
-  identityId?: string;
-  id?: string;
-  source?: string;
-};
-
 function inferKindFromOutput(output: any): MediaKind {
   if (typeof output === "string") {
     const url = output.toLowerCase();
@@ -177,43 +166,6 @@ async function resolveGenerationOutputUrl(output: any): Promise<string> {
 
 function isUuidLike(value?: string | null): boolean {
   return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-function getBuildModelIdentityId(result: any): string | null {
-  const candidates = [
-    result?.identityId,
-    result?.identity_id,
-    result?.savedIdentityId,
-    result?.saved_identity_id,
-    result?.savedIdentity?.id,
-    result?.identity?.id,
-    result?.loraId,
-    result?.lora_id,
-  ];
-
-  for (const value of candidates) {
-    if (typeof value === "string" && isUuidLike(value.trim())) {
-      return value.trim();
-    }
-  }
-
-  return null;
-}
-
-function applyIdentityIdToSelection(
-  identityId: string | null,
-  setPendingIdentityId: React.Dispatch<React.SetStateAction<string | null>>,
-  setLoraSelection: React.Dispatch<React.SetStateAction<LoraSelection>>,
-) {
-  if (!identityId || !isUuidLike(identityId)) return;
-
-  setPendingIdentityId(identityId);
-  setLoraSelection({
-    mode: "single",
-    selected: [identityId],
-    createNew: false,
-    newName: "",
-  });
 }
 
 function getGenerationRecordId(output: any, responseData?: any): string | null {
@@ -493,10 +445,10 @@ function GeneratorHeader(props: { activeMode: GenerationMode }) {
 
   const subtitle =
     props.activeMode === "image_to_video"
-      ? "Image → Video • Flux / I2V motion"
+      ? "Image → Video • Video generation coming soon"
       : props.activeMode === "text_to_video"
-      ? "Text → Video • Flux Cinematic"
-      : "Text → Image • SDXL + LoRA Identity";
+      ? "Text → Video • Video generation coming soon"
+      : "Text → Image • Image Generation";
 
   return (
     <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-950/70 backdrop-blur">
@@ -716,7 +668,7 @@ function HandoffArrivalBanner(props: {
               </span>
             </div>
             <div className="mt-2 text-[11px] leading-5 text-zinc-400">
-              Review your prompt, select or create an AI Twin identity, adjust settings,
+              Review your prompt, optionally select an AI Twin, adjust settings,
               then generate when you’re ready.
             </div>
           </div>
@@ -1359,7 +1311,7 @@ function ModelStyleSection(props: {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          SDXL core model (bigLust_v16) with body-specific LoRA shaping.
+          Choose a body presentation and creative style for the Image Engine.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -1439,20 +1391,20 @@ function LoraIdentitySection(props: {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm md:text-base">Identity Control</CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Use a trained identity LoRA to keep the same person consistent across generations and video.
+          Optionally use a completed AI Twin for identity consistency.
         </CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-3 text-xs">
         {props.options.length === 0 && (
           <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-[11px] text-gray-300">
-            No trained LoRAs yet. Train your AI Twin first for the strongest identity consistency, or use Build My Model only as a starter when photos are not ready.
+            No completed AI Twins yet. Prompt-only generation is ready now; train a Twin later if you want identity consistency.
           </div>
         )}
 
         <Select value={v.selected[0] || "none"} onValueChange={setSelected}>
           <SelectTrigger className="h-8 border-gray-800 bg-gray-950 text-xs text-gray-100">
-            <SelectValue placeholder="Select identity LoRA" />
+            <SelectValue placeholder="No AI Twin — prompt only" />
           </SelectTrigger>
           <SelectContent className="border-gray-800 bg-gray-950 text-gray-100">
             {props.options.map((l) => (
@@ -1465,8 +1417,8 @@ function LoraIdentitySection(props: {
 
         {!hasIdentity && (
           <div className="rounded-lg border border-purple-900/50 bg-purple-500/5 px-3 py-2 text-[11px] text-gray-300">
-            <span className="font-semibold text-purple-300">New here?</span>{" "}
-            Train your AI Twin for the strongest results, or select an existing trained identity before generating. Build My Model is only the starter path when photos are not ready.
+            <span className="font-semibold text-purple-300">Prompt-only mode.</span>{" "}
+            Generate now without a Twin, or choose a completed AI Twin for identity consistency.
           </div>
         )}
       </CardContent>
@@ -1533,7 +1485,7 @@ function AdvancedSettings(props: {
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="mt-1 text-[10px] text-gray-400">SDXL max 1024x1792.</p>
+                <p className="mt-1 text-[10px] text-gray-400">Choose a supported image size.</p>
               </div>
 
               <div>
@@ -1612,7 +1564,7 @@ function AdvancedSettings(props: {
                   step={1}
                   value={props.batchSize}
                   onChange={(e) =>
-                    props.onBatchSizeChange(Math.max(1, parseInt(e.target.value, 10) || 1))
+                    props.onBatchSizeChange(Math.min(4, Math.max(1, parseInt(e.target.value, 10) || 1)))
                   }
                   className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-800 accent-purple-500"
                 />
@@ -1661,7 +1613,7 @@ function VideoSettings(props: {
           >
             <CardContent className="space-y-4 pb-4 pt-0 text-xs">
               <div className="rounded-lg border border-cyan-900/50 bg-cyan-500/5 px-3 py-2 text-[11px] text-gray-300">
-                Best results: use an identity LoRA for more consistent character motion across frames.
+                For identity consistency, optionally use a completed AI Twin.
               </div>
 
               <div>
@@ -1732,7 +1684,7 @@ function VideoSettings(props: {
                   step={1}
                   value={props.batchSize}
                   onChange={(e) =>
-                    props.onBatchSizeChange(Math.max(1, parseInt(e.target.value, 10) || 1))
+                    props.onBatchSizeChange(Math.min(4, Math.max(1, parseInt(e.target.value, 10) || 1)))
                   }
                   className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-800 accent-purple-500"
                 />
@@ -1768,9 +1720,7 @@ function GenerateButton(props: {
       ? "Generate Cinematic Video"
       : "Generate";
 
-  const actionLabel = props.disabledReason?.includes("identity")
-    ? "Select AI Twin First"
-    : baseActionLabel;
+  const actionLabel = baseActionLabel;
 
   const subtext = props.disabledReason
     ? props.disabledReason
@@ -1791,9 +1741,9 @@ function GenerateButton(props: {
       <CardContent className="p-4">
         <div className="mb-3 rounded-xl border border-fuchsia-500/20 bg-black/30 px-3 py-2 text-[11px] text-gray-300">
           <div className="flex items-center justify-between gap-3">
-            <span className="font-semibold text-fuchsia-200">Identity Lock</span>
-            <span className={props.disabledReason?.includes("identity") ? "text-amber-300" : "text-emerald-300"}>
-              {props.disabledReason?.includes("identity") ? "Required" : props.selectedIdentityLabel}
+            <span className="font-semibold text-fuchsia-200">AI Twin (optional)</span>
+            <span className="text-emerald-300">
+              {props.selectedIdentityLabel}
             </span>
           </div>
         </div>
@@ -3343,6 +3293,7 @@ export default function GeneratePage() {
   const [identityOptions, setIdentityOptions] = useState<
     { id: string; name: string | null }[]
   >([]);
+  const [identitiesLoaded, setIdentitiesLoaded] = useState(false);
 
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
   const [stylePreset, setStylePreset] = useState<StylePreset>("photorealistic");
@@ -3424,12 +3375,12 @@ export default function GeneratePage() {
 
   const selectedIdentityLabel = useMemo(() => {
     const selectedId = loraSelection.selected[0];
-    if (!selectedId) return "Not selected";
+    if (!selectedId) return "No AI Twin — prompt only";
 
     const match = identityOptions.find((item) => item.id === selectedId);
-    if (!match) return "Not selected";
+    if (!match) return "No AI Twin — prompt only";
 
-    return match.name && match.name.trim().length > 0 ? match.name : match.id;
+    return match.name && match.name.trim().length > 0 ? match.name : "AI Twin";
   }, [identityOptions, loraSelection.selected]);
 
   const recommendedRefineIndex = useMemo(() => {
@@ -3470,14 +3421,11 @@ export default function GeneratePage() {
     return () => window.clearTimeout(timer);
   }, [refineFeedback]);
 
-  const hasSelectedIdentity = loraSelection.selected.some((id) => isUuidLike(id));
   const hasGenerationInput =
     mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim());
 
   const generateDisabledReason = generationAvailable !== true
     ? generationAvailable === null ? "Checking generation availability…" : "Image generation is temporarily unavailable."
-    : !hasSelectedIdentity
-    ? "Select or create an AI Twin identity first."
     : !hasGenerationInput
       ? mode === "image_to_video"
         ? "Upload a source image before generating video."
@@ -3502,7 +3450,10 @@ export default function GeneratePage() {
         } = await supabase.auth.getSession();
 
         if (!session?.user?.id) {
-          if (!cancelled) setIdentityOptions([]);
+          if (!cancelled) {
+            setIdentityOptions([]);
+            setIdentitiesLoaded(true);
+          }
           return;
         }
 
@@ -3510,18 +3461,28 @@ export default function GeneratePage() {
           .from("user_loras")
           .select("id, name")
           .eq("user_id", session.user.id)
+          .eq("status", "completed")
           .order("created_at", { ascending: false });
 
         if (error) {
-          console.error("Failed to load user LoRAs:", error);
-          if (!cancelled) setIdentityOptions([]);
+          console.error("Failed to load completed AI Twins:", error);
+          if (!cancelled) {
+            setIdentityOptions([]);
+            setIdentitiesLoaded(true);
+          }
           return;
         }
 
-        if (!cancelled) setIdentityOptions(data ?? []);
+        if (!cancelled) {
+          setIdentityOptions(data ?? []);
+          setIdentitiesLoaded(true);
+        }
       } catch (err) {
         console.error("Identity load crash:", err);
-        if (!cancelled) setIdentityOptions([]);
+        if (!cancelled) {
+          setIdentityOptions([]);
+          setIdentitiesLoaded(true);
+        }
       }
     };
 
@@ -3541,7 +3502,7 @@ export default function GeneratePage() {
     let raw: string | null = null;
 
     try {
-      raw = window.localStorage.getItem(VAULT_REUSE_IDENTITY_STORAGE_KEY);
+      raw = window.localStorage.getItem(CREATION_LOOP_HANDOFF_STORAGE_KEY);
     } catch (err) {
       console.error("Failed to read Vault reuse handoff:", err);
     }
@@ -3549,16 +3510,13 @@ export default function GeneratePage() {
     if (!raw) return;
 
     try {
-      const payload = JSON.parse(raw) as VaultReuseIdentityPayload;
+      const payload = parseCreationLoopHandoff(raw);
+      if (!payload) throw new Error("Invalid Creation Loop handoff.");
 
       const incomingPrompt =
         typeof payload.prompt === "string" ? payload.prompt.trim() : "";
       const incomingNegative =
-        typeof payload.negativePrompt === "string" && payload.negativePrompt.trim().length > 0
-          ? payload.negativePrompt.trim()
-          : typeof payload.negative_prompt === "string"
-            ? payload.negative_prompt.trim()
-            : "";
+        typeof payload.negativePrompt === "string" ? payload.negativePrompt.trim() : "";
       const incomingBaseModel =
         typeof payload.baseModel === "string" && payload.baseModel.trim().length > 0
           ? payload.baseModel.trim().toLowerCase()
@@ -3568,9 +3526,7 @@ export default function GeneratePage() {
       const incomingIdentity =
         typeof payload.identityId === "string" && payload.identityId.trim().length > 0
           ? payload.identityId.trim()
-          : typeof payload.id === "string"
-            ? payload.id.trim()
-            : "";
+          : "";
 
       if (incomingPrompt) setPrompt(incomingPrompt);
       if (incomingNegative) setNegativePrompt(incomingNegative);
@@ -3579,12 +3535,9 @@ export default function GeneratePage() {
       }
       if (incomingIdentity) {
         setPendingIdentityId(incomingIdentity);
-        setLoraSelection({
-          mode: "single",
-          selected: [incomingIdentity],
-          createNew: false,
-          newName: "",
-        });
+      } else {
+        setPendingIdentityId(null);
+        setLoraSelection((current) => ({ ...current, mode: "single", selected: [] }));
       }
 
       setMode("text_to_image");
@@ -3610,7 +3563,7 @@ export default function GeneratePage() {
       console.error("Failed to apply Vault reuse handoff:", err);
     } finally {
       try {
-        window.localStorage.removeItem(VAULT_REUSE_IDENTITY_STORAGE_KEY);
+        window.localStorage.removeItem(CREATION_LOOP_HANDOFF_STORAGE_KEY);
       } catch (err) {
         console.error("Failed to clear Vault reuse handoff:", err);
       }
@@ -3797,11 +3750,16 @@ export default function GeneratePage() {
   }, [router, searchParams]);
 
   useEffect(() => {
-    if (!pendingIdentityId) return;
+    if (!pendingIdentityId || !identitiesLoaded) return;
 
     const match = identityOptions.find((item) => item.id === pendingIdentityId);
 
-    if (!match) return;
+    if (!match) {
+      setLoraSelection((current) => ({ ...current, mode: "single", selected: [] }));
+      setPendingIdentityId(null);
+      setErrorMessage("That AI Twin is not available. Your prompt was loaded in prompt-only mode.");
+      return;
+    }
 
     setLoraSelection({
       mode: "single",
@@ -3810,7 +3768,7 @@ export default function GeneratePage() {
       newName: "",
     });
     setPendingIdentityId(null);
-  }, [identityOptions, pendingIdentityId]);
+  }, [identitiesLoaded, identityOptions, pendingIdentityId]);
 
   useEffect(() => {
     if (!imageFile) {
@@ -3825,10 +3783,10 @@ export default function GeneratePage() {
   }, [imageFile]);
 
   const identitySelectOptions: { id: string; label: string }[] = [
-    { id: "none", label: "Select trained AI Twin" },
+    { id: "none", label: "No AI Twin — prompt only" },
     ...identityOptions.map((l) => ({
       id: l.id,
-      label: l.name && l.name.trim().length > 0 ? l.name : l.id,
+      label: l.name && l.name.trim().length > 0 ? l.name : "AI Twin",
     })),
   ];
 
@@ -3940,22 +3898,16 @@ ${basePrompt}`,
     }
   };
 
-  const handleGenerate = async (overridePrompt?: string, identityOverride?: string | null) => {
+  const handleGenerate = async (overridePrompt?: string) => {
     const bodyModeMap: Record<string, string> = {
       feminine: "body_feminine",
       masculine: "body_masculine",
     };
 
-    const selectedLoraId =
-      identityOverride && isUuidLike(identityOverride)
-        ? identityOverride
-        : loraSelection.selected[0] ?? null;
+    const selectedLoraId = loraSelection.selected.find((id) =>
+      isUuidLike(id) && identityOptions.some((option) => option.id === id)
+    ) ?? null;
     const promptToUse = typeof overridePrompt === "string" ? overridePrompt : prompt;
-
-    if (!selectedLoraId || !isUuidLike(selectedLoraId)) {
-      setErrorMessage("Select or create an AI Twin identity before generating. SirensForge is identity-first by design.");
-      return;
-    }
 
     if (mode === "image_to_video" && !imageFile) {
       setErrorMessage("Upload a source image before generating video.");
@@ -4275,14 +4227,14 @@ ${basePrompt}`,
                                 <UserPlus className="h-5 w-5" />
                               </span>
                               <div>
-                                <div className="text-base font-bold text-white md:text-lg">Train Your AI Twin LoRA</div>
+                                <div className="text-base font-bold text-white md:text-lg">Train Your AI Twin</div>
                                 <div className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-fuchsia-200">
                                   Primary path • strongest consistency • creator-ready identity
                                 </div>
                               </div>
                             </div>
                             <p className="mt-3 max-w-3xl text-xs leading-5 text-gray-100 md:text-sm">
-                              For real clients and creator accounts, start here. Upload a training set, build a reusable AI Twin, then return to the Forge with that identity selected for consistent image and video outputs.
+                              Generate from a prompt immediately. When you want repeatable identity consistency, train a reusable AI Twin and optionally select it here.
                             </p>
                           </div>
 
@@ -4308,10 +4260,10 @@ ${basePrompt}`,
 
                         <div className="mt-4 grid grid-cols-1 gap-2 text-[11px] text-gray-300 sm:grid-cols-3">
                           <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
-                            <span className="font-semibold text-fuchsia-200">1.</span> Train or select AI Twin
+                            <span className="font-semibold text-fuchsia-200">1.</span> Write or build a prompt
                           </div>
                           <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
-                            <span className="font-semibold text-cyan-200">2.</span> Build prompt or use Siren’s Mind
+                            <span className="font-semibold text-cyan-200">2.</span> Optionally select an AI Twin
                           </div>
                           <div className="rounded-xl border border-white/10 bg-black/40 px-3 py-2">
                             <span className="font-semibold text-emerald-200">3.</span> Generate consistent assets
@@ -4327,11 +4279,6 @@ ${basePrompt}`,
                         setPrompt(result.prompt);
                         setNegativePrompt(result.negativePrompt);
                         setBaseModel(result.selection.baseModel);
-                        applyIdentityIdToSelection(
-                          getBuildModelIdentityId(result),
-                          setPendingIdentityId,
-                          setLoraSelection,
-                        );
                         setRefineChoices(null);
                       }}
                       onBaseModelChange={(model) => {
@@ -4341,21 +4288,10 @@ ${basePrompt}`,
                         setPrompt(result.prompt);
                         setNegativePrompt(result.negativePrompt);
                         setBaseModel(result.selection.baseModel);
-                        const identityId = getBuildModelIdentityId(result);
-                        applyIdentityIdToSelection(
-                          identityId,
-                          setPendingIdentityId,
-                          setLoraSelection,
-                        );
                         setRefineChoices(null);
 
-                        if (!identityId || !isUuidLike(identityId)) {
-                          setErrorMessage("Build My Model needs to save a starter identity before generation. Select or train an AI Twin to continue.");
-                          return;
-                        }
-
                         window.setTimeout(() => {
-                          void handleGenerate(result.prompt, identityId);
+                          void handleGenerate(result.prompt);
                         }, 0);
                       }}
                     />

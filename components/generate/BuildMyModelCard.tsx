@@ -546,7 +546,7 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
     {
       label: "Look",
       title: "Shape the visual identity",
-      description: "Keep this fast. Body type maps to the supported LoRA modes you actually have right now.",
+      description: "Choose the body presentation that fits your creator concept.",
     },
     {
       label: "Energy",

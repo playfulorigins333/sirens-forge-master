@@ -23,6 +23,7 @@ import {
   LayoutDashboard,
 } from "lucide-react";
 import Link from "next/link";
+import { buildCreationLoopHandoff, CREATION_LOOP_HANDOFF_STORAGE_KEY } from "@/lib/creation-loop/handoff";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,9 +82,6 @@ type IdentityGroup = {
   latestCreatedAt: string | null;
   heroItem: LibraryItem | null;
 };
-
-const VAULT_REUSE_HANDOFF_STORAGE_KEY = "sirensforge:vault_identity_reuse";
-
 
 function formatDate(value: string) {
   try {
@@ -211,22 +209,6 @@ function getGroupSortTime(group: IdentityGroup) {
   if (!group.latestCreatedAt) return 0;
   const time = new Date(group.latestCreatedAt).getTime();
   return Number.isNaN(time) ? 0 : time;
-}
-
-function buildReusePayload(item: LibraryItem) {
-  return {
-    source: "vault",
-    action: "reuse_identity",
-    identityId: item.identityLora || item.id,
-    title: identityTitle(item),
-    prompt: item.prompt || "",
-    baseModel: item.bodyMode || null,
-    bodyMode: item.bodyMode || null,
-    mode: item.mode || null,
-    previewUrl: getDisplayUrl(item),
-    isIdentitySeed: Boolean(item.isIdentitySeed || item.kind === "identity"),
-    createdAt: Date.now(),
-  };
 }
 
 function LibraryHeader() {
@@ -1020,7 +1002,7 @@ function VaultModal(props: {
                       Identity
                     </p>
                     <p className="break-all text-gray-200">
-                      {item.identityLora || "Not linked"}
+                      {item.identityLora || "Prompt only"}
                     </p>
                   </div>
 
@@ -1099,11 +1081,11 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
   const [selected, setSelected] = useState<LibraryItem | null>(null);
 
   const reuseIdentity = (item: LibraryItem) => {
-    const payload = buildReusePayload(item);
+    const payload = buildCreationLoopHandoff(item);
 
     try {
       window.localStorage.setItem(
-        VAULT_REUSE_HANDOFF_STORAGE_KEY,
+        CREATION_LOOP_HANDOFF_STORAGE_KEY,
         JSON.stringify(payload)
       );
     } catch (error) {
@@ -1186,7 +1168,7 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
           ? identitySeedCount > 0
             ? "A saved starter concept ready for the next generation loop."
             : "Saved creations tied to this AI Twin, ready to reuse."
-          : "Assets created without a linked identity.",
+          : "Prompt-only creations, ready to reuse as they are.",
         items: groupItems,
         imageCount,
         videoCount,
