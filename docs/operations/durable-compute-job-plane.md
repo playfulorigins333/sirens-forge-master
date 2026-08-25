@@ -10,7 +10,7 @@ configured. The migration seeds no production policy or numeric cap. Private com
 also requires the existing private-media migration, credentials, and verification;
 `PRIVATE_CREATOR_MEDIA_ENABLED` remains separate and off.
 
-Claims use the configured lease duration; heartbeats renew both authoritative expiries through the configured stale interval.
+Claims use the configured lease duration; heartbeats renew both authoritative expiries through the configured stale interval. An authority-bound worker signal exposes only internal state and whether creator cancellation was requested.
 Pre-dispatch retry is bounded by the job retry ceiling. Dispatch uncertainty enters
 `recovering` and requires the exact attempt recovery token: it can become terminal,
 or requeue only when an adapter positively proves provider work never occurred.
@@ -34,13 +34,19 @@ Trainer durable submission and `user_loras` projection linkage occur in one data
 transaction. Image submission priority uses only the exact canonical `og_throne`
 subscription tier, and the Generator persists/polls every nonterminal submitted job.
 
-Future workers must execute in this order: claim, heartbeat, authorize spend, record
+Future normal workers must execute in this order: claim, heartbeat, check the worker
+signal for cancellation, authorize spend, record
 durable provider-dispatch intent, make the external request, attach the opaque provider
-operation reference, heartbeat, settle actual cost, finalize the result/artifact, and
+operation reference, heartbeat/check the signal, settle actual cost, finalize the result/artifact, and
 only then terminalize the job. A crash after dispatch intent always enters recovering;
 it is never a blind retry. Proven non-execution releases a reservation exactly once.
 Zero actual cost is valid settlement evidence. Stitch has no per-creator active limit;
 OG weighting and creator concurrency apply only to Trainer, Image, and Video.
+
+Future recovery workers claim an exclusive recovery lease, heartbeat it, query the
+provider through a future adapter, and reconcile with both the stable recovery token
+and current ephemeral lease. If a worker disappears, the lease expires and another
+worker can safely reclaim it with a new lease token. No provider implementation exists yet.
 
 Pass 3 must supply worker/provider adapters, reconciliation, cancellation, and result
 finalization. Video remains unavailable. No Salad configuration, provider workload,

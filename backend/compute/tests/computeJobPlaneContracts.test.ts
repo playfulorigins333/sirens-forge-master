@@ -58,10 +58,13 @@ test("creator result and error projection strips poisoned internal data", () => 
   for (const key of ["provider_operation_ref", "worker_ref", "lease_token", "provider", "model", "cost"]) assert.equal(JSON.stringify(projected).includes(key), false);
 });
 
-test("migration exposes bounded heartbeat, retry, recovery and exact-cost contracts", () => {
-  for (const token of ["heartbeat_compute_job", "begin_compute_provider_dispatch", "retry_compute_pre_dispatch", "reconcile_compute_recovery", "release_compute_reservation", "recovery_token", "compute_cost_one_reservation_idx", "compute_cost_one_release_idx", "compute_cost_one_actual_idx", "compute_jobs_one_active_owner_workload_idx", "PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED"]) assert.ok(migration.includes(token), token);
+test("migration exposes bounded heartbeat, worker signal, recovery leases and exact-cost contracts", () => {
+  for (const token of ["heartbeat_compute_job", "compute_worker_signal", "begin_compute_provider_dispatch", "retry_compute_pre_dispatch", "claim_compute_recovery", "heartbeat_compute_recovery", "reconcile_compute_recovery", "release_compute_reservation", "recovery_token", "recovery_lease_token", "recovery_worker_ref", "recovery_heartbeat_at", "recovery_lease_expires_at", "compute_cost_one_reservation_idx", "compute_cost_one_release_idx", "compute_cost_one_actual_idx", "compute_jobs_one_active_owner_workload_idx", "PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED"]) assert.ok(migration.includes(token), token);
   assert.match(migration, /compute_jobs set lease_expires_at=renewed/);
   assert.match(migration, /compute_job_attempts set heartbeat_at=now\(\),lease_expires_at=renewed/);
+  assert.match(migration, /returns table\(job_state public\.compute_job_state,cancellation_requested boolean\)/);
+  assert.match(migration, /recovery_lease_token=null,recovery_worker_ref=null,recovery_heartbeat_at=null,recovery_lease_expires_at=null/);
+  assert.match(migration, /grant execute on function[\s\S]*compute_worker_signal\(uuid,uuid,uuid\)[\s\S]*claim_compute_recovery\(public\.compute_workload,text\)[\s\S]*heartbeat_compute_recovery\(uuid,uuid,uuid\)[\s\S]*to service_role/);
 });
 
 test("merge-blocker dispatch, recovery, result, Stitch, and Image conflict guards remain explicit", () => {

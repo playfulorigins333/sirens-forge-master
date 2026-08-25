@@ -44,13 +44,23 @@ do $$ declare j uuid; a uuid; l uuid; old_exp timestamptz; renewed timestamptz; 
  update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); assert (select state='queued' from public.compute_jobs where id=j), 'stopped heartbeat not recovered'; update public.compute_jobs set available_at=now()+interval '1 hour' where id=j;
  begin perform public.mark_compute_provider_dispatch(j,a,l,'stale-op'); raise exception 'stale dispatch accepted'; exception when others then assert sqlerrm like '%LEASE_MISMATCH%'; end;
 end$$;
+-- Active workers can observe creator cancellation without direct table access.
+do $$ declare j uuid; a uuid; l uuid; state public.compute_job_state; cancelled boolean; begin
+ select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000003','image','worker-signal',repeat('3',64),'{}','standard');
+ select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('image','signal-worker');
+ select job_state,cancellation_requested into state,cancelled from public.compute_worker_signal(j,a,l); assert state='claimed' and not cancelled, 'unexpected initial cancellation signal';
+ perform public.cancel_compute_job('10000000-0000-4000-8000-000000000003',j);
+ select job_state,cancellation_requested into state,cancelled from public.compute_worker_signal(j,a,l); assert state='cancel_requested' and cancelled, 'creator cancellation not signalled';
+ begin perform * from public.compute_worker_signal(j,a,gen_random_uuid()); raise exception 'wrong signal token accepted'; exception when others then assert sqlerrm like '%LEASE_MISMATCH%'; end;
+ assert public.compute_worker_transition(j,a,l,'cancelled')='cancelled';
+end$$;
 -- Bounded normal pre-dispatch retry and next ordinal.
 do $$ declare j uuid; a uuid; l uuid; a2 uuid; begin
  select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000003','image','normal-retry',repeat('0',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('image','retry-1'); assert public.retry_compute_pre_dispatch(j,a,l,'TRANSIENT_FAILURE',0)='queued'; assert (select retry_count=1 from public.compute_jobs where id=j);
  select attempt_id,lease_token into a2,l from public.claim_compute_job('image','retry-2'); assert a2<>a; assert (select ordinal=2 from public.compute_job_attempts where id=a2); assert public.retry_compute_pre_dispatch(j,a2,l,'TRANSIENT_FAILURE',0)='failed'; assert (select retry_count=2 from public.compute_jobs where id=j);
 end$$;
 -- Dispatch locking, post-dispatch recovery, no normal claim, and explicit reconciliation.
-do $$ declare j uuid; a uuid; l uuid; rt uuid; begin
+do $$ declare j uuid; a uuid; l uuid; rt uuid; rl uuid; old_rl uuid; renewed timestamptz; begin
  select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000002','image','recover',repeat('d',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('image','dispatch-worker');
  assert public.compute_worker_transition(j,a,l,'start')='running';
  assert public.compute_worker_transition(j,a,l,'start')='running';
@@ -59,19 +69,27 @@ do $$ declare j uuid; a uuid; l uuid; rt uuid; begin
  begin perform public.mark_compute_provider_dispatch(j,a,l,'different-op'); raise exception 'operation replacement accepted'; exception when others then assert sqlerrm like '%PROVIDER_OPERATION_CONFLICT%'; end;
  begin perform public.retry_compute_pre_dispatch(j,a,l,'TRANSIENT_FAILURE',0); raise exception 'post dispatch retry accepted'; exception when others then assert sqlerrm like '%POST_DISPATCH_RETRY_FORBIDDEN%'; end;
  update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); assert (select state='recovering' from public.compute_jobs where id=j); assert (select provider_operation_ref='opaque-op' from public.compute_job_attempts where id=a); assert not exists(select 1 from public.claim_compute_job('image','duplicate-worker') where job_id=j);
- select recovery_token into rt from public.compute_job_attempts where id=a; begin perform public.reconcile_compute_recovery(j,a,rt,'requeue',false); raise exception 'unsafe requeue accepted'; exception when others then assert sqlerrm like '%PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED%'; end;
- assert public.reconcile_compute_recovery(j,a,rt,'succeeded',false,null,jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001','provider','secret'),700,12,'opaque-op')='succeeded';
- assert public.reconcile_compute_recovery(j,a,rt,'succeeded',false,null,jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001','provider','secret'),700,12,'opaque-op')='succeeded';
+ select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('image','recovery-worker-1') where job_id=j; assert rt is not null and rl is not null;
+ assert not exists(select 1 from public.claim_compute_recovery('image','duplicate-recovery-worker') where job_id=j), 'live recovery lease claimed twice';
+ renewed:=public.heartbeat_compute_recovery(j,a,rl); assert renewed>(select recovery_heartbeat_at from public.compute_job_attempts where id=a);
+ begin perform public.heartbeat_compute_recovery(j,a,gen_random_uuid()); raise exception 'wrong recovery heartbeat accepted'; exception when others then assert sqlerrm like '%RECOVERY_LEASE_MISMATCH%'; end;
+ old_rl:=rl; update public.compute_job_attempts set recovery_lease_expires_at=now()-interval '1 second' where id=a;
+ select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('image','recovery-worker-2') where job_id=j; assert rl<>old_rl, 'expired recovery lease token reused';
+ begin perform public.reconcile_compute_recovery(j,a,rt,old_rl,'succeeded',false,null,jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001','provider','secret'),700,12,'opaque-op'); raise exception 'expired recovery authority accepted'; exception when others then assert sqlerrm like '%RECOVERY_AUTHORITY_MISMATCH%'; end;
+ begin perform public.reconcile_compute_recovery(j,a,rt,rl,'requeue',false); raise exception 'unsafe requeue accepted'; exception when others then assert sqlerrm like '%PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED%'; end;
+ assert public.reconcile_compute_recovery(j,a,rt,rl,'succeeded',false,null,jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001','provider','secret'),700,12,'opaque-op')='succeeded';
+ assert public.reconcile_compute_recovery(j,a,rt,rl,'succeeded',false,null,jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001','provider','secret'),700,12,'opaque-op')='succeeded';
+ assert (select recovery_token=rt and recovery_lease_token is null and recovery_fingerprint is not null from public.compute_job_attempts where id=a);
  assert (select count(*)=1 from public.compute_cost_ledger where attempt_id=a and kind='actual');
- begin perform public.reconcile_compute_recovery(j,a,rt,'succeeded',false,null,jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001'),701,12,'opaque-op'); raise exception 'conflicting recovery replay accepted'; exception when others then assert sqlerrm like '%RECOVERY_REPLAY_CONFLICT%'; end;
+ begin perform public.reconcile_compute_recovery(j,a,rt,rl,'succeeded',false,null,jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001'),701,12,'opaque-op'); raise exception 'conflicting recovery replay accepted'; exception when others then assert sqlerrm like '%RECOVERY_REPLAY_CONFLICT%'; end;
  assert (select result_reference=jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001') from public.creator_compute_status('10000000-0000-4000-8000-000000000002',j));
 end$$;
 -- Safe requeue requires positive non-execution evidence.
-do $$ declare j uuid; a uuid; l uuid; rt uuid; begin
- select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000002','trainer','reconcile-requeue',repeat('e',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('trainer','reconcile-worker'); assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'trainer-op'); update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); select recovery_token into rt from public.compute_job_attempts where id=a; assert public.reconcile_compute_recovery(j,a,rt,'requeue',true)='queued';
+do $$ declare j uuid; a uuid; l uuid; rt uuid; rl uuid; begin
+ select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000002','trainer','reconcile-requeue',repeat('e',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('trainer','reconcile-worker'); assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'trainer-op'); update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('trainer','requeue-recovery-worker') where job_id=j; assert public.reconcile_compute_recovery(j,a,rt,rl,'requeue',true)='queued';
 end$$;
 -- A durable dispatch intent closes the pre-network crash window.
-do $$ declare j uuid; a uuid; l uuid; rt uuid; begin
+do $$ declare j uuid; a uuid; l uuid; rt uuid; rl uuid; begin
  update public.compute_jobs set state='cancelled',terminal_at=now(),lease_token=null,lease_expires_at=null where state in ('claimed','running','recovering','cancel_requested');
  update public.compute_job_attempts set finished_at=coalesce(finished_at,now()),outcome_class=coalesce(outcome_class,'test_cleanup') where finished_at is null;
  select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000002','image','dispatch-intent-crash',repeat('0',64),'{}','standard');
@@ -81,18 +99,18 @@ do $$ declare j uuid; a uuid; l uuid; rt uuid; begin
  assert (select state='recovering' from public.compute_jobs where id=j); assert (select provider_operation_ref is null and provider_dispatch_intent_at is not null from public.compute_job_attempts where id=a);
  assert (select count(*)=1 from public.compute_cost_ledger where attempt_id=a and kind='reservation'); assert (select count(*)=0 from public.compute_cost_ledger where attempt_id=a and kind='release');
  assert not exists(select 1 from public.claim_compute_job('image','must-not-duplicate') where job_id=j);
- select recovery_token into rt from public.compute_job_attempts where id=a;
- assert public.reconcile_compute_recovery(j,a,rt,'succeeded',false,null,jsonb_build_object('result_id','30000000-0000-4000-8000-000000000002'),0,0,'discovered-after-crash')='succeeded';
- assert public.reconcile_compute_recovery(j,a,rt,'succeeded',false,null,jsonb_build_object('result_id','30000000-0000-4000-8000-000000000002'),0,0,'discovered-after-crash')='succeeded';
+ select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('image','intent-recovery-worker') where job_id=j;
+ assert public.reconcile_compute_recovery(j,a,rt,rl,'succeeded',false,null,jsonb_build_object('result_id','30000000-0000-4000-8000-000000000002'),0,0,'discovered-after-crash')='succeeded';
+ assert public.reconcile_compute_recovery(j,a,rt,rl,'succeeded',false,null,jsonb_build_object('result_id','30000000-0000-4000-8000-000000000002'),0,0,'discovered-after-crash')='succeeded';
  assert (select provider_operation_ref='discovered-after-crash' and actual_cost_micros=0 from public.compute_job_attempts where id=a);
  assert (select count(*)=1 from public.compute_cost_ledger where attempt_id=a and kind='release') and (select count(*)=1 from public.compute_cost_ledger where attempt_id=a and kind='actual');
 end$$;
 -- Cancellation: queued terminal, stale pre-dispatch terminal, dispatched ambiguity reconciles.
-do $$ declare j uuid; a uuid; l uuid; rt uuid; begin
+do $$ declare j uuid; a uuid; l uuid; rt uuid; rl uuid; begin
  select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000003','video','cancel-queued',repeat('f',64),'{}','standard'); perform public.cancel_compute_job('10000000-0000-4000-8000-000000000003',j); assert (select state='cancelled' from public.compute_jobs where id=j); perform public.cancel_compute_job('10000000-0000-4000-8000-000000000003',j);
  begin perform public.cancel_compute_job('10000000-0000-4000-8000-000000000001',j); raise exception 'wrong owner accepted'; exception when others then assert sqlerrm like '%COMPUTE_JOB_NOT_FOUND%'; end;
  select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000003','video','cancel-stale',repeat('1',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('video','cancel-worker'); assert public.authorize_compute_dispatch(j,a,l,100); perform public.cancel_compute_job('10000000-0000-4000-8000-000000000003',j); begin perform public.mark_compute_provider_dispatch(j,a,l,'must-not-dispatch'); raise exception 'dispatch after cancel accepted'; exception when others then assert sqlerrm like '%LEASE_MISMATCH%' or sqlerrm like '%DISPATCH_INTENT_REQUIRED%'; end; begin perform public.retry_compute_pre_dispatch(j,a,l,'TRANSIENT_FAILURE',0); raise exception 'retry after cancel accepted'; exception when others then assert sqlerrm like '%CANCELLATION_REQUESTED%'; end; assert public.compute_worker_transition(j,a,l,'cancelled')='cancelled'; assert (select state='cancelled' from public.compute_jobs where id=j); assert (select coalesce(sum(amount_micros),0)=0 from public.compute_cost_ledger where attempt_id=a);
- select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000003','video','cancel-dispatched',repeat('2',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('video','cancel-dispatched-worker'); assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'cancel-op'); perform public.cancel_compute_job('10000000-0000-4000-8000-000000000003',j); update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); assert (select state='recovering' and cancellation_requested_at is not null from public.compute_jobs where id=j); select recovery_token into rt from public.compute_job_attempts where id=a; assert public.reconcile_compute_recovery(j,a,rt,'requeue',true)='cancelled';
+ select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000003','video','cancel-dispatched',repeat('2',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('video','cancel-dispatched-worker'); assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'cancel-op'); perform public.cancel_compute_job('10000000-0000-4000-8000-000000000003',j); update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); assert (select state='recovering' and cancellation_requested_at is not null from public.compute_jobs where id=j); select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('video','cancel-recovery-worker') where job_id=j; assert public.reconcile_compute_recovery(j,a,rt,rl,'requeue',true)='cancelled';
 end$$;
 -- Per-creator concurrency with global capacity >1 and cross-workload coexistence.
 do $$ declare t1 uuid; t2 uuid; i1 uuid; v1 uuid; begin
