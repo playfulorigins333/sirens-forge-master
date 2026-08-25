@@ -20,6 +20,7 @@ import { isPrivateCreatorMediaEnabled } from "../../../lib/private-creator-media
 import { verifyPrivateGenerationObject } from "../../../lib/private-creator-media/r2";
 import { randomUUID } from "node:crypto";
 import { entitlementPriority, isDurableComputeJobsEnabled, submitComputeJob, toCreatorComputeStatus } from "../../../lib/compute-jobs";
+import { resolveOwnedIdentityLoraMetadata } from "../../../lib/generation/identityLoraMetadata";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -248,8 +249,10 @@ export async function POST(req: NextRequest) {
       batch: Math.max(1, Math.min(4, Number(body.batch || 1))),
     };
 
-    const loraStack = await resolveLoraStack(bodyMode, identityLora, userId);
     if (durableComputeEnabled) {
+      if (identityLora) {
+        await resolveOwnedIdentityLoraMetadata(identityLora, userId);
+      }
       const job = await submitComputeJob({
         ownerId: userId,
         workload: "image",
@@ -271,6 +274,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(toCreatorComputeStatus(job), { status: 202 });
     }
 
+    const loraStack = await resolveLoraStack(bodyMode, identityLora, userId);
     const finalPrompt = loraStack.trigger_token
       ? injectTriggerToken(prompt, loraStack.trigger_token)
       : prompt;

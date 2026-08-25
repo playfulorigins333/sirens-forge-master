@@ -10,6 +10,21 @@ configured. The migration seeds no production policy or numeric cap. Private com
 also requires the existing private-media migration, credentials, and verification;
 `PRIVATE_CREATOR_MEDIA_ENABLED` remains separate and off.
 
+Claims use the configured lease duration; heartbeats renew both authoritative expiries through the configured stale interval.
+Pre-dispatch retry is bounded by the job retry ceiling. Dispatch uncertainty enters
+`recovering` and requires the exact attempt recovery token: it can become terminal,
+or requeue only when an adapter positively proves provider work never occurred.
+Cancellation without dispatch becomes terminal on stale recovery; cancellation after
+dispatch remains reconciliation-bound.
+
+Spend events are exact integer USD micros. Each attempt has at most one reservation,
+one release, and one actual settlement. Settlement appends the reservation's negative
+release before actual cost, so net spend equals actual cost. Repeated identical calls
+are idempotent; conflicting amounts fail closed. A denied authorization finishes the
+attempt, clears its lease, and queues it until the configured spend-hold interval.
+The service role executes security-definer functions but has no direct compute-table
+DML grant, keeping the ledger append-only through the control contract.
+
 Pass 3 must supply worker/provider adapters, reconciliation, cancellation, and result
 finalization. Video remains unavailable. No Salad configuration, provider workload,
 GPU canary, or real generation is part of this pass.

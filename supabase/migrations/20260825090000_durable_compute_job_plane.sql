@@ -8,7 +8,7 @@ create table public.compute_scheduler_policies (
  workload public.compute_workload primary key, max_global_active integer not null check(max_global_active>0),
  lease_seconds integer not null check(lease_seconds between 15 and 86400), stale_seconds integer not null check(stale_seconds>=lease_seconds),
  max_attempts smallint not null check(max_attempts between 1 and 20), og_priority_seconds integer not null check(og_priority_seconds>=0),
- warm_grace_seconds integer not null default 0 check(warm_grace_seconds>=0), enabled boolean not null default false,
+ warm_grace_seconds integer not null default 0 check(warm_grace_seconds>=0), spend_hold_seconds integer not null check(spend_hold_seconds between 1 and 86400), enabled boolean not null default false,
  updated_at timestamptz not null default now()
 );
 create table public.compute_spend_policies (
@@ -33,13 +33,13 @@ create table public.compute_job_attempts (
  lease_token uuid not null unique, worker_ref text not null check(length(worker_ref) between 1 and 200), claimed_at timestamptz not null default now(), started_at timestamptz,
  heartbeat_at timestamptz not null default now(), lease_expires_at timestamptz not null, provider_dispatched_at timestamptz, provider_operation_ref text,
  finished_at timestamptz, outcome_class text, safe_error_code text, reserved_cost_micros bigint check(reserved_cost_micros>=0), actual_cost_micros bigint check(actual_cost_micros>=0),
- runtime_ms bigint check(runtime_ms>=0), internal_telemetry jsonb not null default '{}'::jsonb, unique(job_id,ordinal)
+ runtime_ms bigint check(runtime_ms>=0), recovery_token uuid, internal_telemetry jsonb not null default '{}'::jsonb, unique(job_id,ordinal)
 );
 create table public.compute_cost_ledger (
  id uuid primary key default gen_random_uuid(), job_id uuid not null references public.compute_jobs(id) on delete restrict,
  attempt_id uuid references public.compute_job_attempts(id) on delete restrict, kind public.compute_cost_event_kind not null, amount_micros bigint not null,
  currency text not null default 'USD' check(currency='USD'), occurred_at timestamptz not null default now(), metadata jsonb not null default '{}'::jsonb,
- check((kind in ('reservation','actual') and amount_micros>=0) or (kind in ('release','correction') and amount_micros<>0))
+ check((kind in ('reservation','actual') and amount_micros>0) or (kind='release' and amount_micros<0) or (kind='correction' and amount_micros<>0))
 );
 create table public.compute_spend_threshold_events (
  id uuid primary key default gen_random_uuid(), policy_id uuid not null references public.compute_spend_policies(id), period_kind text not null check(period_kind in ('daily','monthly')),
@@ -52,11 +52,26 @@ create index compute_jobs_stale_idx on public.compute_jobs(lease_expires_at) whe
 create index compute_jobs_active_owner_idx on public.compute_jobs(owner_id,workload) where state in ('claimed','running','recovering','cancel_requested');
 create index compute_attempts_provider_idx on public.compute_job_attempts(provider_operation_ref) where provider_operation_ref is not null;
 create index compute_cost_period_idx on public.compute_cost_ledger(occurred_at,kind);
+create unique index compute_cost_one_reservation_idx on public.compute_cost_ledger(attempt_id) where kind='reservation';
+create unique index compute_cost_one_release_idx on public.compute_cost_ledger(attempt_id) where kind='release';
+create unique index compute_cost_one_actual_idx on public.compute_cost_ledger(attempt_id) where kind='actual';
+create unique index compute_jobs_one_active_owner_workload_idx on public.compute_jobs(owner_id,workload) where state in ('claimed','running','recovering','cancel_requested');
 
 alter table public.compute_jobs enable row level security; alter table public.compute_job_attempts enable row level security;
 alter table public.compute_cost_ledger enable row level security; alter table public.compute_spend_policies enable row level security;
 alter table public.compute_scheduler_policies enable row level security; alter table public.compute_spend_threshold_events enable row level security;
-revoke all on all tables in schema public from anon, authenticated;
+revoke all on table public.compute_jobs, public.compute_job_attempts, public.compute_cost_ledger, public.compute_spend_policies, public.compute_scheduler_policies, public.compute_spend_threshold_events from public, anon, authenticated, service_role;
+
+create function public.compute_safe_error(p_code text) returns text language plpgsql immutable set search_path=pg_catalog,public as $$
+begin if p_code is null then return null; end if; if length(p_code) not between 1 and 64 or p_code !~ '^[A-Z][A-Z0-9_]*$' then raise exception 'INVALID_SAFE_ERROR_CODE'; end if; return p_code; end$$;
+
+create function public.compute_creator_result(p_result jsonb) returns jsonb language sql immutable set search_path=pg_catalog,public as $$
+ select case when p_result is null then null else jsonb_strip_nulls(jsonb_build_object(
+  'generation_id',case when p_result->>'generation_id' ~ '^[0-9a-fA-F-]{36}$' then p_result->'generation_id' end,
+  'asset_ids',case when jsonb_typeof(p_result->'asset_ids')='array' then p_result->'asset_ids' end,
+  'project_id',case when p_result->>'project_id' ~ '^[0-9a-fA-F-]{36}$' then p_result->'project_id' end,
+  'result_id',case when p_result->>'result_id' ~ '^[0-9a-fA-F-]{36}$' then p_result->'result_id' end)) end
+$$;
 
 create function public.submit_compute_job(p_owner_id uuid,p_workload public.compute_workload,p_idempotency_key text,p_request_fingerprint text,p_request_payload jsonb,p_priority_class text)
 returns table(job_id uuid, workload public.compute_workload, creator_status text, queued_at timestamptz, started_at timestamptz, completed_at timestamptz, result_reference jsonb, safe_error_code text, can_cancel boolean)
@@ -70,9 +85,9 @@ begin
   select * into policy from public.compute_scheduler_policies p where p.workload=p_workload and p.enabled;
   if not found then raise exception 'COMPUTE_POLICY_UNCONFIGURED'; end if;
   insert into public.compute_jobs(owner_id,workload,idempotency_key,request_fingerprint,request_payload,priority_class,max_attempts)
-   values(p_owner_id,p_workload,p_idempotency_key,p_request_fingerprint,p_request_payload,p_priority_class,policy.max_attempts) returning * into j;
+  values(p_owner_id,p_workload,p_idempotency_key,p_request_fingerprint,p_request_payload,p_priority_class,policy.max_attempts) returning * into j;
  end if;
- return query select j.id,j.workload,case j.state when 'claimed' then 'running' when 'succeeded' then 'completed' when 'cancel_requested' then 'cancelling' else j.state::text end,j.queued_at,j.started_at,j.terminal_at,j.result_reference,j.safe_error_code,j.state not in ('succeeded','failed','cancelled');
+ return query select j.id,j.workload,case when j.state='recovering' and j.cancellation_requested_at is not null then 'cancelling' else case j.state when 'claimed' then 'running' when 'succeeded' then 'completed' when 'cancel_requested' then 'cancelling' else j.state::text end end,j.queued_at,j.started_at,j.terminal_at,public.compute_creator_result(j.result_reference),j.safe_error_code,j.state not in ('succeeded','failed','cancelled');
 end$$;
 
 create function public.claim_compute_job(p_workload public.compute_workload,p_worker_ref text)
@@ -91,47 +106,120 @@ begin
  return query select j.id,a.id,j.lease_token,j.request_payload;
 end$$;
 
+create function public.heartbeat_compute_job(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid) returns timestamptz language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts; p public.compute_scheduler_policies; renewed timestamptz;
+begin
+ select * into j from public.compute_jobs where id=p_job_id for update;
+ select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or j.lease_token is distinct from p_lease_token or a.lease_token<>p_lease_token or a.finished_at is not null or j.lease_expires_at<=clock_timestamp() or j.state not in ('claimed','running','cancel_requested') then raise exception 'LEASE_MISMATCH'; end if;
+ select * into p from public.compute_scheduler_policies where workload=j.workload and enabled; if not found then raise exception 'COMPUTE_POLICY_UNCONFIGURED'; end if;
+ renewed:=clock_timestamp()+p.stale_seconds*interval '1 second'; update public.compute_jobs set lease_expires_at=renewed,updated_at=now() where id=j.id; update public.compute_job_attempts set heartbeat_at=now(),lease_expires_at=renewed where id=a.id; return renewed;
+end$$;
+
 create function public.compute_worker_transition(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_action text,p_safe_error_code text default null,p_result_reference jsonb default null)
 returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
-declare j public.compute_jobs; a public.compute_job_attempts;
+declare j public.compute_jobs; a public.compute_job_attempts; safe_code text;
 begin
- select * into j from public.compute_jobs where id=p_job_id for update; select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id and lease_token=p_lease_token for update;
- if not found or j.lease_token is distinct from p_lease_token then raise exception 'LEASE_MISMATCH'; end if;
- if p_action='heartbeat' and j.state in ('claimed','running','cancel_requested') then update public.compute_job_attempts set heartbeat_at=now() where id=a.id;
- elsif p_action='start' and j.state='claimed' then update public.compute_jobs set state='running',started_at=coalesce(started_at,now()) where id=j.id; update public.compute_job_attempts set started_at=coalesce(started_at,now()) where id=a.id;
- elsif p_action='success' and j.state in ('running','cancel_requested') then update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=p_result_reference,lease_token=null,lease_expires_at=null where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='succeeded' where id=a.id;
- elsif p_action='failure' and j.state in ('claimed','running') then update public.compute_jobs set state='failed',terminal_at=now(),safe_error_code=p_safe_error_code,lease_token=null,lease_expires_at=null where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='failed',safe_error_code=p_safe_error_code where id=a.id;
- elsif p_action='cancelled' and j.state='cancel_requested' then update public.compute_jobs set state='cancelled',terminal_at=now(),lease_token=null,lease_expires_at=null where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='cancelled' where id=a.id;
- elsif (p_action='success' and j.state='succeeded') or (p_action='failure' and j.state='failed') or (p_action='cancelled' and j.state='cancelled') then return j.state;
+ select * into j from public.compute_jobs where id=p_job_id for update;
+ if (p_action='success' and j.state='succeeded') or (p_action='failure' and j.state='failed') or (p_action='cancelled' and j.state='cancelled') then return j.state; end if;
+ select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or j.lease_token is distinct from p_lease_token or a.lease_token<>p_lease_token or a.finished_at is not null or j.lease_expires_at<=clock_timestamp() then raise exception 'LEASE_MISMATCH'; end if;
+ safe_code:=public.compute_safe_error(p_safe_error_code);
+ if p_action='start' and j.state='claimed' then update public.compute_jobs set state='running',started_at=coalesce(started_at,now()),updated_at=now() where id=j.id; update public.compute_job_attempts set started_at=coalesce(started_at,now()) where id=a.id;
+ elsif p_action='success' and j.state in ('running','cancel_requested') then update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=p_result_reference,lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='succeeded' where id=a.id;
+ elsif p_action='failure' and j.state in ('claimed','running') then update public.compute_jobs set state='failed',terminal_at=now(),safe_error_code=safe_code,lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='failed',safe_error_code=safe_code where id=a.id;
+ elsif p_action='cancelled' and j.state='cancel_requested' then update public.compute_jobs set state='cancelled',terminal_at=now(),lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='cancelled' where id=a.id;
  else raise exception 'ILLEGAL_COMPUTE_TRANSITION'; end if;
  select state into j.state from public.compute_jobs where id=j.id; return j.state;
 end$$;
 
-create function public.mark_compute_provider_dispatch(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_operation_ref text)
-returns void language plpgsql security definer set search_path=pg_catalog,public as $$ begin
- if p_operation_ref is null or length(p_operation_ref)>500 then raise exception 'INVALID_OPERATION_REFERENCE'; end if;
- update public.compute_job_attempts set provider_dispatched_at=coalesce(provider_dispatched_at,now()),provider_operation_ref=coalesce(provider_operation_ref,p_operation_ref) where id=p_attempt_id and job_id=p_job_id and lease_token=p_lease_token;
- if not found then raise exception 'LEASE_MISMATCH'; end if;
+create function public.mark_compute_provider_dispatch(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_operation_ref text) returns void language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts;
+begin
+ if p_operation_ref is null or length(p_operation_ref) not between 1 and 500 then raise exception 'INVALID_OPERATION_REFERENCE'; end if;
+ select * into j from public.compute_jobs where id=p_job_id for update; select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or j.lease_token is distinct from p_lease_token or a.lease_token<>p_lease_token or a.finished_at is not null or j.lease_expires_at<=clock_timestamp() or j.state not in ('claimed','running','cancel_requested') then raise exception 'LEASE_MISMATCH'; end if;
+ if a.provider_operation_ref is not null and a.provider_operation_ref<>p_operation_ref then raise exception 'PROVIDER_OPERATION_CONFLICT'; end if;
+ update public.compute_job_attempts set provider_dispatched_at=coalesce(provider_dispatched_at,now()),provider_operation_ref=coalesce(provider_operation_ref,p_operation_ref) where id=a.id;
+end$$;
+
+create function public.retry_compute_pre_dispatch(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_safe_error_code text,p_delay_seconds integer default 0) returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts; safe_code text;
+begin
+ if p_delay_seconds not between 0 and 86400 then raise exception 'INVALID_RETRY_DELAY'; end if; safe_code:=public.compute_safe_error(p_safe_error_code);
+ select * into j from public.compute_jobs where id=p_job_id for update; select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or j.lease_token is distinct from p_lease_token or a.lease_token<>p_lease_token or a.finished_at is not null or j.lease_expires_at<=clock_timestamp() then raise exception 'LEASE_MISMATCH'; end if;
+ if a.provider_dispatched_at is not null or a.provider_operation_ref is not null then raise exception 'POST_DISPATCH_RETRY_FORBIDDEN'; end if;
+ update public.compute_job_attempts set finished_at=now(),outcome_class='retryable_failure',safe_error_code=safe_code where id=a.id;
+ if j.attempt_count<j.max_attempts then update public.compute_jobs set state='queued',available_at=now()+p_delay_seconds*interval '1 second',lease_token=null,lease_expires_at=null,internal_hold_code=null,updated_at=now() where id=j.id;
+ else update public.compute_jobs set state='failed',terminal_at=now(),lease_token=null,lease_expires_at=null,safe_error_code='RETRY_LIMIT_REACHED',updated_at=now() where id=j.id; end if;
+ select state into j.state from public.compute_jobs where id=j.id; return j.state;
 end$$;
 
 create function public.recover_stale_compute_jobs() returns integer language plpgsql security definer set search_path=pg_catalog,public as $$
 declare j public.compute_jobs; a public.compute_job_attempts; n int:=0;
-begin for j in select * from public.compute_jobs where state in ('claimed','running') and lease_expires_at<now() for update skip locked loop
- select * into a from public.compute_job_attempts where job_id=j.id and ordinal=j.attempt_count;
- if a.provider_dispatched_at is not null or a.provider_operation_ref is not null then update public.compute_jobs set state='recovering',lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
- elsif j.attempt_count<j.max_attempts then update public.compute_jobs set state='queued',lease_token=null,lease_expires_at=null,available_at=now(),updated_at=now() where id=j.id;
- else update public.compute_jobs set state='failed',lease_token=null,lease_expires_at=null,terminal_at=now(),safe_error_code='RETRY_LIMIT_REACHED' where id=j.id; end if;
- update public.compute_job_attempts set finished_at=now(),outcome_class=case when a.provider_dispatched_at is null and a.provider_operation_ref is null then 'lease_expired' else 'dispatch_uncertain' end where id=a.id; n:=n+1; end loop; return n; end$$;
+begin
+ for j in select * from public.compute_jobs where state in ('claimed','running','cancel_requested') and lease_expires_at<now() order by id for update skip locked loop
+  select * into a from public.compute_job_attempts where job_id=j.id and ordinal=j.attempt_count for update;
+  if a.provider_dispatched_at is not null or a.provider_operation_ref is not null then
+   update public.compute_jobs set state='recovering',lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
+   update public.compute_job_attempts set recovery_token=coalesce(recovery_token,gen_random_uuid()),outcome_class='dispatch_uncertain' where id=a.id;
+  elsif j.state='cancel_requested' then
+   update public.compute_jobs set state='cancelled',terminal_at=now(),lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
+   update public.compute_job_attempts set finished_at=now(),outcome_class='cancelled_before_dispatch' where id=a.id;
+  elsif j.attempt_count<j.max_attempts then
+   update public.compute_jobs set state='queued',lease_token=null,lease_expires_at=null,available_at=now(),updated_at=now() where id=j.id;
+   update public.compute_job_attempts set finished_at=now(),outcome_class='lease_expired' where id=a.id;
+  else
+   update public.compute_jobs set state='failed',lease_token=null,lease_expires_at=null,terminal_at=now(),safe_error_code='RETRY_LIMIT_REACHED',updated_at=now() where id=j.id;
+   update public.compute_job_attempts set finished_at=now(),outcome_class='lease_expired' where id=a.id;
+  end if; n:=n+1;
+ end loop; return n;
+end$$;
+
+create function public.reconcile_compute_recovery(p_job_id uuid,p_attempt_id uuid,p_recovery_token uuid,p_outcome text,p_provider_nonexecution_proven boolean default false,p_safe_error_code text default null,p_result_reference jsonb default null) returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts; safe_code text;
+begin
+ safe_code:=public.compute_safe_error(p_safe_error_code); select * into j from public.compute_jobs where id=p_job_id for update; select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or j.state<>'recovering' or a.recovery_token is distinct from p_recovery_token or a.finished_at is not null then raise exception 'RECOVERY_AUTHORITY_MISMATCH'; end if;
+ if p_outcome='requeue' then if not p_provider_nonexecution_proven then raise exception 'PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED'; end if; update public.compute_jobs set state='queued',available_at=now(),updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='provider_nonexecution_proven' where id=a.id;
+ elsif p_outcome in ('succeeded','failed','cancelled') then update public.compute_jobs set state=p_outcome::public.compute_job_state,terminal_at=now(),result_reference=case when p_outcome='succeeded' then p_result_reference else result_reference end,safe_error_code=case when p_outcome='failed' then safe_code else safe_error_code end,updated_at=now() where id=j.id; update public.compute_job_attempts set finished_at=now(),outcome_class='reconciled_'||p_outcome,safe_error_code=case when p_outcome='failed' then safe_code else safe_error_code end where id=a.id;
+ else raise exception 'INVALID_RECOVERY_OUTCOME'; end if; select state into j.state from public.compute_jobs where id=j.id; return j.state;
+end$$;
 
 create function public.creator_compute_status(p_owner_id uuid,p_job_id uuid) returns table(job_id uuid,workload public.compute_workload,creator_status text,queued_at timestamptz,started_at timestamptz,completed_at timestamptz,result_reference jsonb,safe_error_code text,can_cancel boolean)
-language sql security definer set search_path=pg_catalog,public as $$ select id,workload,case state when 'claimed' then 'running' when 'succeeded' then 'completed' when 'cancel_requested' then 'cancelling' else state::text end,queued_at,started_at,terminal_at,result_reference,safe_error_code,state not in ('succeeded','failed','cancelled') from public.compute_jobs where id=p_job_id and owner_id=p_owner_id $$;
-create function public.cancel_compute_job(p_owner_id uuid,p_job_id uuid) returns setof public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$ declare s public.compute_job_state; begin select state into s from public.compute_jobs where id=p_job_id and owner_id=p_owner_id for update; if not found then raise exception 'COMPUTE_JOB_NOT_FOUND'; end if; if s='queued' then update public.compute_jobs set state='cancelled',cancellation_requested_at=now(),terminal_at=now() where id=p_job_id returning state into s; elsif s in ('claimed','running','recovering') then update public.compute_jobs set state='cancel_requested',cancellation_requested_at=coalesce(cancellation_requested_at,now()) where id=p_job_id returning state into s; end if; return next s; end$$;
+language sql security definer set search_path=pg_catalog,public as $$ select id,workload,case when state='recovering' and cancellation_requested_at is not null then 'cancelling' else case state when 'claimed' then 'running' when 'succeeded' then 'completed' when 'cancel_requested' then 'cancelling' else state::text end end,queued_at,started_at,terminal_at,public.compute_creator_result(result_reference),safe_error_code,state not in ('succeeded','failed','cancelled') from public.compute_jobs where id=p_job_id and owner_id=p_owner_id $$;
+
+create function public.cancel_compute_job(p_owner_id uuid,p_job_id uuid) returns setof public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$ declare s public.compute_job_state; begin select state into s from public.compute_jobs where id=p_job_id and owner_id=p_owner_id for update; if not found then raise exception 'COMPUTE_JOB_NOT_FOUND'; end if; if s='queued' then update public.compute_jobs set state='cancelled',cancellation_requested_at=now(),terminal_at=now(),updated_at=now() where id=p_job_id returning state into s; elsif s in ('claimed','running') then update public.compute_jobs set state='cancel_requested',cancellation_requested_at=coalesce(cancellation_requested_at,now()),updated_at=now() where id=p_job_id returning state into s; elsif s='recovering' then update public.compute_jobs set cancellation_requested_at=coalesce(cancellation_requested_at,now()),updated_at=now() where id=p_job_id; s:='cancel_requested'; end if; return next s; end$$;
 
 create function public.authorize_compute_dispatch(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_estimated_cost_micros bigint) returns boolean language plpgsql security definer set search_path=pg_catalog,public as $$
-declare pol public.compute_spend_policies; j public.compute_jobs; daily_spent bigint; monthly_spent bigint; threshold_value smallint; begin if p_estimated_cost_micros<0 then raise exception 'INVALID_COST'; end if; select * into j from public.compute_jobs where id=p_job_id and lease_token=p_lease_token for update; if not found or not exists(select 1 from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id and lease_token=p_lease_token) then raise exception 'LEASE_MISMATCH'; end if; select * into pol from public.compute_spend_policies where enabled and effective_from<=now() and (effective_until is null or effective_until>now()) order by version desc limit 1; if not found then update public.compute_jobs set internal_hold_code='SPEND_POLICY_UNCONFIGURED' where id=j.id; return false; end if; if j.workload='video' and p_estimated_cost_micros>pol.video_job_limit_micros then return false; end if; select coalesce(sum(amount_micros),0) into daily_spent from public.compute_cost_ledger where occurred_at>=date_trunc('day',now()); if daily_spent+p_estimated_cost_micros>pol.daily_limit_micros then return false; end if; select coalesce(sum(amount_micros),0) into monthly_spent from public.compute_cost_ledger where occurred_at>=date_trunc('month',now()); if monthly_spent+p_estimated_cost_micros>pol.monthly_limit_micros then return false; end if; foreach threshold_value in array array[50,75,90,100]::smallint[] loop if daily_spent+p_estimated_cost_micros>=pol.daily_limit_micros*threshold_value/100 then insert into public.compute_spend_threshold_events(policy_id,period_kind,period_start,threshold) values(pol.id,'daily',current_date,threshold_value) on conflict do nothing; end if; if monthly_spent+p_estimated_cost_micros>=pol.monthly_limit_micros*threshold_value/100 then insert into public.compute_spend_threshold_events(policy_id,period_kind,period_start,threshold) values(pol.id,'monthly',date_trunc('month',current_date)::date,threshold_value) on conflict do nothing; end if; end loop; insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,p_attempt_id,'reservation',p_estimated_cost_micros); update public.compute_job_attempts set reserved_cost_micros=p_estimated_cost_micros where id=p_attempt_id; return true; end$$;
-create function public.record_compute_actual_cost(p_job_id uuid,p_attempt_id uuid,p_actual_cost_micros bigint,p_runtime_ms bigint,p_telemetry jsonb default '{}') returns void language plpgsql security definer set search_path=pg_catalog,public as $$ begin if p_actual_cost_micros<0 or p_runtime_ms<0 then raise exception 'INVALID_COST'; end if; insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(p_job_id,p_attempt_id,'actual',p_actual_cost_micros); update public.compute_job_attempts set actual_cost_micros=p_actual_cost_micros,runtime_ms=p_runtime_ms,internal_telemetry=p_telemetry where id=p_attempt_id and job_id=p_job_id; if not found then raise exception 'ATTEMPT_NOT_FOUND'; end if; end$$;
+declare pol public.compute_spend_policies; sched public.compute_scheduler_policies; j public.compute_jobs; a public.compute_job_attempts; daily_spent bigint; monthly_spent bigint; threshold_value smallint; denial text;
+begin
+ if p_estimated_cost_micros<=0 then raise exception 'INVALID_COST'; end if; select * into j from public.compute_jobs where id=p_job_id for update; select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or j.lease_token is distinct from p_lease_token or a.lease_token<>p_lease_token or a.finished_at is not null or j.lease_expires_at<=clock_timestamp() or j.state not in ('claimed','running') then raise exception 'LEASE_MISMATCH'; end if;
+ if a.provider_dispatched_at is not null then raise exception 'ALREADY_DISPATCHED'; end if;
+ if a.reserved_cost_micros is not null then if a.reserved_cost_micros=p_estimated_cost_micros then return true; else raise exception 'RESERVATION_CONFLICT'; end if; end if;
+ select * into sched from public.compute_scheduler_policies where workload=j.workload and enabled; if not found then raise exception 'COMPUTE_POLICY_UNCONFIGURED'; end if;
+ select * into pol from public.compute_spend_policies where enabled and effective_from<=now() and (effective_until is null or effective_until>now()) order by version desc limit 1;
+ if not found then denial:='SPEND_POLICY_UNCONFIGURED'; else
+  select coalesce(sum(amount_micros),0) into daily_spent from public.compute_cost_ledger where occurred_at>=date_trunc('day',now()); select coalesce(sum(amount_micros),0) into monthly_spent from public.compute_cost_ledger where occurred_at>=date_trunc('month',now());
+  if j.workload='video' and p_estimated_cost_micros>pol.video_job_limit_micros then denial:='VIDEO_COST_HOLD'; elsif daily_spent+p_estimated_cost_micros>pol.daily_limit_micros then denial:='DAILY_SPEND_HOLD'; elsif monthly_spent+p_estimated_cost_micros>pol.monthly_limit_micros then denial:='MONTHLY_SPEND_HOLD'; end if;
+ end if;
+ if denial is not null then update public.compute_job_attempts set finished_at=now(),outcome_class='dispatch_held' where id=a.id; update public.compute_jobs set state='queued',available_at=now()+sched.spend_hold_seconds*interval '1 second',lease_token=null,lease_expires_at=null,internal_hold_code=denial,updated_at=now() where id=j.id; return false; end if;
+ foreach threshold_value in array array[50,75,90,100]::smallint[] loop if daily_spent+p_estimated_cost_micros>=pol.daily_limit_micros*threshold_value/100 then insert into public.compute_spend_threshold_events(policy_id,period_kind,period_start,threshold) values(pol.id,'daily',current_date,threshold_value) on conflict do nothing; end if; if monthly_spent+p_estimated_cost_micros>=pol.monthly_limit_micros*threshold_value/100 then insert into public.compute_spend_threshold_events(policy_id,period_kind,period_start,threshold) values(pol.id,'monthly',date_trunc('month',current_date)::date,threshold_value) on conflict do nothing; end if; end loop;
+ insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'reservation',p_estimated_cost_micros); update public.compute_job_attempts set reserved_cost_micros=p_estimated_cost_micros where id=a.id; return true;
+end$$;
 
-revoke all on function public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text),public.claim_compute_job(public.compute_workload,text),public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb),public.mark_compute_provider_dispatch(uuid,uuid,uuid,text),public.recover_stale_compute_jobs(),public.creator_compute_status(uuid,uuid),public.cancel_compute_job(uuid,uuid),public.authorize_compute_dispatch(uuid,uuid,uuid,bigint),public.record_compute_actual_cost(uuid,uuid,bigint,bigint,jsonb) from public,anon,authenticated;
-grant execute on function public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text),public.claim_compute_job(public.compute_workload,text),public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb),public.mark_compute_provider_dispatch(uuid,uuid,uuid,text),public.recover_stale_compute_jobs(),public.creator_compute_status(uuid,uuid),public.cancel_compute_job(uuid,uuid),public.authorize_compute_dispatch(uuid,uuid,uuid,bigint),public.record_compute_actual_cost(uuid,uuid,bigint,bigint,jsonb) to service_role;
-grant all on public.compute_jobs,public.compute_job_attempts,public.compute_cost_ledger,public.compute_spend_policies,public.compute_scheduler_policies,public.compute_spend_threshold_events to service_role;
+create function public.record_compute_actual_cost(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_actual_cost_micros bigint,p_runtime_ms bigint,p_telemetry jsonb default '{}') returns void language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts;
+begin
+ if p_actual_cost_micros<=0 or p_runtime_ms<0 then raise exception 'INVALID_COST'; end if; select * into j from public.compute_jobs where id=p_job_id for update; select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or j.lease_token is distinct from p_lease_token or a.lease_token<>p_lease_token or j.lease_expires_at<=clock_timestamp() then raise exception 'LEASE_MISMATCH'; end if;
+ if a.actual_cost_micros is not null then if a.actual_cost_micros=p_actual_cost_micros and a.runtime_ms=p_runtime_ms then return; else raise exception 'ACTUAL_COST_CONFLICT'; end if; end if;
+ if a.reserved_cost_micros is not null then insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'release',-a.reserved_cost_micros); end if;
+ insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'actual',p_actual_cost_micros); update public.compute_job_attempts set actual_cost_micros=p_actual_cost_micros,runtime_ms=p_runtime_ms,internal_telemetry=p_telemetry where id=a.id;
+end$$;
+
+revoke all on function public.compute_safe_error(text),public.compute_creator_result(jsonb),public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text),public.claim_compute_job(public.compute_workload,text),public.heartbeat_compute_job(uuid,uuid,uuid),public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb),public.mark_compute_provider_dispatch(uuid,uuid,uuid,text),public.retry_compute_pre_dispatch(uuid,uuid,uuid,text,integer),public.recover_stale_compute_jobs(),public.reconcile_compute_recovery(uuid,uuid,uuid,text,boolean,text,jsonb),public.creator_compute_status(uuid,uuid),public.cancel_compute_job(uuid,uuid),public.authorize_compute_dispatch(uuid,uuid,uuid,bigint),public.record_compute_actual_cost(uuid,uuid,uuid,bigint,bigint,jsonb) from public,anon,authenticated;
+grant execute on function public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text),public.claim_compute_job(public.compute_workload,text),public.heartbeat_compute_job(uuid,uuid,uuid),public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb),public.mark_compute_provider_dispatch(uuid,uuid,uuid,text),public.retry_compute_pre_dispatch(uuid,uuid,uuid,text,integer),public.recover_stale_compute_jobs(),public.reconcile_compute_recovery(uuid,uuid,uuid,text,boolean,text,jsonb),public.creator_compute_status(uuid,uuid),public.cancel_compute_job(uuid,uuid),public.authorize_compute_dispatch(uuid,uuid,uuid,bigint),public.record_compute_actual_cost(uuid,uuid,uuid,bigint,bigint,jsonb) to service_role;
 commit;

@@ -106,6 +106,14 @@ export async function POST(req: Request) {
           dataset_reference: { bucket: datasetJob.final_r2_bucket, prefix: datasetJob.final_r2_prefix },
         },
       });
+      const { error: projectionError } = await supabaseAdmin.from("user_loras").update({
+        training_job_id: job.job_id,
+        status: "queued",
+        dataset_r2_bucket,
+        dataset_r2_prefix,
+        updated_at: new Date().toISOString(),
+      }).eq("id", lora_id).eq("user_id", userId);
+      if (projectionError) throw new Error("TRAINER_PROJECTION_FAILED");
       return NextResponse.json({ ok: true, lora_id, ...toCreatorComputeStatus(job) }, { status: 202 });
     }
 
