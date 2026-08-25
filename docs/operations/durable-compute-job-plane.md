@@ -34,6 +34,14 @@ Trainer durable submission and `user_loras` projection linkage occur in one data
 transaction. Image submission priority uses only the exact canonical `og_throne`
 subscription tier, and the Generator persists/polls every nonterminal submitted job.
 
+Future workers must execute in this order: claim, heartbeat, authorize spend, record
+durable provider-dispatch intent, make the external request, attach the opaque provider
+operation reference, heartbeat, settle actual cost, finalize the result/artifact, and
+only then terminalize the job. A crash after dispatch intent always enters recovering;
+it is never a blind retry. Proven non-execution releases a reservation exactly once.
+Zero actual cost is valid settlement evidence. Stitch has no per-creator active limit;
+OG weighting and creator concurrency apply only to Trainer, Image, and Video.
+
 Pass 3 must supply worker/provider adapters, reconciliation, cancellation, and result
 finalization. Video remains unavailable. No Salad configuration, provider workload,
 GPU canary, or real generation is part of this pass.

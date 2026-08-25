@@ -150,6 +150,7 @@ export async function POST(req: Request) {
         { status: 401 }
       );
     }
+    if (msg.includes("IDEMPOTENCY_CONFLICT")) return NextResponse.json({ error: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
 
     console.error("[lora/train] Fatal:", err);
     return NextResponse.json(

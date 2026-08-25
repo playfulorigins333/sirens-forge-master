@@ -40,9 +40,9 @@ function safeResultReference(value: unknown) {
   const source = value as Record<string, unknown>;
   const safe: Record<string, unknown> = {};
   for (const key of ["generation_id", "project_id", "result_id"] as const) {
-    if (typeof source[key] === "string" && /^[0-9a-f-]{36}$/i.test(source[key])) safe[key] = source[key];
+    if (typeof source[key] === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(source[key])) safe[key] = source[key];
   }
-  if (Array.isArray(source.asset_ids) && source.asset_ids.every((id) => typeof id === "string" && /^[0-9a-f-]{36}$/i.test(id))) safe.asset_ids = source.asset_ids;
+  if (Array.isArray(source.asset_ids) && source.asset_ids.every((id) => typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))) safe.asset_ids = source.asset_ids;
   return Object.keys(safe).length ? safe : null;
 }
 

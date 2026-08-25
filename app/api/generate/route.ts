@@ -250,13 +250,15 @@ export async function POST(req: NextRequest) {
     };
 
     if (durableComputeEnabled) {
+      const idempotencyKey = req.headers.get("idempotency-key")?.trim();
+      if (!idempotencyKey || idempotencyKey.length > 128) return NextResponse.json({ error: "INVALID_IDEMPOTENCY_KEY" }, { status: 400 });
       if (identityLora) {
         await resolveOwnedIdentityLoraMetadata(identityLora, userId);
       }
       const job = await submitComputeJob({
         ownerId: userId,
         workload: "image",
-        idempotencyKey: req.headers.get("idempotency-key"),
+        idempotencyKey,
         priorityClass: computePriorityForTier(auth.subscription?.tier_name),
         request: {
           prompt,

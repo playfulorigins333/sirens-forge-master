@@ -4,9 +4,10 @@ create schema public;
 create extension if not exists pgcrypto;
 create schema auth;
 create table auth.users(id uuid primary key);
+create type public.lora_status as enum ('idle','queued','training','completed','failed','draft');
 create table public.user_loras(
- id uuid primary key, user_id uuid not null references auth.users(id), status text,
- training_job_id uuid, dataset_r2_bucket text, dataset_r2_prefix text,
+ id uuid primary key, user_id uuid not null references auth.users(id), status public.lora_status,
+ training_job_id text, dataset_r2_bucket text, dataset_r2_prefix text,
  updated_at timestamptz not null default now()
 );
 do $$ begin

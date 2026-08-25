@@ -42,10 +42,11 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    if (isDurableComputeJobsEnabled() && data.training_job_id) {
+    const durableTrainingJobId = typeof data.training_job_id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data.training_job_id.trim()) ? data.training_job_id.trim() : null;
+    if (isDurableComputeJobsEnabled() && durableTrainingJobId) {
       const { data: computeRows, error: computeError } = await supabaseAdmin.rpc("creator_compute_status", {
         p_owner_id: userId,
-        p_job_id: data.training_job_id,
+        p_job_id: durableTrainingJobId,
       });
       if (computeError) return NextResponse.json({ error: "Trainer status unavailable" }, { status: 503 });
       const compute = Array.isArray(computeRows) ? computeRows[0] : computeRows;
@@ -53,7 +54,7 @@ export async function GET(req: Request) {
         const status = compute.creator_status === "running" ? "training"
           : compute.creator_status === "recovering" || compute.creator_status === "cancelling" ? "training"
           : compute.creator_status === "cancelled" || compute.creator_status === "failed" ? "failed"
-          : compute.creator_status === "completed" && data.artifact_r2_bucket && data.artifact_r2_key ? "completed"
+          : compute.creator_status === "completed" && data.artifact_r2_bucket && data.artifact_r2_key && data.completed_at && new Date(data.completed_at) >= new Date(compute.queued_at) ? "completed"
           : "queued";
         return NextResponse.json({ ok: true, lora: { ...data, status, compute_status: compute.creator_status } });
       }

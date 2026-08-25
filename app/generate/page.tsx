@@ -46,6 +46,7 @@ import BuildMyModelCard from "@/components/generate/BuildMyModelCard";
 import { isPrivateCreatorGenerationOutput, parseCreatorGenerationOutputs } from "@/lib/generation/clientResponse";
 import { CREATION_LOOP_HANDOFF_STORAGE_KEY, parseCreationLoopHandoff } from "@/lib/creation-loop/handoff";
 import { resolveIncomingIdentity } from "@/lib/generation/identityHandoff";
+import { clearPendingSubmission, pendingSubmissionKey } from "@/lib/compute-idempotency-client";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -3310,7 +3311,8 @@ export default function GeneratePage() {
         if (!active || !response?.ok) return;
         const job = await response.json();
         if (["queued", "running", "recovering", "cancelling"].includes(job.status)) activeStatuses.push(job.status);
-        else terminalIds.push(jobId);
+        else if (["completed", "failed", "cancelled"].includes(job.status)) terminalIds.push(jobId);
+        else activeStatuses.push("status unavailable");
       }));
       if (!active) return;
       if (activeStatuses.length) setQueuedComputeMessage(`${activeStatuses.length} generation job${activeStatuses.length === 1 ? " is" : "s are"} safely queued or processing.`);
@@ -3999,18 +4001,24 @@ ${basePrompt}`,
       const generatedAll: GeneratedItem[] = [];
 
       if (mode === "text_to_image" && durableCompute) {
+        const durableIntent = { ...baseParams, batch: runCount };
+        const submissionKey = await pendingSubmissionKey("sirensforge:pending-image-compute", durableIntent);
         const res = await fetch("/api/generate", {
           method: "POST",
-          headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
-          body: JSON.stringify({ ...baseParams, batch: runCount }),
+          headers: { "Content-Type": "application/json", "Idempotency-Key": submissionKey },
+          body: JSON.stringify(durableIntent),
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || res.status !== 202 || typeof data?.job_id !== "string") throw new Error(data?.error || "Durable generation submission failed.");
+        if (!res.ok || res.status !== 202 || typeof data?.job_id !== "string") {
+          if (res.status >= 400 && res.status < 500) clearPendingSubmission("sirensforge:pending-image-compute", submissionKey);
+          throw new Error(data?.error || "Durable generation submission failed.");
+        }
         setActiveComputeJobIds((ids) => {
           const next = [...new Set([...ids, data.job_id])];
           localStorage.setItem("sirensforge:active-compute-jobs", JSON.stringify(next));
           return next;
         });
+        clearPendingSubmission("sirensforge:pending-image-compute", submissionKey);
         setQueuedComputeMessage(data.message || "Your job is safely queued. Demand is high right now, so it may take a little longer.");
         setIsGenerating(false);
         return;

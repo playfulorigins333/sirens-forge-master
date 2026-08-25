@@ -14,11 +14,13 @@ drop function if exists public.reconcile_compute_recovery(uuid,uuid,uuid,text,bo
 drop function if exists public.retry_compute_pre_dispatch(uuid,uuid,uuid,text,integer);
 drop function if exists public.heartbeat_compute_job(uuid,uuid,uuid);
 drop function if exists public.mark_compute_provider_dispatch(uuid,uuid,uuid,text);
+drop function if exists public.begin_compute_provider_dispatch(uuid,uuid,uuid);
 drop function if exists public.compute_worker_transition(uuid,uuid,uuid,text,text,jsonb);
 drop function if exists public.claim_compute_job(public.compute_workload,text);
 drop function if exists public.submit_compute_job(uuid,public.compute_workload,text,text,jsonb,text);
 drop function if exists public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text);
 drop function if exists public.emit_compute_spend_thresholds(uuid);
+drop function if exists public.release_compute_reservation(uuid);
 drop function if exists public.compute_creator_result(jsonb);
 drop function if exists public.compute_safe_error(text);
 drop table if exists public.compute_spend_threshold_events,public.compute_cost_ledger,public.compute_job_attempts,public.compute_jobs,public.compute_spend_policies,public.compute_scheduler_policies;
