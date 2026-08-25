@@ -56,7 +56,7 @@ mock.module(new URL("../../../lib/generation/lora-resolver.ts", import.meta.url)
       return {
         body_mode: args[0],
         identity_lora: args[1],
-        trigger_token: "mocktoken",
+        trigger_token: args[1] ? "mocktoken" : null,
         loras: [],
       }
     },
@@ -230,6 +230,23 @@ try {
   assert.equal(lastDownstreamPayload.workflow.type, "sirens_generate_v1")
   assert.equal(lastDownstreamPayload.workflow.inputs.identity_lora, "identity/mock.safetensors")
   assert.equal(lastDownstreamPayload.workflow.inputs.workflow_json.mocked_workflow, true)
+
+  // Prompt-only generation is a normal authenticated path. The optional identity
+  // normalizes to null and never causes the client to invent an identity record.
+  for (const identityBody of [
+    { prompt: "prompt only portrait", body_mode: "body_feminine" },
+    { prompt: "prompt only portrait", body_mode: "body_feminine", identity_lora: null },
+  ]) {
+    configureAuth({ ok: true, status: 200, user: { id: "verified-prompt-only-user" } })
+    response = await invoke(identityBody)
+    assert.equal(response.status, 200)
+    assert.equal((await response.json()).status, "ok")
+    assert.deepEqual(lastResolverArgs, ["body_feminine", null, "verified-prompt-only-user"])
+    assert.equal(lastDownstreamPayload.workflow.inputs.identity_lora, null)
+    assert.equal(lastWorkflowArgs.prompt, "prompt only portrait")
+    assert.equal(insertedRecords.length, 1)
+    assert.equal(insertedRecords[0].lora_used, null)
+  }
 
   configureAuth({ ok: true, status: 200, user: { id: "verified-config-user" } })
   delete process.env.SIRENS_API_BASE_URL
