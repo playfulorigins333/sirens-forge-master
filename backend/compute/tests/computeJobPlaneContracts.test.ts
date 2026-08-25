@@ -59,12 +59,15 @@ test("creator result and error projection strips poisoned internal data", () => 
 });
 
 test("migration exposes bounded heartbeat, worker signal, recovery leases and exact-cost contracts", () => {
-  for (const token of ["heartbeat_compute_job", "compute_worker_signal", "begin_compute_provider_dispatch", "retry_compute_pre_dispatch", "claim_compute_recovery", "heartbeat_compute_recovery", "reconcile_compute_recovery", "release_compute_reservation", "recovery_token", "recovery_lease_token", "recovery_worker_ref", "recovery_heartbeat_at", "recovery_lease_expires_at", "compute_cost_one_reservation_idx", "compute_cost_one_release_idx", "compute_cost_one_actual_idx", "compute_jobs_one_active_owner_workload_idx", "PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED"]) assert.ok(migration.includes(token), token);
+  for (const token of ["heartbeat_compute_job", "compute_worker_signal", "begin_compute_provider_dispatch", "retry_compute_pre_dispatch", "claim_compute_recovery", "heartbeat_compute_recovery", "compute_recovery_signal", "reconcile_compute_recovery", "release_compute_reservation", "recovery_token", "recovery_lease_token", "recovery_worker_ref", "recovery_heartbeat_at", "recovery_lease_expires_at", "compute_cost_one_reservation_idx", "compute_cost_one_release_idx", "compute_cost_one_actual_idx", "compute_jobs_one_active_owner_workload_idx", "PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED"]) assert.ok(migration.includes(token), token);
   assert.match(migration, /compute_jobs set lease_expires_at=renewed/);
   assert.match(migration, /compute_job_attempts set heartbeat_at=now\(\),lease_expires_at=renewed/);
   assert.match(migration, /returns table\(job_state public\.compute_job_state,cancellation_requested boolean\)/);
   assert.match(migration, /recovery_lease_token=null,recovery_worker_ref=null,recovery_heartbeat_at=null,recovery_lease_expires_at=null/);
   assert.match(migration, /grant execute on function[\s\S]*compute_worker_signal\(uuid,uuid,uuid\)[\s\S]*claim_compute_recovery\(public\.compute_workload,text\)[\s\S]*heartbeat_compute_recovery\(uuid,uuid,uuid\)[\s\S]*to service_role/);
+  assert.match(migration, /create function public\.compute_recovery_signal\(p_job_id uuid,p_attempt_id uuid,p_recovery_lease_token uuid\)[\s\S]*returns table\(job_state public\.compute_job_state,cancellation_requested boolean\)/);
+  assert.match(migration, /revoke all on function[\s\S]*compute_recovery_signal\(uuid,uuid,uuid\)[\s\S]*from public,anon,authenticated/);
+  assert.match(migration, /grant execute on function[\s\S]*compute_recovery_signal\(uuid,uuid,uuid\)[\s\S]*to service_role/);
 });
 
 test("merge-blocker dispatch, recovery, result, Stitch, and Image conflict guards remain explicit", () => {

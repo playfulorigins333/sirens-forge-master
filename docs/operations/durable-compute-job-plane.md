@@ -46,7 +46,10 @@ OG weighting and creator concurrency apply only to Trainer, Image, and Video.
 Future recovery workers claim an exclusive recovery lease, heartbeat it, query the
 provider through a future adapter, and reconcile with both the stable recovery token
 and current ephemeral lease. If a worker disappears, the lease expires and another
-worker can safely reclaim it with a new lease token. No provider implementation exists yet.
+worker can safely reclaim it with a new lease token. While observing provider work, a
+recovery worker holding a live recovery lease checks `compute_recovery_signal` so it
+can act on creator cancellation without direct compute-table reads. No provider
+implementation exists yet.
 
 Pass 3 must supply worker/provider adapters, reconciliation, cancellation, and result
 finalization. Video remains unavailable. No Salad configuration, provider workload,
