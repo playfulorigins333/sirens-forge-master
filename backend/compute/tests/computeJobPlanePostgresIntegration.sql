@@ -84,6 +84,22 @@ do $$ declare j uuid; a uuid; l uuid; rt uuid; rl uuid; old_rl uuid; renewed tim
  begin perform public.reconcile_compute_recovery(j,a,rt,rl,'succeeded',false,null,jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001'),701,12,'opaque-op'); raise exception 'conflicting recovery replay accepted'; exception when others then assert sqlerrm like '%RECOVERY_REPLAY_CONFLICT%'; end;
  assert (select result_reference=jsonb_build_object('generation_id','30000000-0000-4000-8000-000000000001') from public.creator_compute_status('10000000-0000-4000-8000-000000000002',j));
 end$$;
+-- A live recovery worker can observe creator cancellation without direct table reads.
+do $$ declare j uuid; a uuid; l uuid; rt uuid; rl uuid; state public.compute_job_state; cancelled boolean; begin
+ select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000003','video','recovery-signal',repeat('7',64),'{}','standard');
+ select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('video','recovery-signal-dispatch-worker');
+ assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'recovery-signal-op');
+ update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); assert (select state='recovering' from public.compute_jobs where id=j);
+ select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('video','recovery-signal-worker') where job_id=j;
+ select job_state,cancellation_requested into state,cancelled from public.compute_recovery_signal(j,a,rl); assert state='recovering' and not cancelled, 'unexpected initial recovery cancellation signal';
+ perform public.cancel_compute_job('10000000-0000-4000-8000-000000000003',j);
+ select job_state,cancellation_requested into state,cancelled from public.compute_recovery_signal(j,a,rl); assert state='recovering' and cancelled, 'creator cancellation not signalled to recovery worker';
+ begin perform * from public.compute_recovery_signal(j,a,gen_random_uuid()); raise exception 'wrong recovery signal token accepted'; exception when others then assert sqlerrm like '%RECOVERY_LEASE_MISMATCH%'; end;
+ update public.compute_job_attempts set recovery_lease_expires_at=now()-interval '1 second' where id=a;
+ begin perform * from public.compute_recovery_signal(j,a,rl); raise exception 'expired recovery signal lease accepted'; exception when others then assert sqlerrm like '%RECOVERY_LEASE_MISMATCH%'; end;
+ select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('video','recovery-signal-cleanup-worker') where job_id=j;
+ assert public.reconcile_compute_recovery(j,a,rt,rl,'requeue',true)='cancelled';
+end$$;
 -- Safe requeue requires positive non-execution evidence.
 do $$ declare j uuid; a uuid; l uuid; rt uuid; rl uuid; begin
  select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000002','trainer','reconcile-requeue',repeat('e',64),'{}','standard'); select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('trainer','reconcile-worker'); assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'trainer-op'); update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('trainer','requeue-recovery-worker') where job_id=j; assert public.reconcile_compute_recovery(j,a,rt,rl,'requeue',true)='queued';
