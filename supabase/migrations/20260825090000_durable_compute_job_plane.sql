@@ -273,7 +273,7 @@ begin
    and (x.recovery_lease_token is null or x.recovery_lease_expires_at<=clock_timestamp())
  ) order by q.updated_at,q.id for update skip locked limit 1;
  if not found then return; end if;
- select * into a from public.compute_job_attempts where job_id=j.id and ordinal=j.attempt_count for update;
+ select * into a from public.compute_job_attempts ca where ca.job_id=j.id and ca.ordinal=j.attempt_count for update;
  if a.finished_at is not null or a.recovery_token is null or (a.recovery_lease_token is not null and a.recovery_lease_expires_at>clock_timestamp()) then return; end if;
  new_token:=gen_random_uuid(); expires_at:=clock_timestamp()+p.lease_seconds*interval '1 second';
  update public.compute_job_attempts set recovery_lease_token=new_token,recovery_worker_ref=p_worker_ref,recovery_heartbeat_at=now(),recovery_lease_expires_at=expires_at where id=a.id returning * into a;
