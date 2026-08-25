@@ -89,7 +89,7 @@ do $$ declare j uuid; a uuid; l uuid; rt uuid; rl uuid; state public.compute_job
  select job_id into j from public.submit_compute_job('10000000-0000-4000-8000-000000000003','video','recovery-signal',repeat('7',64),'{}','standard');
  select job_id,attempt_id,lease_token into j,a,l from public.claim_compute_job('video','recovery-signal-dispatch-worker');
  assert public.authorize_compute_dispatch(j,a,l,100); perform public.begin_compute_provider_dispatch(j,a,l); perform public.mark_compute_provider_dispatch(j,a,l,'recovery-signal-op');
- update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); assert (select state='recovering' from public.compute_jobs where id=j);
+ update public.compute_jobs set lease_expires_at=now()-interval '1 second' where id=j; perform public.recover_stale_compute_jobs(); assert (select cj.state='recovering' from public.compute_jobs cj where cj.id=j);
  select recovery_token,recovery_lease_token into rt,rl from public.claim_compute_recovery('video','recovery-signal-worker') where job_id=j;
  select job_state,cancellation_requested into state,cancelled from public.compute_recovery_signal(j,a,rl); assert state='recovering' and not cancelled, 'unexpected initial recovery cancellation signal';
  perform public.cancel_compute_job('10000000-0000-4000-8000-000000000003',j);
