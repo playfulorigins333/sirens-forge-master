@@ -1,5 +1,7 @@
 "use client";
 
+import { clearPendingSubmission, pendingSubmissionKey } from "@/lib/compute-idempotency-client";
+
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -708,11 +710,14 @@ export default function LoRATrainerPage() {
 
       setTrainingStatus("training");
 
+      const trainIntent = { lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId };
+      const submissionKey = await pendingSubmissionKey("sirensforge:pending-trainer-compute", trainIntent);
       const queueRes = await fetch("/api/lora/train", {
         credentials: "include",
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Idempotency-Key": submissionKey,
         },
         body: JSON.stringify({
           lora_id: loraId,
@@ -726,11 +731,13 @@ export default function LoRATrainerPage() {
       const queueJson = await queueRes.json().catch(() => ({} as any));
 
       if (!queueRes.ok) {
+        if (queueRes.status >= 400 && queueRes.status < 500) clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey);
         setTrainingStatus("failed");
         setErrorMessage(queueJson?.error || "Failed to queue training.");
         return;
       }
 
+      clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey);
       setTrainingStatus("queued");
     } catch (err: any) {
       console.error("Approve/start training error:", err);

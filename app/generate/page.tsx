@@ -46,6 +46,7 @@ import BuildMyModelCard from "@/components/generate/BuildMyModelCard";
 import { isPrivateCreatorGenerationOutput, parseCreatorGenerationOutputs } from "@/lib/generation/clientResponse";
 import { CREATION_LOOP_HANDOFF_STORAGE_KEY, parseCreationLoopHandoff } from "@/lib/creation-loop/handoff";
 import { resolveIncomingIdentity } from "@/lib/generation/identityHandoff";
+import { clearPendingSubmission, pendingSubmissionKey } from "@/lib/compute-idempotency-client";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -3277,6 +3278,9 @@ function HistorySidebar(props: {
 
 export default function GeneratePage() {
   const [generationAvailable, setGenerationAvailable] = useState<boolean | null>(null);
+  const [durableCompute, setDurableCompute] = useState(false);
+  const [activeComputeJobIds, setActiveComputeJobIds] = useState<string[]>([]);
+  const [queuedComputeMessage, setQueuedComputeMessage] = useState<string | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -3285,9 +3289,42 @@ export default function GeneratePage() {
   const [mode, setMode] = useState<GenerationMode>("text_to_image");
   useEffect(() => {
     let current = true;
-    fetch("/api/generate/availability", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => { if (current) setGenerationAvailable(data?.available === true); }).catch(() => { if (current) setGenerationAvailable(false); });
+    fetch("/api/generate/availability", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => { if (current) { setGenerationAvailable(data?.available === true); setDurableCompute(data?.execution_mode === "durable"); } }).catch(() => { if (current) setGenerationAvailable(false); });
     return () => { current = false; };
   }, []);
+  useEffect(() => {
+    if (!durableCompute) return;
+    if (activeComputeJobIds.length) return;
+    try {
+      const restored = JSON.parse(localStorage.getItem("sirensforge:active-compute-jobs") || "[]");
+      if (Array.isArray(restored)) setActiveComputeJobIds([...new Set(restored.filter((id): id is string => typeof id === "string"))]);
+    } catch { /* Invalid local state is ignored; it never marks a job complete. */ }
+  }, [durableCompute, activeComputeJobIds.length]);
+  useEffect(() => {
+    if (!durableCompute || !activeComputeJobIds.length) return;
+    let active = true;
+    const poll = async () => {
+      const terminalIds: string[] = [];
+      const activeStatuses: string[] = [];
+      await Promise.all(activeComputeJobIds.map(async (jobId) => {
+        const response = await fetch(`/api/compute/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" }).catch(() => null);
+        if (!active || !response?.ok) return;
+        const job = await response.json();
+        if (["queued", "running", "recovering", "cancelling"].includes(job.status)) activeStatuses.push(job.status);
+        else if (["completed", "failed", "cancelled"].includes(job.status)) terminalIds.push(jobId);
+        else activeStatuses.push("status unavailable");
+      }));
+      if (!active) return;
+      if (activeStatuses.length) setQueuedComputeMessage(`${activeStatuses.length} generation job${activeStatuses.length === 1 ? " is" : "s are"} safely queued or processing.`);
+      if (terminalIds.length) setActiveComputeJobIds((ids) => {
+        const remaining = ids.filter((id) => !terminalIds.includes(id));
+        localStorage.setItem("sirensforge:active-compute-jobs", JSON.stringify(remaining));
+        return remaining;
+      });
+    };
+    void poll(); const timer = window.setInterval(poll, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [durableCompute, activeComputeJobIds]);
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState(DEFAULT_NEGATIVE_PROMPT);
@@ -3963,6 +4000,30 @@ ${basePrompt}`,
 
       const generatedAll: GeneratedItem[] = [];
 
+      if (mode === "text_to_image" && durableCompute) {
+        const durableIntent = { ...baseParams, batch: runCount };
+        const submissionKey = await pendingSubmissionKey("sirensforge:pending-image-compute", durableIntent);
+        const res = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Idempotency-Key": submissionKey },
+          body: JSON.stringify(durableIntent),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || res.status !== 202 || typeof data?.job_id !== "string") {
+          if (res.status >= 400 && res.status < 500) clearPendingSubmission("sirensforge:pending-image-compute", submissionKey);
+          throw new Error(data?.error || "Durable generation submission failed.");
+        }
+        setActiveComputeJobIds((ids) => {
+          const next = [...new Set([...ids, data.job_id])];
+          localStorage.setItem("sirensforge:active-compute-jobs", JSON.stringify(next));
+          return next;
+        });
+        clearPendingSubmission("sirensforge:pending-image-compute", submissionKey);
+        setQueuedComputeMessage(data.message || "Your job is safely queued. Demand is high right now, so it may take a little longer.");
+        setIsGenerating(false);
+        return;
+      }
+
       for (let i = 0; i < runCount; i++) {
         const runSeed = lockSeed ? seedValue + i : Math.floor(Math.random() * 1_000_000_000);
 
@@ -4409,6 +4470,7 @@ ${basePrompt}`,
           />
 
           {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
+          {queuedComputeMessage && <p className="text-[11px] text-purple-300">{queuedComputeMessage}</p>}
 
           <Card className="border-gray-800 bg-gray-900/80">
             <CardContent className="p-4">

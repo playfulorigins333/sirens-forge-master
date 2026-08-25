@@ -19,6 +19,8 @@ import { requirePrivateOutputs } from "../../../lib/generation/upstreamResponse"
 import { isPrivateCreatorMediaEnabled } from "../../../lib/private-creator-media/core";
 import { verifyPrivateGenerationObject } from "../../../lib/private-creator-media/r2";
 import { randomUUID } from "node:crypto";
+import { computePriorityForTier, isDurableComputeJobsEnabled, submitComputeJob, toCreatorComputeStatus } from "../../../lib/compute-jobs";
+import { resolveOwnedIdentityLoraMetadata } from "../../../lib/generation/identityLoraMetadata";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -191,15 +193,15 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = auth.user.id;
+    const durableComputeEnabled = isDurableComputeJobsEnabled();
     if (!isGenerationExecutionEnabled()) {
       return NextResponse.json(
         { error: "GENERATION_UNAVAILABLE", message: "Image generation is temporarily unavailable." },
         { status: 503 },
       );
     }
-    // Fail closed before parsing input or invoking any privileged generation work.
-    const sirensApiConfig = requireSirensApiConfig();
-
+    // Preserve the legacy fail-closed ordering without requiring provider configuration to enqueue.
+    const sirensApiConfig = durableComputeEnabled ? null : requireSirensApiConfig();
     const publicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const publicSupabaseAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
@@ -247,6 +249,33 @@ export async function POST(req: NextRequest) {
       batch: Math.max(1, Math.min(4, Number(body.batch || 1))),
     };
 
+    if (durableComputeEnabled) {
+      const idempotencyKey = req.headers.get("idempotency-key")?.trim();
+      if (!idempotencyKey || idempotencyKey.length > 128) return NextResponse.json({ error: "INVALID_IDEMPOTENCY_KEY" }, { status: 400 });
+      if (identityLora) {
+        await resolveOwnedIdentityLoraMetadata(identityLora, userId);
+      }
+      const job = await submitComputeJob({
+        ownerId: userId,
+        workload: "image",
+        idempotencyKey,
+        priorityClass: computePriorityForTier(auth.subscription?.tier_name),
+        request: {
+          prompt,
+          negative_prompt: negativePrompt,
+          body_presentation: bodyMode,
+          identity_id: identityLora,
+          width: normalized.width,
+          height: normalized.height,
+          steps: normalized.steps,
+          cfg: normalized.cfg,
+          seed: normalized.seed,
+          output_count: normalized.batch,
+        },
+      });
+      return NextResponse.json(toCreatorComputeStatus(job), { status: 202 });
+    }
+
     const loraStack = await resolveLoraStack(bodyMode, identityLora, userId);
     const finalPrompt = loraStack.trigger_token
       ? injectTriggerToken(prompt, loraStack.trigger_token)
@@ -289,10 +318,10 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-    }, fetch, sirensApiConfig);
+    }, fetch, sirensApiConfig!);
 
     const text = (await upstream.text()).replaceAll(
-      sirensApiConfig.internalSecret,
+      sirensApiConfig!.internalSecret,
       "[redacted]",
     );
 
@@ -524,6 +553,10 @@ export async function POST(req: NextRequest) {
     );
   } catch (err: any) {
     const message = err instanceof Error ? err.message : "";
+
+    if (message.includes("IDEMPOTENCY_CONFLICT")) {
+      return NextResponse.json({ error: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
+    }
 
     if (message === "IDENTITY_LORA_UNAVAILABLE") {
       return NextResponse.json(

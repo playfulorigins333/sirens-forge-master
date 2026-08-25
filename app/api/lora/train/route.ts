@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { computePriorityForTier, isDurableComputeJobsEnabled, toCreatorComputeStatus } from "@/lib/compute-jobs";
+import { createHash } from "node:crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +95,26 @@ export async function POST(req: Request) {
     const dataset_r2_bucket = datasetJob.final_r2_bucket;
     const dataset_r2_prefix = datasetJob.final_r2_prefix;
 
+    if (isDurableComputeJobsEnabled()) {
+      const idempotencyKey = req.headers.get("idempotency-key")?.trim();
+      if (!idempotencyKey || idempotencyKey.length > 128) return NextResponse.json({ error: "INVALID_IDEMPOTENCY_KEY" }, { status: 400 });
+      const requestPayload = {
+          identity_id: lora_id,
+          dataset_doctor_job_id: datasetJob.id,
+          dataset_reference: { bucket: datasetJob.final_r2_bucket, prefix: datasetJob.final_r2_prefix },
+      };
+      const fingerprint = createHash("sha256").update(JSON.stringify(requestPayload)).digest("hex");
+      const { data: rows, error: submitError } = await supabaseAdmin.rpc("submit_trainer_compute_job", {
+        p_owner_id: userId, p_lora_id: lora_id, p_idempotency_key: idempotencyKey,
+        p_request_fingerprint: fingerprint, p_request_payload: requestPayload,
+        p_priority_class: computePriorityForTier(auth.subscription?.tier_name),
+        p_dataset_r2_bucket: dataset_r2_bucket, p_dataset_r2_prefix: dataset_r2_prefix,
+      });
+      if (submitError) throw new Error(submitError.message.includes("IDEMPOTENCY_CONFLICT") ? "IDEMPOTENCY_CONFLICT" : "TRAINER_SUBMISSION_FAILED");
+      const job = Array.isArray(rows) ? rows[0] : rows;
+      return NextResponse.json({ ok: true, lora_id, ...toCreatorComputeStatus(job) }, { status: 202 });
+    }
+
     const now = new Date().toISOString();
     const { error: updateErr } = await supabaseAdmin
       .from("user_loras")
@@ -128,6 +150,7 @@ export async function POST(req: Request) {
         { status: 401 }
       );
     }
+    if (msg.includes("IDEMPOTENCY_CONFLICT")) return NextResponse.json({ error: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
 
     console.error("[lora/train] Fatal:", err);
     return NextResponse.json(
