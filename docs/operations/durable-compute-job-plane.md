@@ -119,3 +119,28 @@ use `supabase/manual/durable_compute_pass_4a_emergency_rollback.sql` after separ
 authorization. It drops the four finalizers and projection helper/trigger and restores
 the exact pre-Pass-4A Trainer submission, generic worker transition, and generic
 recovery reconciliation definitions.
+
+## Pass 4C-A Video/Stitch foundation (execution disabled)
+
+Pass 4C-A defines a creator-rooted **Video Project** without enabling creator Video.
+One service-only submission transaction derives either two standard segments (10–15s)
+or three OG segments (20–25s), creates exactly one Video job for the entire private
+segment set, and creates exactly one dependent Stitch job. Stitch cannot claim until
+the Video job succeeded and PostgreSQL has the exact contiguous segment set. The
+`project_id` is the creator-facing root; compute job IDs, attempts, segment rows, and
+R2 coordinates remain internal.
+
+Video and recovery workers obtain authority-bound, service-role-only manifests and
+must use the dedicated atomic finalizers. The Video finalizer records MP4 segment
+metadata under `creator-video-projects/<project>/segments/<ordinal>/` without creating
+Library assets. The Stitch finalizer accepts the verified continuous MP4 under
+`creator-video-projects/<project>/final/` and creates exactly one completed Video
+generation plus one Video Library asset. R2 remains binary truth and PostgreSQL owns
+job and product truth. Generic Video/Stitch submission is forbidden, and generic
+success is forbidden for Image, Trainer, Video, and Stitch.
+
+This migration has **not** been applied to Production. Both public Video POST routes
+still return `503 VIDEO_GENERATION_UNAVAILABLE`, and Generate continues to label both
+Video modes Coming Soon. This pass adds no provider adapter, worker/API wiring,
+identity materialization, FFmpeg/Stitch implementation, R2 runtime upload, scheduler
+or spend policy configuration, gate activation, canary, deployment, or live work.

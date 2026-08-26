@@ -28,6 +28,7 @@ test("keys, image signatures, and filenames fail closed", () => {
   assert.equal(detectImageMime(Buffer.from("RIFF0000WEBP")), "image/webp");
   assert.equal(detectImageMime(Buffer.from("not media")), null);
   assert.equal(sanitizeDownloadFilename("../../ private prompt", "image/png"), "private-prompt.png");
+  assert.equal(sanitizeDownloadFilename("final movie", "video/mp4"), "final-movie.mp4");
 });
 
 test("migration and route preserve server-only least privilege contract", () => {

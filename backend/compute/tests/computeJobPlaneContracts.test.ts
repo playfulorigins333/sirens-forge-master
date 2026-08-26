@@ -5,6 +5,7 @@ import { computePriorityForTier, toCreatorComputeStatus } from "../../../lib/com
 const read = (path: string) => fs.readFileSync(path, "utf8");
 const migration = read("supabase/migrations/20260825090000_durable_compute_job_plane.sql");
 const pass4a = read("supabase/migrations/20260826004344_durable_compute_pass_4a_finalization.sql");
+const pass4c = read("supabase/migrations/20260826120000_durable_compute_pass_4c_video_stitch_foundation.sql");
 
 test("durable gate is server-only, exact true, and defaults off", () => {
   const source = read("lib/compute-jobs.ts");
@@ -139,6 +140,37 @@ test("Pass 4A PostgreSQL integration runs in CI against a separate database", ()
   assert.match(workflow, /create database compute_job_plane_pass4a_test/);
   assert.match(workflow, /COMPUTE_JOB_PLANE_DATABASE_URL: postgresql:\/\/postgres:postgres@127\.0\.0\.1:5432\/compute_job_plane_pass4a_test/);
   assert.match(workflow, /npm run test:compute-job-plane-pass4a-postgres/);
+});
+
+test("Pass 4C-A establishes a private Video Project and dependent Stitch contract", () => {
+  for (const token of ["video_projects", "video_project_segments", "submit_video_project_compute_jobs", "video_compute_manifest", "recovered_video_compute_manifest", "stitch_compute_manifest", "recovered_stitch_compute_manifest", "finalize_video_compute_job", "finalize_recovered_video_compute_job", "finalize_stitch_compute_job", "finalize_recovered_stitch_compute_job", "creator_video_project_status", "cancel_video_project"]) assert.ok(pass4c.includes(token), token);
+  assert.match(pass4c, /priority_class='standard'[\s\S]*requested_duration_seconds between 10 and 15[\s\S]*segment_count=2/);
+  assert.match(pass4c, /priority_class='og'[\s\S]*requested_duration_seconds between 20 and 25[\s\S]*segment_count=3/);
+  assert.match(pass4c, /target_fps=30/); assert.match(pass4c, /target_min_short_edge>=1080/);
+  assert.match(pass4c, /mime_type in \('image\/jpeg','image\/png','image\/webp','video\/mp4'\)/);
+  assert.match(pass4c, /WORKLOAD_SUBMISSION_REQUIRED/);
+  assert.match(pass4c, /j\.workload in \('image','trainer','video','stitch'\)/);
+  assert.match(pass4c, /p_outcome='succeeded' and j\.workload in \('image','trainer','video','stitch'\)/);
+  assert.match(pass4c, /alter table public\.video_projects force row level security/);
+  assert.match(pass4c, /revoke all on table public\.video_projects,public\.video_project_segments from public,anon,authenticated,service_role/);
+  assert.doesNotMatch(pass4c, /grant (select|insert|update|delete|all).*video_project/i);
+  assert.doesNotMatch(pass4c, /https?:\/\/|signed_url.*jsonb_build_object|runpod\.ai|comfy|ffmpeg/i);
+});
+
+test("Pass 4C-A keeps creator Video disabled and generic helpers fail closed", async () => {
+  const helper = read("lib/compute-jobs.ts");
+  assert.match(helper, /args\.workload === "video" \|\| args\.workload === "stitch"/);
+  for (const route of ["app/api/generate_video/route.ts", "app/api/video/route.ts"]) {
+    const source = read(route); assert.match(source, /VIDEO_GENERATION_UNAVAILABLE/); assert.doesNotMatch(source, /submit_video_project_compute_jobs|finalize_video|provider|runpod/i);
+  }
+  assert.match(read("app/generate/page.tsx"), /Image → Video · Coming Soon/);
+  assert.match(read("app/generate/page.tsx"), /Text → Video · Coming Soon/);
+});
+
+test("Pass 4C-A PostgreSQL integration has a third isolated CI database", () => {
+ const workflow=read(".github/workflows/compute-job-plane-postgres.yml");
+ assert.match(workflow,/create database compute_job_plane_pass4c_test/);
+ assert.match(workflow,/npm run test:compute-job-plane-pass4c-postgres/);
 });
 
 function walk(dir: string): string[] {

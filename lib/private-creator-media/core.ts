@@ -29,7 +29,7 @@ export function hashBytes(chunks: Uint8Array[]): string {
 }
 
 export function sanitizeDownloadFilename(name: string, mime: string): string {
-  const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
+  const ext = mime === "video/mp4" ? "mp4" : mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
   const stem = name.normalize("NFKD").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "sirens-forge-asset";
   return `${stem}.${ext}`;
 }
