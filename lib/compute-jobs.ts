@@ -19,6 +19,7 @@ export async function submitComputeJob(args: {
   ownerId: string; workload: ComputeWorkload; request: Record<string, unknown>;
   idempotencyKey?: string | null; priorityClass: "og" | "standard";
 }) {
+  if (args.workload === "video" || args.workload === "stitch") throw new Error("WORKLOAD_SUBMISSION_REQUIRED");
   const canonicalRequest = canonicalize(args.request);
   const fingerprint = createHash("sha256").update(JSON.stringify(canonicalRequest)).digest("hex");
   const key = args.idempotencyKey?.trim() || randomUUID();
