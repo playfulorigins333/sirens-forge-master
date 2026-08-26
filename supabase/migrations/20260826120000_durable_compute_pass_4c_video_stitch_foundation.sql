@@ -159,7 +159,7 @@ begin
  perform pg_advisory_xact_lock(hashtextextended(p_owner_id::text||':video-project:'||p_idempotency_key,0));
  select * into p from public.video_projects x where x.owner_id=p_owner_id and x.idempotency_key=p_idempotency_key;
  if found then if p.request_fingerprint<>p_request_fingerprint then raise exception 'IDEMPOTENCY_CONFLICT'; end if;
-  return query select p.id,x->>'creator_status',p.created_at,p.completed_at,(x->>'can_cancel')::boolean from public.video_project_creator_projection(p) x; return;
+  return query select p.id,x->>'creator_status',p.created_at,case when x->>'creator_status'='completed' then p.completed_at else null end,(x->>'can_cancel')::boolean from public.video_project_creator_projection(p) x; return;
  end if;
  perform 1 from public.user_loras l where l.id=p_identity_id and l.user_id=p_owner_id and l.status='completed' and l.artifact_r2_bucket is not null and l.artifact_r2_key is not null for update;
  if not found then raise exception 'VIDEO_IDENTITY_NOT_READY'; end if;
@@ -358,7 +358,7 @@ begin
    if not found or row(o.owner_id,o.storage_class,o.mime_type,o.size_bytes,o.sha256,o.source_reference) is distinct from row(p.owner_id,'creator_generation'::text,'video/mp4'::text,(e->>'size_bytes')::bigint,e->>'sha256',jsonb_build_object('video_project_id',p.id,'segment_ordinal',(e->>'ordinal')::integer)) then raise exception 'VIDEO_FINALIZATION_REPLAY_CONFLICT'; end if;
    if not exists(select 1 from public.video_project_segments where project_id=p.id and ordinal=(e->>'ordinal')::smallint and storage_object_id=o.id) then raise exception 'VIDEO_FINALIZATION_REPLAY_CONFLICT'; end if;
   else
-   if found then if row(o.owner_id,o.mime_type,o.size_bytes,o.sha256) is distinct from row(p.owner_id,'video/mp4'::text,(e->>'size_bytes')::bigint,e->>'sha256') then raise exception 'PRIVATE_STORAGE_OBJECT_CONFLICT'; end if; oid:=o.id;
+   if found then if row(o.owner_id,o.storage_class,o.mime_type,o.size_bytes,o.sha256,o.source_reference) is distinct from row(p.owner_id,'creator_generation'::text,'video/mp4'::text,(e->>'size_bytes')::bigint,e->>'sha256',jsonb_build_object('video_project_id',p.id,'segment_ordinal',(e->>'ordinal')::integer)) then raise exception 'PRIVATE_STORAGE_OBJECT_CONFLICT'; end if; oid:=o.id;
    else insert into public.private_storage_objects(owner_id,storage_class,bucket,object_key,mime_type,size_bytes,sha256,source_reference) values(p.owner_id,'creator_generation',e->>'bucket',e->>'object_key','video/mp4',(e->>'size_bytes')::bigint,e->>'sha256',jsonb_build_object('video_project_id',p.id,'segment_ordinal',(e->>'ordinal')::integer)) returning id into oid; end if;
    insert into public.video_project_segments(project_id,ordinal,storage_object_id) values(p.id,(e->>'ordinal')::smallint,oid) on conflict(project_id,ordinal) do nothing;
    if not exists(select 1 from public.video_project_segments where project_id=p.id and ordinal=(e->>'ordinal')::smallint and storage_object_id=oid) then raise exception 'VIDEO_SEGMENT_CONFLICT'; end if;
@@ -422,13 +422,13 @@ begin
  if replay then
   if not found or row(o.owner_id,o.storage_class,o.mime_type,o.size_bytes,o.sha256,o.source_reference) is distinct from row(p.owner_id,'creator_generation'::text,'video/mp4'::text,(asset->>'size_bytes')::bigint,asset->>'sha256',jsonb_build_object('video_project_id',p.id,'kind','final')) then raise exception 'STITCH_FINALIZATION_REPLAY_CONFLICT'; end if; oid:=o.id;
  else
-  if found then if row(o.owner_id,o.mime_type,o.size_bytes,o.sha256) is distinct from row(p.owner_id,'video/mp4'::text,(asset->>'size_bytes')::bigint,asset->>'sha256') then raise exception 'PRIVATE_STORAGE_OBJECT_CONFLICT'; end if; oid:=o.id;
+  if found then if row(o.owner_id,o.storage_class,o.mime_type,o.size_bytes,o.sha256,o.source_reference) is distinct from row(p.owner_id,'creator_generation'::text,'video/mp4'::text,(asset->>'size_bytes')::bigint,asset->>'sha256',jsonb_build_object('video_project_id',p.id,'kind','final')) then raise exception 'PRIVATE_STORAGE_OBJECT_CONFLICT'; end if; oid:=o.id;
   else insert into public.private_storage_objects(owner_id,storage_class,bucket,object_key,mime_type,size_bytes,sha256,source_reference) values(p.owner_id,'creator_generation',asset->>'bucket',asset->>'object_key','video/mp4',(asset->>'size_bytes')::bigint,asset->>'sha256',jsonb_build_object('video_project_id',p.id,'kind','final')) returning id into oid; end if;
  end if;
  select * into g from public.generations where id=p.id for update;
  if not found and not replay then
   insert into public.generations(id,user_id,prompt,image_url,lora_used,job_type,body_type,mode,status,negative_prompt,steps,cfg_scale,seed,width,height,runpod_job_id,processing_time_ms,completed_at,metadata,r2_bucket,r2_key,updated_at) values(p.id,p.owner_id,p.request_payload->>'prompt',null,p.identity_id::text,'video',p.request_payload->>'body_type',p.mode,'completed',p.request_payload->>'negative_prompt',null,null,null,(p_evidence->>'width')::integer,(p_evidence->>'height')::integer,null,p_runtime_ms::integer,clock_timestamp(),metadata,null,null,clock_timestamp()) returning * into g;
- elsif not found or row(g.user_id,g.prompt,g.negative_prompt,g.lora_used,g.job_type,g.body_type,g.mode,g.status,g.image_url,g.width,g.height,g.processing_time_ms,g.metadata,g.runpod_job_id,g.r2_bucket,g.r2_key) is distinct from row(p.owner_id,p.request_payload->>'prompt',p.request_payload->>'negative_prompt',p.identity_id::text,'video'::text,p.request_payload->>'body_type',p.mode,'completed'::text,null::text,(p_evidence->>'width')::integer,(p_evidence->>'height')::integer,p_runtime_ms::integer,metadata,null::text,null::text,null::text) or g.completed_at is null then raise exception 'VIDEO_GENERATION_CONFLICT'; end if;
+ elsif not found or row(g.user_id,g.prompt,g.negative_prompt,g.lora_used,g.job_type,g.body_type,g.mode,g.status,g.image_url,g.steps,g.cfg_scale,g.seed,g.width,g.height,g.processing_time_ms,g.metadata,g.runpod_job_id,g.r2_bucket,g.r2_key) is distinct from row(p.owner_id,p.request_payload->>'prompt',p.request_payload->>'negative_prompt',p.identity_id::text,'video'::text,p.request_payload->>'body_type',p.mode,'completed'::text,null::text,null::integer,null::numeric,null::bigint,(p_evidence->>'width')::integer,(p_evidence->>'height')::integer,p_runtime_ms::integer,metadata,null::text,null::text,null::text) or g.completed_at is null then raise exception 'VIDEO_GENERATION_CONFLICT'; end if;
  if not replay then insert into public.generation_assets(generation_id,storage_object_id,owner_id,ordinal,kind) values(p.id,oid,p.owner_id,0,'video') on conflict(generation_id,ordinal) do nothing; end if;
  select id into aid from public.generation_assets where generation_id=p.id and ordinal=0 and storage_object_id=oid and owner_id=p.owner_id and kind='video'; if aid is null or (select count(*) from public.generation_assets where generation_id=p.id)<>1 then if replay then raise exception 'STITCH_FINALIZATION_REPLAY_CONFLICT'; else raise exception 'VIDEO_FINAL_ASSET_CONFLICT'; end if; end if;
  result:=jsonb_build_object('project_id',p.id,'generation_id',p.id,'asset_ids',jsonb_build_array(aid));
@@ -455,20 +455,35 @@ begin if new.workload<>'video' or new.state not in ('failed','cancelled') or old
 create trigger propagate_video_project_terminal_state after update of state on public.compute_jobs for each row execute function public.propagate_video_project_terminal_state();
 
 create function public.video_project_creator_projection(p_project public.video_projects) returns jsonb language plpgsql set search_path=pg_catalog,public as $$
-declare v public.compute_jobs;s public.compute_jobs;status text;canonical boolean:=false;safe_result jsonb;
+declare v public.compute_jobs;s public.compute_jobs;g public.generations;status text;canonical boolean:=false;safe_result jsonb;final_asset_id uuid;integrity_failed boolean:=false;
 begin
- select * into v from public.compute_jobs where id=p_project.video_job_id; select * into s from public.compute_jobs where id=p_project.stitch_job_id;
- safe_result:=public.compute_creator_result(s.result_reference);
- canonical:=p_project.completed_at is not null and s.state='succeeded' and safe_result=jsonb_build_object('generation_id',p_project.id,'asset_ids',safe_result->'asset_ids','project_id',p_project.id)
-  and exists(select 1 from public.generations g where g.id=p_project.id and g.user_id=p_project.owner_id and g.status='completed' and g.job_type='video' and g.image_url is null and g.completed_at is not null)
-  and (select count(*) from public.generation_assets a where a.generation_id=p_project.id and a.owner_id=p_project.owner_id and a.ordinal=0 and a.kind='video')=1;
- status:=case when canonical then 'completed'
+ select * into v from public.compute_jobs where id=p_project.video_job_id; select * into s from public.compute_jobs where id=p_project.stitch_job_id; select * into g from public.generations where id=p_project.id;
+ select a.id into final_asset_id from public.generation_assets a where a.generation_id=p_project.id and a.owner_id=p_project.owner_id and a.ordinal=0 and a.kind='video';
+ canonical:=p_project.completed_at is not null and v.state='succeeded' and s.state='succeeded' and final_asset_id is not null
+  and (select count(*) from public.generation_assets a where a.generation_id=p_project.id)=1
+  and exists(select 1 from public.generation_assets a join public.private_storage_objects o on o.id=a.storage_object_id
+   where a.id=final_asset_id and o.owner_id=p_project.owner_id and o.storage_class='creator_generation' and o.mime_type='video/mp4' and o.bucket=p_project.storage_bucket
+    and o.object_key~('^creator-video-projects/'||p_project.id::text||'/final/[^/]+$'))
+  and g.id=p_project.id and row(g.user_id,g.prompt,g.negative_prompt,g.body_type,g.lora_used,g.job_type,g.mode,g.status,g.image_url,g.runpod_job_id,g.r2_bucket,g.r2_key,g.steps,g.cfg_scale,g.seed)
+   is not distinct from row(p_project.owner_id,p_project.request_payload->>'prompt',p_project.request_payload->>'negative_prompt',p_project.request_payload->>'body_type',p_project.identity_id::text,'video'::text,p_project.mode,'completed'::text,null::text,null::text,null::text,null::text,null::integer,null::numeric,null::bigint)
+  and g.completed_at is not null and least(g.width,g.height)>=p_project.target_min_short_edge
+  and jsonb_typeof(g.metadata)='object' and (select array_agg(k order by k) from jsonb_object_keys(g.metadata) k)=
+    (case when p_project.source_generation_asset_id is null then array['actual_duration_ms','fps_millihz','kind','policy_version','private_creator_media','requested_duration_seconds','segment_count','target_min_short_edge','video_project_id'] else array['actual_duration_ms','fps_millihz','kind','policy_version','private_creator_media','requested_duration_seconds','segment_count','source_generation_asset_id','target_min_short_edge','video_project_id'] end)::text[]
+  and g.metadata->'private_creator_media'='true'::jsonb and g.metadata->>'kind'='video' and g.metadata->>'video_project_id'=p_project.id::text
+  and g.metadata->>'segment_count'=p_project.segment_count::text and g.metadata->>'requested_duration_seconds'=p_project.requested_duration_seconds::text
+  and g.metadata->>'target_min_short_edge'=p_project.target_min_short_edge::text and g.metadata->>'policy_version'='1'
+  and g.metadata->>'actual_duration_ms'~'^[1-9][0-9]*$' and (g.metadata->>'actual_duration_ms')::integer between (case p_project.priority_class when 'standard' then 10000 else 20000 end) and (case p_project.priority_class when 'standard' then 15000 else 25000 end) and abs((g.metadata->>'actual_duration_ms')::integer-p_project.requested_duration_seconds*1000)<=1000
+  and g.metadata->>'fps_millihz'~'^[1-9][0-9]*$' and (g.metadata->>'fps_millihz')::integer between 29900 and 30100
+  and (p_project.source_generation_asset_id is null or g.metadata->>'source_generation_asset_id'=p_project.source_generation_asset_id::text)
+  and s.result_reference=jsonb_build_object('project_id',p_project.id,'generation_id',p_project.id,'asset_ids',jsonb_build_array(final_asset_id));
+ integrity_failed:=s.state='succeeded' and not canonical;
+ status:=case when canonical then 'completed' when integrity_failed then 'failed'
   when v.state='failed' or s.state='failed' then 'failed'
   when p_project.cancellation_requested_at is not null and (v.state not in ('cancelled','succeeded') or s.state not in ('cancelled','succeeded')) then 'cancelling'
   when v.state='cancelled' or s.state='cancelled' then 'cancelled'
-  when v.state<>'succeeded' then case when v.state='queued' then 'queued' else 'generating' end
-  else 'stitching' end;
- return jsonb_build_object('creator_status',status,'started_at',coalesce(v.started_at,s.started_at),'safe_result',case when status='completed' then safe_result else null end,'safe_error_code',case when status='failed' then coalesce(s.safe_error_code,v.safe_error_code) else null end,'can_cancel',status in ('queued','generating','stitching','cancelling'));
+  when v.state<>'succeeded' then case when v.state='queued' then 'queued' else 'generating' end else 'stitching' end;
+ safe_result:=case when canonical then public.compute_creator_result(s.result_reference) else null end;
+ return jsonb_build_object('creator_status',status,'started_at',coalesce(v.started_at,s.started_at),'safe_result',safe_result,'safe_error_code',case when integrity_failed then 'VIDEO_PRODUCT_INTEGRITY_CONFLICT' when status='failed' then coalesce(s.safe_error_code,v.safe_error_code) else null end,'can_cancel',status in ('queued','generating','stitching','cancelling'));
 end$$;
 
 create function public.creator_video_project_status(p_owner_id uuid,p_project_id uuid) returns table(project_id uuid,creator_status text,created_at timestamptz,started_at timestamptz,completed_at timestamptz,safe_result jsonb,safe_error_code text,can_cancel boolean) language plpgsql security definer set search_path=pg_catalog,public as $$
@@ -476,8 +491,8 @@ declare p public.video_projects;x jsonb;
 begin select * into p from public.video_projects where id=p_project_id and owner_id=p_owner_id; if not found then raise exception 'VIDEO_PROJECT_NOT_FOUND'; end if; x:=public.video_project_creator_projection(p);
  return query select p.id,x->>'creator_status',p.created_at,(x->>'started_at')::timestamptz,case when x->>'creator_status'='completed' then p.completed_at else null end,x->'safe_result',x->>'safe_error_code',(x->>'can_cancel')::boolean; end$$;
 create function public.cancel_video_project(p_owner_id uuid,p_project_id uuid) returns text language plpgsql security definer set search_path=pg_catalog,public as $$
-declare p public.video_projects;j public.compute_jobs;
-begin select * into p from public.video_projects where id=p_project_id and owner_id=p_owner_id for update; if not found then raise exception 'VIDEO_PROJECT_NOT_FOUND'; end if; if p.completed_at is not null or exists(select 1 from public.compute_jobs where id in(p.video_job_id,p.stitch_job_id) and state='failed') then return (select creator_status from public.creator_video_project_status(p_owner_id,p_project_id)); end if;
+declare p public.video_projects;j public.compute_jobs;x jsonb;
+begin select * into p from public.video_projects where id=p_project_id and owner_id=p_owner_id for update; if not found then raise exception 'VIDEO_PROJECT_NOT_FOUND'; end if; x:=public.video_project_creator_projection(p); if x->>'creator_status' in ('completed','failed','cancelled') then return x->>'creator_status'; end if;
  update public.video_projects set cancellation_requested_at=coalesce(cancellation_requested_at,clock_timestamp()),updated_at=clock_timestamp() where id=p.id;
  update public.compute_jobs set state=case when state='queued' then 'cancelled'::public.compute_job_state when state in ('claimed','running') then 'cancel_requested'::public.compute_job_state else state end,cancellation_requested_at=case when state in ('queued','claimed','running','recovering','cancel_requested') then coalesce(cancellation_requested_at,clock_timestamp()) else cancellation_requested_at end,terminal_at=case when state='queued' then clock_timestamp() else terminal_at end,updated_at=clock_timestamp() where id in(p.video_job_id,p.stitch_job_id) and state not in('succeeded','failed','cancelled'); return (select creator_status from public.creator_video_project_status(p_owner_id,p_project_id)); end$$;
 
