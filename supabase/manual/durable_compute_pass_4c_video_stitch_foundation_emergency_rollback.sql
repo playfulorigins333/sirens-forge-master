@@ -6,11 +6,75 @@ do $$ begin
 end$$;
 drop trigger if exists propagate_video_project_terminal_state on public.compute_jobs;
 drop function if exists public.propagate_video_project_terminal_state(),public.creator_video_project_status(uuid,uuid),public.cancel_video_project(uuid,uuid),public.finalize_recovered_stitch_compute_job(uuid,uuid,uuid,uuid,jsonb,bigint,bigint,text),public.finalize_stitch_compute_job(uuid,uuid,uuid,jsonb),public.finalize_recovered_video_compute_job(uuid,uuid,uuid,uuid,jsonb,bigint,bigint,text),public.finalize_video_compute_job(uuid,uuid,uuid,jsonb),public.finalize_stitch_product(public.compute_jobs,public.compute_job_attempts,jsonb,bigint),public.settle_recovered_video_attempt(public.compute_jobs,public.compute_job_attempts,bigint,bigint,text),public.finalize_video_segments(public.compute_jobs,public.compute_job_attempts,jsonb),public.recovered_stitch_compute_manifest(uuid,uuid,uuid,uuid),public.stitch_compute_manifest(uuid,uuid,uuid),public.recovered_video_compute_manifest(uuid,uuid,uuid,uuid),public.video_compute_manifest(uuid,uuid,uuid),public.submit_video_project_compute_jobs(uuid,uuid,uuid,text,text,jsonb,text);
-drop table if exists public.video_project_segments; drop table if exists public.video_projects; drop function if exists public.video_project_segment_consistent();
+drop function if exists public.video_project_creator_projection(public.video_projects); drop table if exists public.video_project_segments; drop table if exists public.video_projects; drop function if exists public.video_project_segment_consistent();
 alter table public.private_storage_objects drop constraint private_storage_objects_mime_type_check;
 alter table public.private_storage_objects drop constraint private_storage_objects_size_bytes_check;
 alter table public.private_storage_objects add constraint private_storage_objects_mime_type_check check(mime_type in ('image/jpeg','image/png','image/webp'));
 alter table public.private_storage_objects add constraint private_storage_objects_size_bytes_check check(size_bytes>0 and size_bytes<=52428800);
+create or replace function public.finalize_private_generation(
+  p_generation_id uuid,
+  p_owner_id uuid,
+  p_generation jsonb,
+  p_assets jsonb
+) returns jsonb
+language plpgsql security definer
+set search_path = pg_catalog, public, pg_temp
+as $$
+declare
+  v_asset jsonb;
+  v_existing public.private_storage_objects%rowtype;
+  v_object_id uuid;
+  v_asset_ids jsonb := '[]'::jsonb;
+  v_count integer;
+  v_generation public.generations%rowtype;
+begin
+  if p_generation_id is null or p_owner_id is null or jsonb_typeof(p_generation) <> 'object' or jsonb_typeof(p_assets) <> 'array' then
+    raise exception 'PRIVATE_GENERATION_ARGUMENT_INVALID';
+  end if;
+  v_count := jsonb_array_length(p_assets);
+  if v_count < 1 or v_count > 4 then raise exception 'PRIVATE_GENERATION_ASSET_COUNT_INVALID'; end if;
+  if exists (select 1 from jsonb_array_elements(p_assets) a group by (a->>'ordinal') having count(*) > 1) then
+    raise exception 'PRIVATE_GENERATION_DUPLICATE_ORDINAL';
+  end if;
+
+  select * into v_generation from public.generations where id = p_generation_id for update;
+  if found and v_generation.user_id <> p_owner_id then raise exception 'PRIVATE_GENERATION_OWNER_MISMATCH'; end if;
+  if not found then
+    insert into public.generations(id,user_id,prompt,image_url,lora_used,job_type,body_type,mode,status,negative_prompt,steps,cfg_scale,seed,width,height,runpod_job_id,processing_time_ms,completed_at,metadata,r2_bucket,r2_key,updated_at)
+    values (p_generation_id,p_owner_id,p_generation->>'prompt',null,nullif(p_generation->>'lora_used',''),'image',p_generation->>'body_type','txt2img','completed',p_generation->>'negative_prompt',(p_generation->>'steps')::integer,(p_generation->>'cfg_scale')::numeric,(p_generation->>'seed')::bigint,(p_generation->>'width')::integer,(p_generation->>'height')::integer,nullif(p_generation->>'upstream_generation_id',''),(p_generation->>'processing_time_ms')::integer,clock_timestamp(),coalesce(p_generation->'metadata','{}'::jsonb),null,null,clock_timestamp());
+  elsif v_generation.status <> 'completed' or v_generation.image_url is not null then
+    raise exception 'PRIVATE_GENERATION_STATE_CONFLICT';
+  end if;
+
+  for v_asset in select value from jsonb_array_elements(p_assets) loop
+    if (v_asset->>'ordinal')::integer not between 0 and 3 or v_asset->>'kind' <> 'image'
+       or v_asset->>'owner_id' <> p_owner_id::text or coalesce(v_asset->>'storage_class','') <> 'creator_generation'
+       or coalesce(v_asset->>'bucket','') = '' or coalesce(v_asset->>'object_key','') = '' then
+      raise exception 'PRIVATE_GENERATION_ASSET_INVALID';
+    end if;
+    select * into v_existing from public.private_storage_objects where bucket=v_asset->>'bucket' and object_key=v_asset->>'object_key' for update;
+    if found then
+      if v_existing.owner_id <> p_owner_id or v_existing.mime_type <> v_asset->>'mime_type' or v_existing.size_bytes <> (v_asset->>'size_bytes')::bigint or v_existing.sha256 <> v_asset->>'sha256' then
+        raise exception 'PRIVATE_STORAGE_OBJECT_CONFLICT';
+      end if;
+      v_object_id := v_existing.id;
+    else
+      insert into public.private_storage_objects(owner_id,storage_class,bucket,object_key,mime_type,size_bytes,sha256,source_reference)
+      values(p_owner_id,'creator_generation',v_asset->>'bucket',v_asset->>'object_key',v_asset->>'mime_type',(v_asset->>'size_bytes')::bigint,v_asset->>'sha256',jsonb_build_object('generation_id',p_generation_id,'ordinal',(v_asset->>'ordinal')::integer)) returning id into v_object_id;
+    end if;
+    insert into public.generation_assets(generation_id,storage_object_id,owner_id,ordinal,kind)
+    values(p_generation_id,v_object_id,p_owner_id,(v_asset->>'ordinal')::smallint,'image')
+    on conflict (generation_id, ordinal) do nothing;
+    if not exists(select 1 from public.generation_assets where generation_id=p_generation_id and ordinal=(v_asset->>'ordinal')::smallint and storage_object_id=v_object_id and owner_id=p_owner_id and kind='image') then
+      raise exception 'PRIVATE_GENERATION_ASSET_CONFLICT';
+    end if;
+    v_asset_ids := v_asset_ids || jsonb_build_array((select id from public.generation_assets where generation_id=p_generation_id and ordinal=(v_asset->>'ordinal')::smallint));
+  end loop;
+  if (select count(*) from public.generation_assets where generation_id=p_generation_id) <> v_count then raise exception 'PRIVATE_GENERATION_ASSET_SET_CONFLICT'; end if;
+  return jsonb_build_object('generation_id',p_generation_id,'asset_ids',v_asset_ids);
+end;
+$$;
+
 create or replace function public.submit_compute_job(p_owner_id uuid,p_workload public.compute_workload,p_idempotency_key text,p_request_fingerprint text,p_request_payload jsonb,p_priority_class text)
 returns table(job_id uuid, workload public.compute_workload, creator_status text, queued_at timestamptz, started_at timestamptz, completed_at timestamptz, result_reference jsonb, safe_error_code text, can_cancel boolean)
 language plpgsql security definer set search_path=pg_catalog,public as $$
