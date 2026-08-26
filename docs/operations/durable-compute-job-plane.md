@@ -56,19 +56,30 @@ implementation exists yet.
 Pass 4A adds service-role-only normal and recovery finalizers for Image and Trainer.
 Each finalizer persists its canonical product and terminal durable outcome in one
 PostgreSQL transaction. Image delegates canonical persistence to
-`finalize_private_generation`, returning only `generation_id` and `asset_ids`.
+`finalize_private_generation`, always using the compute job UUID as `generation_id`
+and deriving creator-facing generation metadata from the durable request. Image asset
+evidence must exactly match `output_count`, use contiguous ordinals starting at zero,
+and live below `creator-generations/<job_id>/`; owner, media kind, and storage class
+are injected by PostgreSQL rather than trusted from a worker. The creator result
+contains only `generation_id` and `asset_ids`.
 Trainer binds through the job's authoritative `identity_id`, persists the artifact,
-and derives `sf` plus the first eight normalized LoRA UUID characters server-side.
+enforces the provider-neutral canonical key `loras/<lora_id>/final.safetensors`,
+derives `sf` plus the first eight normalized LoRA UUID characters server-side, and
+stores only `{ "result_id": "<lora_id>" }` in the creator result reference.
 Identical replay is idempotent and conflicting replay fails closed.
 
-A `compute_jobs` transition guard rejects generic Image/Trainer success unless the
-workload finalizer has installed its transaction-local authority marker. Generic
-Stitch success is unchanged. Video remains unavailable. Both recovery finalizers
-retain recovery-token, recovery-lease, execution-evidence, and actual-cost settlement
-requirements.
+The forward migration replaces the generic normal transition and recovery
+reconciliation functions so they unconditionally reject Image/Trainer success with
+`WORKLOAD_FINALIZATION_REQUIRED`. There is no session setting or caller-settable
+bypass. Workload finalizers perform their narrow terminal updates directly in the
+same product transaction. Generic Stitch success is unchanged. Video remains
+unavailable. Both recovery finalizers retain recovery-token, recovery-lease,
+execution-evidence, and actual-cost settlement requirements, including valid zero
+cost and dispatch uncertainty without a provider operation reference.
 
 An exact-binding trigger projects current Trainer jobs to `user_loras`: queued maps
-to queued; claimed, running, recovering, and cancel_requested map to training; failed
+to queued; claimed maps to training without inventing `started_at`; running maps its
+authoritative durable start; recovering and cancel_requested preserve that start; failed
 and cancelled map to failed (with creator-safe codes only). Succeeded never projects
 completed; only atomic artifact finalization does that. A row lock on the authoritative
 LoRA prevents a different idempotency key from replacing a nonterminal current job,
@@ -98,5 +109,6 @@ private-media, and publishing tables.
 
 To remove only Pass 4A while preserving the Pass 2 plane and private-media schema,
 use `supabase/manual/durable_compute_pass_4a_emergency_rollback.sql` after separate
-authorization. It drops the four finalizers and two triggers/helpers and restores the
-exact pre-Pass-4A Trainer submission function.
+authorization. It drops the four finalizers and projection helper/trigger and restores
+the exact pre-Pass-4A Trainer submission, generic worker transition, and generic
+recovery reconciliation definitions.

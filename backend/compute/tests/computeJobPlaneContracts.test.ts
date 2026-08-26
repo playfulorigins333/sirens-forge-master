@@ -110,10 +110,14 @@ test("trainer status guards legacy text IDs and requires current-execution artif
 test("Pass 4A atomically finalizes workload products and blocks generic success", () => {
   for (const fn of ["finalize_image_compute_job", "finalize_recovered_image_compute_job", "finalize_trainer_compute_job", "finalize_recovered_trainer_compute_job"]) assert.ok(pass4a.includes(fn), fn);
   assert.match(pass4a, /WORKLOAD_FINALIZATION_REQUIRED/);
-  assert.match(pass4a, /new\.workload in \('image','trainer'\)/);
-  assert.match(pass4a, /finalize_private_generation\(p_generation_id,j\.owner_id,p_generation,p_assets\)/);
-  assert.match(pass4a, /token:='sf'\|\|lower\(substr\(replace\(l\.id::text,'-',''\),1,8\)\)/);
-  assert.match(pass4a, /from public,anon,authenticated;[\s\S]*grant execute on function[\s\S]*to service_role/);
+  assert.match(pass4a, /p_action='success' and j\.workload in \('image','trainer'\)/);
+  assert.match(pass4a, /p_outcome='succeeded' and j\.workload in \('image','trainer'\)/);
+  assert.doesNotMatch(pass4a, /current_setting|set_config/);
+  assert.match(pass4a, /finalize_private_generation\(p_job\.id,p_job\.owner_id,generation_data,normalized\)/);
+  assert.match(pass4a, /expected_prefix:='creator-generations\/'\|\|p_job\.id::text\|\|'\/'/);
+  assert.match(pass4a, /token:='sf'\|\|lower\(substr\(replace\(lora_id::text,'-',''\),1,8\)\)/);
+  assert.match(pass4a, /result:=jsonb_build_object\('result_id',lora_id\)/);
+  assert.match(pass4a, /from public,anon,authenticated,service_role;[\s\S]*grant execute on function[\s\S]*to service_role/);
   assert.doesNotMatch(pass4a, /grant (select|insert|update|delete|all).*compute_/i);
 });
 
@@ -123,6 +127,14 @@ test("Pass 4A serializes same-Twin submission and projects only the exact bindin
   assert.match(pass4a, /training_job_id=new\.id::text/);
   assert.doesNotMatch(pass4a, /new\.state = 'succeeded'[\s\S]{0,300}status='completed'/);
   assert.match(read("app/api/lora/train/route.ts"), /TRAINER_ALREADY_ACTIVE[\s\S]*status: 409/);
+});
+
+test("Pass 4A PostgreSQL integration runs in CI against a separate database", () => {
+  const workflow = read(".github/workflows/compute-job-plane-postgres.yml");
+  assert.match(workflow, /create database compute_job_plane_test/);
+  assert.match(workflow, /create database compute_job_plane_pass4a_test/);
+  assert.match(workflow, /COMPUTE_JOB_PLANE_DATABASE_URL: postgresql:\/\/postgres:postgres@127\.0\.0\.1:5432\/compute_job_plane_pass4a_test/);
+  assert.match(workflow, /npm run test:compute-job-plane-pass4a-postgres/);
 });
 
 function walk(dir: string): string[] {

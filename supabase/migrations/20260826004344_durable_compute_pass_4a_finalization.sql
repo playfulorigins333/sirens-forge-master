@@ -1,23 +1,5 @@
--- Pass 4A: atomic workload finalization and Trainer state projection.
--- Applying this migration to any shared environment is a separately authorized operation.
+-- Pass 4A: atomic workload finalization and Trainer state projection. Applying is separately authorized.
 begin;
-
-create function public.compute_workload_success_guard() returns trigger
-language plpgsql
-set search_path = pg_catalog, public
-as $$
-begin
-  if new.state = 'succeeded' and old.state <> 'succeeded' and new.workload in ('image','trainer')
-     and current_setting('sirens_forge.workload_finalization_job', true) is distinct from new.id::text then
-    raise exception 'WORKLOAD_FINALIZATION_REQUIRED';
-  end if;
-  return new;
-end
-$$;
-
-create trigger compute_workload_success_guard
-before update of state on public.compute_jobs
-for each row execute function public.compute_workload_success_guard();
 
 create function public.project_trainer_compute_state() returns trigger
 language plpgsql security definer
@@ -34,8 +16,11 @@ begin
     update public.user_loras set status='queued', progress=0, started_at=null, completed_at=null,
       error_message=null, updated_at=clock_timestamp()
     where id=v_lora_id and user_id=new.owner_id and training_job_id=new.id::text;
-  elsif new.state in ('claimed','running','recovering','cancel_requested') then
-    update public.user_loras set status='training', started_at=coalesce(started_at,new.started_at,clock_timestamp()),
+  elsif new.state='claimed' then
+    update public.user_loras set status='training', started_at=coalesce(started_at,new.started_at),error_message=null,updated_at=clock_timestamp()
+    where id=v_lora_id and user_id=new.owner_id and training_job_id=new.id::text;
+  elsif new.state in ('running','recovering','cancel_requested') then
+    update public.user_loras set status='training', started_at=coalesce(new.started_at,started_at),
       error_message=null, updated_at=clock_timestamp()
     where id=v_lora_id and user_id=new.owner_id and training_job_id=new.id::text;
   elsif new.state in ('failed','cancelled') then
@@ -85,118 +70,218 @@ begin
  return query select j.id,j.workload,case when j.state='recovering' and j.cancellation_requested_at is not null then 'cancelling' else case j.state when 'claimed' then 'running' when 'succeeded' then 'completed' when 'cancel_requested' then 'cancelling' else j.state::text end end,j.queued_at,j.started_at,j.terminal_at,public.compute_creator_result(j.result_reference),j.safe_error_code,j.state not in ('succeeded','failed','cancelled');
 end$$;
 
-create function public.finalize_image_compute_job(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_generation_id uuid,p_generation jsonb,p_assets jsonb)
-returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
-declare j public.compute_jobs; a public.compute_job_attempts; product jsonb; fingerprint text;
+
+create or replace function public.compute_worker_transition(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_action text,p_safe_error_code text default null,p_result_reference jsonb default null)
+returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts; safe_code text; expected_outcome text;
 begin
- select * into j from public.compute_jobs where id=p_job_id for update;
+ select * into j from public.compute_jobs where id=p_job_id for update; if not found then raise exception 'JOB_NOT_FOUND'; end if;
+ if p_action='success' and j.workload in ('image','trainer') then raise exception 'WORKLOAD_FINALIZATION_REQUIRED'; end if;
  select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
- if j.workload is distinct from 'image' or not found or a.lease_token<>p_lease_token then raise exception 'IMAGE_FINALIZATION_AUTHORITY_MISMATCH'; end if;
- if j.state not in ('running','cancel_requested','succeeded') or (j.state<>'succeeded' and (j.lease_token is distinct from p_lease_token or j.lease_expires_at<=clock_timestamp())) then raise exception 'IMAGE_FINALIZATION_AUTHORITY_MISMATCH'; end if;
- if a.provider_dispatch_intent_at is null or a.provider_dispatched_at is null or a.provider_operation_ref is null or a.actual_cost_micros is null then raise exception 'IMAGE_EXECUTION_EVIDENCE_REQUIRED'; end if;
- fingerprint:=encode(digest(jsonb_build_array(p_generation_id,p_generation,p_assets)::text,'sha256'),'hex');
- if a.internal_telemetry->>'workload_finalization_fingerprint' is not null and a.internal_telemetry->>'workload_finalization_fingerprint'<>fingerprint then raise exception 'IMAGE_FINALIZATION_REPLAY_CONFLICT'; end if;
- product:=public.finalize_private_generation(p_generation_id,j.owner_id,p_generation,p_assets);
- if j.state='succeeded' and j.result_reference is distinct from product then raise exception 'IMAGE_FINALIZATION_REPLAY_CONFLICT'; end if;
- perform set_config('sirens_forge.workload_finalization_job',j.id::text,true);
- update public.compute_job_attempts set internal_telemetry=jsonb_set(internal_telemetry,'{workload_finalization_fingerprint}',to_jsonb(fingerprint)) where id=a.id;
- perform public.compute_worker_transition(j.id,a.id,p_lease_token,'success',null,product);
+ if not found or a.lease_token<>p_lease_token then raise exception 'LEASE_MISMATCH'; end if;
+ expected_outcome:=case p_action when 'success' then 'succeeded' when 'failure' then 'failed' when 'cancelled' then 'cancelled' end;
+ if j.state in ('succeeded','failed','cancelled') then
+  if expected_outcome is not null and j.state::text=expected_outcome and a.finished_at is not null and a.outcome_class=expected_outcome then return j.state; end if;
+  raise exception 'TERMINAL_TRANSITION_CONFLICT';
+ end if;
+ if j.lease_token is distinct from p_lease_token or a.finished_at is not null or j.lease_expires_at<=clock_timestamp() then raise exception 'LEASE_MISMATCH'; end if;
+ safe_code:=public.compute_safe_error(p_safe_error_code);
+ if p_action='start' and j.state='claimed' then
+  update public.compute_jobs set state='running',started_at=coalesce(started_at,now()),updated_at=now() where id=j.id;
+  update public.compute_job_attempts set started_at=coalesce(started_at,now()) where id=a.id;
+ elsif p_action='start' and j.state='running' and a.started_at is not null then
+  return j.state;
+ elsif p_action='success' and j.state in ('running','cancel_requested') then
+  if a.provider_dispatch_intent_at is null or a.provider_dispatched_at is null or a.provider_operation_ref is null then raise exception 'EXECUTION_EVIDENCE_REQUIRED'; end if;
+  if a.actual_cost_micros is null then raise exception 'ACTUAL_COST_REQUIRED'; end if;
+  update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=public.compute_creator_result(p_result_reference),lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
+  update public.compute_job_attempts set finished_at=now(),outcome_class='succeeded' where id=a.id;
+ elsif p_action in ('failure','cancelled') and ((p_action='failure' and j.state in ('claimed','running')) or (p_action='cancelled' and j.state='cancel_requested')) then
+  if a.provider_dispatch_intent_at is not null and a.actual_cost_micros is null then raise exception 'ACTUAL_COST_REQUIRED'; end if;
+  if a.provider_dispatch_intent_at is null then perform public.release_compute_reservation(a.id); end if;
+  update public.compute_jobs set state=expected_outcome::public.compute_job_state,terminal_at=now(),safe_error_code=case when p_action='failure' then safe_code else safe_error_code end,lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
+  update public.compute_job_attempts set finished_at=now(),outcome_class=expected_outcome,safe_error_code=case when p_action='failure' then safe_code else safe_error_code end where id=a.id;
+ else raise exception 'ILLEGAL_COMPUTE_TRANSITION'; end if;
+ select state into j.state from public.compute_jobs where id=j.id; return j.state;
+end$$;
+
+create or replace function public.reconcile_compute_recovery(p_job_id uuid,p_attempt_id uuid,p_recovery_token uuid,p_recovery_lease_token uuid,p_outcome text,p_provider_nonexecution_proven boolean default false,p_safe_error_code text default null,p_result_reference jsonb default null,p_actual_cost_micros bigint default null,p_runtime_ms bigint default 0,p_provider_operation_ref text default null) returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts; safe_code text; fingerprint text; final_state public.compute_job_state; pol public.compute_spend_policies;
+begin
+ safe_code:=public.compute_safe_error(p_safe_error_code);
+ fingerprint:=encode(digest(jsonb_build_array(p_outcome,p_provider_nonexecution_proven,safe_code,public.compute_creator_result(p_result_reference),p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref)::text,'sha256'),'hex');
+ select * into j from public.compute_jobs where id=p_job_id for update; if not found then raise exception 'RECOVERY_AUTHORITY_MISMATCH'; end if;
+ if p_outcome='succeeded' and j.workload in ('image','trainer') then raise exception 'WORKLOAD_FINALIZATION_REQUIRED'; end if;
+ select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
+ if not found or a.recovery_token is distinct from p_recovery_token then raise exception 'RECOVERY_AUTHORITY_MISMATCH'; end if;
+ if a.recovery_fingerprint is not null then
+  if a.recovery_fingerprint=fingerprint then return a.recovery_state; end if;
+  raise exception 'RECOVERY_REPLAY_CONFLICT';
+ end if;
+ if j.state<>'recovering' or a.finished_at is not null or a.recovery_lease_token is distinct from p_recovery_lease_token or a.recovery_lease_expires_at<=clock_timestamp() then raise exception 'RECOVERY_AUTHORITY_MISMATCH'; end if;
+ if p_outcome='requeue' then
+  if not p_provider_nonexecution_proven or p_actual_cost_micros is not null then raise exception 'PROVIDER_NONEXECUTION_EVIDENCE_REQUIRED'; end if;
+  perform public.release_compute_reservation(a.id);
+  if j.cancellation_requested_at is not null then final_state:='cancelled';
+  elsif j.retry_count+1<j.max_attempts then final_state:='queued';
+  else final_state:='failed'; end if;
+  update public.compute_jobs set state=final_state,retry_count=case when cancellation_requested_at is null then retry_count+1 else retry_count end,
+   available_at=case when final_state='queued' then now() else available_at end,terminal_at=case when final_state in ('failed','cancelled') then now() else terminal_at end,
+   safe_error_code=case when final_state='failed' then 'RETRY_LIMIT_REACHED' else safe_error_code end,updated_at=now() where id=j.id;
+  update public.compute_job_attempts set finished_at=now(),outcome_class=case when final_state='cancelled' then 'cancelled_provider_nonexecution_proven' else 'provider_nonexecution_proven' end,
+   recovery_fingerprint=fingerprint,recovery_state=final_state,recovery_lease_token=null,recovery_worker_ref=null,recovery_heartbeat_at=null,recovery_lease_expires_at=null where id=a.id;
+ elsif p_outcome in ('succeeded','failed','cancelled') then
+  if p_actual_cost_micros is null or p_actual_cost_micros<0 or p_runtime_ms<0 or a.provider_dispatch_intent_at is null then raise exception 'RECOVERY_EXECUTION_EVIDENCE_REQUIRED'; end if;
+  if p_provider_operation_ref is not null then
+   if length(p_provider_operation_ref) not between 1 and 500 then raise exception 'INVALID_OPERATION_REFERENCE'; end if;
+   if a.provider_operation_ref is not null and a.provider_operation_ref<>p_provider_operation_ref then raise exception 'PROVIDER_OPERATION_CONFLICT'; end if;
+   update public.compute_job_attempts set provider_operation_ref=coalesce(provider_operation_ref,p_provider_operation_ref),provider_dispatched_at=coalesce(provider_dispatched_at,now()) where id=a.id returning * into a;
+  end if;
+  if a.actual_cost_micros is not null and (a.actual_cost_micros<>p_actual_cost_micros or a.runtime_ms<>p_runtime_ms) then raise exception 'ACTUAL_COST_CONFLICT'; end if;
+  if a.actual_cost_micros is null then
+   select * into pol from public.compute_spend_policies where id=a.spend_policy_id for update; if not found then raise exception 'SPEND_POLICY_NOT_FOUND'; end if;
+   perform public.release_compute_reservation(a.id);
+   insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'actual',p_actual_cost_micros);
+   update public.compute_job_attempts set actual_cost_micros=p_actual_cost_micros,runtime_ms=p_runtime_ms where id=a.id returning * into a;
+   perform public.emit_compute_spend_thresholds(a.spend_policy_id);
+  end if;
+  final_state:=p_outcome::public.compute_job_state;
+  update public.compute_jobs set state=final_state,terminal_at=now(),result_reference=case when p_outcome='succeeded' then public.compute_creator_result(p_result_reference) else result_reference end,
+   safe_error_code=case when p_outcome='failed' then safe_code else safe_error_code end,updated_at=now() where id=j.id;
+  update public.compute_job_attempts set finished_at=now(),outcome_class='reconciled_'||p_outcome,safe_error_code=case when p_outcome='failed' then safe_code else safe_error_code end,
+   recovery_fingerprint=fingerprint,recovery_state=final_state,recovery_lease_token=null,recovery_worker_ref=null,recovery_heartbeat_at=null,recovery_lease_expires_at=null where id=a.id;
+ else raise exception 'INVALID_RECOVERY_OUTCOME'; end if;
+ return final_state;
+end$$;
+
+create function public.finalize_durable_image_product(p_job public.compute_jobs,p_attempt public.compute_job_attempts,p_assets jsonb,p_runtime_ms bigint)
+returns jsonb language plpgsql set search_path=pg_catalog,public as $$
+declare output_count integer; expected_prefix text; normalized jsonb; generation_data jsonb; fingerprint text; product jsonb;
+begin
+ if jsonb_typeof(p_job.request_payload->'output_count')<>'number' or p_job.request_payload->>'output_count' !~ '^[1-4]$' then raise exception 'IMAGE_OUTPUT_COUNT_INVALID'; end if;
+ if jsonb_typeof(p_job.request_payload->'prompt')<>'string' or jsonb_typeof(p_job.request_payload->'body_presentation')<>'string'
+   or jsonb_typeof(p_job.request_payload->'steps')<>'number' or p_job.request_payload->>'steps' !~ '^[0-9]+$'
+   or jsonb_typeof(p_job.request_payload->'cfg')<>'number' or p_job.request_payload->>'cfg' !~ '^[0-9]+([.][0-9]+)?$'
+   or jsonb_typeof(p_job.request_payload->'seed')<>'number' or p_job.request_payload->>'seed' !~ '^[0-9]+$'
+   or jsonb_typeof(p_job.request_payload->'width')<>'number' or p_job.request_payload->>'width' !~ '^[0-9]+$'
+   or jsonb_typeof(p_job.request_payload->'height')<>'number' or p_job.request_payload->>'height' !~ '^[0-9]+$'
+   or (p_job.request_payload ? 'negative_prompt' and jsonb_typeof(p_job.request_payload->'negative_prompt') not in ('string','null'))
+   or (p_job.request_payload ? 'identity_id' and jsonb_typeof(p_job.request_payload->'identity_id') not in ('string','null')) then raise exception 'IMAGE_REQUEST_METADATA_INVALID'; end if;
+ output_count:=(p_job.request_payload->>'output_count')::integer;
+ if jsonb_typeof(p_assets)<>'array' or jsonb_array_length(p_assets)<>output_count then raise exception 'IMAGE_OUTPUT_COUNT_MISMATCH'; end if;
+ if exists(select 1 from jsonb_array_elements(p_assets) e where jsonb_typeof(e)<>'object' or e ?| array['owner_id','kind','storage_class']
+   or jsonb_typeof(e->'ordinal')<>'number' or e->>'ordinal' !~ '^[0-3]$' or e->>'bucket' is null or e->>'object_key' is null or e->>'mime_type' not in ('image/jpeg','image/png','image/webp')
+   or jsonb_typeof(e->'size_bytes')<>'number' or e->>'size_bytes' !~ '^[1-9][0-9]*$' or e->>'sha256' !~ '^[0-9a-f]{64}$') then raise exception 'IMAGE_ASSET_EVIDENCE_INVALID'; end if;
+ if exists(select 1 from jsonb_array_elements(p_assets) e group by (e->>'ordinal') having count(*)<>1)
+   or exists(select 1 from generate_series(0,output_count-1) n where not exists(select 1 from jsonb_array_elements(p_assets) e where (e->>'ordinal')::integer=n))
+   or exists(select 1 from jsonb_array_elements(p_assets) e where (e->>'ordinal')::integer>=output_count) then raise exception 'IMAGE_OUTPUT_ORDINALS_INVALID'; end if;
+ expected_prefix:='creator-generations/'||p_job.id::text||'/';
+ if exists(select 1 from jsonb_array_elements(p_assets) e where left(e->>'object_key',length(expected_prefix))<>expected_prefix or length(e->>'object_key')<=length(expected_prefix)) then raise exception 'IMAGE_OBJECT_NAMESPACE_INVALID'; end if;
+ select jsonb_agg(jsonb_build_object('owner_id',p_job.owner_id,'ordinal',(e->>'ordinal')::integer,'kind','image','storage_class','creator_generation',
+   'bucket',e->>'bucket','object_key',e->>'object_key','mime_type',e->>'mime_type','size_bytes',(e->>'size_bytes')::bigint,'sha256',e->>'sha256') order by (e->>'ordinal')::integer)
+ into normalized from jsonb_array_elements(p_assets) e;
+ generation_data:=jsonb_build_object('prompt',p_job.request_payload->>'prompt','negative_prompt',p_job.request_payload->>'negative_prompt',
+   'lora_used',p_job.request_payload->>'identity_id','body_type',p_job.request_payload->>'body_presentation','steps',p_job.request_payload->'steps',
+   'cfg_scale',p_job.request_payload->'cfg','seed',p_job.request_payload->'seed','width',p_job.request_payload->'width','height',p_job.request_payload->'height',
+   'processing_time_ms',p_runtime_ms,'metadata',jsonb_build_object('private_creator_media',true,'policy_version',1,'output_count',output_count));
+ fingerprint:=encode(digest(jsonb_build_array(p_job.id,generation_data,normalized)::text,'sha256'),'hex');
+ if p_attempt.internal_telemetry->>'workload_finalization_fingerprint' is not null and p_attempt.internal_telemetry->>'workload_finalization_fingerprint'<>fingerprint then raise exception 'IMAGE_FINALIZATION_REPLAY_CONFLICT'; end if;
+ product:=public.finalize_private_generation(p_job.id,p_job.owner_id,generation_data,normalized);
+ update public.compute_job_attempts set internal_telemetry=jsonb_set(internal_telemetry,'{workload_finalization_fingerprint}',to_jsonb(fingerprint)) where id=p_attempt.id;
  return product;
 end$$;
 
-create function public.finalize_recovered_image_compute_job(p_job_id uuid,p_attempt_id uuid,p_recovery_token uuid,p_recovery_lease_token uuid,p_generation_id uuid,p_generation jsonb,p_assets jsonb,p_actual_cost_micros bigint,p_runtime_ms bigint,p_provider_operation_ref text default null)
+create function public.finalize_image_compute_job(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_assets jsonb)
 returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
-declare j public.compute_jobs; a public.compute_job_attempts; product jsonb; fingerprint text; recovery_fingerprint text;
+declare j public.compute_jobs; a public.compute_job_attempts; product jsonb;
 begin
- select * into j from public.compute_jobs where id=p_job_id for update;
- select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
- if j.workload is distinct from 'image' or not found or a.recovery_token is distinct from p_recovery_token then raise exception 'IMAGE_RECOVERY_AUTHORITY_MISMATCH'; end if;
- fingerprint:=encode(digest(jsonb_build_array(p_generation_id,p_generation,p_assets)::text,'sha256'),'hex');
+ select * into j from public.compute_jobs where id=p_job_id for update; if not found or j.workload<>'image' then raise exception 'IMAGE_FINALIZATION_AUTHORITY_MISMATCH'; end if;
+ select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=j.id for update;
+ if not found or a.lease_token<>p_lease_token then raise exception 'IMAGE_FINALIZATION_AUTHORITY_MISMATCH'; end if;
+ if j.state='succeeded' then product:=public.finalize_durable_image_product(j,a,p_assets,a.runtime_ms); if j.result_reference=product then return product; end if; raise exception 'IMAGE_FINALIZATION_REPLAY_CONFLICT'; end if;
+ if j.state not in ('running','cancel_requested') or j.lease_token is distinct from p_lease_token or j.lease_expires_at<=clock_timestamp() then raise exception 'IMAGE_FINALIZATION_AUTHORITY_MISMATCH'; end if;
+ if a.provider_dispatch_intent_at is null or a.provider_dispatched_at is null or a.provider_operation_ref is null then raise exception 'IMAGE_EXECUTION_EVIDENCE_REQUIRED'; end if;
+ if a.actual_cost_micros is null or a.runtime_ms is null then raise exception 'ACTUAL_COST_REQUIRED'; end if;
+ product:=public.finalize_durable_image_product(j,a,p_assets,a.runtime_ms);
+ update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=public.compute_creator_result(product),lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id;
+ update public.compute_job_attempts set finished_at=now(),outcome_class='succeeded' where id=a.id;
+ return product;
+end$$;
+
+create function public.finalize_recovered_image_compute_job(p_job_id uuid,p_attempt_id uuid,p_recovery_token uuid,p_recovery_lease_token uuid,p_assets jsonb,p_actual_cost_micros bigint,p_runtime_ms bigint,p_provider_operation_ref text default null)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,public as $$
+declare j public.compute_jobs; a public.compute_job_attempts; pol public.compute_spend_policies; product jsonb; fingerprint text;
+begin
+ select * into j from public.compute_jobs where id=p_job_id for update; if not found or j.workload<>'image' then raise exception 'IMAGE_RECOVERY_AUTHORITY_MISMATCH'; end if;
+ select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=j.id for update;
+ if not found or a.recovery_token is distinct from p_recovery_token then raise exception 'IMAGE_RECOVERY_AUTHORITY_MISMATCH'; end if;
  if a.recovery_fingerprint is not null then
-   if j.state='succeeded' then
-     product:=public.finalize_private_generation(p_generation_id,j.owner_id,p_generation,p_assets);
-     recovery_fingerprint:=encode(digest(jsonb_build_array('succeeded',false,null,public.compute_creator_result(product),p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref)::text,'sha256'),'hex');
-     if j.result_reference=product and a.recovery_fingerprint=recovery_fingerprint and a.internal_telemetry->>'workload_finalization_fingerprint'=fingerprint then return product; end if;
-   end if;
-   raise exception 'IMAGE_FINALIZATION_REPLAY_CONFLICT';
+  product:=public.finalize_durable_image_product(j,a,p_assets,p_runtime_ms);
+  fingerprint:=encode(digest(jsonb_build_array('succeeded',false,null,public.compute_creator_result(product),p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref)::text,'sha256'),'hex');
+  if j.state='succeeded' and a.recovery_fingerprint=fingerprint and j.result_reference=product then return product; end if; raise exception 'IMAGE_FINALIZATION_REPLAY_CONFLICT';
  end if;
  if j.state<>'recovering' or a.finished_at is not null or a.recovery_lease_token is distinct from p_recovery_lease_token or a.recovery_lease_expires_at<=clock_timestamp() then raise exception 'IMAGE_RECOVERY_AUTHORITY_MISMATCH'; end if;
- product:=public.finalize_private_generation(p_generation_id,j.owner_id,p_generation,p_assets);
- perform set_config('sirens_forge.workload_finalization_job',j.id::text,true);
- update public.compute_job_attempts set internal_telemetry=jsonb_set(internal_telemetry,'{workload_finalization_fingerprint}',to_jsonb(fingerprint)) where id=a.id;
- perform public.reconcile_compute_recovery(j.id,a.id,p_recovery_token,p_recovery_lease_token,'succeeded',false,null,product,p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref);
+ if p_actual_cost_micros is null or p_actual_cost_micros<0 or p_runtime_ms<0 or a.provider_dispatch_intent_at is null then raise exception 'RECOVERY_EXECUTION_EVIDENCE_REQUIRED'; end if;
+ if p_provider_operation_ref is not null then
+  if length(p_provider_operation_ref) not between 1 and 500 then raise exception 'INVALID_OPERATION_REFERENCE'; end if;
+  if a.provider_operation_ref is not null and a.provider_operation_ref<>p_provider_operation_ref then raise exception 'PROVIDER_OPERATION_CONFLICT'; end if;
+  update public.compute_job_attempts set provider_operation_ref=coalesce(provider_operation_ref,p_provider_operation_ref),provider_dispatched_at=coalesce(provider_dispatched_at,now()) where id=a.id returning * into a;
+ end if;
+ if a.actual_cost_micros is not null and (a.actual_cost_micros<>p_actual_cost_micros or a.runtime_ms<>p_runtime_ms) then raise exception 'ACTUAL_COST_CONFLICT'; end if;
+ if a.actual_cost_micros is null then
+  select * into pol from public.compute_spend_policies where id=a.spend_policy_id for update; if not found then raise exception 'SPEND_POLICY_NOT_FOUND'; end if;
+  perform public.release_compute_reservation(a.id); insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'actual',p_actual_cost_micros);
+  update public.compute_job_attempts set actual_cost_micros=p_actual_cost_micros,runtime_ms=p_runtime_ms where id=a.id returning * into a; perform public.emit_compute_spend_thresholds(a.spend_policy_id);
+ end if;
+ product:=public.finalize_durable_image_product(j,a,p_assets,p_runtime_ms);
+ fingerprint:=encode(digest(jsonb_build_array('succeeded',false,null,public.compute_creator_result(product),p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref)::text,'sha256'),'hex');
+ update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=public.compute_creator_result(product),updated_at=now() where id=j.id;
+ update public.compute_job_attempts set finished_at=now(),outcome_class='reconciled_succeeded',recovery_fingerprint=fingerprint,recovery_state='succeeded',recovery_lease_token=null,recovery_worker_ref=null,recovery_heartbeat_at=null,recovery_lease_expires_at=null where id=a.id;
  return product;
 end$$;
 
 create function public.finalize_trainer_compute_job(p_job_id uuid,p_attempt_id uuid,p_lease_token uuid,p_artifact_r2_bucket text,p_artifact_r2_key text)
 returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
-declare j public.compute_jobs; a public.compute_job_attempts; l public.user_loras; lora_id uuid; token text; fingerprint text;
+declare j public.compute_jobs; a public.compute_job_attempts; l public.user_loras; lora_id uuid; token text; fingerprint text; result jsonb;
 begin
- select * into j from public.compute_jobs where id=p_job_id for update;
- select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
- if j.workload is distinct from 'trainer' or not found or a.lease_token<>p_lease_token or j.request_payload->>'identity_id' !~ '^[0-9a-fA-F-]{36}$' then raise exception 'TRAINER_FINALIZATION_AUTHORITY_MISMATCH'; end if;
- if j.state not in ('running','cancel_requested','succeeded') or (j.state<>'succeeded' and (j.lease_token is distinct from p_lease_token or j.lease_expires_at<=clock_timestamp())) then raise exception 'TRAINER_FINALIZATION_AUTHORITY_MISMATCH'; end if;
- if a.provider_dispatch_intent_at is null or a.provider_dispatched_at is null or a.provider_operation_ref is null or a.actual_cost_micros is null then raise exception 'TRAINER_EXECUTION_EVIDENCE_REQUIRED'; end if;
- if p_artifact_r2_bucket is null or p_artifact_r2_bucket<>btrim(p_artifact_r2_bucket) or length(p_artifact_r2_bucket) not between 3 and 63
-   or p_artifact_r2_key is null or p_artifact_r2_key<>btrim(p_artifact_r2_key) or length(p_artifact_r2_key) not between 1 and 1024
-   or p_artifact_r2_key like '/%' or p_artifact_r2_key like E'%\\%' or p_artifact_r2_key ~ '[[:cntrl:]]'
-   or exists(select 1 from unnest(string_to_array(p_artifact_r2_key,'/')) s where s in ('','.','..')) then raise exception 'TRAINER_ARTIFACT_REFERENCE_INVALID'; end if;
- lora_id:=(j.request_payload->>'identity_id')::uuid;
- select * into l from public.user_loras where id=lora_id for update;
+ select * into j from public.compute_jobs where id=p_job_id for update; if not found or j.workload<>'trainer' or j.request_payload->>'identity_id' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' then raise exception 'TRAINER_FINALIZATION_AUTHORITY_MISMATCH'; end if;
+ select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=j.id for update; if not found or a.lease_token<>p_lease_token then raise exception 'TRAINER_FINALIZATION_AUTHORITY_MISMATCH'; end if;
+ lora_id:=(j.request_payload->>'identity_id')::uuid; select * into l from public.user_loras where id=lora_id for update;
  if not found or l.user_id<>j.owner_id or l.training_job_id is distinct from j.id::text then raise exception 'TRAINER_TARGET_BINDING_MISMATCH'; end if;
- token:='sf'||lower(substr(replace(l.id::text,'-',''),1,8));
- fingerprint:=encode(digest(jsonb_build_array(p_artifact_r2_bucket,p_artifact_r2_key)::text,'sha256'),'hex');
+ if p_artifact_r2_bucket is null or p_artifact_r2_bucket<>btrim(p_artifact_r2_bucket) or length(p_artifact_r2_bucket) not between 3 and 63 or p_artifact_r2_key is distinct from 'loras/'||lora_id::text||'/final.safetensors' then raise exception 'TRAINER_ARTIFACT_REFERENCE_INVALID'; end if;
+ token:='sf'||lower(substr(replace(lora_id::text,'-',''),1,8)); result:=jsonb_build_object('result_id',lora_id); fingerprint:=encode(digest(jsonb_build_array(p_artifact_r2_bucket,p_artifact_r2_key,result)::text,'sha256'),'hex');
  if a.internal_telemetry->>'workload_finalization_fingerprint' is not null and a.internal_telemetry->>'workload_finalization_fingerprint'<>fingerprint then raise exception 'TRAINER_FINALIZATION_REPLAY_CONFLICT'; end if;
- if j.state='succeeded' then
-   if l.status='completed' and l.progress=100 and l.artifact_r2_bucket=p_artifact_r2_bucket and l.artifact_r2_key=p_artifact_r2_key and l.trigger_token=token then return j.state; end if;
-   raise exception 'TRAINER_FINALIZATION_REPLAY_CONFLICT';
- end if;
- update public.user_loras set status='completed',progress=100,artifact_r2_bucket=p_artifact_r2_bucket,artifact_r2_key=p_artifact_r2_key,
-   trigger_token=token,started_at=coalesce(started_at,a.started_at,j.started_at,clock_timestamp()),completed_at=clock_timestamp(),updated_at=clock_timestamp(),error_message=null where id=l.id;
- perform set_config('sirens_forge.workload_finalization_job',j.id::text,true);
- update public.compute_job_attempts set internal_telemetry=jsonb_set(internal_telemetry,'{workload_finalization_fingerprint}',to_jsonb(fingerprint)) where id=a.id;
- return public.compute_worker_transition(j.id,a.id,p_lease_token,'success',null,null);
+ if j.state='succeeded' then if j.result_reference=result and l.status='completed' and l.progress=100 and l.artifact_r2_bucket=p_artifact_r2_bucket and l.artifact_r2_key=p_artifact_r2_key and l.trigger_token=token then return j.state; end if; raise exception 'TRAINER_FINALIZATION_REPLAY_CONFLICT'; end if;
+ if j.state not in ('running','cancel_requested') or j.lease_token is distinct from p_lease_token or j.lease_expires_at<=clock_timestamp() then raise exception 'TRAINER_FINALIZATION_AUTHORITY_MISMATCH'; end if;
+ if a.provider_dispatch_intent_at is null or a.provider_dispatched_at is null or a.provider_operation_ref is null then raise exception 'TRAINER_EXECUTION_EVIDENCE_REQUIRED'; end if; if a.actual_cost_micros is null then raise exception 'ACTUAL_COST_REQUIRED'; end if;
+ update public.user_loras set status='completed',progress=100,artifact_r2_bucket=p_artifact_r2_bucket,artifact_r2_key=p_artifact_r2_key,trigger_token=token,started_at=coalesce(a.started_at,j.started_at),completed_at=clock_timestamp(),updated_at=clock_timestamp(),error_message=null where id=l.id;
+ update public.compute_job_attempts set internal_telemetry=jsonb_set(internal_telemetry,'{workload_finalization_fingerprint}',to_jsonb(fingerprint)),finished_at=now(),outcome_class='succeeded' where id=a.id;
+ update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=result,lease_token=null,lease_expires_at=null,updated_at=now() where id=j.id; return 'succeeded';
 end$$;
 
 create function public.finalize_recovered_trainer_compute_job(p_job_id uuid,p_attempt_id uuid,p_recovery_token uuid,p_recovery_lease_token uuid,p_artifact_r2_bucket text,p_artifact_r2_key text,p_actual_cost_micros bigint,p_runtime_ms bigint,p_provider_operation_ref text default null)
 returns public.compute_job_state language plpgsql security definer set search_path=pg_catalog,public as $$
-declare j public.compute_jobs; a public.compute_job_attempts; l public.user_loras; lora_id uuid; token text; final_state public.compute_job_state; fingerprint text; replay_fingerprint text;
+declare j public.compute_jobs; a public.compute_job_attempts; l public.user_loras; pol public.compute_spend_policies; lora_id uuid; token text; artifact_fingerprint text; recovery_fp text; result jsonb;
 begin
- select * into j from public.compute_jobs where id=p_job_id for update;
- select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=p_job_id for update;
- if j.workload is distinct from 'trainer' or not found or a.recovery_token is distinct from p_recovery_token or j.request_payload->>'identity_id' !~ '^[0-9a-fA-F-]{36}$' then raise exception 'TRAINER_RECOVERY_AUTHORITY_MISMATCH'; end if;
- lora_id:=(j.request_payload->>'identity_id')::uuid; select * into l from public.user_loras where id=lora_id for update;
- token:='sf'||lower(substr(replace(lora_id::text,'-',''),1,8));
- fingerprint:=encode(digest(jsonb_build_array(p_artifact_r2_bucket,p_artifact_r2_key)::text,'sha256'),'hex');
- if a.recovery_fingerprint is not null then
-   replay_fingerprint:=encode(digest(jsonb_build_array('succeeded',false,null,null,p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref)::text,'sha256'),'hex');
-   if j.state='succeeded' and a.recovery_fingerprint=replay_fingerprint and a.internal_telemetry->>'workload_finalization_fingerprint'=fingerprint and l.user_id=j.owner_id and l.training_job_id=j.id::text and l.status='completed' and l.progress=100 and l.artifact_r2_bucket=p_artifact_r2_bucket and l.artifact_r2_key=p_artifact_r2_key and l.trigger_token=token then return j.state; end if;
-   raise exception 'TRAINER_FINALIZATION_REPLAY_CONFLICT';
- end if;
+ select * into j from public.compute_jobs where id=p_job_id for update; if not found or j.workload<>'trainer' or j.request_payload->>'identity_id' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$' then raise exception 'TRAINER_RECOVERY_AUTHORITY_MISMATCH'; end if;
+ select * into a from public.compute_job_attempts where id=p_attempt_id and job_id=j.id for update; if not found or a.recovery_token is distinct from p_recovery_token then raise exception 'TRAINER_RECOVERY_AUTHORITY_MISMATCH'; end if;
+ lora_id:=(j.request_payload->>'identity_id')::uuid; select * into l from public.user_loras where id=lora_id for update; if not found or l.user_id<>j.owner_id or l.training_job_id is distinct from j.id::text then raise exception 'TRAINER_TARGET_BINDING_MISMATCH'; end if;
+ if p_artifact_r2_bucket is null or p_artifact_r2_bucket<>btrim(p_artifact_r2_bucket) or length(p_artifact_r2_bucket) not between 3 and 63 or p_artifact_r2_key is distinct from 'loras/'||lora_id::text||'/final.safetensors' then raise exception 'TRAINER_ARTIFACT_REFERENCE_INVALID'; end if;
+ token:='sf'||lower(substr(replace(lora_id::text,'-',''),1,8)); result:=jsonb_build_object('result_id',lora_id); artifact_fingerprint:=encode(digest(jsonb_build_array(p_artifact_r2_bucket,p_artifact_r2_key,result)::text,'sha256'),'hex'); recovery_fp:=encode(digest(jsonb_build_array('succeeded',false,null,result,p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref)::text,'sha256'),'hex');
+ if a.recovery_fingerprint is not null then if j.state='succeeded' and a.recovery_fingerprint=recovery_fp and a.internal_telemetry->>'workload_finalization_fingerprint'=artifact_fingerprint and j.result_reference=result and l.status='completed' and l.artifact_r2_bucket=p_artifact_r2_bucket and l.artifact_r2_key=p_artifact_r2_key then return j.state; end if; raise exception 'TRAINER_FINALIZATION_REPLAY_CONFLICT'; end if;
  if j.state<>'recovering' or a.finished_at is not null or a.recovery_lease_token is distinct from p_recovery_lease_token or a.recovery_lease_expires_at<=clock_timestamp() then raise exception 'TRAINER_RECOVERY_AUTHORITY_MISMATCH'; end if;
- if not found or l.user_id<>j.owner_id or l.training_job_id is distinct from j.id::text then raise exception 'TRAINER_TARGET_BINDING_MISMATCH'; end if;
- if p_artifact_r2_bucket is null or p_artifact_r2_bucket<>btrim(p_artifact_r2_bucket) or length(p_artifact_r2_bucket) not between 3 and 63
-   or p_artifact_r2_key is null or p_artifact_r2_key<>btrim(p_artifact_r2_key) or length(p_artifact_r2_key) not between 1 and 1024
-   or p_artifact_r2_key like '/%' or p_artifact_r2_key like E'%\\%' or p_artifact_r2_key ~ '[[:cntrl:]]'
-   or exists(select 1 from unnest(string_to_array(p_artifact_r2_key,'/')) s where s in ('','.','..')) then raise exception 'TRAINER_ARTIFACT_REFERENCE_INVALID'; end if;
- update public.user_loras set status='completed',progress=100,artifact_r2_bucket=p_artifact_r2_bucket,artifact_r2_key=p_artifact_r2_key,
-  trigger_token=token,started_at=coalesce(started_at,a.started_at,j.started_at,clock_timestamp()),completed_at=clock_timestamp(),updated_at=clock_timestamp(),error_message=null where id=l.id;
- perform set_config('sirens_forge.workload_finalization_job',j.id::text,true);
- update public.compute_job_attempts set internal_telemetry=jsonb_set(internal_telemetry,'{workload_finalization_fingerprint}',to_jsonb(fingerprint)) where id=a.id;
- final_state:=public.reconcile_compute_recovery(j.id,a.id,p_recovery_token,p_recovery_lease_token,'succeeded',false,null,null,p_actual_cost_micros,p_runtime_ms,p_provider_operation_ref);
- return final_state;
+ if p_actual_cost_micros is null or p_actual_cost_micros<0 or p_runtime_ms<0 or a.provider_dispatch_intent_at is null then raise exception 'RECOVERY_EXECUTION_EVIDENCE_REQUIRED'; end if;
+ if p_provider_operation_ref is not null then if length(p_provider_operation_ref) not between 1 and 500 then raise exception 'INVALID_OPERATION_REFERENCE'; end if; if a.provider_operation_ref is not null and a.provider_operation_ref<>p_provider_operation_ref then raise exception 'PROVIDER_OPERATION_CONFLICT'; end if; update public.compute_job_attempts set provider_operation_ref=coalesce(provider_operation_ref,p_provider_operation_ref),provider_dispatched_at=coalesce(provider_dispatched_at,now()) where id=a.id returning * into a; end if;
+ if a.actual_cost_micros is not null and (a.actual_cost_micros<>p_actual_cost_micros or a.runtime_ms<>p_runtime_ms) then raise exception 'ACTUAL_COST_CONFLICT'; end if;
+ if a.actual_cost_micros is null then select * into pol from public.compute_spend_policies where id=a.spend_policy_id for update; if not found then raise exception 'SPEND_POLICY_NOT_FOUND'; end if; perform public.release_compute_reservation(a.id); insert into public.compute_cost_ledger(job_id,attempt_id,kind,amount_micros) values(j.id,a.id,'actual',p_actual_cost_micros); update public.compute_job_attempts set actual_cost_micros=p_actual_cost_micros,runtime_ms=p_runtime_ms where id=a.id returning * into a; perform public.emit_compute_spend_thresholds(a.spend_policy_id); end if;
+ update public.user_loras set status='completed',progress=100,artifact_r2_bucket=p_artifact_r2_bucket,artifact_r2_key=p_artifact_r2_key,trigger_token=token,started_at=coalesce(a.started_at,j.started_at),completed_at=clock_timestamp(),updated_at=clock_timestamp(),error_message=null where id=l.id;
+ update public.compute_jobs set state='succeeded',terminal_at=now(),result_reference=result,updated_at=now() where id=j.id;
+ update public.compute_job_attempts set internal_telemetry=jsonb_set(internal_telemetry,'{workload_finalization_fingerprint}',to_jsonb(artifact_fingerprint)),finished_at=now(),outcome_class='reconciled_succeeded',recovery_fingerprint=recovery_fp,recovery_state='succeeded',recovery_lease_token=null,recovery_worker_ref=null,recovery_heartbeat_at=null,recovery_lease_expires_at=null where id=a.id; return 'succeeded';
 end$$;
 
-revoke all on function public.compute_workload_success_guard(),public.project_trainer_compute_state(),
- public.finalize_image_compute_job(uuid,uuid,uuid,uuid,jsonb,jsonb),
- public.finalize_recovered_image_compute_job(uuid,uuid,uuid,uuid,uuid,jsonb,jsonb,bigint,bigint,text),
- public.finalize_trainer_compute_job(uuid,uuid,uuid,text,text),
- public.finalize_recovered_trainer_compute_job(uuid,uuid,uuid,uuid,text,text,bigint,bigint,text)
- from public,anon,authenticated;
-grant execute on function public.finalize_image_compute_job(uuid,uuid,uuid,uuid,jsonb,jsonb),
- public.finalize_recovered_image_compute_job(uuid,uuid,uuid,uuid,uuid,jsonb,jsonb,bigint,bigint,text),
- public.finalize_trainer_compute_job(uuid,uuid,uuid,text,text),
- public.finalize_recovered_trainer_compute_job(uuid,uuid,uuid,uuid,text,text,bigint,bigint,text)
- to service_role;
-
+revoke all on function public.finalize_durable_image_product(public.compute_jobs,public.compute_job_attempts,jsonb,bigint),
+ public.finalize_image_compute_job(uuid,uuid,uuid,jsonb),public.finalize_recovered_image_compute_job(uuid,uuid,uuid,uuid,jsonb,bigint,bigint,text),
+ public.finalize_trainer_compute_job(uuid,uuid,uuid,text,text),public.finalize_recovered_trainer_compute_job(uuid,uuid,uuid,uuid,text,text,bigint,bigint,text) from public,anon,authenticated,service_role;
+grant execute on function public.finalize_image_compute_job(uuid,uuid,uuid,jsonb),public.finalize_recovered_image_compute_job(uuid,uuid,uuid,uuid,jsonb,bigint,bigint,text),
+ public.finalize_trainer_compute_job(uuid,uuid,uuid,text,text),public.finalize_recovered_trainer_compute_job(uuid,uuid,uuid,uuid,text,text,bigint,bigint,text) to service_role;
 commit;
