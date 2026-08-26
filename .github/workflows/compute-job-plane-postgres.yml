@@ -23,6 +23,12 @@ jobs:
         with: { node-version: 20, cache: npm }
       - run: npm ci
       - name: Create disposable database
-        run: psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database compute_job_plane_test'
+        run: |
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database compute_job_plane_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database compute_job_plane_pass4a_test'
       - run: npm run test:compute-job-plane
       - run: npm run test:compute-job-plane-postgres
+      - name: Run Pass 4A PostgreSQL integration and rollback
+        env:
+          COMPUTE_JOB_PLANE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/compute_job_plane_pass4a_test
+        run: npm run test:compute-job-plane-pass4a-postgres
