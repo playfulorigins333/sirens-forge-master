@@ -110,7 +110,11 @@ export async function POST(req: Request) {
         p_priority_class: computePriorityForTier(auth.subscription?.tier_name),
         p_dataset_r2_bucket: dataset_r2_bucket, p_dataset_r2_prefix: dataset_r2_prefix,
       });
-      if (submitError) throw new Error(submitError.message.includes("IDEMPOTENCY_CONFLICT") ? "IDEMPOTENCY_CONFLICT" : "TRAINER_SUBMISSION_FAILED");
+      if (submitError) {
+        if (submitError.message.includes("IDEMPOTENCY_CONFLICT")) throw new Error("IDEMPOTENCY_CONFLICT");
+        if (submitError.message.includes("TRAINER_ALREADY_ACTIVE")) throw new Error("TRAINER_ALREADY_ACTIVE");
+        throw new Error("TRAINER_SUBMISSION_FAILED");
+      }
       const job = Array.isArray(rows) ? rows[0] : rows;
       return NextResponse.json({ ok: true, lora_id, ...toCreatorComputeStatus(job) }, { status: 202 });
     }
@@ -151,6 +155,7 @@ export async function POST(req: Request) {
       );
     }
     if (msg.includes("IDEMPOTENCY_CONFLICT")) return NextResponse.json({ error: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
+    if (msg.includes("TRAINER_ALREADY_ACTIVE")) return NextResponse.json({ error: "TRAINER_ALREADY_ACTIVE", message: "Training is already active for this Twin." }, { status: 409 });
 
     console.error("[lora/train] Fatal:", err);
     return NextResponse.json(

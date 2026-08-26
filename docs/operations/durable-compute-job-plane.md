@@ -51,18 +51,42 @@ recovery worker holding a live recovery lease checks `compute_recovery_signal` s
 can act on creator cancellation without direct compute-table reads. No provider
 implementation exists yet.
 
-Pass 3 must supply worker/provider adapters, reconciliation, cancellation, and result
-finalization. Video remains unavailable. No Salad configuration, provider workload,
-GPU canary, or real generation is part of this pass.
+## Pass 4A workload finalization
+
+Pass 4A adds service-role-only normal and recovery finalizers for Image and Trainer.
+Each finalizer persists its canonical product and terminal durable outcome in one
+PostgreSQL transaction. Image delegates canonical persistence to
+`finalize_private_generation`, returning only `generation_id` and `asset_ids`.
+Trainer binds through the job's authoritative `identity_id`, persists the artifact,
+and derives `sf` plus the first eight normalized LoRA UUID characters server-side.
+Identical replay is idempotent and conflicting replay fails closed.
+
+A `compute_jobs` transition guard rejects generic Image/Trainer success unless the
+workload finalizer has installed its transaction-local authority marker. Generic
+Stitch success is unchanged. Video remains unavailable. Both recovery finalizers
+retain recovery-token, recovery-lease, execution-evidence, and actual-cost settlement
+requirements.
+
+An exact-binding trigger projects current Trainer jobs to `user_loras`: queued maps
+to queued; claimed, running, recovering, and cancel_requested map to training; failed
+and cancelled map to failed (with creator-safe codes only). Succeeded never projects
+completed; only atomic artifact finalization does that. A row lock on the authoritative
+LoRA prevents a different idempotency key from replacing a nonterminal current job,
+while different Twins remain independently queueable and terminal Twins may retrain.
+
+The Pass 4A migration is still a separately authorized Production operation. All
+runtime gates remain **OFF**; this pass adds no provider adapter, provider
+configuration, GPU canary, real generation, or real training.
 
 ## Eventual activation sequence
 
 1. Merge reviewed source and obtain a green Production deployment.
 2. With separate human authorization, apply `20260825090000_durable_compute_job_plane.sql`.
-3. Verify schema, functions, RLS, grants, and keep the durable gate off.
-4. Complete Pass 3 provider-neutral worker adapters.
-5. Configure measured scheduler/spend policies and private compute storage prerequisites.
-6. Only then authorize a controlled canary and later activation.
+3. With a further separate authorization, apply `20260826004344_durable_compute_pass_4a_finalization.sql`.
+4. Verify schema, functions, RLS, grants, and keep the durable gate off.
+5. Complete provider-neutral worker adapters in a later pass.
+6. Configure measured scheduler/spend policies and private compute storage prerequisites.
+7. Only then authorize a controlled canary and later activation.
 
 ## Emergency rollback
 
@@ -71,3 +95,8 @@ records, and obtain explicit authorization. Run
 `supabase/manual/durable_compute_job_plane_emergency_rollback.sql`. It drops only
 Pass 2 objects and intentionally preserves generations, user_loras, legacy generation,
 private-media, and publishing tables.
+
+To remove only Pass 4A while preserving the Pass 2 plane and private-media schema,
+use `supabase/manual/durable_compute_pass_4a_emergency_rollback.sql` after separate
+authorization. It drops the four finalizers and two triggers/helpers and restores the
+exact pre-Pass-4A Trainer submission function.

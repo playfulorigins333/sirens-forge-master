@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { computePriorityForTier, toCreatorComputeStatus } from "../../../lib/compute-jobs";
 const read = (path: string) => fs.readFileSync(path, "utf8");
 const migration = read("supabase/migrations/20260825090000_durable_compute_job_plane.sql");
+const pass4a = read("supabase/migrations/20260826004344_durable_compute_pass_4a_finalization.sql");
 
 test("durable gate is server-only, exact true, and defaults off", () => {
   const source = read("lib/compute-jobs.ts");
@@ -104,6 +105,24 @@ test("trainer status guards legacy text IDs and requires current-execution artif
   const fixture = read("backend/compute/tests/computeJobPlanePostgresSetup.sql");
   assert.match(fixture, /training_job_id text/);
   assert.match(fixture, /create type public\.lora_status as enum \('idle','queued','training','completed','failed','draft'\)/);
+});
+
+test("Pass 4A atomically finalizes workload products and blocks generic success", () => {
+  for (const fn of ["finalize_image_compute_job", "finalize_recovered_image_compute_job", "finalize_trainer_compute_job", "finalize_recovered_trainer_compute_job"]) assert.ok(pass4a.includes(fn), fn);
+  assert.match(pass4a, /WORKLOAD_FINALIZATION_REQUIRED/);
+  assert.match(pass4a, /new\.workload in \('image','trainer'\)/);
+  assert.match(pass4a, /finalize_private_generation\(p_generation_id,j\.owner_id,p_generation,p_assets\)/);
+  assert.match(pass4a, /token:='sf'\|\|lower\(substr\(replace\(l\.id::text,'-',''\),1,8\)\)/);
+  assert.match(pass4a, /from public,anon,authenticated;[\s\S]*grant execute on function[\s\S]*to service_role/);
+  assert.doesNotMatch(pass4a, /grant (select|insert|update|delete|all).*compute_/i);
+});
+
+test("Pass 4A serializes same-Twin submission and projects only the exact binding", () => {
+  assert.match(pass4a, /where id=p_lora_id and user_id=p_owner_id for update/);
+  assert.match(pass4a, /current_job\.state not in \('succeeded','failed','cancelled'\).*TRAINER_ALREADY_ACTIVE/);
+  assert.match(pass4a, /training_job_id=new\.id::text/);
+  assert.doesNotMatch(pass4a, /new\.state = 'succeeded'[\s\S]{0,300}status='completed'/);
+  assert.match(read("app/api/lora/train/route.ts"), /TRAINER_ALREADY_ACTIVE[\s\S]*status: 409/);
 });
 
 function walk(dir: string): string[] {
