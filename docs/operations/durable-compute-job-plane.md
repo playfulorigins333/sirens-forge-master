@@ -61,12 +61,19 @@ and deriving creator-facing generation metadata from the durable request. Image 
 evidence must exactly match `output_count`, use contiguous ordinals starting at zero,
 and live below `creator-generations/<job_id>/`; owner, media kind, and storage class
 are injected by PostgreSQL rather than trusted from a worker. The creator result
-contains only `generation_id` and `asset_ids`.
+contains only `generation_id` and `asset_ids`. After canonical persistence, the
+durable wrapper locks the generation row and compares every creator-facing generation
+field with the authoritative contract; a same-ID legacy/poisoned row fails closed and
+the transaction rolls back any attempted asset attachment.
 Trainer binds through the job's authoritative `identity_id`, persists the artifact,
 enforces the provider-neutral canonical key `loras/<lora_id>/final.safetensors`,
 derives `sf` plus the first eight normalized LoRA UUID characters server-side, and
 stores only `{ "result_id": "<lora_id>" }` in the creator result reference.
 Identical replay is idempotent and conflicting replay fails closed.
+Normal replay additionally requires the supplied attempt to be the current attempt
+ordinal and the recorded successful attempt with its workload fingerprint; an older
+retried attempt cannot replay a newer success. Recovery Trainer replay verifies the
+entire completed LoRA product, including progress and server-derived trigger token.
 
 The forward migration replaces the generic normal transition and recovery
 reconciliation functions so they unconditionally reject Image/Trainer success with

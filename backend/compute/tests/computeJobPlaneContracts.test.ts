@@ -117,6 +117,10 @@ test("Pass 4A atomically finalizes workload products and blocks generic success"
   assert.match(pass4a, /expected_prefix:='creator-generations\/'\|\|p_job\.id::text\|\|'\/'/);
   assert.match(pass4a, /token:='sf'\|\|lower\(substr\(replace\(lora_id::text,'-',''\),1,8\)\)/);
   assert.match(pass4a, /result:=jsonb_build_object\('result_id',lora_id\)/);
+  assert.match(pass4a, /DURABLE_IMAGE_GENERATION_CONFLICT/);
+  assert.match(pass4a, /a\.ordinal<>j\.attempt_count/);
+  assert.match(pass4a, /a\.finished_at is null or a\.outcome_class<>'succeeded'/);
+  assert.match(pass4a, /revoke all on function public\.project_trainer_compute_state\(\)/);
   assert.match(pass4a, /from public,anon,authenticated,service_role;[\s\S]*grant execute on function[\s\S]*to service_role/);
   assert.doesNotMatch(pass4a, /grant (select|insert|update|delete|all).*compute_/i);
 });
