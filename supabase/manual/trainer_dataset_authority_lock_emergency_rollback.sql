@@ -33,16 +33,35 @@ begin
  return query select j.id,j.workload,case when j.state='recovering' and j.cancellation_requested_at is not null then 'cancelling' else case j.state when 'claimed' then 'running' when 'succeeded' then 'completed' when 'cancel_requested' then 'cancelling' else j.state::text end end,j.queued_at,j.started_at,j.terminal_at,public.compute_creator_result(j.result_reference),j.safe_error_code,j.state not in ('succeeded','failed','cancelled');
 end$$;
 
+
 revoke execute on function public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text) from public, anon, authenticated;
 grant execute on function public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text) to service_role;
-drop policy if exists user_loras_authenticated_owner_select on public.user_loras;
--- Restore the pre-Phase2A Data API grants and owner policies verified for this boundary.
-grant select,insert,update on public.user_loras to authenticated;
-create policy "Users can view own loras" on public.user_loras for select to authenticated using ((select auth.uid())=user_id);
-create policy "Users can insert own loras" on public.user_loras for insert to authenticated with check ((select auth.uid())=user_id);
-create policy "Users can update own loras" on public.user_loras for update to authenticated using ((select auth.uid())=user_id) with check ((select auth.uid())=user_id);
-grant select,insert,update,delete on public.dataset_doctor_jobs,public.dataset_doctor_images,public.dataset_doctor_selections to authenticated;
-create policy dataset_doctor_jobs_owner_all on public.dataset_doctor_jobs for all to authenticated using ((select auth.uid())=user_id) with check ((select auth.uid())=user_id);
-create policy dataset_doctor_images_owner_all on public.dataset_doctor_images for all to authenticated using ((select auth.uid())=user_id) with check ((select auth.uid())=user_id);
-create policy dataset_doctor_selections_owner_all on public.dataset_doctor_selections for all to authenticated using ((select auth.uid())=user_id) with check ((select auth.uid())=user_id);
+
+revoke all privileges on table public.dataset_doctor_jobs, public.dataset_doctor_images, public.dataset_doctor_selections, public.user_loras from public, anon, authenticated;
+do $policies$
+declare r record;
+begin
+ for r in select schemaname,tablename,policyname from pg_policies where schemaname='public' and tablename in ('dataset_doctor_jobs','dataset_doctor_images','dataset_doctor_selections','user_loras')
+ loop execute format('drop policy %I on %I.%I',r.policyname,r.schemaname,r.tablename); end loop;
+end $policies$;
+
+grant select, insert, update, delete on table public.dataset_doctor_jobs, public.dataset_doctor_images, public.dataset_doctor_selections to anon, authenticated;
+grant select, insert, update on table public.user_loras to anon, authenticated;
+
+create policy "Users can delete own dataset doctor jobs" on public.dataset_doctor_jobs for delete to public using (auth.uid() = user_id);
+create policy "Users can insert own dataset doctor jobs" on public.dataset_doctor_jobs for insert to public with check (auth.uid() = user_id);
+create policy "Users can update own dataset doctor jobs" on public.dataset_doctor_jobs for update to public using (auth.uid() = user_id);
+create policy "Users can view own dataset doctor jobs" on public.dataset_doctor_jobs for select to public using (auth.uid() = user_id);
+create policy "Users can delete own dataset doctor images" on public.dataset_doctor_images for delete to public using (auth.uid() = user_id);
+create policy "Users can insert own dataset doctor images" on public.dataset_doctor_images for insert to public with check (auth.uid() = user_id);
+create policy "Users can update own dataset doctor images" on public.dataset_doctor_images for update to public using (auth.uid() = user_id);
+create policy "Users can view own dataset doctor images" on public.dataset_doctor_images for select to public using (auth.uid() = user_id);
+create policy "Users can delete own dataset doctor selections" on public.dataset_doctor_selections for delete to public using (auth.uid() = user_id);
+create policy "Users can insert own dataset doctor selections" on public.dataset_doctor_selections for insert to public with check (auth.uid() = user_id);
+create policy "Users can update own dataset doctor selections" on public.dataset_doctor_selections for update to public using (auth.uid() = user_id);
+create policy "Users can view own dataset doctor selections" on public.dataset_doctor_selections for select to public using (auth.uid() = user_id);
+create policy "Users can create own loras" on public.user_loras for insert to public with check (auth.uid() = user_id);
+create policy "Users can update own loras" on public.user_loras for update to public using (auth.uid() = user_id);
+create policy "Users can view own loras" on public.user_loras for select to public using (auth.uid() = user_id);
+create policy "Users can view their own completed loras" on public.user_loras for select to public using (auth.uid() = user_id and status = 'completed'::public.lora_status);
 commit;

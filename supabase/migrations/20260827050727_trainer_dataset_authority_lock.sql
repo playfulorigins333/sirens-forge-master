@@ -2,7 +2,7 @@
 begin;
 
 revoke all privileges on table public.dataset_doctor_jobs, public.dataset_doctor_images, public.dataset_doctor_selections from public, anon, authenticated;
-revoke insert, update, delete on table public.user_loras from public, anon, authenticated;
+revoke all privileges on table public.user_loras from public, anon, authenticated;
 grant select on table public.user_loras to authenticated;
 
 do $policies$
