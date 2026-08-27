@@ -9,6 +9,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { DATASET_LIMITS } from "@/lib/dataset-doctor/dataset-limits";
 
 /**
  * Generates presigned PUT URLs for uploading Dataset Doctor raw images directly to R2.
@@ -96,9 +97,9 @@ export async function POST(req: Request) {
       );
     }
 
-    if (image_count < 10 || image_count > 20) {
+    if (!Number.isInteger(image_count) || image_count < DATASET_LIMITS.minimumUploadCount || image_count > DATASET_LIMITS.maximumUploadCount) {
       return NextResponse.json(
-        { error: "Image count must be between 10 and 20" },
+        { error: `Image count must be between ${DATASET_LIMITS.minimumUploadCount} and ${DATASET_LIMITS.maximumUploadCount}` },
         { status: 400 }
       );
     }

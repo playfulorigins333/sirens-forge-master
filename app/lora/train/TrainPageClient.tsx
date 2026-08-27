@@ -1,6 +1,7 @@
 "use client";
 
 import { clearPendingSubmission, pendingSubmissionKey } from "@/lib/compute-idempotency-client";
+import { DATASET_LIMITS } from "@/lib/dataset-doctor/dataset-limits";
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
@@ -102,6 +103,7 @@ type DatasetDoctorAnalyzeSummary = {
   guidance?: string[];
   dataset_ready?: boolean;
   confidence_message?: string | null;
+  non_overridable_conditions?: Array<string | { category?: string }>;
 };
 
 type DatasetDoctorAnalyzeResult = {
@@ -292,6 +294,7 @@ export default function LoRATrainerPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
   const [showManualReview, setShowManualReview] = useState(false);
+  const [showTrainAnywayConfirm, setShowTrainAnywayConfirm] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
@@ -323,6 +326,7 @@ export default function LoRATrainerPage() {
       setIsApproving(false);
       setShowConfetti(false);
       setShowManualReview(false);
+      setShowTrainAnywayConfirm(false);
 
       if (options?.clearIdentity) {
         setIdentityName("");
@@ -474,8 +478,8 @@ export default function LoRATrainerPage() {
       return;
     }
 
-    if (uploadedImages.length + imageFiles.length > 20) {
-      setErrorMessage("Maximum 20 images allowed");
+    if (uploadedImages.length + imageFiles.length > DATASET_LIMITS.maximumUploadCount) {
+      setErrorMessage(`Maximum ${DATASET_LIMITS.maximumUploadCount} images allowed`);
       return;
     }
 
@@ -620,7 +624,7 @@ export default function LoRATrainerPage() {
   };
 
   const handleStartTraining = async () => {
-    if (uploadedImages.length < 10 || uploadedImages.length > 20) return;
+    if (uploadedImages.length < DATASET_LIMITS.minimumUploadCount || uploadedImages.length > DATASET_LIMITS.maximumUploadCount) return;
     if (!identityName.trim()) return;
 
     setErrorMessage(null);
@@ -696,7 +700,7 @@ export default function LoRATrainerPage() {
     }
   };
 
-  const handleApproveAndStartTraining = async () => {
+  const handleApproveAndStartTraining = async (trainAnyway = false) => {
     if (!loraId || !datasetDoctorJobId) {
       setErrorMessage("Missing LoRA or Dataset Doctor job reference.");
       return;
@@ -708,9 +712,17 @@ export default function LoRATrainerPage() {
     try {
       await approveDatasetDoctorJob(datasetDoctorJobId, selectedImageIds);
 
+      let receiptId: string | undefined;
+      if (datasetDoctorSummary?.dataset_ready === false) {
+        if (!trainAnyway) { setIsApproving(false); setShowTrainAnywayConfirm(true); return; }
+        const decisionRes = await fetch("/api/lora/dataset-training-decision", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, decision: "train_anyway" }) });
+        const decisionJson = await decisionRes.json().catch(() => ({}));
+        if (!decisionRes.ok || !decisionJson.receipt_id) throw new Error(decisionJson.error || "Could not record training decision.");
+        receiptId = decisionJson.receipt_id;
+      }
       setTrainingStatus("training");
 
-      const trainIntent = { lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId };
+      const trainIntent = { lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, training_decision_receipt_id: receiptId || null };
       const submissionKey = await pendingSubmissionKey("sirensforge:pending-trainer-compute", trainIntent);
       const queueRes = await fetch("/api/lora/train", {
         credentials: "include",
@@ -722,6 +734,7 @@ export default function LoRATrainerPage() {
         body: JSON.stringify({
           lora_id: loraId,
           dataset_doctor_job_id: datasetDoctorJobId,
+          ...(receiptId ? { training_decision_receipt_id: receiptId } : {}),
         }),
       });
 
@@ -1073,7 +1086,7 @@ export default function LoRATrainerPage() {
                 </CardTitle>
               </div>
               <CardDescription className="text-gray-400">
-                Start with 10 clear photos. Upload up to 20 for stronger consistency.
+                Start with 10 clear photos. Upload 20–30+ useful angles so Dataset Doctor can assess coverage and diversity.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 relative z-10">
@@ -1093,7 +1106,7 @@ export default function LoRATrainerPage() {
                     }}
                     transition={{ duration: 0.5 }}
                   >
-                    {uploadedImages.length} / 20 images uploaded
+                    {uploadedImages.length} / {DATASET_LIMITS.maximumUploadCount} images uploaded
                   </motion.span>
                   <span className="text-sm text-gray-500">
                     {uploadedImages.length < 10 ? (
@@ -1114,7 +1127,7 @@ export default function LoRATrainerPage() {
                 <div className="relative h-3 bg-gray-800 rounded-full overflow-hidden">
                   <motion.div
                     initial={{ width: 0 }}
-                    animate={{ width: `${(uploadedImages.length / 20) * 100}%` }}
+                    animate={{ width: `${(uploadedImages.length / DATASET_LIMITS.maximumUploadCount) * 100}%` }}
                     transition={{ duration: 0.5, type: "spring" }}
                     className={`h-full ${getProgressColor()} rounded-full relative`}
                   >
@@ -1149,7 +1162,7 @@ export default function LoRATrainerPage() {
                   accept="image/*"
                   onChange={handleFileInput}
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  disabled={uploadedImages.length >= 20}
+                  disabled={uploadedImages.length >= DATASET_LIMITS.maximumUploadCount}
                 />
                 <motion.div
                   animate={{
@@ -1164,7 +1177,7 @@ export default function LoRATrainerPage() {
                   <Upload className="w-16 h-16 mx-auto mb-4 text-purple-400" />
                 </motion.div>
                 <p className="text-xl font-semibold mb-2">
-                  {uploadedImages.length >= 20 ? (
+                  {uploadedImages.length >= DATASET_LIMITS.maximumUploadCount ? (
                     <span className="text-amber-400">Maximum images reached ⚡</span>
                   ) : isDragging ? (
                     <span className="text-purple-400">Drop your images here! ✨</span>
@@ -1265,7 +1278,7 @@ export default function LoRATrainerPage() {
                     >
                       {[
                         { icon: Check, text: "Minimum: 10 images required to start", color: "text-emerald-400" },
-                        { icon: Star, text: "10 is enough to begin; 15–20 gives Dataset Doctor more coverage", color: "text-purple-400" },
+                        { icon: Star, text: "20–30+ varied images give Dataset Doctor more evidence; image count alone never guarantees readiness", color: "text-purple-400" },
                         { icon: Sparkles, text: "Clear face, upper-body, and full-body photos help identity consistency", color: "text-cyan-400" },
                         { icon: Zap, text: "Mix angles, expressions, lighting, and outfits when possible", color: "text-pink-400" },
                       ].map((item, index) => (
@@ -1676,7 +1689,7 @@ export default function LoRATrainerPage() {
                       </span>
                     </div>
 
-                    <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5">
+                    {datasetDoctorSummary?.dataset_ready !== false ? (<div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5">
                       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div>
                           <div className="text-sm font-bold text-emerald-200">Recommended: auto-optimize and train</div>
@@ -1685,7 +1698,7 @@ export default function LoRATrainerPage() {
                           </div>
                         </div>
                         <Button
-                          onClick={handleApproveAndStartTraining}
+                          onClick={() => handleApproveAndStartTraining(false)}
                           disabled={selectedImageIds.length < 3 || isApproving}
                           className="shrink-0 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 px-5 py-5 text-sm font-bold text-white shadow-[0_0_24px_rgba(168,85,247,0.35)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 disabled:opacity-50"
                         >
@@ -1702,7 +1715,11 @@ export default function LoRATrainerPage() {
                           )}
                         </Button>
                       </div>
-                    </div>
+                    </div>) : (<div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-4">
+                      <div><div className="font-bold text-amber-200">We recommend improving this dataset</div><p className="mt-1 text-sm text-gray-300">These are training-quality recommendations, not legal or safety warnings.</p></div>
+                      <ul className="list-disc pl-5 text-sm text-gray-200">{(datasetDoctorSummary.dataset_warnings || datasetDoctorSummary.priority_guidance || []).map((warning) => <li key={warning}>{warning}</li>)}</ul>
+                      {(datasetDoctorSummary.non_overridable_conditions?.length || 0) > 0 ? <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">Training is prohibited until the blocking requirement is resolved. Train Anyway is unavailable.</div> : showTrainAnywayConfirm ? <div role="alertdialog" aria-label="Confirm Train Anyway" className="rounded-xl border border-amber-300/30 bg-black/30 p-4 space-y-3"><p className="text-sm">I understand that these quality concerns may reduce the trained Twin’s consistency.</p><Button onClick={() => handleApproveAndStartTraining(true)} disabled={isApproving}>Confirm Train Anyway</Button></div> : <div className="flex flex-col gap-3 sm:flex-row"><Button variant="secondary" onClick={() => resetTrainingState()}>Improve Dataset</Button><Button onClick={() => setShowTrainAnywayConfirm(true)}>Train Anyway</Button></div>}
+                    </div>)}
 
                     <button
                       type="button"
@@ -2088,7 +2105,7 @@ export default function LoRATrainerPage() {
                     <>
                       {showManualReview && (
                       <Button
-                        onClick={handleApproveAndStartTraining}
+                        onClick={() => handleApproveAndStartTraining(false)}
                         disabled={selectedImageIds.length < 3 || isApproving}
                         className="w-full py-6 text-lg font-bold bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500 shadow-xl disabled:opacity-50"
                       >

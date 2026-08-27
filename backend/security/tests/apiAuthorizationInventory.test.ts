@@ -123,6 +123,12 @@ assert.ok(!xPostClasses.has("PUBLIC"), "POST /api/autopost/platforms/x must not 
 assert.match(xPost[5], /x-autopost-internal-secret.+AUTOPOST_INTERNAL_ADAPTER_SECRET/i, "X POST authentication metadata must name its header and configured secret")
 assert.match(xPost[10], /Supabase admin.+X account.+decrypt\/refresh.+POST to X/i, "X POST privileged-use metadata must record downstream account, token, and provider access")
 
+const datasetDecisionPost = inventoryRow("/api/lora/dataset-training-decision", "POST")
+const datasetDecisionClasses = authorizationClasses(datasetDecisionPost)
+for (const required of ["AUTHENTICATED", "OWNER", "ENTITLED"]) assert.ok(datasetDecisionClasses.has(required), `dataset decision must record ${required}`)
+assert.match(datasetDecisionPost[5], /ensureActiveSubscription\(\).+before privileged access/i)
+assert.match(datasetDecisionPost[10], /getSupabaseAdmin\(\).+only after authentication\/entitlement/i)
+
 const identitySeedPost = inventoryRow("/api/lora/identity-seed", "POST")
 const identitySeedClasses = authorizationClasses(identitySeedPost)
 for (const required of ["AUTHENTICATED", "OWNER", "ENTITLED"]) {

@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { computePriorityForTier, isDurableComputeJobsEnabled, toCreatorComputeStatus } from "@/lib/compute-jobs";
 import { buildRecommendedTrainerRecipe, canonicalUuid, trainerRequestFingerprint } from "@/lib/trainer-application-contract";
+import { DATASET_DOCTOR_TRAINING_DECISION_VERSION, canonicalSelectedImageIds, canonicalWarningSnapshot, sha256Fingerprint } from "@/lib/dataset-doctor/training-decision-contract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,8 +24,9 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const lora_id = canonicalUuid(body?.lora_id);
     const dataset_doctor_job_id = canonicalUuid(body?.dataset_doctor_job_id);
+    const training_decision_receipt_id = body?.training_decision_receipt_id === undefined ? null : canonicalUuid(body.training_decision_receipt_id);
 
-    if (!lora_id || !dataset_doctor_job_id || Object.keys(body || {}).some((key) => !["lora_id", "dataset_doctor_job_id"].includes(key))) {
+    if (!lora_id || !dataset_doctor_job_id || (body?.training_decision_receipt_id !== undefined && !training_decision_receipt_id) || Object.keys(body || {}).some((key) => !["lora_id", "dataset_doctor_job_id", "training_decision_receipt_id"].includes(key))) {
       return NextResponse.json(
         { error: "INVALID_TRAINER_IDENTIFIERS" },
         { status: 400 }
@@ -90,18 +92,27 @@ export async function POST(req: Request) {
 
     const dataset_r2_bucket = datasetJob.final_r2_bucket;
     const dataset_r2_prefix = datasetJob.final_r2_prefix;
-    if (datasetJob.summary?.dataset_ready === false) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_REQUIRED" }, { status: 409 });
     const { data: selections, error: selectionsError } = await supabaseAdmin.from("dataset_doctor_selections")
       .select("image_id").eq("job_id", datasetJob.id).eq("selection_type", "final");
     if (selectionsError) return NextResponse.json({ error: "DATASET_SELECTION_LOOKUP_FAILED" }, { status: 500 });
-    const imageIds = (selections || []).map((row) => canonicalUuid(row.image_id)).filter((id): id is string => Boolean(id)).sort();
-    if (!imageIds.length || imageIds.length !== selections?.length || new Set(imageIds).size !== imageIds.length)
+    const imageIds = canonicalSelectedImageIds(selections || []);
+    if (!imageIds)
       return NextResponse.json({ error: "DATASET_SELECTION_INVALID" }, { status: 400 });
+    let datasetTrainingDecision: null | Record<string, string> = null;
+    if (datasetJob.summary?.dataset_ready === false) {
+      if (!training_decision_receipt_id) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_REQUIRED" }, { status: 409 });
+      const { data: receipt } = await supabaseAdmin.from("dataset_doctor_training_decision_receipts").select("id,user_id,lora_id,dataset_doctor_job_id,decision,decision_contract_version,warning_snapshot,warning_fingerprint,dataset_snapshot,dataset_snapshot_fingerprint,selected_image_ids").eq("id", training_decision_receipt_id).maybeSingle();
+      if (!receipt) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_INVALID" }, { status: 409 });
+      const stale = receipt.user_id !== userId || receipt.lora_id !== lora_id || receipt.dataset_doctor_job_id !== datasetJob.id || receipt.decision !== "train_anyway" || receipt.decision_contract_version !== DATASET_DOCTOR_TRAINING_DECISION_VERSION || receipt.dataset_snapshot_fingerprint !== sha256Fingerprint(datasetJob.summary) || receipt.warning_fingerprint !== sha256Fingerprint(canonicalWarningSnapshot(datasetJob.summary)) || JSON.stringify(receipt.selected_image_ids) !== JSON.stringify(imageIds) || JSON.stringify(receipt.dataset_snapshot) !== JSON.stringify(datasetJob.summary);
+      if (stale) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_STALE" }, { status: 409 });
+      datasetTrainingDecision = { receipt_id: receipt.id, decision: receipt.decision, contract_version: receipt.decision_contract_version, warning_fingerprint: receipt.warning_fingerprint, dataset_snapshot_fingerprint: receipt.dataset_snapshot_fingerprint };
+    }
     const requestPayload = {
       identity_id: lora_id, dataset_doctor_job_id: datasetJob.id,
       dataset_reference: { bucket: dataset_r2_bucket, prefix: dataset_r2_prefix },
       dataset_snapshot: datasetJob.summary,
       dataset_selection: { image_ids: imageIds, image_count: imageIds.length },
+      dataset_training_decision: datasetTrainingDecision,
       trainer_recipe: buildRecommendedTrainerRecipe(),
     };
 

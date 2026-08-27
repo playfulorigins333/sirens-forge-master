@@ -74,7 +74,9 @@
     "test:compute-job-plane-pass4a-postgres": "node backend/compute/tests/runComputeJobPlanePass4aPostgres.mjs",
     "test:compute-job-plane-pass4c-postgres": "node backend/compute/tests/runComputeJobPlanePass4cPostgres.mjs",
     "test:trainer-dataset-authority": "tsx --test backend/compute/tests/trainerDatasetAuthorityContracts.test.ts",
-    "test:trainer-dataset-authority-postgres": "node backend/compute/tests/runTrainerDatasetAuthorityPostgres.mjs"
+    "test:trainer-dataset-authority-postgres": "node backend/compute/tests/runTrainerDatasetAuthorityPostgres.mjs",
+    "test:dataset-training-decisions": "tsx --test backend/compute/tests/datasetTrainingDecisionContracts.test.ts",
+    "test:dataset-training-decisions-postgres": "node backend/compute/tests/runDatasetTrainingDecisionPostgres.mjs"
   },
   "repository": {
     "type": "git",

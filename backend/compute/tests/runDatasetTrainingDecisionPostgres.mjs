@@ -1,0 +1,48 @@
+import { spawnSync } from "node:child_process";
+const url=process.env.COMPUTE_JOB_PLANE_DATABASE_URL;if(!url){console.error("COMPUTE_JOB_PLANE_DATABASE_URL is required");process.exit(2)}
+const run=(args)=>{const r=spawnSync("psql",[url,"-v","ON_ERROR_STOP=1",...args],{encoding:"utf8"});if(r.status){process.stderr.write(r.stderr);process.stdout.write(r.stdout);process.exit(r.status??1)}return r};
+for(const f of ["backend/compute/tests/computeJobPlanePostgresSetup.sql","supabase/migrations/20260824090000_private_creator_generation_media.sql","supabase/migrations/20260825090000_durable_compute_job_plane.sql","supabase/migrations/20260826004344_durable_compute_pass_4a_finalization.sql","supabase/migrations/20260826120000_durable_compute_pass_4c_video_stitch_foundation.sql"])run(["-f",f]);
+run(["-c",String.raw`
+create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+grant usage on schema public to anon,authenticated,service_role;
+alter table public.user_loras enable row level security; alter table public.user_loras add column name text, add column description text;
+create table public.dataset_doctor_jobs(id uuid primary key,lora_id uuid not null,user_id uuid not null,status text not null,final_r2_bucket text,final_r2_prefix text,summary jsonb not null);
+create table public.dataset_doctor_images(id uuid primary key,job_id uuid not null,user_id uuid not null);
+create table public.dataset_doctor_selections(id uuid primary key,job_id uuid not null,image_id uuid not null,lora_id uuid not null,user_id uuid not null,selection_type text not null);
+alter table public.dataset_doctor_jobs enable row level security; alter table public.dataset_doctor_images enable row level security; alter table public.dataset_doctor_selections enable row level security;
+grant all privileges on table public.dataset_doctor_jobs,public.dataset_doctor_images,public.dataset_doctor_selections,public.user_loras to service_role;
+grant select,insert,update,delete on table public.dataset_doctor_jobs,public.dataset_doctor_images,public.dataset_doctor_selections to anon,authenticated;
+grant select,insert,update on table public.user_loras to anon,authenticated;
+create policy "Users can delete own dataset doctor jobs" on public.dataset_doctor_jobs for delete to public using (auth.uid() = user_id); create policy "Users can insert own dataset doctor jobs" on public.dataset_doctor_jobs for insert to public with check (auth.uid() = user_id); create policy "Users can update own dataset doctor jobs" on public.dataset_doctor_jobs for update to public using (auth.uid() = user_id); create policy "Users can view own dataset doctor jobs" on public.dataset_doctor_jobs for select to public using (auth.uid() = user_id);
+create policy "Users can delete own dataset doctor images" on public.dataset_doctor_images for delete to public using (auth.uid() = user_id); create policy "Users can insert own dataset doctor images" on public.dataset_doctor_images for insert to public with check (auth.uid() = user_id); create policy "Users can update own dataset doctor images" on public.dataset_doctor_images for update to public using (auth.uid() = user_id); create policy "Users can view own dataset doctor images" on public.dataset_doctor_images for select to public using (auth.uid() = user_id);
+create policy "Users can delete own dataset doctor selections" on public.dataset_doctor_selections for delete to public using (auth.uid() = user_id); create policy "Users can insert own dataset doctor selections" on public.dataset_doctor_selections for insert to public with check (auth.uid() = user_id); create policy "Users can update own dataset doctor selections" on public.dataset_doctor_selections for update to public using (auth.uid() = user_id); create policy "Users can view own dataset doctor selections" on public.dataset_doctor_selections for select to public using (auth.uid() = user_id);
+create policy "Users can create own loras" on public.user_loras for insert to public with check (auth.uid() = user_id); create policy "Users can update own loras" on public.user_loras for update to public using (auth.uid() = user_id); create policy "Users can view own loras" on public.user_loras for select to public using (auth.uid() = user_id); create policy "Users can view their own completed loras" on public.user_loras for select to public using (auth.uid() = user_id and status = 'completed'::public.lora_status);
+create table public.phase2a_function_sentinel(definition text not null); insert into public.phase2a_function_sentinel select pg_get_functiondef('public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)'::regprocedure);
+create table public.phase2a_policy_sentinel as select tablename,policyname,permissive,roles,cmd,qual,with_check from pg_policies where schemaname='public' and tablename in('dataset_doctor_jobs','dataset_doctor_images','dataset_doctor_selections','user_loras');
+create table public.phase2a_grant_sentinel as select grantee,table_name,privilege_type from information_schema.role_table_grants where table_schema='public' and table_name in('dataset_doctor_jobs','dataset_doctor_images','dataset_doctor_selections','user_loras') and grantee in('anon','authenticated');
+do $$ begin assert has_function_privilege('service_role','public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)','execute'); assert not has_function_privilege('anon','public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)','execute'); assert not has_function_privilege('authenticated','public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)','execute'); assert not exists(select 1 from aclexplode((select proacl from pg_proc where oid='public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)'::regprocedure)) a where a.grantee=0 and a.privilege_type='EXECUTE'); end$$;
+`]);
+run(["-f","supabase/migrations/20260827050727_trainer_dataset_authority_lock.sql"]);
+run(["-c",`create table public.phase2a2_function_sentinel(definition text not null); insert into public.phase2a2_function_sentinel select pg_get_functiondef('public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)'::regprocedure);`]);
+run(["-f","supabase/migrations/20260827070952_dataset_doctor_training_decision_receipts.sql"]);
+run(["-c",String.raw`
+do $$ begin
+ assert to_regclass('public.dataset_doctor_training_decision_receipts') is not null;
+ assert has_table_privilege('service_role','public.dataset_doctor_training_decision_receipts','select');
+ assert has_table_privilege('service_role','public.dataset_doctor_training_decision_receipts','insert');
+ assert not has_table_privilege('authenticated','public.dataset_doctor_training_decision_receipts','select');
+ assert not has_table_privilege('authenticated','public.dataset_doctor_training_decision_receipts','insert');
+ assert not has_table_privilege('anon','public.dataset_doctor_training_decision_receipts','select');
+ assert not has_table_privilege('anon','public.dataset_doctor_training_decision_receipts','update');
+ assert has_function_privilege('service_role','public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)','execute');
+ assert not has_function_privilege('authenticated','public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)','execute');
+end$$;
+insert into auth.users(id) values('10000000-0000-4000-8000-000000000001');
+insert into public.user_loras(id,user_id,status) values('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','draft');
+insert into public.dataset_doctor_jobs(id,lora_id,user_id,status,final_r2_bucket,final_r2_prefix,summary) values('30000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','exported','bucket','prefix','{"dataset_ready":false,"dataset_warnings":["coverage"]}');
+insert into public.dataset_doctor_training_decision_receipts(id,user_id,lora_id,dataset_doctor_job_id,decision_contract_version,decision,warning_snapshot,warning_fingerprint,dataset_snapshot,dataset_snapshot_fingerprint,selected_image_ids,selected_image_count,shown_at,decided_at) values('40000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','dataset-doctor-training-decision-v1','train_anyway','{"dataset_warnings":["coverage"]}',repeat('a',64),'{"dataset_ready":false,"dataset_warnings":["coverage"]}',repeat('b',64),'["50000000-0000-4000-8000-000000000001"]',1,statement_timestamp(),statement_timestamp());
+do $$ begin begin update public.dataset_doctor_training_decision_receipts set warning_fingerprint=repeat('c',64); raise exception 'immutability failed'; exception when others then assert sqlerrm='DATASET_TRAINING_DECISION_RECEIPT_IMMUTABLE'; end; end$$;
+`]);
+run(["-f","supabase/manual/dataset_doctor_training_decision_receipts_emergency_rollback.sql"]);
+run(["-c",`do $$ begin assert to_regclass('public.dataset_doctor_training_decision_receipts') is null; assert pg_get_functiondef('public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text)'::regprocedure)=(select definition from public.phase2a2_function_sentinel); assert to_regclass('public.dataset_doctor_jobs') is not null; assert to_regprocedure('public.finalize_trainer_compute_job(uuid,uuid,uuid,text,text)') is not null; assert to_regclass('public.video_projects') is not null; end$$; drop table public.phase2a2_function_sentinel;`]);
+console.log("Phase 2A-2 receipt authority and exact rollback passed.");
