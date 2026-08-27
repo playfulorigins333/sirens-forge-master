@@ -1,0 +1,32 @@
+{
+  "command": "python",
+  "arguments": [
+    "/opt/sirens/executor.py",
+    "--identity-id", "<IDENTITY_ID>",
+    "--job-id", "<JOB_ID>",
+    "--attempt-id", "<ATTEMPT_ID>",
+    "--dataset-dir", "/opt/sirens/input/dataset",
+    "--base-model", "/opt/sirens/input/models/base.safetensors",
+    "--base-model-sha256", "<64_LOWERCASE_HEX_BASE_MODEL_SHA256>",
+    "--vae", "/opt/sirens/input/models/vae.safetensors",
+    "--vae-sha256", "<64_LOWERCASE_HEX_VAE_SHA256>",
+    "--checkpoint-dir", "/opt/sirens/checkpoints",
+    "--output-dir", "/opt/sirens/output",
+    "--sd-scripts-dir", "/opt/sd-scripts"
+  ],
+  "environment": {},
+  "sync": {
+    "before": [
+      {"bucket": "<DATASET_BUCKET>", "prefix": "<AUTHORITATIVE_FINAL_R2_PREFIX>", "local_path": "/opt/sirens/input/dataset", "direction": "download"},
+      {"bucket": "<PRIVATE_MODEL_BUCKET>", "prefix": "<PRIVATE_BASE_MODEL_OBJECT>", "local_path": "/opt/sirens/input/models/base.safetensors", "direction": "download"},
+      {"bucket": "<PRIVATE_MODEL_BUCKET>", "prefix": "<PRIVATE_VAE_OBJECT>", "local_path": "/opt/sirens/input/models/vae.safetensors", "direction": "download"},
+      {"bucket": "<CHECKPOINT_BUCKET>", "prefix": "trainer-checkpoints/<ATTEMPT_ID>", "local_path": "/opt/sirens/checkpoints", "direction": "download"}
+    ],
+    "during": [
+      {"bucket": "<CHECKPOINT_BUCKET>", "prefix": "trainer-checkpoints/<ATTEMPT_ID>", "local_path": "/opt/sirens/checkpoints", "direction": "upload"}
+    ],
+    "after": [
+      {"bucket": "<LORA_BUCKET>", "prefix": "loras/<IDENTITY_ID>", "local_path": "/opt/sirens/output", "direction": "upload"}
+    ]
+  }
+}

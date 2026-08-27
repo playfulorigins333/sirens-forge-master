@@ -2,8 +2,10 @@
 
 This source-only control plane is provider-neutral. PostgreSQL owns Image, Trainer,
 Video, and Stitch job/attempt state; R2 remains the binary source of truth.
-`DURABLE_COMPUTE_JOBS_ENABLED` is server-only, exact-`true`, and defaults **OFF**.
-The migration must exist before staged use. Do not enable the gate now.
+`DURABLE_COMPUTE_JOBS_ENABLED` is server-only, exact-`true`, and remains **OFF**.
+Pass 4A and Pass 4C-A migrations are applied in Production, and Pass 4C-B API
+worker wiring is deployed. The deployed provider registry is empty; scheduler and
+spend policies remain unconfigured. Do not enable the gate now.
 
 Dispatch fails closed until deliberately measured scheduler and spend policies are
 configured. The migration seeds no production policy or numeric cap. Private compute
@@ -92,19 +94,18 @@ completed; only atomic artifact finalization does that. A row lock on the author
 LoRA prevents a different idempotency key from replacing a nonterminal current job,
 while different Twins remain independently queueable and terminal Twins may retrain.
 
-The Pass 4A migration is still a separately authorized Production operation. All
-runtime gates remain **OFF**; this pass adds no provider adapter, provider
-configuration, GPU canary, real generation, or real training.
+The Pass 4A Production migration is applied. All runtime gates remain **OFF**;
+there is still no registered provider, provider configuration, GPU canary, real
+generation, or real training.
 
-## Eventual activation sequence
+## Historical activation prerequisites
 
-1. Merge reviewed source and obtain a green Production deployment.
-2. With separate human authorization, apply `20260825090000_durable_compute_job_plane.sql`.
-3. With a further separate authorization, apply `20260826004344_durable_compute_pass_4a_finalization.sql`.
-4. Verify schema, functions, RLS, grants, and keep the durable gate off.
-5. Complete provider-neutral worker adapters in a later pass.
-6. Configure measured scheduler/spend policies and private compute storage prerequisites.
-7. Only then authorize a controlled canary and later activation.
+The base control-plane, Pass 4A, and Pass 4C-A migrations have been applied, and
+Pass 4C-B API wiring is deployed. Schema verification remains distinct from runtime
+activation. Future activation still requires a reviewed provider adapter and registry
+entry, measured scheduler/spend policies, private-compute storage prerequisites, exact
+provider cost accounting, an explicitly authorized controlled canary, and a separate
+gate decision.
 
 ## Emergency rollback
 
@@ -139,8 +140,17 @@ generation plus one Video Library asset. R2 remains binary truth and PostgreSQL 
 job and product truth. Generic Video/Stitch submission is forbidden, and generic
 success is forbidden for Image, Trainer, Video, and Stitch.
 
-This migration has **not** been applied to Production. Both public Video POST routes
-still return `503 VIDEO_GENERATION_UNAVAILABLE`, and Generate continues to label both
-Video modes Coming Soon. This pass adds no provider adapter, worker/API wiring,
-identity materialization, FFmpeg/Stitch implementation, R2 runtime upload, scheduler
-or spend policy configuration, gate activation, canary, deployment, or live work.
+This migration is applied to Production, and Pass 4C-B API worker wiring is deployed.
+Both public Video POST routes still return `503 VIDEO_GENERATION_UNAVAILABLE`, and
+Generate continues to label both Video modes Coming Soon. Generic success is
+prohibited for Image, Trainer, Video, and Stitch. The provider registry remains empty,
+scheduler/spend policies remain unconfigured, and the worker gate remains **OFF**.
+
+## Pass 5A Salad/Kelpie Trainer package (source only)
+
+Pass 5A adds only a reproducible local Trainer executor, a pinned container recipe,
+an undeployed Kelpie job example, documentation, and source tests. The durable worker
+remains authoritative; Kelpie would own input, checkpoint, and final-output sync while
+the executor has no database, storage SDK, or provider API access. No Salad resource,
+provider adapter or registry entry, live R2 traffic, provider/GPU execution, or canary
+is created by this package. Video remains creator-disabled and Coming Soon.
