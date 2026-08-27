@@ -4,7 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { computePriorityForTier, isDurableComputeJobsEnabled, toCreatorComputeStatus } from "@/lib/compute-jobs";
 import { buildRecommendedTrainerRecipe, canonicalUuid, trainerRequestFingerprint } from "@/lib/trainer-application-contract";
-import { DATASET_DOCTOR_TRAINING_DECISION_VERSION, canonicalSelectedImageIds, canonicalWarningSnapshot, sha256Fingerprint } from "@/lib/dataset-doctor/training-decision-contract";
+import { canonicalSelectedImageIds } from "@/lib/dataset-doctor/training-decision-contract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,14 +98,20 @@ export async function POST(req: Request) {
     const imageIds = canonicalSelectedImageIds(selections || []);
     if (!imageIds)
       return NextResponse.json({ error: "DATASET_SELECTION_INVALID" }, { status: 400 });
+    const readiness = datasetJob.summary?.dataset_ready;
+    if (typeof readiness !== "boolean") return NextResponse.json({ error: "DATASET_TRAINING_PROHIBITED" }, { status: 409 });
     let datasetTrainingDecision: null | Record<string, string> = null;
-    if (datasetJob.summary?.dataset_ready === false) {
+    if (!readiness) {
       if (!training_decision_receipt_id) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_REQUIRED" }, { status: 409 });
-      const { data: receipt } = await supabaseAdmin.from("dataset_doctor_training_decision_receipts").select("id,user_id,lora_id,dataset_doctor_job_id,decision,decision_contract_version,warning_snapshot,warning_fingerprint,dataset_snapshot,dataset_snapshot_fingerprint,selected_image_ids").eq("id", training_decision_receipt_id).maybeSingle();
-      if (!receipt) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_INVALID" }, { status: 409 });
-      const stale = receipt.user_id !== userId || receipt.lora_id !== lora_id || receipt.dataset_doctor_job_id !== datasetJob.id || receipt.decision !== "train_anyway" || receipt.decision_contract_version !== DATASET_DOCTOR_TRAINING_DECISION_VERSION || receipt.dataset_snapshot_fingerprint !== sha256Fingerprint(datasetJob.summary) || receipt.warning_fingerprint !== sha256Fingerprint(canonicalWarningSnapshot(datasetJob.summary)) || JSON.stringify(receipt.selected_image_ids) !== JSON.stringify(imageIds) || JSON.stringify(receipt.dataset_snapshot) !== JSON.stringify(datasetJob.summary);
-      if (stale) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_STALE" }, { status: 409 });
-      datasetTrainingDecision = { receipt_id: receipt.id, decision: receipt.decision, contract_version: receipt.decision_contract_version, warning_fingerprint: receipt.warning_fingerprint, dataset_snapshot_fingerprint: receipt.dataset_snapshot_fingerprint };
+      if (!isDurableComputeJobsEnabled()) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_EXECUTION_UNAVAILABLE", message: "Train Anyway is not available in the current Trainer execution mode. Improve the dataset before training." }, { status: 409 });
+      const { data: validated, error: validationError } = await supabaseAdmin.rpc("validate_dataset_training_decision_receipt", { p_receipt_id: training_decision_receipt_id, p_user_id: userId, p_lora_id: lora_id, p_dataset_doctor_job_id: datasetJob.id });
+      if (validationError) {
+        const safeCode = ["DATASET_TRAINING_DECISION_REQUIRED", "DATASET_TRAINING_DECISION_STALE", "DATASET_TRAINING_DECISION_INVALID", "DATASET_TRAINING_PROHIBITED"].find((code) => validationError.message.includes(code)) || "DATASET_TRAINING_DECISION_INVALID";
+        return NextResponse.json({ error: safeCode }, { status: 409 });
+      }
+      const decision = Array.isArray(validated) ? validated[0] : validated;
+      if (!decision) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_INVALID" }, { status: 409 });
+      datasetTrainingDecision = { receipt_id: decision.receipt_id, decision: decision.decision, contract_version: decision.contract_version, warning_fingerprint: decision.warning_fingerprint, dataset_snapshot_fingerprint: decision.dataset_snapshot_fingerprint };
     }
     const requestPayload = {
       identity_id: lora_id, dataset_doctor_job_id: datasetJob.id,
@@ -129,6 +135,8 @@ export async function POST(req: Request) {
       if (submitError) {
         if (submitError.message.includes("IDEMPOTENCY_CONFLICT")) throw new Error("IDEMPOTENCY_CONFLICT");
         if (submitError.message.includes("TRAINER_ALREADY_ACTIVE")) throw new Error("TRAINER_ALREADY_ACTIVE");
+        const decisionCode = ["DATASET_TRAINING_DECISION_REQUIRED", "DATASET_TRAINING_DECISION_STALE", "DATASET_TRAINING_DECISION_INVALID", "DATASET_TRAINING_PROHIBITED"].find((code) => submitError.message.includes(code));
+        if (decisionCode) throw new Error(decisionCode);
         throw new Error("TRAINER_SUBMISSION_FAILED");
       }
       const job = Array.isArray(rows) ? rows[0] : rows;
@@ -172,6 +180,8 @@ export async function POST(req: Request) {
     }
     if (msg.includes("IDEMPOTENCY_CONFLICT")) return NextResponse.json({ error: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
     if (msg.includes("TRAINER_ALREADY_ACTIVE")) return NextResponse.json({ error: "TRAINER_ALREADY_ACTIVE", message: "Training is already active for this Twin." }, { status: 409 });
+    const decisionCode = ["DATASET_TRAINING_DECISION_REQUIRED", "DATASET_TRAINING_DECISION_STALE", "DATASET_TRAINING_DECISION_INVALID", "DATASET_TRAINING_PROHIBITED", "DATASET_TRAINING_DECISION_EXECUTION_UNAVAILABLE"].find((code) => msg.includes(code));
+    if (decisionCode) return NextResponse.json({ error: decisionCode }, { status: 409 });
 
     console.error("[lora/train] Fatal:", err);
     return NextResponse.json(

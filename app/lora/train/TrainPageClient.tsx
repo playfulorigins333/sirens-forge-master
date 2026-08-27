@@ -2,6 +2,7 @@
 
 import { clearPendingSubmission, pendingSubmissionKey } from "@/lib/compute-idempotency-client";
 import { DATASET_LIMITS } from "@/lib/dataset-doctor/dataset-limits";
+import { classifyDatasetDoctorQuality } from "@/lib/dataset-doctor/quality-classification";
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,7 @@ type DatasetDoctorAnalyzeSummary = {
   balance_score?: number | null;
   dataset_quality_score?: number | null;
   dataset_warnings?: string[];
+  dataset_warnings_structured?: Array<{ type?: string; [key: string]: unknown }>;
   primary_issue?: string | null;
   secondary_issues?: string[];
   priority_guidance?: string[];
@@ -295,6 +297,9 @@ export default function LoRATrainerPage() {
   const [showInfo, setShowInfo] = useState(false);
   const [showManualReview, setShowManualReview] = useState(false);
   const [showTrainAnywayConfirm, setShowTrainAnywayConfirm] = useState(false);
+  const [decisionKey, setDecisionKey] = useState<string | null>(null);
+  const [shownWarningSnapshot, setShownWarningSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [datasetApprovedForDecision, setDatasetApprovedForDecision] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showConfetti, setShowConfetti] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
@@ -327,6 +332,9 @@ export default function LoRATrainerPage() {
       setShowConfetti(false);
       setShowManualReview(false);
       setShowTrainAnywayConfirm(false);
+      setDecisionKey(null);
+      setShownWarningSnapshot(null);
+      setDatasetApprovedForDecision(false);
 
       if (options?.clearIdentity) {
         setIdentityName("");
@@ -701,61 +709,44 @@ export default function LoRATrainerPage() {
   };
 
   const handleApproveAndStartTraining = async (trainAnyway = false) => {
-    if (!loraId || !datasetDoctorJobId) {
-      setErrorMessage("Missing LoRA or Dataset Doctor job reference.");
-      return;
-    }
-
-    setIsApproving(true);
-    setErrorMessage(null);
-
+    if (!loraId || !datasetDoctorJobId) { setErrorMessage("Missing LoRA or Dataset Doctor job reference."); return; }
+    setIsApproving(true); setErrorMessage(null);
     try {
-      await approveDatasetDoctorJob(datasetDoctorJobId, selectedImageIds);
-
       let receiptId: string | undefined;
-      if (datasetDoctorSummary?.dataset_ready === false) {
-        if (!trainAnyway) { setIsApproving(false); setShowTrainAnywayConfirm(true); return; }
-        const decisionRes = await fetch("/api/lora/dataset-training-decision", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, decision: "train_anyway" }) });
+      let activeDecisionKey = decisionKey;
+      if (datasetDoctorSummary?.dataset_ready === false && !trainAnyway) {
+        activeDecisionKey = await pendingSubmissionKey("sirensforge:pending-dataset-training-decision", { lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, selected_image_ids: [...selectedImageIds].sort() });
+        const prepareRes = await fetch("/api/lora/dataset-training-decision", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": activeDecisionKey }, body: JSON.stringify({ action: "prepare", lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, selected_image_ids: selectedImageIds }) });
+        const prepared = await prepareRes.json().catch(() => ({}));
+        if (!prepareRes.ok || !prepared.prompt_id) throw new Error(prepared.message || prepared.error || "Train Anyway is unavailable for this dataset.");
+        setDecisionKey(activeDecisionKey); setShownWarningSnapshot(prepared.warning_snapshot); setShowTrainAnywayConfirm(true); return;
+      }
+      if (datasetDoctorSummary?.dataset_ready === false && trainAnyway) {
+        if (!activeDecisionKey || !shownWarningSnapshot) throw new Error("Prepare the Train Anyway confirmation first.");
+        if (!datasetApprovedForDecision) { await approveDatasetDoctorJob(datasetDoctorJobId, selectedImageIds); setDatasetApprovedForDecision(true); }
+        const decisionRes = await fetch("/api/lora/dataset-training-decision", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": activeDecisionKey }, body: JSON.stringify({ action: "confirm", lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, decision: "train_anyway" }) });
         const decisionJson = await decisionRes.json().catch(() => ({}));
         if (!decisionRes.ok || !decisionJson.receipt_id) throw new Error(decisionJson.error || "Could not record training decision.");
         receiptId = decisionJson.receipt_id;
+      } else {
+        await approveDatasetDoctorJob(datasetDoctorJobId, selectedImageIds);
       }
       setTrainingStatus("training");
-
       const trainIntent = { lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, training_decision_receipt_id: receiptId || null };
       const submissionKey = await pendingSubmissionKey("sirensforge:pending-trainer-compute", trainIntent);
-      const queueRes = await fetch("/api/lora/train", {
-        credentials: "include",
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": submissionKey,
-        },
-        body: JSON.stringify({
-          lora_id: loraId,
-          dataset_doctor_job_id: datasetDoctorJobId,
-          ...(receiptId ? { training_decision_receipt_id: receiptId } : {}),
-        }),
-      });
-
-      const queueJson = await queueRes.json().catch(() => ({} as any));
-
-      if (!queueRes.ok) {
-        if (queueRes.status >= 400 && queueRes.status < 500) clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey);
-        setTrainingStatus("failed");
-        setErrorMessage(queueJson?.error || "Failed to queue training.");
-        return;
-      }
-
+      const queueRes = await fetch("/api/lora/train", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": submissionKey }, body: JSON.stringify({ lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, ...(receiptId ? { training_decision_receipt_id: receiptId } : {}) }) });
+      const queueJson = await queueRes.json().catch(() => ({}));
+      if (!queueRes.ok) { if (queueRes.status >= 400 && queueRes.status < 500) clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey); setTrainingStatus("failed"); setErrorMessage(queueJson?.message || queueJson?.error || "Failed to queue training."); return; }
       clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey);
-      setTrainingStatus("queued");
-    } catch (err: any) {
-      console.error("Approve/start training error:", err);
-      setTrainingStatus("review");
-      setErrorMessage(err?.message || "Failed to approve dataset.");
-    } finally {
-      setIsApproving(false);
-    }
+      if (activeDecisionKey) clearPendingSubmission("sirensforge:pending-dataset-training-decision", activeDecisionKey);
+      setDecisionKey(null); setShownWarningSnapshot(null); setTrainingStatus("queued");
+    } catch (err: any) { console.error("Approve/start training error:", err); setTrainingStatus("review"); setErrorMessage(err?.message || "Failed to approve dataset."); }
+    finally { setIsApproving(false); }
+  };
+
+  const handleImproveDataset = () => {
+    if (decisionKey) clearPendingSubmission("sirensforge:pending-dataset-training-decision", decisionKey);
+    resetTrainingState();
   };
 
   const toggleSelectedImage = (imageId: string) => {
@@ -786,6 +777,7 @@ export default function LoRATrainerPage() {
 
   const isReadyToTrain =
     uploadedImages.length >= 10 && identityName.trim().length > 0;
+  const datasetQualityClassification = classifyDatasetDoctorQuality(datasetDoctorSummary, selectedImageIds.length);
 
   if (!mounted) {
     return null;
@@ -1718,7 +1710,7 @@ export default function LoRATrainerPage() {
                     </div>) : (<div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-4">
                       <div><div className="font-bold text-amber-200">We recommend improving this dataset</div><p className="mt-1 text-sm text-gray-300">These are training-quality recommendations, not legal or safety warnings.</p></div>
                       <ul className="list-disc pl-5 text-sm text-gray-200">{(datasetDoctorSummary.dataset_warnings || datasetDoctorSummary.priority_guidance || []).map((warning) => <li key={warning}>{warning}</li>)}</ul>
-                      {(datasetDoctorSummary.non_overridable_conditions?.length || 0) > 0 ? <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">Training is prohibited until the blocking requirement is resolved. Train Anyway is unavailable.</div> : showTrainAnywayConfirm ? <div role="alertdialog" aria-label="Confirm Train Anyway" className="rounded-xl border border-amber-300/30 bg-black/30 p-4 space-y-3"><p className="text-sm">I understand that these quality concerns may reduce the trained Twin’s consistency.</p><Button onClick={() => handleApproveAndStartTraining(true)} disabled={isApproving}>Confirm Train Anyway</Button></div> : <div className="flex flex-col gap-3 sm:flex-row"><Button variant="secondary" onClick={() => resetTrainingState()}>Improve Dataset</Button><Button onClick={() => setShowTrainAnywayConfirm(true)}>Train Anyway</Button></div>}
+                      {datasetQualityClassification.state === "prohibited" ? <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-200">Training is prohibited until the blocking requirement is resolved. Train Anyway is unavailable.</div> : showTrainAnywayConfirm ? <div role="alertdialog" aria-label="Confirm Train Anyway" className="rounded-xl border border-amber-300/30 bg-black/30 p-4 space-y-3"><div className="space-y-2 text-sm">{Object.entries(shownWarningSnapshot || {}).filter(([, value]) => value !== null && value !== false && (!Array.isArray(value) || value.length)).map(([field, value]) => <div key={field}><span className="font-semibold">{field.replaceAll("_", " ")}:</span> {typeof value === "string" ? value : JSON.stringify(value)}</div>)}</div><p className="text-sm">I understand that these quality concerns may reduce the trained Twin’s consistency.</p><Button onClick={() => handleApproveAndStartTraining(true)} disabled={isApproving}>Confirm Train Anyway</Button></div> : <div className="flex flex-col gap-3 sm:flex-row"><Button variant="secondary" onClick={handleImproveDataset}>Improve Dataset</Button><Button onClick={() => handleApproveAndStartTraining(false)} disabled={isApproving}>Train Anyway</Button></div>}
                     </div>)}
 
                     <button

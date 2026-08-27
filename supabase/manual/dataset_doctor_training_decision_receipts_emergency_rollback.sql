@@ -1,4 +1,4 @@
--- Manual emergency rollback for Phase 2A-2 only. Never apply without separate authorization.
+-- Manual emergency rollback for the unapplied Phase 2A-2 migration only. Separate authorization is required.
 begin;
 create or replace function public.submit_trainer_compute_job(p_owner_id uuid,p_lora_id uuid,p_idempotency_key text,p_request_fingerprint text,p_request_payload jsonb,p_priority_class text,p_dataset_r2_bucket text,p_dataset_r2_prefix text)
 returns table(job_id uuid, workload public.compute_workload, creator_status text, queued_at timestamptz, started_at timestamptz, completed_at timestamptz, result_reference jsonb, safe_error_code text, can_cancel boolean)
@@ -45,9 +45,17 @@ begin
  end if;
  return query select j.id,j.workload,case when j.state='recovering' and j.cancellation_requested_at is not null then 'cancelling' else case j.state when 'claimed' then 'running' when 'succeeded' then 'completed' when 'cancel_requested' then 'cancelling' else j.state::text end end,j.queued_at,j.started_at,j.terminal_at,public.compute_creator_result(j.result_reference),j.safe_error_code,j.state not in ('succeeded','failed','cancelled');
 end $function$;
-revoke execute on function public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text) from public,anon,authenticated;
-grant execute on function public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text) to service_role;
+revoke execute on function public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text) from public,anon,authenticated;grant execute on function public.submit_trainer_compute_job(uuid,uuid,text,text,jsonb,text,text,text) to service_role;
+drop function public.prepare_dataset_training_decision_prompt(uuid,uuid,uuid,text,uuid[]);
+drop function public.record_dataset_training_decision_receipt(uuid,uuid,uuid,text);
+drop function public.validate_dataset_training_decision_receipt(uuid,uuid,uuid,uuid);
 drop function public.link_dataset_training_decision_receipt(uuid,uuid);
+drop function public.dataset_training_quality_overridable(jsonb,integer);
+drop function public.dataset_training_final_selection(uuid);
+drop function public.dataset_training_fingerprint(jsonb);
+drop function public.dataset_training_warning_snapshot(public.dataset_doctor_jobs);
 drop table public.dataset_doctor_training_decision_receipts;
-drop function public.dataset_training_decision_receipts_immutable();
+drop table public.dataset_doctor_training_decision_prompts;
+drop function public.dataset_training_decision_receipt_changes();
+drop function public.dataset_training_decision_reject_changes();
 commit;
