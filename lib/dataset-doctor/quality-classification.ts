@@ -1,17 +1,27 @@
-export const V1_QUALITY_WARNING_CODES = Object.freeze(["insufficient_closeups","insufficient_midshots","insufficient_fullbody","closeup_overrepresented","fullbody_overrepresented","midshot_overrepresented","dataset_unbalanced","too_many_side_profiles","low_resolution_images_present","face_detection_uncertain_present","small_dataset_recommended_more_images"] as const);
-export const V1_QUALITY_ISSUE_CODES = Object.freeze(["too_few_accepted_images","weak_identity_signal","missing_closeups","missing_midshots","missing_fullbody","closeup_overrepresented","low_average_quality","face_detection_uncertain_present","low_resolution_images_present","too_many_side_profiles"] as const);
-export const V1_STRUCTURED_WARNING_TYPES = Object.freeze([...V1_QUALITY_WARNING_CODES,"missing_midshots"] as const);
-const V1_SUMMARY_KEYS=new Set(["raw_count","accepted_count","rejected_count","review_count","needs_more_images","missing_coverage","composition_summary","composition_balance","balance_score","dataset_quality_score","dataset_warnings","dataset_warnings_structured","primary_issue","secondary_issues","priority_guidance","dataset_strengths","shot_suggestions","dataset_grade","training_prediction","confidence_signal","guidance","dataset_ready","confidence_message","analysis_version","mode","rebuild_from_r2","non_overridable_conditions"]);
-const WARNING_SET=new Set<string>(V1_QUALITY_WARNING_CODES),ISSUE_SET=new Set<string>(V1_QUALITY_ISSUE_CODES),STRUCTURED_SET=new Set<string>(V1_STRUCTURED_WARNING_TYPES);
-function stringCodes(value:unknown,allowed:Set<string>){return Array.isArray(value)&&value.every(item=>typeof item==="string"&&allowed.has(item))}
-export type QualityClassification={state:"ready"|"overridable"|"prohibited";reasons:string[]};
-export function classifyDatasetDoctorQuality(summary:unknown,selectedImageCount:number):QualityClassification{
- const source=summary&&typeof summary==="object"&&!Array.isArray(summary)?summary as Record<string,unknown>:null,reasons:string[]=[];
- if(!source||typeof source.dataset_ready!=="boolean")return{state:"prohibited",reasons:["dataset_ready_invalid"]};if(Object.keys(source).some(key=>!V1_SUMMARY_KEYS.has(key)))reasons.push("summary_evidence_unknown");if(source.dataset_ready)return{state:"ready",reasons:[]};
- if(selectedImageCount<3)reasons.push("selected_images_insufficient");if("non_overridable_conditions" in source&&(!Array.isArray(source.non_overridable_conditions)||source.non_overridable_conditions.length>0))reasons.push("non_overridable_conditions");
- if(!stringCodes(source.dataset_warnings??[],WARNING_SET))reasons.push("dataset_warnings_unknown");if(!stringCodes(source.secondary_issues??[],ISSUE_SET))reasons.push("secondary_issues_unknown");
- if(!(source.primary_issue===null||source.primary_issue===undefined||source.primary_issue===""||typeof source.primary_issue==="string"&&ISSUE_SET.has(source.primary_issue)))reasons.push("primary_issue_unknown");
- const structured=source.dataset_warnings_structured??[];if(!Array.isArray(structured)||structured.some(item=>!item||typeof item!=="object"||Array.isArray(item)||typeof(item as Record<string,unknown>).type!=="string"||!STRUCTURED_SET.has(String((item as Record<string,unknown>).type))))reasons.push("structured_warning_unknown");
- const understood=Array.isArray(source.dataset_warnings)&&source.dataset_warnings.length>0||Array.isArray(source.secondary_issues)&&source.secondary_issues.length>0||typeof source.primary_issue==="string"&&source.primary_issue.length>0||Array.isArray(structured)&&structured.length>0||source.needs_more_images===true||Array.isArray(source.missing_coverage)&&source.missing_coverage.length>0;if(!understood)reasons.push("not_ready_reason_unknown");
- return reasons.length?{state:"prohibited",reasons}:{state:"overridable",reasons:[]};
+export const V1_QUALITY_WARNING_CODES = Object.freeze(["insufficient_closeups", "insufficient_midshots", "insufficient_fullbody", "closeup_overrepresented", "fullbody_overrepresented", "midshot_overrepresented", "dataset_unbalanced", "too_many_side_profiles", "low_resolution_images_present", "face_detection_uncertain_present", "small_dataset_recommended_more_images"] as const);
+export const V1_QUALITY_ISSUE_CODES = Object.freeze(["too_few_accepted_images", "weak_identity_signal", "missing_closeups", "missing_midshots", "missing_fullbody", "closeup_overrepresented", "low_average_quality", "face_detection_uncertain_present", "low_resolution_images_present", "too_many_side_profiles"] as const);
+export const V1_STRUCTURED_WARNING_TYPES = Object.freeze([...V1_QUALITY_WARNING_CODES, "missing_midshots"] as const);
+const V1_SUMMARY_KEYS = new Set(["raw_count", "accepted_count", "rejected_count", "review_count", "needs_more_images", "missing_coverage", "composition_summary", "composition_balance", "balance_score", "dataset_quality_score", "dataset_warnings", "dataset_warnings_structured", "primary_issue", "secondary_issues", "priority_guidance", "dataset_strengths", "shot_suggestions", "dataset_grade", "training_prediction", "confidence_signal", "guidance", "dataset_ready", "confidence_message", "analysis_version", "mode", "rebuild_from_r2", "non_overridable_conditions"]);
+const WARNING_SET = new Set<string>(V1_QUALITY_WARNING_CODES);
+const ISSUE_SET = new Set<string>(V1_QUALITY_ISSUE_CODES);
+const STRUCTURED_SET = new Set<string>(V1_STRUCTURED_WARNING_TYPES);
+function stringCodes(value: unknown, allowed: Set<string>) { return Array.isArray(value) && value.every((item) => typeof item === "string" && allowed.has(item)); }
+export type QualityClassification = { state: "ready" | "overridable" | "prohibited"; reasons: string[] };
+export function classifyDatasetDoctorQuality(summary: unknown, selectedImageCount: number): QualityClassification {
+  const source = summary && typeof summary === "object" && !Array.isArray(summary) ? summary as Record<string, unknown> : null;
+  if (!source || typeof source.dataset_ready !== "boolean") return { state: "prohibited", reasons: ["dataset_ready_invalid"] };
+  const reasons: string[] = [];
+  if (Object.keys(source).some((key) => !V1_SUMMARY_KEYS.has(key))) reasons.push("summary_evidence_unknown");
+  if ("non_overridable_conditions" in source && (!Array.isArray(source.non_overridable_conditions) || source.non_overridable_conditions.length > 0)) reasons.push("non_overridable_conditions");
+  if (!stringCodes(source.dataset_warnings ?? [], WARNING_SET)) reasons.push("dataset_warnings_unknown");
+  if (!stringCodes(source.secondary_issues ?? [], ISSUE_SET)) reasons.push("secondary_issues_unknown");
+  if (!(source.primary_issue === null || source.primary_issue === undefined || source.primary_issue === "" || typeof source.primary_issue === "string" && ISSUE_SET.has(source.primary_issue))) reasons.push("primary_issue_unknown");
+  const structured = source.dataset_warnings_structured ?? [];
+  if (!Array.isArray(structured) || structured.some((item) => !item || typeof item !== "object" || Array.isArray(item) || typeof (item as Record<string, unknown>).type !== "string" || !STRUCTURED_SET.has(String((item as Record<string, unknown>).type)))) reasons.push("structured_warning_unknown");
+  if (reasons.length) return { state: "prohibited", reasons };
+  if (source.dataset_ready) return { state: "ready", reasons: [] };
+  if (selectedImageCount < 3) reasons.push("selected_images_insufficient");
+  const understood = Array.isArray(source.dataset_warnings) && source.dataset_warnings.length > 0 || Array.isArray(source.secondary_issues) && source.secondary_issues.length > 0 || typeof source.primary_issue === "string" && source.primary_issue.length > 0 || Array.isArray(structured) && structured.length > 0 || source.needs_more_images === true || Array.isArray(source.missing_coverage) && source.missing_coverage.length > 0;
+  if (!understood) reasons.push("not_ready_reason_unknown");
+  return reasons.length ? { state: "prohibited", reasons } : { state: "overridable", reasons: [] };
 }

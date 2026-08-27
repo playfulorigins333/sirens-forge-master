@@ -5,6 +5,7 @@ import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { computePriorityForTier, isDurableComputeJobsEnabled, toCreatorComputeStatus } from "@/lib/compute-jobs";
 import { buildRecommendedTrainerRecipe, canonicalUuid, trainerRequestFingerprint } from "@/lib/trainer-application-contract";
 import { canonicalSelectedImageIds } from "@/lib/dataset-doctor/training-decision-contract";
+import { classifyDatasetDoctorQuality } from "@/lib/dataset-doctor/quality-classification";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,10 +99,10 @@ export async function POST(req: Request) {
     const imageIds = canonicalSelectedImageIds(selections || []);
     if (!imageIds)
       return NextResponse.json({ error: "DATASET_SELECTION_INVALID" }, { status: 400 });
-    const readiness = datasetJob.summary?.dataset_ready;
-    if (typeof readiness !== "boolean") return NextResponse.json({ error: "DATASET_TRAINING_PROHIBITED" }, { status: 409 });
+    const qualityClassification = classifyDatasetDoctorQuality(datasetJob.summary, imageIds.length);
+    if (qualityClassification.state === "prohibited") return NextResponse.json({ error: "DATASET_TRAINING_PROHIBITED" }, { status: 409 });
     let datasetTrainingDecision: null | Record<string, string> = null;
-    if (!readiness) {
+    if (qualityClassification.state === "overridable") {
       if (!training_decision_receipt_id) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_REQUIRED" }, { status: 409 });
       if (!isDurableComputeJobsEnabled()) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_EXECUTION_UNAVAILABLE", message: "Train Anyway is not available in the current Trainer execution mode. Improve the dataset before training." }, { status: 409 });
       const { data: validated, error: validationError } = await supabaseAdmin.rpc("validate_dataset_training_decision_receipt", { p_receipt_id: training_decision_receipt_id, p_user_id: userId, p_lora_id: lora_id, p_dataset_doctor_job_id: datasetJob.id });

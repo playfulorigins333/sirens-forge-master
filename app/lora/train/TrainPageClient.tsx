@@ -710,18 +710,22 @@ export default function LoRATrainerPage() {
 
   const handleApproveAndStartTraining = async (trainAnyway = false) => {
     if (!loraId || !datasetDoctorJobId) { setErrorMessage("Missing LoRA or Dataset Doctor job reference."); return; }
+    if (datasetQualityClassification.state === "prohibited") {
+      setErrorMessage("Training is prohibited until Dataset Doctor can verify this dataset safely.");
+      return;
+    }
     setIsApproving(true); setErrorMessage(null);
     try {
       let receiptId: string | undefined;
       let activeDecisionKey = decisionKey;
-      if (datasetDoctorSummary?.dataset_ready === false && !trainAnyway) {
+      if (datasetQualityClassification.state === "overridable" && !trainAnyway) {
         activeDecisionKey = await pendingSubmissionKey("sirensforge:pending-dataset-training-decision", { lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, selected_image_ids: [...selectedImageIds].sort() });
         const prepareRes = await fetch("/api/lora/dataset-training-decision", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": activeDecisionKey }, body: JSON.stringify({ action: "prepare", lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, selected_image_ids: selectedImageIds }) });
         const prepared = await prepareRes.json().catch(() => ({}));
         if (!prepareRes.ok || !prepared.prompt_id) throw new Error(prepared.message || prepared.error || "Train Anyway is unavailable for this dataset.");
         setDecisionKey(activeDecisionKey); setShownWarningSnapshot(prepared.warning_snapshot); setShowTrainAnywayConfirm(true); return;
       }
-      if (datasetDoctorSummary?.dataset_ready === false && trainAnyway) {
+      if (datasetQualityClassification.state === "overridable" && trainAnyway) {
         if (!activeDecisionKey || !shownWarningSnapshot) throw new Error("Prepare the Train Anyway confirmation first.");
         if (!datasetApprovedForDecision) { await approveDatasetDoctorJob(datasetDoctorJobId, selectedImageIds); setDatasetApprovedForDecision(true); }
         const decisionRes = await fetch("/api/lora/dataset-training-decision", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": activeDecisionKey }, body: JSON.stringify({ action: "confirm", lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, decision: "train_anyway" }) });
@@ -1681,7 +1685,7 @@ export default function LoRATrainerPage() {
                       </span>
                     </div>
 
-                    {datasetDoctorSummary?.dataset_ready !== false ? (<div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5">
+                    {datasetQualityClassification.state === "ready" ? (<div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-5">
                       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div>
                           <div className="text-sm font-bold text-emerald-200">Recommended: auto-optimize and train</div>
