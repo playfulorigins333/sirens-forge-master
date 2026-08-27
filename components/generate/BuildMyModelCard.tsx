@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { createBrowserClient } from "@supabase/ssr";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ChevronDown,
@@ -19,11 +18,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
-);
 
 export type BuildModelBaseModel = "feminine" | "masculine";
 
@@ -424,49 +418,14 @@ export default function BuildMyModelCard(props: BuildMyModelCardProps) {
     setIdentitySaveError(null);
 
     try {
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-
-      if (userError || !userData.user?.id) {
-        throw new Error("You must be logged in to save this identity.");
-      }
-
-      const basePayload = {
-        user_id: userData.user.id,
-        name: compiled.identityName || getDefaultIdentityName(selection),
-        description: "Created from Build My Model on the Generate page.",
-        preview_url: compiled.selectedPreviewImage || null,
-        source: "build_my_model",
-        base_model: selection.baseModel,
-        prompt: compiled.prompt,
-        negative_prompt: compiled.negativePrompt,
-        selection,
-        is_identity_seed: true,
-        image_count: compiled.selectedPreviewImage ? 1 : 0,
-      };
-
-      const firstAttempt = await supabase
-        .from("user_loras")
-        .insert({
-          ...basePayload,
-          status: "draft",
-        })
-        .select("id")
-        .single();
-
-      if (firstAttempt.error) {
-        const retryAttempt = await supabase
-          .from("user_loras")
-          .insert({
-            ...basePayload,
-            status: "pending",
-          })
-          .select("id")
-          .single();
-
-        if (retryAttempt.error) {
-          throw retryAttempt.error;
-        }
-      }
+      const response = await fetch("/api/lora/identity-seed", { method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          identityName: compiled.identityName || getDefaultIdentityName(selection), baseModel: selection.baseModel,
+          prompt: compiled.prompt, negativePrompt: compiled.negativePrompt, selection,
+          selectedPreviewImage: compiled.selectedPreviewImage || null,
+        }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.message || result.error || "Identity save failed.");
 
       setIdentitySaved(true);
       setApplied(true);

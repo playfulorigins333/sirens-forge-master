@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { computePriorityForTier, isDurableComputeJobsEnabled, toCreatorComputeStatus } from "@/lib/compute-jobs";
-import { createHash } from "node:crypto";
+import { buildRecommendedTrainerRecipe, canonicalUuid, trainerRequestFingerprint } from "@/lib/trainer-application-contract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,11 +21,12 @@ export async function POST(req: Request) {
     const supabaseAdmin = getSupabaseAdmin();
 
     const body = await req.json().catch(() => ({}));
-    const { lora_id } = body || {};
+    const lora_id = canonicalUuid(body?.lora_id);
+    const dataset_doctor_job_id = canonicalUuid(body?.dataset_doctor_job_id);
 
-    if (!lora_id) {
+    if (!lora_id || !dataset_doctor_job_id || Object.keys(body || {}).some((key) => !["lora_id", "dataset_doctor_job_id"].includes(key))) {
       return NextResponse.json(
-        { error: "Missing lora_id" },
+        { error: "INVALID_TRAINER_IDENTIFIERS" },
         { status: 400 }
       );
     }
@@ -51,23 +52,18 @@ export async function POST(req: Request) {
       );
     }
 
-    // ✅ Dataset Doctor is now the source of truth for training datasets.
-    // Find the latest exported/approved job that has a final dataset location.
+    // The supplied exported Dataset Doctor job is the sole dataset authority.
     const { data: datasetJob, error: datasetJobErr } = await supabaseAdmin
       .from("dataset_doctor_jobs")
       .select(
-        "id, lora_id, user_id, status, final_r2_bucket, final_r2_prefix, approved_at, exported_at, updated_at, created_at"
+        "id, lora_id, user_id, status, final_r2_bucket, final_r2_prefix, summary"
       )
+      .eq("id", dataset_doctor_job_id)
       .eq("lora_id", lora_id)
       .eq("user_id", userId)
-      .in("status", ["approved", "exported"])
+      .eq("status", "exported")
       .not("final_r2_bucket", "is", null)
       .not("final_r2_prefix", "is", null)
-      .order("exported_at", { ascending: false, nullsFirst: false })
-      .order("approved_at", { ascending: false, nullsFirst: false })
-      .order("updated_at", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false, nullsFirst: false })
-      .limit(1)
       .maybeSingle();
 
     if (datasetJobErr) {
@@ -86,7 +82,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            "No approved Dataset Doctor dataset found. Please analyze and approve a dataset before starting training.",
+            "DATASET_EXPORT_NOT_FOUND",
         },
         { status: 400 }
       );
@@ -94,16 +90,25 @@ export async function POST(req: Request) {
 
     const dataset_r2_bucket = datasetJob.final_r2_bucket;
     const dataset_r2_prefix = datasetJob.final_r2_prefix;
+    if (datasetJob.summary?.dataset_ready === false) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_REQUIRED" }, { status: 409 });
+    const { data: selections, error: selectionsError } = await supabaseAdmin.from("dataset_doctor_selections")
+      .select("image_id").eq("job_id", datasetJob.id).eq("selection_type", "final");
+    if (selectionsError) return NextResponse.json({ error: "DATASET_SELECTION_LOOKUP_FAILED" }, { status: 500 });
+    const imageIds = (selections || []).map((row) => canonicalUuid(row.image_id)).filter((id): id is string => Boolean(id)).sort();
+    if (!imageIds.length || imageIds.length !== selections?.length || new Set(imageIds).size !== imageIds.length)
+      return NextResponse.json({ error: "DATASET_SELECTION_INVALID" }, { status: 400 });
+    const requestPayload = {
+      identity_id: lora_id, dataset_doctor_job_id: datasetJob.id,
+      dataset_reference: { bucket: dataset_r2_bucket, prefix: dataset_r2_prefix },
+      dataset_snapshot: datasetJob.summary,
+      dataset_selection: { image_ids: imageIds, image_count: imageIds.length },
+      trainer_recipe: buildRecommendedTrainerRecipe(),
+    };
 
     if (isDurableComputeJobsEnabled()) {
       const idempotencyKey = req.headers.get("idempotency-key")?.trim();
       if (!idempotencyKey || idempotencyKey.length > 128) return NextResponse.json({ error: "INVALID_IDEMPOTENCY_KEY" }, { status: 400 });
-      const requestPayload = {
-          identity_id: lora_id,
-          dataset_doctor_job_id: datasetJob.id,
-          dataset_reference: { bucket: datasetJob.final_r2_bucket, prefix: datasetJob.final_r2_prefix },
-      };
-      const fingerprint = createHash("sha256").update(JSON.stringify(requestPayload)).digest("hex");
+      const fingerprint = trainerRequestFingerprint(requestPayload);
       const { data: rows, error: submitError } = await supabaseAdmin.rpc("submit_trainer_compute_job", {
         p_owner_id: userId, p_lora_id: lora_id, p_idempotency_key: idempotencyKey,
         p_request_fingerprint: fingerprint, p_request_payload: requestPayload,
