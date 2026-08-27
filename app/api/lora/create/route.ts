@@ -18,8 +18,13 @@ export async function POST(req: Request) {
     const userId = auth.user.id;
     const supabaseAdmin = getSupabaseAdmin();
 
-    // Body is intentionally read but NOT persisted
-    await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => ({}));
+    const control = /[\u0000-\u001f\u007f]/;
+    const identityName = typeof body.identityName === "string" ? body.identityName.trim() : "";
+    const description = body.description == null ? "" : typeof body.description === "string" ? body.description.trim() : null;
+    if (!identityName || identityName.length > 120 || description === null || description.length > 1000 || control.test(identityName) || control.test(description)) {
+      return NextResponse.json({ error: "INVALID_LORA_METADATA" }, { status: 400 });
+    }
 
     // 1️⃣ Check for existing active draft FOR THIS USER
     const { data: existingDraft, error: draftErr } = await supabaseAdmin
@@ -36,6 +41,10 @@ export async function POST(req: Request) {
     }
 
     if (existingDraft) {
+      const { error: updateError } = await supabaseAdmin.from("user_loras")
+        .update({ name: identityName, description, updated_at: new Date().toISOString() })
+        .eq("id", existingDraft.id).eq("user_id", userId);
+      if (updateError) return NextResponse.json({ error: "Failed to update LoRA draft" }, { status: 500 });
       return NextResponse.json({
         lora_id: existingDraft.id,
         reused: true,
@@ -51,6 +60,8 @@ export async function POST(req: Request) {
         user_id: userId,
         status: "draft",
         image_count: 0,
+        name: identityName,
+        description,
         created_at: now,
         updated_at: now,
       })

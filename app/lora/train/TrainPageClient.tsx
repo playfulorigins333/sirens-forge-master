@@ -722,9 +722,6 @@ export default function LoRATrainerPage() {
         body: JSON.stringify({
           lora_id: loraId,
           dataset_doctor_job_id: datasetDoctorJobId,
-          identityName: identityName.trim(),
-          description: (description?.trim() || "") || null,
-          image_count: uploadedImages.length,
         }),
       });
 

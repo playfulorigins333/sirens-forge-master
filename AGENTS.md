@@ -11,3 +11,11 @@ These rules apply to the entire repository.
 - Never substitute fake, mock, or placeholder generation output for real generation testing. Generation pods are currently offline. Until they return, limit pre-pod QA to build/deploy checks, static UI, route existence, payload review, schema/RLS review, and non-generation flows; do not claim generation or post-generation validation.
 - In any ElevenSparks-related client-facing material, use **“event staff,”** not “guards.” Keep all ElevenSparks work separate from Sirens Forge product work.
 - Return the exact changed files, validation results, commit SHA, PR state, and explicit confirmation of actions not performed.
+
+## Hard PRE-SALAD sequencing gate
+
+- Phases 2–15 source/application corrections must precede provider work.
+- No Salad/Kelpie integration, provider adapter, GPU/model/checkpoint canary, or worker activation is permitted before the final PRE-SALAD gate.
+- Existing durable-compute plumbing does not imply that provider work is next.
+- Leave the old RunPod implementation and variables untouched until a real replacement is later proven.
+- Production scheduler, spend, and runtime gates remain controlled/off until separately authorized.

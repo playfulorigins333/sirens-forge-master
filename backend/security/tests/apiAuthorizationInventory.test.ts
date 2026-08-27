@@ -123,5 +123,17 @@ assert.ok(!xPostClasses.has("PUBLIC"), "POST /api/autopost/platforms/x must not 
 assert.match(xPost[5], /x-autopost-internal-secret.+AUTOPOST_INTERNAL_ADAPTER_SECRET/i, "X POST authentication metadata must name its header and configured secret")
 assert.match(xPost[10], /Supabase admin.+X account.+decrypt\/refresh.+POST to X/i, "X POST privileged-use metadata must record downstream account, token, and provider access")
 
+const identitySeedPost = inventoryRow("/api/lora/identity-seed", "POST")
+const identitySeedClasses = authorizationClasses(identitySeedPost)
+for (const required of ["AUTHENTICATED", "OWNER", "ENTITLED"]) {
+  assert.ok(identitySeedClasses.has(required), `POST /api/lora/identity-seed must record ${required}`)
+}
+for (const forbidden of ["PUBLIC", "ADMIN", "INTERNAL_CONTROLLED"]) {
+  assert.ok(!identitySeedClasses.has(forbidden), `POST /api/lora/identity-seed must not claim ${forbidden}`)
+}
+assert.match(identitySeedPost[5], /ensureActiveSubscription\(\).+authenticated.+entitlement.+before privileged mutation/i, "identity-seed must record authentication/entitlement before privileged mutation")
+assert.match(identitySeedPost[6], /cannot choose.+user_id.+derived exclusively from.+auth\.user\.id/i, "identity-seed must record authenticated-user-derived ownership")
+assert.match(identitySeedPost[10], /getSupabaseAdmin\(\).+after successful authentication\/entitlement validation.+service-role insert binds.+auth\.user\.id.+never exposed to the browser/i, "identity-seed must record server-only service-role use")
+
 assert.match(markdown, new RegExp(`\\*\\*Inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries`))
 console.log(`API authorization inventory contract passed (${actualFiles.length} files, ${expectedEntries.length} route-method entries).`)
