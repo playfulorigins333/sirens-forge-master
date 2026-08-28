@@ -41,6 +41,7 @@ interface UploadedImage {
 
 type TrainingStatus =
   | "idle"
+  | "preparing"
   | "review"
   | "queued"
   | "training"
@@ -284,6 +285,7 @@ export default function LoRATrainerPage() {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [trainingStatus, setTrainingStatus] = useState<TrainingStatus>("idle");
   const [loraId, setLoraId] = useState<string | null>(null);
+  const [trainerJobId, setTrainerJobId] = useState<string | null>(null);
   const [datasetDoctorJobId, setDatasetDoctorJobId] = useState<string | null>(
     null
   );
@@ -327,6 +329,7 @@ export default function LoRATrainerPage() {
       setTrainingProgress(0);
       setErrorMessage(null);
       setLoraId(null);
+      setTrainerJobId(null);
       setDatasetDoctorJobId(null);
       setDatasetDoctorSummary(null);
       setDatasetDoctorImages([]);
@@ -420,6 +423,7 @@ export default function LoRATrainerPage() {
       trainingStatus === "completed" ||
       trainingStatus === "failed" ||
       trainingStatus === "idle" ||
+      trainingStatus === "preparing" ||
       trainingStatus === "review"
     ) {
       return;
@@ -643,7 +647,8 @@ export default function LoRATrainerPage() {
     setSelectedImageIds([]);
     setReviewSelection(null);
     setShowManualReview(false);
-    setTrainingStatus("training");
+    setTrainerJobId(null);
+    setTrainingStatus("preparing");
 
     try {
       const createDraftRes = await fetch("/api/lora/create", {
@@ -662,14 +667,14 @@ export default function LoRATrainerPage() {
       const draftJson = await createDraftRes.json().catch(() => ({} as any));
 
       if (!createDraftRes.ok) {
-        setTrainingStatus("failed");
+        setTrainingStatus("idle");
         setErrorMessage(draftJson?.error || "Failed to create LoRA draft.");
         return;
       }
 
       const createdId = draftJson?.lora_id as string | undefined;
       if (!createdId || (loraId && createdId !== loraId)) {
-        setTrainingStatus("failed");
+        setTrainingStatus("idle");
         setErrorMessage("Server response missing lora_id.");
         return;
       }
@@ -708,8 +713,8 @@ export default function LoRATrainerPage() {
       return;
     } catch (err: any) {
       console.error("Start training error:", err);
-      setTrainingStatus("failed");
-      setErrorMessage(err?.message || "Unexpected error starting training.");
+      setTrainingStatus("idle");
+      setErrorMessage(err?.message || "Unexpected error preparing the dataset.");
     }
   };
 
@@ -761,13 +766,14 @@ export default function LoRATrainerPage() {
           setErrorMessage(queueJson?.message || "Your Dataset Doctor preparation is preserved, but Trainer execution is not currently available.");
           return;
         }
-        setTrainingStatus("failed"); setErrorMessage(queueJson?.message || queueJson?.error || "Failed to queue training."); return;
+        setTrainingStatus("review"); setErrorMessage(queueJson?.message || queueJson?.error || "Trainer submission was not accepted. Your prepared dataset is preserved."); return;
       }
       if (typeof queueJson?.job_id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(queueJson.job_id) || queueJson?.status !== "queued") {
         setTrainingStatus("review"); setErrorMessage("Trainer did not return a valid durable queued job. Your prepared dataset is preserved."); return;
       }
       clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey);
       if (activeDecisionKey) clearPendingSubmission("sirensforge:pending-dataset-training-decision", activeDecisionKey);
+      setTrainerJobId(queueJson.job_id);
       setDecisionKey(null); setShownWarningSnapshot(null); setTrainingStatus("queued");
     } catch (err: any) { console.error("Approve/start training error:", err); setTrainingStatus("review"); setErrorMessage(err?.message || "Failed to approve dataset."); }
     finally { setIsApproving(false); }
@@ -775,7 +781,7 @@ export default function LoRATrainerPage() {
 
   const handleImproveDataset = () => {
     if (decisionKey) clearPendingSubmission("sirensforge:pending-dataset-training-decision", decisionKey);
-    setDatasetDoctorJobId(null);setDatasetDoctorSummary(null);setDatasetDoctorImages([]);setSelectedImageIds([]);setReviewSelection(null);setDecisionKey(null);setShownWarningSnapshot(null);setShowTrainAnywayConfirm(false);setDatasetApprovedForDecision(false);setTrainingStatus("idle");setErrorMessage(null);
+    setDatasetDoctorJobId(null);setDatasetDoctorSummary(null);setDatasetDoctorImages([]);setSelectedImageIds([]);setReviewSelection(null);setTrainerJobId(null);setDecisionKey(null);setShownWarningSnapshot(null);setShowTrainAnywayConfirm(false);setDatasetApprovedForDecision(false);setTrainingStatus("idle");setErrorMessage(null);
   };
 
   const toggleSelectedImage = (imageId: string) => {
@@ -1424,11 +1430,13 @@ export default function LoRATrainerPage() {
                   Train My AI Twin
                   <Zap className="w-6 h-6 ml-3" />
                 </>
-              ) : (
+              ) : trainingStatus === "preparing" ? (
                 <>
                   <Clock className="w-6 h-6 mr-3 animate-spin" />
-                  Forging your AI Twin...
+                  Preparing dataset...
                 </>
+              ) : (
+                <>Trainer workflow in progress</>
               )}
             </Button>
           </motion.div>
@@ -1461,6 +1469,15 @@ export default function LoRATrainerPage() {
 
               <div className="p-12 text-center space-y-8 relative z-10">
                 <div className="flex justify-center">
+                  {trainingStatus === "preparing" && (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{ repeat: Infinity, duration: 3, ease: "linear" }}
+                      className="p-8 rounded-full bg-gradient-to-br from-cyan-500/30 to-purple-500/30 backdrop-blur-sm"
+                    >
+                      <Clock className="w-16 h-16 text-cyan-400" />
+                    </motion.div>
+                  )}
                   {trainingStatus === "review" && (
                     <motion.div
                       animate={{
@@ -1526,6 +1543,19 @@ export default function LoRATrainerPage() {
                 </div>
 
                 <div className="space-y-4">
+                  {trainingStatus === "preparing" && (
+                    <>
+                      <h3 className="text-3xl font-bold text-cyan-400">
+                        Preparing Your Dataset
+                      </h3>
+                      <p className="text-gray-300 text-lg">
+                        Uploading images and running Dataset Doctor...
+                      </p>
+                      <p className="text-sm text-gray-400">
+                        Checking your photos before training. Trainer compute has not started.
+                      </p>
+                    </>
+                  )}
                   {trainingStatus === "review" && (
                     <>
                       <motion.h3
@@ -1540,7 +1570,7 @@ export default function LoRATrainerPage() {
                       </p>
                       {loraId && (
                         <p className="text-xs text-gray-400 mt-2">
-                          LoRA Job: <span className="font-mono">{loraId}</span>
+                          Twin ID: <span className="font-mono">{loraId}</span>
                         </p>
                       )}
                       {datasetDoctorJobId && (
@@ -1603,7 +1633,12 @@ export default function LoRATrainerPage() {
                       </p>
                       {loraId && (
                         <p className="text-xs text-gray-400 mt-2">
-                          LoRA Job: <span className="font-mono">{loraId}</span>
+                          Twin ID: <span className="font-mono">{loraId}</span>
+                        </p>
+                      )}
+                      {trainerJobId && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          Trainer Job: <span className="font-mono">{trainerJobId}</span>
                         </p>
                       )}
                       {datasetDoctorJobId && (
@@ -1630,7 +1665,12 @@ export default function LoRATrainerPage() {
                       </p>
                       {loraId && (
                         <p className="text-xs text-gray-400 mt-2">
-                          LoRA Job: <span className="font-mono">{loraId}</span>
+                          Twin ID: <span className="font-mono">{loraId}</span>
+                        </p>
+                      )}
+                      {trainerJobId && (
+                        <p className="text-xs text-gray-400 mt-1">
+                          Trainer Job: <span className="font-mono">{trainerJobId}</span>
                         </p>
                       )}
                       {datasetDoctorJobId && (
@@ -1698,6 +1738,11 @@ export default function LoRATrainerPage() {
 
                 {trainingStatus === "review" && (
                   <div className="space-y-6 text-left">
+                    {errorMessage && (
+                      <div role="alert" className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+                        {errorMessage}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-gray-300">
                         Selected accepted images:{" "}
