@@ -750,12 +750,22 @@ export default function LoRATrainerPage() {
       } else {
         await approveDatasetDoctorJob(datasetDoctorJobId, selectedImageIds);
       }
-      setTrainingStatus("training");
       const trainIntent = { lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, training_decision_receipt_id: receiptId || null };
       const submissionKey = await pendingSubmissionKey("sirensforge:pending-trainer-compute", trainIntent);
       const queueRes = await fetch("/api/lora/train", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": submissionKey }, body: JSON.stringify({ lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, ...(receiptId ? { training_decision_receipt_id: receiptId } : {}) }) });
       const queueJson = await queueRes.json().catch(() => ({}));
-      if (!queueRes.ok) { if (queueRes.status >= 400 && queueRes.status < 500) clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey); setTrainingStatus("failed"); setErrorMessage(queueJson?.message || queueJson?.error || "Failed to queue training."); return; }
+      if (!queueRes.ok) {
+        clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey);
+        if (queueJson?.error === "TRAINER_EXECUTION_UNAVAILABLE") {
+          setTrainingStatus("review");
+          setErrorMessage(queueJson?.message || "Your Dataset Doctor preparation is preserved, but Trainer execution is not currently available.");
+          return;
+        }
+        setTrainingStatus("failed"); setErrorMessage(queueJson?.message || queueJson?.error || "Failed to queue training."); return;
+      }
+      if (typeof queueJson?.job_id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(queueJson.job_id) || queueJson?.status !== "queued") {
+        setTrainingStatus("review"); setErrorMessage("Trainer did not return a valid durable queued job. Your prepared dataset is preserved."); return;
+      }
       clearPendingSubmission("sirensforge:pending-trainer-compute", submissionKey);
       if (activeDecisionKey) clearPendingSubmission("sirensforge:pending-dataset-training-decision", activeDecisionKey);
       setDecisionKey(null); setShownWarningSnapshot(null); setTrainingStatus("queued");

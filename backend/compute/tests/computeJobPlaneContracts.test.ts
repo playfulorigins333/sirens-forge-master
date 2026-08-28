@@ -101,7 +101,11 @@ test("video stays unavailable and durable client tracks a submitted job immediat
 test("trainer status guards legacy text IDs and requires current-execution artifact evidence", () => {
   const source = read("app/api/lora/status/route.ts");
   assert.match(source, /durableTrainingJobId/);
-  assert.match(source, /new Date\(data\.completed_at\) >= new Date\(compute\.queued_at\)/);
+  const projection = read("lib/lora/trainer-state.ts");
+  assert.match(projection, /completedAt >= queuedAt/);
+  assert.match(projection, /isExactTrainerBinding/);
+  assert.match(source, /\.eq\("owner_id", userId\)/);
+  assert.match(source, /\.eq\("workload", "trainer"\)/);
   assert.doesNotMatch(source, /p_job_id: data\.training_job_id/);
   const fixture = read("backend/compute/tests/computeJobPlanePostgresSetup.sql");
   assert.match(fixture, /training_job_id text/);

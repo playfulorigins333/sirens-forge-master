@@ -63,9 +63,6 @@ mock.module(new URL("../../../lib/supabaseAdmin.ts", import.meta.url).href, {
     },
   },
 })
-mock.module(new URL("../../../lib/compute-jobs.ts", import.meta.url).href, {
-  namedExports: { isDurableComputeJobsEnabled: () => false },
-})
 
 globalThis.fetch = async (input, init) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
@@ -146,8 +143,7 @@ try {
   ]) {
     reset();response=await proxyDatasetDoctorOperation(request("POST",body),jobId,"review-selection");assert.equal(response.status,400);assert.equal(railwayCalls.length,0)
   }
-  for (const count of [9,21]) { reset();response=await proxyDatasetDoctorOperation(request("POST",{selected_image_ids:imageIds(count),queue_training:false}),jobId,"approve");assert.equal(response.status,409);assert.equal((await response.json()).error,"TRAINER_EXECUTION_SELECTION_LIMIT");assert.equal(railwayCalls.length,0) }
-  for (const count of [10,20]) { reset();response=await proxyDatasetDoctorOperation(request("POST",{selected_image_ids:imageIds(count),queue_training:false}),jobId,"approve");assert.equal(response.status,200);assert.equal(JSON.parse(String(railwayCalls[0].init?.body)).queue_training,false) }
+  for (const count of [9,10,20,21,50]) { reset();response=await proxyDatasetDoctorOperation(request("POST",{selected_image_ids:imageIds(count),queue_training:false}),jobId,"approve");assert.equal(response.status,200);assert.equal(JSON.parse(String(railwayCalls[0].init?.body)).queue_training,false) }
   reset();response=await proxyDatasetDoctorOperation(request("POST",{selected_image_ids:imageIds(10),queue_training:true}),jobId,"approve");assert.equal(response.status,400);assert.equal(railwayCalls.length,0)
 
   for (const [operation, subscriptionStatus] of [

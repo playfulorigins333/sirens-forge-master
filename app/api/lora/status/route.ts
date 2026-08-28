@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
-import { isDurableComputeJobsEnabled } from "@/lib/compute-jobs";
+import { canonicalTrainerJobId, projectTrainerState } from "@/lib/lora/trainer-state";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,28 +42,21 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const durableTrainingJobId = typeof data.training_job_id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data.training_job_id.trim()) ? data.training_job_id.trim() : null;
-    if (isDurableComputeJobsEnabled() && durableTrainingJobId) {
-      const { data: computeRows, error: computeError } = await supabaseAdmin.rpc("creator_compute_status", {
-        p_owner_id: userId,
-        p_job_id: durableTrainingJobId,
-      });
-      if (computeError) return NextResponse.json({ error: "Trainer status unavailable" }, { status: 503 });
-      const compute = Array.isArray(computeRows) ? computeRows[0] : computeRows;
-      if (compute) {
-        const status = compute.creator_status === "running" ? "training"
-          : compute.creator_status === "recovering" || compute.creator_status === "cancelling" ? "training"
-          : compute.creator_status === "cancelled" || compute.creator_status === "failed" ? "failed"
-          : compute.creator_status === "completed" && data.artifact_r2_bucket && data.artifact_r2_key && data.completed_at && new Date(data.completed_at) >= new Date(compute.queued_at) ? "completed"
-          : "queued";
-        return NextResponse.json({ ok: true, lora: { ...data, status, compute_status: compute.creator_status } });
-      }
+    const durableTrainingJobId = canonicalTrainerJobId(data.training_job_id);
+    let trainerJob = null;
+    if (durableTrainingJobId) {
+      const { data: job, error: jobError } = await supabaseAdmin
+        .from("compute_jobs")
+        .select("id, owner_id, workload, state, request_payload, queued_at")
+        .eq("id", durableTrainingJobId)
+        .eq("owner_id", userId)
+        .eq("workload", "trainer")
+        .maybeSingle();
+      if (jobError) return NextResponse.json({ error: "Trainer status unavailable" }, { status: 503 });
+      trainerJob = job;
     }
 
-    return NextResponse.json({
-      ok: true,
-      lora: data,
-    });
+    return NextResponse.json({ ok: true, lora: projectTrainerState(data, trainerJob) });
   } catch (err: any) {
     const msg = String(err?.message || err);
     if (msg.toLowerCase().includes("unauthorized")) {

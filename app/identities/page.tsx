@@ -4,6 +4,8 @@ import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { supabaseServer } from "@/lib/supabaseServer";
 import IdentitiesClient, { IdentityCardItem } from "./IdentitiesClient";
+import { canonicalTrainerJobId, projectTrainerState } from "@/lib/lora/trainer-state";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -195,8 +197,22 @@ export default async function IdentitiesPage() {
   }
 
   const generationRows: GenerationRow[] = Array.isArray(generations) ? generations : [];
+  const canonicalJobIds = [...new Set((loras || []).map((lora: any) => canonicalTrainerJobId(lora.training_job_id)).filter((id): id is string => !!id))];
+  let trainerJobs: any[] = [];
+  if (canonicalJobIds.length > 0) {
+    const { data, error } = await getSupabaseAdmin()
+      .from("compute_jobs")
+      .select("id, owner_id, workload, state, request_payload, queued_at")
+      .in("id", canonicalJobIds)
+      .eq("owner_id", authUserId)
+      .eq("workload", "trainer");
+    if (error) console.error("[identities] Failed to load Trainer bindings:", error);
+    else if (Array.isArray(data)) trainerJobs = data;
+  }
+  const trainerJobsById = new Map(trainerJobs.map((job) => [job.id, job]));
 
-  const items: IdentityCardItem[] = (loras || []).map((lora: any) => {
+  const items: IdentityCardItem[] = (loras || []).map((rawLora: any) => {
+    const lora = projectTrainerState(rawLora, trainerJobsById.get(canonicalTrainerJobId(rawLora.training_job_id) || ""));
     const linkedAssets = generationRows.filter(
       (row) => isRealAsset(row) && matchesIdentityLink(row, lora.id)
     );

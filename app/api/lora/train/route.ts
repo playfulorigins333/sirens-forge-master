@@ -6,7 +6,6 @@ import { computePriorityForTier, isDurableComputeJobsEnabled, toCreatorComputeSt
 import { buildRecommendedTrainerRecipe, canonicalUuid, trainerRequestFingerprint } from "@/lib/trainer-application-contract";
 import { canonicalSelectedImageIds } from "@/lib/dataset-doctor/training-decision-contract";
 import { selectedQualityState, sameSelectedIds, validateReviewSelection } from "@/lib/dataset-doctor/quality-contract";
-import { trainerSelectionCapacityError, TRAINER_EXECUTION_SELECTION_LIMIT_MESSAGE } from "@/lib/dataset-doctor/trainer-execution-capacity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -104,10 +103,12 @@ export async function POST(req: Request) {
     if (!selectedAuthority || !sameSelectedIds(imageIds, selectedAuthority)) return NextResponse.json({ error: "DATASET_TRAINING_PROHIBITED" }, { status: 409 });
     const qualityState = selectedQualityState(selectedAuthority);
     if (qualityState === "prohibited") return NextResponse.json({ error: "DATASET_TRAINING_PROHIBITED" }, { status: 409 });
+    if (!isDurableComputeJobsEnabled()) {
+      return NextResponse.json({ error: "TRAINER_EXECUTION_UNAVAILABLE", message: "Your Dataset Doctor preparation is preserved, but Trainer execution is not currently enabled." }, { status: 503 });
+    }
     let datasetTrainingDecision: null | Record<string, string> = null;
     if (qualityState === "overridable") {
       if (!training_decision_receipt_id) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_REQUIRED" }, { status: 409 });
-      if (!isDurableComputeJobsEnabled()) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_EXECUTION_UNAVAILABLE", message: "Train Anyway is not available in the current Trainer execution mode. Improve the dataset before training." }, { status: 409 });
       const { data: validated, error: validationError } = await supabaseAdmin.rpc("validate_dataset_training_decision_receipt", { p_receipt_id: training_decision_receipt_id, p_user_id: userId, p_lora_id: lora_id, p_dataset_doctor_job_id: datasetJob.id });
       if (validationError) {
         const safeCode = ["DATASET_TRAINING_DECISION_REQUIRED", "DATASET_TRAINING_DECISION_STALE", "DATASET_TRAINING_DECISION_INVALID", "DATASET_TRAINING_PROHIBITED"].find((code) => validationError.message.includes(code)) || "DATASET_TRAINING_DECISION_INVALID";
@@ -126,56 +127,27 @@ export async function POST(req: Request) {
       trainer_recipe: buildRecommendedTrainerRecipe(),
     };
 
-    if (isDurableComputeJobsEnabled()) {
-      const idempotencyKey = req.headers.get("idempotency-key")?.trim();
-      if (!idempotencyKey || idempotencyKey.length > 128) return NextResponse.json({ error: "INVALID_IDEMPOTENCY_KEY" }, { status: 400 });
-      const fingerprint = trainerRequestFingerprint(requestPayload);
-      const { data: rows, error: submitError } = await supabaseAdmin.rpc("submit_trainer_compute_job", {
-        p_owner_id: userId, p_lora_id: lora_id, p_idempotency_key: idempotencyKey,
-        p_request_fingerprint: fingerprint, p_request_payload: requestPayload,
-        p_priority_class: computePriorityForTier(auth.subscription?.tier_name),
-        p_dataset_r2_bucket: dataset_r2_bucket, p_dataset_r2_prefix: dataset_r2_prefix,
-      });
-      if (submitError) {
-        if (submitError.message.includes("IDEMPOTENCY_CONFLICT")) throw new Error("IDEMPOTENCY_CONFLICT");
-        if (submitError.message.includes("TRAINER_ALREADY_ACTIVE")) throw new Error("TRAINER_ALREADY_ACTIVE");
-        const decisionCode = ["DATASET_TRAINING_DECISION_REQUIRED", "DATASET_TRAINING_DECISION_STALE", "DATASET_TRAINING_DECISION_INVALID", "DATASET_TRAINING_PROHIBITED"].find((code) => submitError.message.includes(code));
-        if (decisionCode) throw new Error(decisionCode);
-        throw new Error("TRAINER_SUBMISSION_FAILED");
-      }
-      const job = Array.isArray(rows) ? rows[0] : rows;
-      return NextResponse.json({ ok: true, lora_id, ...toCreatorComputeStatus(job) }, { status: 202 });
-    }
-
-    const executionLimit = trainerSelectionCapacityError(imageIds.length, false);
-    if (executionLimit) return NextResponse.json({ error: executionLimit, message: TRAINER_EXECUTION_SELECTION_LIMIT_MESSAGE }, { status: 409 });
-    const now = new Date().toISOString();
-    const { error: updateErr } = await supabaseAdmin
-      .from("user_loras")
-      .update({
-        status: "queued",
-        dataset_r2_bucket,
-        dataset_r2_prefix,
-        updated_at: now,
-      })
-      .eq("id", lora_id);
-
-    if (updateErr) {
-      console.error("[lora/train] Update failed:", updateErr);
-      return NextResponse.json(
-        { error: "Failed to queue training job" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({
-      ok: true,
-      lora_id,
-      status: "queued",
-      dataset_r2_bucket,
-      dataset_r2_prefix,
-      dataset_doctor_job_id: datasetJob.id,
+    const idempotencyKey = req.headers.get("idempotency-key")?.trim();
+    if (!idempotencyKey || idempotencyKey.length > 128) return NextResponse.json({ error: "INVALID_IDEMPOTENCY_KEY" }, { status: 400 });
+    const fingerprint = trainerRequestFingerprint(requestPayload);
+    const { data: rows, error: submitError } = await supabaseAdmin.rpc("submit_trainer_compute_job", {
+      p_owner_id: userId, p_lora_id: lora_id, p_idempotency_key: idempotencyKey,
+      p_request_fingerprint: fingerprint, p_request_payload: requestPayload,
+      p_priority_class: computePriorityForTier(auth.subscription?.tier_name),
+      p_dataset_r2_bucket: dataset_r2_bucket, p_dataset_r2_prefix: dataset_r2_prefix,
     });
+    if (submitError) {
+      if (submitError.message.includes("COMPUTE_POLICY_UNCONFIGURED")) throw new Error("TRAINER_EXECUTION_UNAVAILABLE");
+      if (submitError.message.includes("IDEMPOTENCY_CONFLICT")) throw new Error("IDEMPOTENCY_CONFLICT");
+      if (submitError.message.includes("TRAINER_ALREADY_ACTIVE")) throw new Error("TRAINER_ALREADY_ACTIVE");
+      const decisionCode = ["DATASET_TRAINING_DECISION_REQUIRED", "DATASET_TRAINING_DECISION_STALE", "DATASET_TRAINING_DECISION_INVALID", "DATASET_TRAINING_PROHIBITED"].find((code) => submitError.message.includes(code));
+      if (decisionCode) throw new Error(decisionCode);
+      throw new Error("TRAINER_SUBMISSION_FAILED");
+    }
+    const job = Array.isArray(rows) ? rows[0] : rows;
+    const creatorJob = job ? toCreatorComputeStatus(job) : null;
+    if (!creatorJob?.job_id || !canonicalUuid(creatorJob.job_id)) throw new Error("TRAINER_SUBMISSION_FAILED");
+    return NextResponse.json({ ok: true, lora_id, ...creatorJob }, { status: 202 });
   } catch (err: any) {
     const msg = String(err?.message || err);
     if (msg.toLowerCase().includes("unauthorized")) {
@@ -186,7 +158,8 @@ export async function POST(req: Request) {
     }
     if (msg.includes("IDEMPOTENCY_CONFLICT")) return NextResponse.json({ error: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
     if (msg.includes("TRAINER_ALREADY_ACTIVE")) return NextResponse.json({ error: "TRAINER_ALREADY_ACTIVE", message: "Training is already active for this Twin." }, { status: 409 });
-    const decisionCode = ["DATASET_TRAINING_DECISION_REQUIRED", "DATASET_TRAINING_DECISION_STALE", "DATASET_TRAINING_DECISION_INVALID", "DATASET_TRAINING_PROHIBITED", "DATASET_TRAINING_DECISION_EXECUTION_UNAVAILABLE"].find((code) => msg.includes(code));
+    if (msg.includes("TRAINER_EXECUTION_UNAVAILABLE")) return NextResponse.json({ error: "TRAINER_EXECUTION_UNAVAILABLE", message: "Your Dataset Doctor preparation is preserved, but Trainer execution is not currently available." }, { status: 503 });
+    const decisionCode = ["DATASET_TRAINING_DECISION_REQUIRED", "DATASET_TRAINING_DECISION_STALE", "DATASET_TRAINING_DECISION_INVALID", "DATASET_TRAINING_PROHIBITED"].find((code) => msg.includes(code));
     if (decisionCode) return NextResponse.json({ error: decisionCode }, { status: 409 });
 
     console.error("[lora/train] Fatal:", err);

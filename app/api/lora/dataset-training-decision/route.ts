@@ -25,8 +25,9 @@ export async function POST(req: Request) {
   if (!loraId || !jobId) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_INVALID" }, { status: 400 });
   const admin = getSupabaseAdmin();
 
+  if (!isDurableComputeJobsEnabled()) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_EXECUTION_UNAVAILABLE", message: "Train Anyway is not available while Trainer execution is unavailable. Your Dataset Doctor preparation is preserved." }, { status: 409 });
+
   if (body.action === "prepare") {
-    if (!isDurableComputeJobsEnabled()) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_EXECUTION_UNAVAILABLE", message: "Train Anyway is not available in the current Trainer execution mode. Improve the dataset before training." }, { status: 409 });
     if (Object.keys(body).some((field) => !["action", "lora_id", "dataset_doctor_job_id", "selected_image_ids"].includes(field)) || !Array.isArray(body.selected_image_ids)) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_INVALID" }, { status: 400 });
     const selectedIds = canonicalSelectedImageIds(body.selected_image_ids, 3);
     if (!selectedIds) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_INVALID" }, { status: 400 });
