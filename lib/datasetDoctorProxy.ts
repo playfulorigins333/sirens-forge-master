@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { ensureActiveSubscription } from "./subscription-checker";
 import { requireSirensApiConfig, sirensApiFetch } from "./sirensApi";
+import { isDurableComputeJobsEnabled } from "./compute-jobs";
+import { trainerSelectionCapacityError, TRAINER_EXECUTION_SELECTION_LIMIT_MESSAGE } from "./dataset-doctor/trainer-execution-capacity";
 
 const UUID_RE =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const SELECTED_IMAGE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const SELECTED_IMAGE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-type Operation = "analyze" | "images" | "approve";
+type Operation = "analyze" | "images" | "approve" | "review-selection";
 
 function safeUpstreamResponse(upstream: Response, internalSecret: string) {
   return upstream.text().then((body) =>
@@ -68,7 +70,7 @@ export async function proxyDatasetDoctorOperation(
       const selectedImageIds = body?.selected_image_ids;
       if (
         !Array.isArray(selectedImageIds) ||
-        selectedImageIds.length === 0 ||
+        selectedImageIds.length < 3 || selectedImageIds.length > 100 || new Set(selectedImageIds).size !== selectedImageIds.length ||
         !selectedImageIds.every(
           (id: unknown) =>
             typeof id === "string" && SELECTED_IMAGE_ID_RE.test(id),
@@ -79,14 +81,9 @@ export async function proxyDatasetDoctorOperation(
           { status: 400 },
         );
       }
-      init = {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selected_image_ids: selectedImageIds,
-          queue_training: false,
-        }),
-      };
+      if (Object.keys(body).some((key) => operation === "approve" ? !["selected_image_ids", "queue_training"].includes(key) : key !== "selected_image_ids") || body.queue_training === true) return NextResponse.json({ error: "INVALID_SELECTED_IMAGE_IDS" }, { status: 400 });
+      if (operation === "approve" && trainerSelectionCapacityError(selectedImageIds.length, isDurableComputeJobsEnabled())) return NextResponse.json({ error: "TRAINER_EXECUTION_SELECTION_LIMIT", message: TRAINER_EXECUTION_SELECTION_LIMIT_MESSAGE }, { status: 409 });
+      init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(operation === "approve" ? { selected_image_ids: selectedImageIds, queue_training: false } : { selected_image_ids: selectedImageIds }) };
     }
 
     const upstream = await sirensApiFetch(

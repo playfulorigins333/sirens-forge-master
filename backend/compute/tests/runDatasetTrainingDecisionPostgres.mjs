@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 const url=process.env.COMPUTE_JOB_PLANE_DATABASE_URL;if(!url){console.error("COMPUTE_JOB_PLANE_DATABASE_URL is required");process.exit(2)}
-const run=(args)=>{const r=spawnSync("psql",[url,"-v","ON_ERROR_STOP=1",...args],{encoding:"utf8"});if(r.status){process.stderr.write(r.stderr);process.stdout.write(r.stdout);process.exit(r.status??1)}return r};
+const run=(args)=>{const r=spawnSync("psql",[url,"-v","ON_ERROR_STOP=1",...args],{encoding:"utf8"});if(r.error||r.status!==0){process.stderr.write(r.stderr);process.stdout.write(r.stdout);process.exit(r.status??1)}return r};
 for(const f of ["backend/compute/tests/computeJobPlanePostgresSetup.sql","supabase/migrations/20260824090000_private_creator_generation_media.sql","supabase/migrations/20260825090000_durable_compute_job_plane.sql","supabase/migrations/20260826004344_durable_compute_pass_4a_finalization.sql","supabase/migrations/20260826120000_durable_compute_pass_4c_video_stitch_foundation.sql"])run(["-f",f]);
 run(["-c",String.raw`
 create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;

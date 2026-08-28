@@ -5,7 +5,8 @@ import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { computePriorityForTier, isDurableComputeJobsEnabled, toCreatorComputeStatus } from "@/lib/compute-jobs";
 import { buildRecommendedTrainerRecipe, canonicalUuid, trainerRequestFingerprint } from "@/lib/trainer-application-contract";
 import { canonicalSelectedImageIds } from "@/lib/dataset-doctor/training-decision-contract";
-import { classifyDatasetDoctorQuality } from "@/lib/dataset-doctor/quality-classification";
+import { selectedQualityState, sameSelectedIds, validateReviewSelection } from "@/lib/dataset-doctor/quality-contract";
+import { trainerSelectionCapacityError, TRAINER_EXECUTION_SELECTION_LIMIT_MESSAGE } from "@/lib/dataset-doctor/trainer-execution-capacity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,10 +100,12 @@ export async function POST(req: Request) {
     const imageIds = canonicalSelectedImageIds(selections || []);
     if (!imageIds)
       return NextResponse.json({ error: "DATASET_SELECTION_INVALID" }, { status: 400 });
-    const qualityClassification = classifyDatasetDoctorQuality(datasetJob.summary, imageIds.length);
-    if (qualityClassification.state === "prohibited") return NextResponse.json({ error: "DATASET_TRAINING_PROHIBITED" }, { status: 409 });
+    const selectedAuthority = validateReviewSelection(datasetJob.summary);
+    if (!selectedAuthority || !sameSelectedIds(imageIds, selectedAuthority)) return NextResponse.json({ error: "DATASET_TRAINING_PROHIBITED" }, { status: 409 });
+    const qualityState = selectedQualityState(selectedAuthority);
+    if (qualityState === "prohibited") return NextResponse.json({ error: "DATASET_TRAINING_PROHIBITED" }, { status: 409 });
     let datasetTrainingDecision: null | Record<string, string> = null;
-    if (qualityClassification.state === "overridable") {
+    if (qualityState === "overridable") {
       if (!training_decision_receipt_id) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_REQUIRED" }, { status: 409 });
       if (!isDurableComputeJobsEnabled()) return NextResponse.json({ error: "DATASET_TRAINING_DECISION_EXECUTION_UNAVAILABLE", message: "Train Anyway is not available in the current Trainer execution mode. Improve the dataset before training." }, { status: 409 });
       const { data: validated, error: validationError } = await supabaseAdmin.rpc("validate_dataset_training_decision_receipt", { p_receipt_id: training_decision_receipt_id, p_user_id: userId, p_lora_id: lora_id, p_dataset_doctor_job_id: datasetJob.id });
@@ -117,7 +120,7 @@ export async function POST(req: Request) {
     const requestPayload = {
       identity_id: lora_id, dataset_doctor_job_id: datasetJob.id,
       dataset_reference: { bucket: dataset_r2_bucket, prefix: dataset_r2_prefix },
-      dataset_snapshot: datasetJob.summary,
+      dataset_snapshot: selectedAuthority,
       dataset_selection: { image_ids: imageIds, image_count: imageIds.length },
       dataset_training_decision: datasetTrainingDecision,
       trainer_recipe: buildRecommendedTrainerRecipe(),
@@ -144,6 +147,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, lora_id, ...toCreatorComputeStatus(job) }, { status: 202 });
     }
 
+    const executionLimit = trainerSelectionCapacityError(imageIds.length, false);
+    if (executionLimit) return NextResponse.json({ error: executionLimit, message: TRAINER_EXECUTION_SELECTION_LIMIT_MESSAGE }, { status: 409 });
     const now = new Date().toISOString();
     const { error: updateErr } = await supabaseAdmin
       .from("user_loras")

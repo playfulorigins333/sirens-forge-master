@@ -50,10 +50,10 @@ drop function public.prepare_dataset_training_decision_prompt(uuid,uuid,uuid,tex
 drop function public.record_dataset_training_decision_receipt(uuid,uuid,uuid,text);
 drop function public.validate_dataset_training_decision_receipt(uuid,uuid,uuid,uuid);
 drop function public.link_dataset_training_decision_receipt(uuid,uuid);
-drop function public.dataset_training_quality_state(jsonb,integer,boolean,jsonb);
+drop function public.dataset_training_quality_state(jsonb);
 drop function public.dataset_training_final_selection(uuid);
 drop function public.dataset_training_fingerprint(jsonb);
-drop function public.dataset_training_warning_snapshot(public.dataset_doctor_jobs);
+drop function public.dataset_training_selected_authority(jsonb);
 drop table public.dataset_doctor_training_decision_receipts;
 drop table public.dataset_doctor_training_decision_prompts;
 drop function public.dataset_training_decision_receipt_changes();

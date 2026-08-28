@@ -132,6 +132,7 @@ try {
     ["analyze", "active"],
     ["images", "trialing"],
     ["approve", "active"],
+    ["review-selection", "trialing"],
   ] as const) {
     reset()
     authResult = {
@@ -140,10 +141,10 @@ try {
       subscription: { status: subscriptionStatus },
     }
     const inbound =
-      operation === "approve"
+      operation === "approve" || operation === "review-selection"
         ? request("POST", {
-            selected_image_ids: ["image-1", "image_2.jpg"],
-            queue_training: true,
+            selected_image_ids: Array.from({length: operation === "approve" ? 10 : 3}, (_,i) => `40000000-0000-4000-8000-${String(i+1).padStart(12,"0")}`),
+            ...(operation === "approve" ? { queue_training: false } : {}),
           })
         : operation === "images"
           ? request("GET")
@@ -168,10 +169,10 @@ try {
         rebuild_from_r2: true,
       })
     } else {
-      assert.deepEqual(JSON.parse(String(railwayCalls[0].init?.body)), {
-        selected_image_ids: ["image-1", "image_2.jpg"],
-        queue_training: false,
-      })
+      const proxied=JSON.parse(String(railwayCalls[0].init?.body));
+      assert.equal(proxied.selected_image_ids.length, operation === "approve" ? 10 : 3)
+      if (operation === "approve") assert.equal(proxied.queue_training, false)
+      else assert.deepEqual(Object.keys(proxied), ["selected_image_ids"])
     }
   }
 
@@ -203,6 +204,7 @@ try {
   for (const operation of ["analyze", "images", "approve"]) {
     assert.match(clientSource, new RegExp(`/api/lora/dataset-doctor/jobs/\\$\\{jobId\\}/${operation}`))
   }
+  assert.match(clientSource, /\/api\/lora\/dataset-doctor\/jobs\/\$\{datasetDoctorJobId\}\/review-selection/)
   assert.match(clientSource, /fetch\(putUrl/)
   assert.match(clientSource, /fetch\("\/api\/lora\/get-upload-urls"/)
   assert.match(clientSource, /fetch\("\/api\/lora\/train"/)

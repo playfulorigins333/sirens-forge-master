@@ -2,6 +2,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { canonicalUuid } from "@/lib/trainer-application-contract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,10 +23,20 @@ export async function POST(req: Request) {
     const control = /[\u0000-\u001f\u007f]/;
     const identityName = typeof body.identityName === "string" ? body.identityName.trim() : "";
     const description = body.description == null ? "" : typeof body.description === "string" ? body.description.trim() : null;
-    if (!identityName || identityName.length > 120 || description === null || description.length > 1000 || control.test(identityName) || control.test(description)) {
+    const requestedLoraId = body.lora_id === undefined ? null : canonicalUuid(body.lora_id);
+    if (Object.keys(body).some((key) => !["identityName", "description", "lora_id"].includes(key)) || (body.lora_id !== undefined && !requestedLoraId) || !identityName || identityName.length > 120 || description === null || description.length > 1000 || control.test(identityName) || control.test(description)) {
       return NextResponse.json({ error: "INVALID_LORA_METADATA" }, { status: 400 });
     }
 
+
+    if (requestedLoraId) {
+      const { data: exactDraft } = await supabaseAdmin.from("user_loras").select("id,status,user_id").eq("id", requestedLoraId).eq("user_id", userId).maybeSingle();
+      if (!exactDraft) return NextResponse.json({ error: "LORA_NOT_FOUND" }, { status: 404 });
+      if (exactDraft.status !== "draft") return NextResponse.json({ error: "LORA_NOT_DRAFT" }, { status: 409 });
+      const { error } = await supabaseAdmin.from("user_loras").update({ name: identityName, description, updated_at: new Date().toISOString() }).eq("id", requestedLoraId).eq("user_id", userId).eq("status", "draft");
+      if (error) return NextResponse.json({ error: "Failed to update LoRA draft" }, { status: 500 });
+      return NextResponse.json({ lora_id: requestedLoraId, reused: true, status: "draft" });
+    }
     // 1️⃣ Check for existing active draft FOR THIS USER
     const { data: existingDraft, error: draftErr } = await supabaseAdmin
       .from("user_loras")

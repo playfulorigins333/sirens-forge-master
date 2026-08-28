@@ -2,7 +2,8 @@
 
 import { clearPendingSubmission, pendingSubmissionKey } from "@/lib/compute-idempotency-client";
 import { DATASET_LIMITS } from "@/lib/dataset-doctor/dataset-limits";
-import { classifyDatasetDoctorQuality } from "@/lib/dataset-doctor/quality-classification";
+import { MAX_SOURCE_BYTES, datasetSourceExtension } from "@/lib/dataset-doctor/upload-contract";
+import { ReviewSelection, SelectedAuthority, sameSelectedIds, selectedQualityState, validateReviewSelection } from "@/lib/dataset-doctor/quality-contract";
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
@@ -106,6 +107,7 @@ type DatasetDoctorAnalyzeSummary = {
   dataset_ready?: boolean;
   confidence_message?: string | null;
   non_overridable_conditions?: Array<string | { category?: string }>;
+  analysis_version?: number; mode?: string; quality_contract_version?: string; review_selection?: ReviewSelection;
 };
 
 type DatasetDoctorAnalyzeResult = {
@@ -291,6 +293,7 @@ export default function LoRATrainerPage() {
     DatasetDoctorImage[]
   >([]);
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
+  const [reviewSelection, setReviewSelection] = useState<SelectedAuthority | null>(null);
   const [isApproving, setIsApproving] = useState(false);
   const [trainingProgress, setTrainingProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -328,6 +331,7 @@ export default function LoRATrainerPage() {
       setDatasetDoctorSummary(null);
       setDatasetDoctorImages([]);
       setSelectedImageIds([]);
+      setReviewSelection(null);
       setIsApproving(false);
       setShowConfetti(false);
       setShowManualReview(false);
@@ -479,10 +483,10 @@ export default function LoRATrainerPage() {
   }, [uploadedImages]);
 
   const handleFiles = (files: File[]) => {
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    const imageFiles = files.filter((file) => datasetSourceExtension(file.type) && file.size > 0 && file.size <= MAX_SOURCE_BYTES);
 
     if (imageFiles.length === 0) {
-      setErrorMessage("Please upload image files only.");
+      setErrorMessage("Use JPEG, PNG, or WebP files up to 25 MiB each.");
       return;
     }
 
@@ -521,7 +525,7 @@ export default function LoRATrainerPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         lora_id: loraIdForPath,
-        image_count: images.length,
+        images: images.map((image) => ({ mime_type: image.file.type, size_bytes: image.file.size })),
       }),
     });
 
@@ -534,7 +538,7 @@ export default function LoRATrainerPage() {
       dataset_doctor_job_id?: string;
       bucket?: string;
       prefix?: string;
-      urls: { url: string; key: string }[];
+      urls: { url: string; key: string; content_type: string }[];
     };
 
     const { dataset_doctor_job_id, bucket, prefix, urls } = json;
@@ -551,10 +555,7 @@ export default function LoRATrainerPage() {
       const img = images[i];
       const putUrl = urls[i].url;
 
-      const putRes = await fetch(putUrl, {
-        method: "PUT",
-        body: img.file,
-      });
+      const putRes = await fetch(putUrl, { method: "PUT", headers: { "Content-Type": urls[i].content_type }, body: img.file });
 
       if (!putRes.ok) {
         throw new Error(`R2 upload failed on image ${i + 1}`);
@@ -640,6 +641,7 @@ export default function LoRATrainerPage() {
     setDatasetDoctorSummary(null);
     setDatasetDoctorImages([]);
     setSelectedImageIds([]);
+    setReviewSelection(null);
     setShowManualReview(false);
     setTrainingStatus("training");
 
@@ -653,6 +655,7 @@ export default function LoRATrainerPage() {
         body: JSON.stringify({
           identityName: identityName.trim(),
           description: (description?.trim() || "") || null,
+          ...(loraId ? { lora_id: loraId } : {}),
         }),
       });
 
@@ -665,7 +668,7 @@ export default function LoRATrainerPage() {
       }
 
       const createdId = draftJson?.lora_id as string | undefined;
-      if (!createdId) {
+      if (!createdId || (loraId && createdId !== loraId)) {
         setTrainingStatus("failed");
         setErrorMessage("Server response missing lora_id.");
         return;
@@ -697,6 +700,8 @@ export default function LoRATrainerPage() {
         .map((image) => image.id);
 
       setSelectedImageIds(acceptedIds);
+      const initialAuthority = validateReviewSelection(analyzeResult.summary);
+      setReviewSelection(sameSelectedIds(acceptedIds, initialAuthority) ? initialAuthority : null);
 
       setTrainingStatus("review");
       setErrorMessage(null);
@@ -708,24 +713,34 @@ export default function LoRATrainerPage() {
     }
   };
 
+  const ensureCurrentReviewSelection = async (): Promise<SelectedAuthority> => {
+    if (sameSelectedIds(selectedImageIds, reviewSelection)) return reviewSelection!;
+    if (!datasetDoctorJobId) throw new Error("Missing Dataset Doctor job.");
+    const response = await fetch(`/api/lora/dataset-doctor/jobs/${datasetDoctorJobId}/review-selection`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ selected_image_ids: selectedImageIds }) });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(json?.message || json?.error || "Dataset Doctor could not review this selection.");
+    const authority = validateReviewSelection(json?.summary || { ...datasetDoctorSummary, review_selection: json?.review_selection });
+    if (!authority || !sameSelectedIds(selectedImageIds, authority)) throw new Error("DATASET_REVIEW_SELECTION_STALE");
+    setReviewSelection(authority); return authority;
+  };
+
   const handleApproveAndStartTraining = async (trainAnyway = false) => {
     if (!loraId || !datasetDoctorJobId) { setErrorMessage("Missing LoRA or Dataset Doctor job reference."); return; }
-    if (datasetQualityClassification.state === "prohibited") {
-      setErrorMessage("Training is prohibited until Dataset Doctor can verify this dataset safely.");
-      return;
-    }
     setIsApproving(true); setErrorMessage(null);
     try {
+      const currentReview = await ensureCurrentReviewSelection();
+      const currentQualityState = selectedQualityState(currentReview);
+      if (currentQualityState === "prohibited") throw new Error("Training is prohibited until Dataset Doctor can verify this selection safely.");
       let receiptId: string | undefined;
       let activeDecisionKey = decisionKey;
-      if (datasetQualityClassification.state === "overridable" && !trainAnyway) {
+      if (currentQualityState === "overridable" && !trainAnyway) {
         activeDecisionKey = await pendingSubmissionKey("sirensforge:pending-dataset-training-decision", { lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, selected_image_ids: [...selectedImageIds].sort() });
         const prepareRes = await fetch("/api/lora/dataset-training-decision", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": activeDecisionKey }, body: JSON.stringify({ action: "prepare", lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, selected_image_ids: selectedImageIds }) });
         const prepared = await prepareRes.json().catch(() => ({}));
         if (!prepareRes.ok || !prepared.prompt_id) throw new Error(prepared.message || prepared.error || "Train Anyway is unavailable for this dataset.");
         setDecisionKey(activeDecisionKey); setShownWarningSnapshot(prepared.warning_snapshot); setShowTrainAnywayConfirm(true); return;
       }
-      if (datasetQualityClassification.state === "overridable" && trainAnyway) {
+      if (currentQualityState === "overridable" && trainAnyway) {
         if (!activeDecisionKey || !shownWarningSnapshot) throw new Error("Prepare the Train Anyway confirmation first.");
         if (!datasetApprovedForDecision) { await approveDatasetDoctorJob(datasetDoctorJobId, selectedImageIds); setDatasetApprovedForDecision(true); }
         const decisionRes = await fetch("/api/lora/dataset-training-decision", { credentials: "include", method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": activeDecisionKey }, body: JSON.stringify({ action: "confirm", lora_id: loraId, dataset_doctor_job_id: datasetDoctorJobId, decision: "train_anyway" }) });
@@ -750,15 +765,11 @@ export default function LoRATrainerPage() {
 
   const handleImproveDataset = () => {
     if (decisionKey) clearPendingSubmission("sirensforge:pending-dataset-training-decision", decisionKey);
-    resetTrainingState();
+    setDatasetDoctorJobId(null);setDatasetDoctorSummary(null);setDatasetDoctorImages([]);setSelectedImageIds([]);setReviewSelection(null);setDecisionKey(null);setShownWarningSnapshot(null);setShowTrainAnywayConfirm(false);setDatasetApprovedForDecision(false);setTrainingStatus("idle");setErrorMessage(null);
   };
 
   const toggleSelectedImage = (imageId: string) => {
-    setSelectedImageIds((prev) =>
-      prev.includes(imageId)
-        ? prev.filter((id) => id !== imageId)
-        : [...prev, imageId]
-    );
+    setSelectedImageIds((prev) => { const next=prev.includes(imageId)?prev.filter((id)=>id!==imageId):[...prev,imageId]; if(!sameSelectedIds(next,reviewSelection)){setReviewSelection(null);if(decisionKey)clearPendingSubmission("sirensforge:pending-dataset-training-decision",decisionKey);setDecisionKey(null);setShownWarningSnapshot(null);setShowTrainAnywayConfirm(false);setDatasetApprovedForDecision(false);} return next; });
   };
 
   const handleRetry = () => {
@@ -781,7 +792,7 @@ export default function LoRATrainerPage() {
 
   const isReadyToTrain =
     uploadedImages.length >= 10 && identityName.trim().length > 0;
-  const datasetQualityClassification = classifyDatasetDoctorQuality(datasetDoctorSummary, selectedImageIds.length);
+  const datasetQualityClassification = { state: reviewSelection && sameSelectedIds(selectedImageIds, reviewSelection) ? selectedQualityState(reviewSelection) : "prohibited" as const };
 
   if (!mounted) {
     return null;
@@ -1115,7 +1126,7 @@ export default function LoRATrainerPage() {
                         animate={{ opacity: 1, scale: 1 }}
                         className="text-emerald-400"
                       >
-                        ✨ Ready to train!
+                        Ready for Dataset Doctor review
                       </motion.span>
                     )}
                   </span>
@@ -1527,38 +1538,42 @@ export default function LoRATrainerPage() {
                           Dataset Doctor Job: <span className="font-mono">{datasetDoctorJobId}</span>
                         </p>
                       )}
-                      {datasetDoctorSummary && (
+                      {reviewSelection && sameSelectedIds(selectedImageIds, reviewSelection) ? (
                         <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm text-gray-300">
                           <div className="bg-black/30 rounded-xl p-3 border border-gray-800">
                             Accepted
                             <div className="text-emerald-400 font-semibold text-lg">
-                              {datasetDoctorSummary.accepted_count ?? 0}
+                              {String(reviewSelection.review_selection.quality_summary.accepted_count)}
                             </div>
                           </div>
                           <div className="bg-black/30 rounded-xl p-3 border border-gray-800">
                             Rejected
                             <div className="text-rose-400 font-semibold text-lg">
-                              {datasetDoctorSummary.rejected_count ?? 0}
+                              {String(reviewSelection.review_selection.quality_summary.rejected_count)}
                             </div>
                           </div>
                           <div className="bg-black/30 rounded-xl p-3 border border-gray-800">
                             Review
                             <div className="text-amber-400 font-semibold text-lg">
-                              {datasetDoctorSummary.review_count ?? 0}
+                              0
                             </div>
                           </div>
                           <div className="bg-black/30 rounded-xl p-3 border border-gray-800">
                             Ready
                             <div
                               className={`font-semibold text-lg ${
-                                datasetDoctorSummary.dataset_ready
+                                reviewSelection.review_selection.quality_summary.dataset_ready
                                   ? "text-emerald-400"
                                   : "text-amber-400"
                               }`}
                             >
-                              {datasetDoctorSummary.dataset_ready ? "Yes" : "Not yet"}
+                              {reviewSelection.review_selection.quality_summary.dataset_ready ? "Yes" : "Not yet"}
                             </div>
                           </div>
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-xl border border-amber-400/30 bg-amber-500/10 p-3 text-sm text-amber-100">
+                          Dataset Doctor needs to recheck this selection before it can be exported or trained.
                         </div>
                       )}
                     </>
