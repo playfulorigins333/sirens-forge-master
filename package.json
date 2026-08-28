@@ -7,7 +7,7 @@
   "scripts": {
     "image-model:validate": "tsx tools/image_model_validation/cli.ts",
     "test:image-model-validation": "tsx --test tools/image_model_validation/tests/*.test.ts",
-    "test:identity-lora-metadata": "tsx backend/security/tests/identityLoraMetadataBehavior.test.ts",
+    "test:identity-lora-metadata": "tsx backend/security/tests/identityLoraMetadataBehavior.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/loraCreateExactTwinBehavior.test.ts",
     "test:launch-observability-recovery": "tsx backend/operations/tests/launchObservabilityRecovery.test.ts",
     "test:frontend-launch-readiness": "npm run test:identity-lora-metadata && npm run test:dataset-doctor-proxy && tsx backend/security/tests/frontendLaunchReadiness.test.ts",
     "test:generator-creation-loop": "tsx backend/security/tests/generatorCreationLoopContracts.test.ts",

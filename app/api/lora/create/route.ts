@@ -1,8 +1,8 @@
 // app/api/lora/create/route.ts
 import { NextResponse } from "next/server";
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
-import { ensureActiveSubscription } from "@/lib/subscription-checker";
-import { canonicalUuid } from "@/lib/trainer-application-contract";
+import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { ensureActiveSubscription } from "../../../../lib/subscription-checker";
+import { canonicalUuid } from "../../../../lib/trainer-application-contract";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
