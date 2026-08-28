@@ -40,7 +40,7 @@ test("durable image validation is metadata-only and legacy resolver remains afte
   const durableReturn = source.indexOf("return NextResponse.json(toCreatorComputeStatus(job), { status: 202 })", durableStart);
   const legacyResolver = source.indexOf("resolveLoraStack(bodyMode, identityLora, userId)");
   assert.ok(durableStart >= 0 && durableReturn > durableStart && legacyResolver > durableReturn);
-  assert.match(source.slice(durableStart, durableReturn), /resolveOwnedIdentityLoraMetadata/);
+  assert.match(source.slice(durableStart, durableReturn), /buildDurableIdentityReference/);
   assert.doesNotMatch(source.slice(durableStart, durableReturn), /buildWorkflow|resolveLoraStack|sirensApiFetch|BIGLUST|checkpoint|provider/);
   assert.match(source.slice(legacyResolver), /buildWorkflow/);
 });
@@ -89,7 +89,9 @@ test("video stays unavailable and durable client tracks a submitted job immediat
   assert.match(client, /sirensforge:active-compute-jobs/);
   assert.match(client, /new Set\(\[\.\.\.ids, data\.job_id\]\)/);
   assert.match(client, /ids\.filter\(\(id\) => !terminalIds\.includes\(id\)\)/);
-  assert.match(client, /\["completed", "failed", "cancelled"\]\.includes\(job\.status\)/);
+  assert.match(client, /job\.status === "completed"/);
+  assert.match(client, /job\.status === "failed"/);
+  assert.match(client, /job\.status === "cancelled"/);
   assert.match(client, /pendingSubmissionKey\("sirensforge:pending-image-compute"/);
   assert.doesNotMatch(client, /"Idempotency-Key": crypto\.randomUUID\(\)/);
   const trainer = read("app/lora/train/TrainPageClient.tsx");

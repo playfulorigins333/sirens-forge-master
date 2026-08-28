@@ -13,7 +13,7 @@ import { isPublicPath } from "../../../proxy";
 import { parseGenerationSuccess } from "../../../lib/generation/upstreamResponse";
 
 const owner="11111111-1111-4111-8111-111111111111", foreign="22222222-2222-4222-8222-222222222222", lora="33333333-3333-4333-8333-333333333333";
-function deps(rowOwner=owner,status="completed"){let queries=0;const value:IdentityLoraMetadataDependencies={async loadOwnedCompletedLora(_id,userId){queries++;return userId===rowOwner&&status==="completed"?{artifact_r2_bucket:null,artifact_r2_key:"owned/key",trigger_token:"owner_token"}:null}};return{value,get queries(){return queries}}}
+function deps(rowOwner=owner,status="completed"){let queries=0;const value:IdentityLoraMetadataDependencies={async loadOwnedCompletedLora(_id,userId){queries++;return userId===rowOwner&&status==="completed"?{artifact_r2_bucket:"private-artifacts",artifact_r2_key:"owned/key",trigger_token:"owner_token"}:null}};return{value,get queries(){return queries}}}
 
 const own=deps(); const resolved=await resolveOwnedIdentityLoraMetadata(lora,owner,own.value); assert.equal(resolved.trigger_token,"owner_token");
 const denied=deps(owner); await assert.rejects(()=>resolveOwnedIdentityLoraMetadata(lora,foreign,denied.value),/IDENTITY_LORA_UNAVAILABLE/);

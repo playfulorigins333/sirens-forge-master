@@ -20,7 +20,7 @@ import { isPrivateCreatorMediaEnabled } from "../../../lib/private-creator-media
 import { verifyPrivateGenerationObject } from "../../../lib/private-creator-media/r2";
 import { randomUUID } from "node:crypto";
 import { computePriorityForTier, isDurableComputeJobsEnabled, submitComputeJob, toCreatorComputeStatus } from "../../../lib/compute-jobs";
-import { resolveOwnedIdentityLoraMetadata } from "../../../lib/generation/identityLoraMetadata";
+import { buildDurableIdentityReference } from "../../../lib/generation/identityLoraMetadata";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -194,7 +194,13 @@ export async function POST(req: NextRequest) {
 
     const userId = auth.user.id;
     const durableComputeEnabled = isDurableComputeJobsEnabled();
-    if (!isGenerationExecutionEnabled()) {
+    if (durableComputeEnabled && !isPrivateCreatorMediaEnabled()) {
+      return NextResponse.json(
+        { error: "GENERATION_UNAVAILABLE", message: "Image generation is temporarily unavailable." },
+        { status: 503 },
+      );
+    }
+    if (!durableComputeEnabled && !isGenerationExecutionEnabled()) {
       return NextResponse.json(
         { error: "GENERATION_UNAVAILABLE", message: "Image generation is temporarily unavailable." },
         { status: 503 },
@@ -252,9 +258,9 @@ export async function POST(req: NextRequest) {
     if (durableComputeEnabled) {
       const idempotencyKey = req.headers.get("idempotency-key")?.trim();
       if (!idempotencyKey || idempotencyKey.length > 128) return NextResponse.json({ error: "INVALID_IDEMPOTENCY_KEY" }, { status: 400 });
-      if (identityLora) {
-        await resolveOwnedIdentityLoraMetadata(identityLora, userId);
-      }
+      const identityReference = identityLora
+        ? await buildDurableIdentityReference(identityLora, userId)
+        : null;
       const job = await submitComputeJob({
         ownerId: userId,
         workload: "image",
@@ -265,6 +271,7 @@ export async function POST(req: NextRequest) {
           negative_prompt: negativePrompt,
           body_presentation: bodyMode,
           identity_id: identityLora,
+          ...(identityReference ? { identity_reference: identityReference } : {}),
           width: normalized.width,
           height: normalized.height,
           steps: normalized.steps,
@@ -556,6 +563,13 @@ export async function POST(req: NextRequest) {
 
     if (message.includes("IDEMPOTENCY_CONFLICT")) {
       return NextResponse.json({ error: "IDEMPOTENCY_CONFLICT" }, { status: 409 });
+    }
+
+    if (message === "COMPUTE_POLICY_UNCONFIGURED") {
+      return NextResponse.json(
+        { error: "GENERATION_UNAVAILABLE", message: "Image generation is temporarily unavailable." },
+        { status: 503 },
+      );
     }
 
     if (message === "IDENTITY_LORA_UNAVAILABLE") {

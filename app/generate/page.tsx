@@ -65,16 +65,6 @@ type GenerationMode =
   | "text_to_video";
 
 type BaseModel = "feminine" | "masculine";
-type StylePreset =
-  | "photorealistic"
-  | "cinematic"
-  | "editorial"
-  | "soft_glam"
-  | "artistic"
-  | "anime";
-
-type QualityPreset = "fast" | "balanced" | "quality" | "ultra";
-type ConsistencyPreset = "low" | "medium" | "high" | "perfect";
 type RefineVariant = "cinematic" | "explicit" | "photoreal";
 
 type LoraMode = "single" | "advanced";
@@ -1289,31 +1279,20 @@ function ImageToVideoUploadSection(props: {
 
 function ModelStyleSection(props: {
   baseModel: BaseModel;
-  stylePreset: StylePreset;
   onBaseModelChange: (model: BaseModel) => void;
-  onStylePresetChange: (preset: StylePreset) => void;
 }) {
   const baseModels: { id: BaseModel; label: string }[] = [
     { id: "feminine", label: "Feminine" },
     { id: "masculine", label: "Masculine" },
   ];
 
-  const stylePresets: StylePreset[] = [
-    "photorealistic",
-    "cinematic",
-    "editorial",
-    "soft_glam",
-    "artistic",
-    "anime",
-  ];
-
   return (
     <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.18 }}>
     <Card className="border-gray-800 bg-gray-900/80 transition-all duration-300 hover:shadow-[0_12px_30px_rgba(0,0,0,0.20)]">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm md:text-base">Model & Style</CardTitle>
+        <CardTitle className="text-sm md:text-base">Body Presentation</CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Choose a body presentation and creative style for the Image Engine.
+          Choose the body presentation used by the Image Engine.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -1336,29 +1315,6 @@ function ModelStyleSection(props: {
                   }`}
                 >
                   {bm.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div>
-          <p className="mb-2 text-xs font-semibold text-gray-200">Style Preset</p>
-          <div className="flex flex-wrap gap-2">
-            {stylePresets.map((preset) => {
-              const isActive = props.stylePreset === preset;
-              return (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => props.onStylePresetChange(preset)}
-                  className={`rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all duration-200 ${
-                    isActive
-                      ? "bg-purple-500 text-white"
-                      : "bg-gray-800 text-gray-300 hover:-translate-y-0.5 hover:bg-gray-700 hover:shadow-[0_8px_18px_rgba(0,0,0,0.18)]"
-                  }`}
-                >
-                  {preset.replace("_", " ")}
                 </button>
               );
             })}
@@ -1707,8 +1663,6 @@ function GenerateButton(props: {
   mode: GenerationMode;
   isGenerating: boolean;
   batchSize: number;
-  qualityPreset: QualityPreset;
-  consistencyPreset: ConsistencyPreset;
   disabled?: boolean;
   disabledReason?: string | null;
   selectedIdentityLabel: string;
@@ -1728,7 +1682,7 @@ function GenerateButton(props: {
     ? props.disabledReason
     : `This will create ${props.batchSize} ${
         props.batchSize > 1 ? "outputs" : "output"
-      } at ${props.qualityPreset} quality with ${props.consistencyPreset} consistency using ${props.selectedIdentityLabel}.`;
+      } using ${props.selectedIdentityLabel}.`;
 
   return (
     <IdleGlow>
@@ -3308,14 +3262,60 @@ export default function GeneratePage() {
       const activeStatuses: string[] = [];
       await Promise.all(activeComputeJobIds.map(async (jobId) => {
         const response = await fetch(`/api/compute/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" }).catch(() => null);
-        if (!active || !response?.ok) return;
+        if (!active) return;
+        if (!response?.ok) {
+          if (response?.status === 409) setErrorMessage("Your completed image could not be recovered yet. It remains available for another recovery attempt.");
+          return;
+        }
         const job = await response.json();
         if (["queued", "running", "recovering", "cancelling"].includes(job.status)) activeStatuses.push(job.status);
-        else if (["completed", "failed", "cancelled"].includes(job.status)) terminalIds.push(jobId);
+        else if (job.status === "completed") {
+          const result = job.image_result;
+          const outputs = parseCreatorGenerationOutputs({ outputs: result?.outputs });
+          if (!isUuidLike(result?.generation_id) || !outputs.length || outputs.some((output) => !isPrivateGenerationOutput(output))) {
+            setErrorMessage("Your completed image could not be recovered yet. It remains available for another recovery attempt.");
+            return;
+          }
+          try {
+            const hydrated = await Promise.all(outputs.map(async (output: any): Promise<GeneratedItem> => ({
+              id: output.id,
+              kind: "image",
+              url: await resolveGenerationOutputUrl(output),
+              prompt: typeof result.prompt === "string" ? result.prompt : "",
+              settings: {
+                negative_prompt: result.negative_prompt,
+                body_mode: result.body_mode,
+                steps: result.steps, cfg: result.cfg, seed: result.seed,
+                width: result.width, height: result.height,
+                identity_lora: result.identity_id,
+                generation_id: result.generation_id,
+              },
+              createdAt: result.completed_at,
+              dbGenerationId: result.generation_id,
+              generationAssetId: output.id,
+              privateAsset: true,
+            })));
+            const addUnique = (previous: GeneratedItem[]) => {
+              const known = new Set(previous.map((item) => item.generationAssetId).filter(Boolean));
+              return [...hydrated.filter((item) => !known.has(item.generationAssetId)), ...previous];
+            };
+            setItems((previous) => addUnique(previous).slice(0, 12));
+            setHistory(addUnique);
+            terminalIds.push(jobId);
+          } catch {
+            setErrorMessage("Your completed image could not be recovered yet. It remains available for another recovery attempt.");
+          }
+        } else if (job.status === "failed") {
+          setErrorMessage("Image generation failed. Please try again.");
+          terminalIds.push(jobId);
+        } else if (job.status === "cancelled") {
+          setErrorMessage("Image generation was cancelled.");
+          terminalIds.push(jobId);
+        }
         else activeStatuses.push("status unavailable");
       }));
       if (!active) return;
-      if (activeStatuses.length) setQueuedComputeMessage(`${activeStatuses.length} generation job${activeStatuses.length === 1 ? " is" : "s are"} safely queued or processing.`);
+      setQueuedComputeMessage(activeStatuses.length ? `${activeStatuses.length} generation job${activeStatuses.length === 1 ? " is" : "s are"} safely queued or processing.` : null);
       if (terminalIds.length) setActiveComputeJobIds((ids) => {
         const remaining = ids.filter((id) => !terminalIds.includes(id));
         localStorage.setItem("sirensforge:active-compute-jobs", JSON.stringify(remaining));
@@ -3334,10 +3334,6 @@ export default function GeneratePage() {
   const [identitiesLoaded, setIdentitiesLoaded] = useState(false);
 
   const [baseModel, setBaseModel] = useState<BaseModel>("feminine");
-  const [stylePreset, setStylePreset] = useState<StylePreset>("photorealistic");
-  const [qualityPreset] = useState<QualityPreset>("balanced");
-  const [consistencyPreset] = useState<ConsistencyPreset>("medium");
-
   const [loraSelection, setLoraSelection] = useState<LoraSelection>({
     mode: "single",
     selected: [],
@@ -3485,27 +3481,10 @@ export default function GeneratePage() {
 
     const loadIdentities = async () => {
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session?.user?.id) {
-          if (!cancelled) {
-            setIdentityOptions([]);
-            setIdentitiesLoaded(true);
-          }
-          return;
-        }
-
-        const { data, error } = await supabase
-          .from("user_loras")
-          .select("id, name")
-          .eq("user_id", session.user.id)
-          .eq("status", "completed")
-          .order("created_at", { ascending: false });
-
-        if (error) {
-          console.error("Failed to load completed AI Twins:", error);
+        const response = await fetch("/api/generate/identities", { cache: "no-store", credentials: "same-origin" });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || !Array.isArray(body.identities)) {
+          console.error("Failed to load Image-ready AI Twins.");
           if (!cancelled) {
             setIdentityOptions([]);
             setIdentitiesLoaded(true);
@@ -3514,7 +3493,7 @@ export default function GeneratePage() {
         }
 
         if (!cancelled) {
-          setIdentityOptions(data ?? []);
+          setIdentityOptions(body.identities);
           setIdentitiesLoaded(true);
         }
       } catch (err) {
@@ -3753,7 +3732,6 @@ export default function GeneratePage() {
     setPrompt(prefilledPrompt);
     setMode("text_to_image");
     setOutputType("IMAGE");
-    setStylePreset(normalizedAction === "different_style" ? "cinematic" : "photorealistic");
     setBatchSize(4);
     setShowNextPackBanner(true);
     setHighlightPrompt(true);
@@ -3977,9 +3955,7 @@ ${basePrompt}`,
     try {
       const seedValue = lockSeed ? seed : Math.floor(Math.random() * 1_000_000_000);
 
-      const baseParams = {
-        engine: "comfyui",
-        template: "sirens_image_v3_production",
+      const imageRequest = {
         prompt: promptToUse,
         negative_prompt: negativePrompt,
         body_mode: bodyModeMap[baseModel],
@@ -3989,8 +3965,6 @@ ${basePrompt}`,
         cfg: guidance,
         seed: seedValue,
         identity_lora: selectedLoraId ? selectedLoraId : null,
-        lora_used: selectedLoraId ? selectedLoraId : null,
-        active_identity_id: selectedLoraId ? selectedLoraId : null,
       };
 
       const runCount =
@@ -4001,7 +3975,7 @@ ${basePrompt}`,
       const generatedAll: GeneratedItem[] = [];
 
       if (mode === "text_to_image" && durableCompute) {
-        const durableIntent = { ...baseParams, batch: runCount };
+        const durableIntent = { ...imageRequest, batch: runCount };
         const submissionKey = await pendingSubmissionKey("sirensforge:pending-image-compute", durableIntent);
         const res = await fetch("/api/generate", {
           method: "POST",
@@ -4029,7 +4003,7 @@ ${basePrompt}`,
 
         if (mode === "text_to_image") {
           const runPayload = {
-            ...baseParams,
+            ...imageRequest,
             seed: runSeed,
           };
 
@@ -4089,7 +4063,7 @@ ${basePrompt}`,
           generatedAll.push(...generated);
         } else {
           const videoPayload = {
-            ...baseParams,
+            ...imageRequest,
             mode,
             seed: runSeed,
             image_input:
@@ -4423,9 +4397,7 @@ ${basePrompt}`,
 
                     <ModelStyleSection
                       baseModel={baseModel}
-                      stylePreset={stylePreset}
                       onBaseModelChange={setBaseModel}
-                      onStylePresetChange={setStylePreset}
                     />
                   </div>
 
@@ -4433,8 +4405,6 @@ ${basePrompt}`,
                     mode={mode}
                     isGenerating={isGenerating}
                     batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
-                    qualityPreset={qualityPreset}
-                    consistencyPreset={consistencyPreset}
                     disabled={!canGenerate}
                     disabledReason={generateDisabledReason}
                     selectedIdentityLabel={selectedIdentityLabel}
