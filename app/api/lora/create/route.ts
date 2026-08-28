@@ -33,8 +33,9 @@ export async function POST(req: Request) {
       const { data: exactDraft } = await supabaseAdmin.from("user_loras").select("id,status,user_id").eq("id", requestedLoraId).eq("user_id", userId).maybeSingle();
       if (!exactDraft) return NextResponse.json({ error: "LORA_NOT_FOUND" }, { status: 404 });
       if (exactDraft.status !== "draft") return NextResponse.json({ error: "LORA_NOT_DRAFT" }, { status: 409 });
-      const { error } = await supabaseAdmin.from("user_loras").update({ name: identityName, description, updated_at: new Date().toISOString() }).eq("id", requestedLoraId).eq("user_id", userId).eq("status", "draft");
+      const { data: updatedDraft, error } = await supabaseAdmin.from("user_loras").update({ name: identityName, description, updated_at: new Date().toISOString() }).eq("id", requestedLoraId).eq("user_id", userId).eq("status", "draft").select("id,status").maybeSingle();
       if (error) return NextResponse.json({ error: "Failed to update LoRA draft" }, { status: 500 });
+      if (!updatedDraft || updatedDraft.id !== requestedLoraId || updatedDraft.status !== "draft") return NextResponse.json({ error: "LORA_NOT_DRAFT" }, { status: 409 });
       return NextResponse.json({ lora_id: requestedLoraId, reused: true, status: "draft" });
     }
     // 1️⃣ Check for existing active draft FOR THIS USER
