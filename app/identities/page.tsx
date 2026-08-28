@@ -4,6 +4,7 @@ import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { supabaseServer } from "@/lib/supabaseServer";
 import IdentitiesClient, { IdentityCardItem } from "./IdentitiesClient";
+import { projectTrainerState } from "@/lib/lora/trainer-state";
 
 export const dynamic = "force-dynamic";
 
@@ -196,7 +197,8 @@ export default async function IdentitiesPage() {
 
   const generationRows: GenerationRow[] = Array.isArray(generations) ? generations : [];
 
-  const items: IdentityCardItem[] = (loras || []).map((lora: any) => {
+  const items: IdentityCardItem[] = (loras || []).map((rawLora: any) => {
+    const lora = projectTrainerState(rawLora);
     const linkedAssets = generationRows.filter(
       (row) => isRealAsset(row) && matchesIdentityLink(row, lora.id)
     );

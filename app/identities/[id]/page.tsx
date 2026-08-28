@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import IdentityDetailClient from "./IdentityDetailClient";
+import { projectTrainerState } from "@/lib/lora/trainer-state";
 
 type IdentityDetailAsset = {
   id: string;
@@ -213,10 +214,11 @@ export default async function IdentityDetailPage({
   const imageCount = assets.filter((a) => a.kind === "image").length;
   const videoCount = assets.filter((a) => a.kind === "video").length;
 
+  const projectedIdentity = projectTrainerState(identityRow);
   const identity: IdentityDetailData = {
-    id: asString(identityRow.id, id),
+    id: asString(projectedIdentity.id, id),
     name: asString(identityRow.name, "Unnamed Identity"),
-    status: asString(identityRow.status, "draft"),
+    status: asString(projectedIdentity.status, "draft"),
     triggerToken: asNullableString(identityRow.trigger_token),
     createdAt: asDateString(identityRow.created_at),
     completedAt: asNullableString(identityRow.completed_at),

@@ -146,11 +146,13 @@ try {
   assert.match(activeRoutes.status, /ensureActiveSubscription/)
   assert.match(activeRoutes.status, /data\.user_id !== userId/)
   assert.match(activeRoutes.uploadUrls, /ensureActiveSubscription/)
-  assert.match(activeRoutes.uploadUrls, /lora\.user_id !== userId/)
-  assert.match(activeRoutes.uploadUrls, /r2\.send\(/)
+  assert.match(activeRoutes.uploadUrls, /\.eq\("user_id",auth\.user\.id\)/)
+  assert.match(activeRoutes.uploadUrls, /getSignedUrl\(r2,/)
   assert.match(activeRoutes.train, /ensureActiveSubscription/)
   assert.match(activeRoutes.train, /lora\.user_id !== userId/)
-  assert.match(activeRoutes.train, /status: "queued"/)
+  assert.doesNotMatch(activeRoutes.train, /\.from\("user_loras"\)[\s\S]*\.update\([\s\S]*status:\s*["']queued["']/)
+  assert.match(activeRoutes.train, /TRAINER_EXECUTION_UNAVAILABLE/)
+  assert.match(activeRoutes.train, /submit_trainer_compute_job/)
 
   console.log("LOCK-02D legacy LoRA route containment contract ok")
 } finally {

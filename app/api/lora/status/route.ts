@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
-import { isDurableComputeJobsEnabled } from "@/lib/compute-jobs";
+import { canonicalTrainerJobId, projectTrainerState, TRAINER_STATE_ORPHANED } from "@/lib/lora/trainer-state";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,8 +42,9 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const durableTrainingJobId = typeof data.training_job_id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(data.training_job_id.trim()) ? data.training_job_id.trim() : null;
-    if (isDurableComputeJobsEnabled() && durableTrainingJobId) {
+    const persisted = projectTrainerState(data);
+    const durableTrainingJobId = canonicalTrainerJobId(data.training_job_id);
+    if (durableTrainingJobId) {
       const { data: computeRows, error: computeError } = await supabaseAdmin.rpc("creator_compute_status", {
         p_owner_id: userId,
         p_job_id: durableTrainingJobId,
@@ -55,15 +56,14 @@ export async function GET(req: Request) {
           : compute.creator_status === "recovering" || compute.creator_status === "cancelling" ? "training"
           : compute.creator_status === "cancelled" || compute.creator_status === "failed" ? "failed"
           : compute.creator_status === "completed" && data.artifact_r2_bucket && data.artifact_r2_key && data.completed_at && new Date(data.completed_at) >= new Date(compute.queued_at) ? "completed"
+          : compute.creator_status === "completed" ? "failed"
           : "queued";
-        return NextResponse.json({ ok: true, lora: { ...data, status, compute_status: compute.creator_status } });
+        return NextResponse.json({ ok: true, lora: { ...data, status, compute_status: compute.creator_status, ...(status === "failed" && compute.creator_status === "completed" ? { error_message: TRAINER_STATE_ORPHANED } : {}) } });
       }
+      return NextResponse.json({ ok: true, lora: { ...data, status: "failed", error_message: TRAINER_STATE_ORPHANED } });
     }
 
-    return NextResponse.json({
-      ok: true,
-      lora: data,
-    });
+    return NextResponse.json({ ok: true, lora: persisted });
   } catch (err: any) {
     const msg = String(err?.message || err);
     if (msg.toLowerCase().includes("unauthorized")) {

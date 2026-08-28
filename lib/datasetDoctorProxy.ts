@@ -2,8 +2,6 @@ import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "./supabaseAdmin";
 import { ensureActiveSubscription } from "./subscription-checker";
 import { requireSirensApiConfig, sirensApiFetch } from "./sirensApi";
-import { isDurableComputeJobsEnabled } from "./compute-jobs";
-import { trainerSelectionCapacityError, TRAINER_EXECUTION_SELECTION_LIMIT_MESSAGE } from "./dataset-doctor/trainer-execution-capacity";
 
 const UUID_RE =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
@@ -82,7 +80,6 @@ export async function proxyDatasetDoctorOperation(
         );
       }
       if (Object.keys(body).some((key) => operation === "approve" ? !["selected_image_ids", "queue_training"].includes(key) : key !== "selected_image_ids") || body.queue_training === true) return NextResponse.json({ error: "INVALID_SELECTED_IMAGE_IDS" }, { status: 400 });
-      if (operation === "approve" && trainerSelectionCapacityError(selectedImageIds.length, isDurableComputeJobsEnabled())) return NextResponse.json({ error: "TRAINER_EXECUTION_SELECTION_LIMIT", message: TRAINER_EXECUTION_SELECTION_LIMIT_MESSAGE }, { status: 409 });
       init = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(operation === "approve" ? { selected_image_ids: selectedImageIds, queue_training: false } : { selected_image_ids: selectedImageIds }) };
     }
 
