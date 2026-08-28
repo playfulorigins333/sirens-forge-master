@@ -2,7 +2,8 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { createServerClient } from "@supabase/ssr";
 import IdentityDetailClient from "./IdentityDetailClient";
-import { projectTrainerState } from "@/lib/lora/trainer-state";
+import { canonicalTrainerJobId, projectTrainerState } from "@/lib/lora/trainer-state";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 type IdentityDetailAsset = {
   id: string;
@@ -192,6 +193,20 @@ export default async function IdentityDetailPage({
     notFound();
   }
 
+  const durableTrainingJobId = canonicalTrainerJobId(identityRow.training_job_id);
+  let trainerJob = null;
+  if (durableTrainingJobId) {
+    const { data, error } = await getSupabaseAdmin()
+      .from("compute_jobs")
+      .select("id, owner_id, workload, state, request_payload, queued_at")
+      .eq("id", durableTrainingJobId)
+      .eq("owner_id", user.id)
+      .eq("workload", "trainer")
+      .maybeSingle();
+    if (error) console.error("[identity detail] Failed to load Trainer binding:", error);
+    else trainerJob = data;
+  }
+
   const generationRows = await fetchGenerationsForIdentity(
     supabase,
     user.id,
@@ -214,7 +229,7 @@ export default async function IdentityDetailPage({
   const imageCount = assets.filter((a) => a.kind === "image").length;
   const videoCount = assets.filter((a) => a.kind === "video").length;
 
-  const projectedIdentity = projectTrainerState(identityRow);
+  const projectedIdentity = projectTrainerState(identityRow, trainerJob);
   const identity: IdentityDetailData = {
     id: asString(projectedIdentity.id, id),
     name: asString(identityRow.name, "Unnamed Identity"),

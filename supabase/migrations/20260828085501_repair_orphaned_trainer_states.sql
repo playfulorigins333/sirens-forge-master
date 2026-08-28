@@ -15,5 +15,6 @@ where l.status in ('queued', 'training')
     where j.id::text = l.training_job_id
       and j.owner_id = l.user_id
       and j.workload = 'trainer'
+      and j.state in ('queued', 'claimed', 'running', 'recovering', 'cancel_requested')
       and j.request_payload ->> 'identity_id' = l.id::text
   );

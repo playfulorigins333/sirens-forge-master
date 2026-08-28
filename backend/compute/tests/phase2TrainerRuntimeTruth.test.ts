@@ -24,27 +24,58 @@ test("Dataset Doctor export is runtime-independent and direct queueing stays pro
   assert.match(source, /queue_training: false/);
 });
 
-test("creator state projection rejects orphan activity and artifactless completion", () => {
-  for (const status of ["queued", "training"]) {
-    const projected = projectTrainerState({ status });
+test("creator projection requires the exact durable Trainer binding", () => {
+  const twinId = "30000000-0000-4000-8000-000000000001";
+  const otherTwinId = "30000000-0000-4000-8000-000000000002";
+  const ownerId = "20000000-0000-4000-8000-000000000001";
+  const otherOwnerId = "20000000-0000-4000-8000-000000000002";
+  const row = { id: twinId, user_id: ownerId, status: "queued", training_job_id: jobId };
+  const exact = { id: jobId, owner_id: ownerId, workload: "trainer", state: "queued", request_payload: { identity_id: twinId }, queued_at: "2026-08-28T08:00:00Z" };
+  const orphan = (job?: any, source: any = row) => {
+    const projected = projectTrainerState(source, job);
     assert.equal(projected.status, "failed");
     assert.equal(projected.error_message, TRAINER_STATE_ORPHANED);
+  };
+
+  orphan();
+  orphan(null, { ...row, training_job_id: "not-a-uuid" });
+  orphan(null, row); // syntactically valid but nonexistent
+  for (const workload of ["image", "video", "stitch"]) orphan({ ...exact, workload });
+  orphan({ ...exact, request_payload: { identity_id: otherTwinId } });
+  orphan({ ...exact, owner_id: otherOwnerId });
+
+  assert.equal(projectTrainerState(row, exact).status, "queued");
+  for (const state of ["claimed", "running", "recovering", "cancel_requested"]) {
+    assert.equal(projectTrainerState(row, { ...exact, state }).status, "training");
   }
-  assert.equal(projectTrainerState({ status: "queued", training_job_id: jobId }).status, "queued");
-  assert.equal(projectTrainerState({ status: "training", training_job_id: jobId }).status, "training");
-  assert.equal(projectTrainerState({ status: "completed", artifact_r2_bucket: "models", artifact_r2_key: "loras/old/final.safetensors" }).status, "completed");
-  const artifactless = projectTrainerState({ status: "completed" });
-  assert.equal(artifactless.status, "failed");
-  assert.equal(artifactless.error_message, TRAINER_STATE_ORPHANED);
+  for (const state of ["failed", "cancelled"]) {
+    assert.equal(projectTrainerState(row, { ...exact, state }).status, "failed");
+  }
+
+  const completed = { ...row, status: "training", completed_at: "2026-08-28T09:00:00Z", artifact_r2_bucket: "models", artifact_r2_key: "loras/final.safetensors" };
+  assert.equal(projectTrainerState(completed, { ...exact, state: "succeeded" }).status, "completed");
+  orphan({ ...exact, state: "succeeded" }, { ...completed, artifact_r2_key: " " });
+  orphan({ ...exact, state: "succeeded" }, { ...completed, completed_at: "2026-08-28T07:00:00Z" });
+  assert.equal(projectTrainerState({ ...completed, status: "completed", training_job_id: null }, null).status, "completed");
 });
 
-test("all creator surfaces use the same truth projection", () => {
-  for (const path of ["app/api/lora/status/route.ts", "app/identities/page.tsx", "app/identities/[id]/page.tsx"]) {
-    assert.match(read(path), /projectTrainerState/);
-  }
+test("all creator surfaces retrieve and project exact durable bindings", () => {
+  const list = read("app/identities/page.tsx");
+  assert.match(list, /\.in\("id", canonicalJobIds\)/);
+  assert.match(list, /\.eq\("owner_id", authUserId\)/);
+  assert.match(list, /\.eq\("workload", "trainer"\)/);
+  assert.match(list, /projectTrainerState\(rawLora, trainerJobsById/);
+
+  const detail = read("app/identities/[id]/page.tsx");
+  assert.match(detail, /\.eq\("owner_id", user\.id\)/);
+  assert.match(detail, /\.eq\("workload", "trainer"\)/);
+  assert.match(detail, /projectTrainerState\(identityRow, trainerJob\)/);
+
   const status = read("app/api/lora/status/route.ts");
-  assert.match(status, /creator_compute_status/);
-  assert.match(status, /TRAINER_STATE_ORPHANED/);
+  assert.match(status, /\.eq\("owner_id", userId\)/);
+  assert.match(status, /\.eq\("workload", "trainer"\)/);
+  assert.match(status, /projectTrainerState\(data, trainerJob\)/);
+  assert.doesNotMatch(status, /creator_compute_status/);
 });
 
 test("Trainer UX preserves prepared review state when runtime is unavailable", () => {
@@ -60,6 +91,7 @@ test("cleanup migration is invariant-bound and idempotent", () => {
   assert.match(migration, /j\.id::text = l\.training_job_id/);
   assert.match(migration, /j\.owner_id = l\.user_id/);
   assert.match(migration, /j\.workload = 'trainer'/);
+  assert.match(migration, /j\.state in \('queued', 'claimed', 'running', 'recovering', 'cancel_requested'\)/);
   assert.match(migration, /identity_id.*l\.id::text/);
   assert.match(migration, /TRAINER_STATE_ORPHANED/);
   assert.doesNotMatch(migration, /delete|truncate|drop/i);
