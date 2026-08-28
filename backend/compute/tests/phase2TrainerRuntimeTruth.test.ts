@@ -85,6 +85,67 @@ test("Trainer UX preserves prepared review state when runtime is unavailable", (
   assert.match(source, /prepared dataset is preserved/);
 });
 
+test("Trainer UX separates dataset preparation from durable execution truth", () => {
+  const source = read("app/lora/train/TrainPageClient.tsx");
+  const startHandler = source.slice(
+    source.indexOf("const handleStartTraining = async"),
+    source.indexOf("const ensureCurrentReviewSelection")
+  );
+  const submitHandler = source.slice(
+    source.indexOf("const handleApproveAndStartTraining = async"),
+    source.indexOf("const handleImproveDataset")
+  );
+  const poller = source.slice(
+    source.indexOf("const pollLoraStatusOnce"),
+    source.indexOf("useEffect(() =>", source.indexOf("const pollLoraStatusOnce"))
+  );
+
+  assert.match(source, /type TrainingStatus =[^;]*\| "preparing"/s);
+  assert.match(startHandler, /setTrainerJobId\(null\)[\s\S]*setTrainingStatus\("preparing"\)/);
+  assert.doesNotMatch(startHandler, /setTrainingStatus\("training"\)/);
+  assert.doesNotMatch(startHandler, /setTrainingStatus\("failed"\)/);
+  assert.match(startHandler, /catch[\s\S]*setTrainingStatus\("idle"\)/);
+
+  const pageAlert = source.slice(
+    source.indexOf('{(trainingStatus === "idle" || trainingStatus === "failed") && errorMessage && ('),
+    source.indexOf('initial={{ opacity: 0, y: 30 }}', source.indexOf('{(trainingStatus === "idle" || trainingStatus === "failed") && errorMessage && ('))
+  );
+  assert.match(pageAlert, /trainingStatus === "idle"[\s\S]*errorMessage/);
+  assert.match(pageAlert, /role="alert"[\s\S]*Dataset preparation needs attention[\s\S]*\{errorMessage\}/);
+  assert.doesNotMatch(pageAlert, /training (?:failed|couldn't complete)/i);
+
+  assert.match(poller, /mapDbStatusToUi[\s\S]*setTrainingStatus/);
+  assert.equal(source.match(/setTrainingStatus\("training"\)/g)?.length || 0, 0);
+  assert.equal(source.match(/setTrainingStatus\("failed"\)/g)?.length || 0, 0);
+
+  assert.match(submitHandler, /!queueRes\.ok[\s\S]*setTrainingStatus\("review"\)/);
+  assert.match(submitHandler, /TRAINER_EXECUTION_UNAVAILABLE[\s\S]*setTrainingStatus\("review"\)/);
+  assert.match(submitHandler, /typeof queueJson\?\.job_id !== "string"[\s\S]*queueJson\?\.status !== "queued"[\s\S]*setTrainingStatus\("review"\)/);
+  assert.match(submitHandler, /queueJson\?\.status !== "queued"[\s\S]*setTrainerJobId\(queueJson\.job_id\)[\s\S]*setTrainingStatus\("queued"\)/);
+  assert.doesNotMatch(submitHandler, /setTrainingStatus\("failed"\)/);
+});
+
+test("Trainer UX keeps Twin and Trainer job identities distinct and surfaces review errors", () => {
+  const source = read("app/lora/train/TrainPageClient.tsx");
+  const reviewUi = source.slice(
+    source.indexOf('{trainingStatus === "review" && (', source.indexOf("<div className=\"space-y-4\">")),
+    source.indexOf('{trainingStatus === "queued" && (', source.indexOf("<div className=\"space-y-4\">"))
+  );
+  const preparingUi = source.slice(
+    source.indexOf('{trainingStatus === "preparing" && (', source.indexOf("<div className=\"space-y-4\">")),
+    source.indexOf('{trainingStatus === "review" && (', source.indexOf("<div className=\"space-y-4\">"))
+  );
+
+  assert.match(source, /const \[trainerJobId, setTrainerJobId\] = useState<string \| null>\(null\)/);
+  assert.match(source, /Twin ID: <span className="font-mono">\{loraId\}<\/span>/);
+  assert.doesNotMatch(source, /(?:LoRA Job|Trainer Job):[^\n]*\{loraId\}/);
+  assert.doesNotMatch(reviewUi, /Trainer Job:/);
+  assert.match(source, /Trainer Job: <span className="font-mono">\{trainerJobId\}<\/span>/);
+  assert.match(preparingUi, /Preparing Your Dataset[\s\S]*Uploading images and running Dataset Doctor/);
+  assert.doesNotMatch(preparingUi, /Training in progress|Forging Your AI Twin|Queued/);
+  assert.match(source, /trainingStatus === "review"[\s\S]*errorMessage[\s\S]*role="alert"[\s\S]*\{errorMessage\}/);
+});
+
 test("cleanup migration is invariant-bound and idempotent", () => {
   const migration = read("supabase/migrations/20260828085501_repair_orphaned_trainer_states.sql");
   assert.match(migration, /status in \('queued', 'training'\)/);
