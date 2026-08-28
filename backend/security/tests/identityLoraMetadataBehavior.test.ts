@@ -59,6 +59,11 @@ assert.equal(workflow["13"].inputs.strength_clip, 1.0);
 const bodyOnlyWorkflow = buildWorkflow({ prompt: "test", negative: "", seed: 1, steps: 20, cfg: 7, width: 512, height: 512, loraStack: feminine, dnaImageNames: [], fluxLock: null }) as Record<string, any>;
 assert.equal(bodyOnlyWorkflow["13"], undefined, "no identity selection must create no identity node");
 
+const createRoute = await readFile("app/api/lora/create/route.ts", "utf8");
+assert.match(createRoute, /\.eq\("id", requestedLoraId\)\.eq\("user_id", userId\)\.eq\("status", "draft"\)\.select\("id,status"\)\.maybeSingle\(\)/, "exact-Twin update must be a returned-row CAS");
+assert.match(createRoute, /!updatedDraft \|\| updatedDraft\.id !== requestedLoraId \|\| updatedDraft\.status !== "draft"/);
+assert.match(createRoute, /LORA_NOT_DRAFT/);
+
 for (const sourcePath of ["lib/generation/identityLoraMetadata.ts", "lib/generation/lora-resolver.ts"]) {
   const source = await readFile(sourcePath, "utf8");
   for (const forbidden of ["@aws-sdk/client-s3", "GetObjectCommand", "download(", "writeFile", "copyFile", "/tmp/loras", "/workspace/ComfyUI"]) {
