@@ -1379,7 +1379,7 @@ export default function LoRATrainerPage() {
           </Card>
         </motion.div>
 
-        {trainingStatus === "failed" && errorMessage && (
+        {(trainingStatus === "idle" || trainingStatus === "failed") && errorMessage && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1387,7 +1387,12 @@ export default function LoRATrainerPage() {
             role="alert"
           >
             <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
-            <div className="text-sm leading-relaxed">{errorMessage}</div>
+            <div className="text-sm leading-relaxed">
+              {trainingStatus === "idle" && (
+                <div className="font-semibold">Dataset preparation needs attention</div>
+              )}
+              <div>{errorMessage}</div>
+            </div>
           </motion.div>
         )}
 

@@ -106,6 +106,14 @@ test("Trainer UX separates dataset preparation from durable execution truth", ()
   assert.doesNotMatch(startHandler, /setTrainingStatus\("failed"\)/);
   assert.match(startHandler, /catch[\s\S]*setTrainingStatus\("idle"\)/);
 
+  const pageAlert = source.slice(
+    source.indexOf('{(trainingStatus === "idle" || trainingStatus === "failed") && errorMessage && ('),
+    source.indexOf('initial={{ opacity: 0, y: 30 }}', source.indexOf('{(trainingStatus === "idle" || trainingStatus === "failed") && errorMessage && ('))
+  );
+  assert.match(pageAlert, /trainingStatus === "idle"[\s\S]*errorMessage/);
+  assert.match(pageAlert, /role="alert"[\s\S]*Dataset preparation needs attention[\s\S]*\{errorMessage\}/);
+  assert.doesNotMatch(pageAlert, /training (?:failed|couldn't complete)/i);
+
   assert.match(poller, /mapDbStatusToUi[\s\S]*setTrainingStatus/);
   assert.equal(source.match(/setTrainingStatus\("training"\)/g)?.length || 0, 0);
   assert.equal(source.match(/setTrainingStatus\("failed"\)/g)?.length || 0, 0);
