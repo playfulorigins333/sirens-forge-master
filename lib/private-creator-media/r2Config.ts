@@ -13,3 +13,13 @@ export function resolvePrivateR2Config(env: NodeJS.ProcessEnv = process.env): Pr
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) throw new Error("PRIVATE_MEDIA_R2_BUCKET_INVALID");
   return { endpoint: endpoint.toString(), accessKeyId, secretAccessKey, bucket, region: env.R2_REGION || env.AWS_DEFAULT_REGION || "auto" };
 }
+
+export function isPrivateCreatorMediaDeliveryReady(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (env.PRIVATE_CREATOR_MEDIA_ENABLED !== "true") return false;
+  try {
+    resolvePrivateR2Config(env);
+    return true;
+  } catch {
+    return false;
+  }
+}

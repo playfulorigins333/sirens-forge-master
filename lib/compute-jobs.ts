@@ -29,7 +29,11 @@ export async function submitComputeJob(args: {
     p_request_fingerprint: fingerprint, p_request_payload: canonicalRequest,
     p_priority_class: args.priorityClass,
   });
-  if (error) throw new Error(error.message.includes("IDEMPOTENCY_CONFLICT") ? "IDEMPOTENCY_CONFLICT" : "COMPUTE_SUBMISSION_FAILED");
+  if (error) {
+    if (error.message.includes("IDEMPOTENCY_CONFLICT")) throw new Error("IDEMPOTENCY_CONFLICT");
+    if (error.message.includes("COMPUTE_POLICY_UNCONFIGURED")) throw new Error("COMPUTE_POLICY_UNCONFIGURED");
+    throw new Error("COMPUTE_SUBMISSION_FAILED");
+  }
   return Array.isArray(data) ? data[0] : data;
 }
 
