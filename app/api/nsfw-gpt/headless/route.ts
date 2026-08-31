@@ -54,6 +54,14 @@ type OutputType = "IMAGE" | "VIDEO" | "STORY"
 type GenerationTarget = "text_to_image" | "text_to_video" | "image_to_video"
 type RefineVariant = "cinematic" | "explicit" | "photoreal"
 
+export function isInvalidInteractionCombination(
+  interactionMode: "conversation" | "headless",
+  task: HeadlessBody["task"] | null,
+  refineType: unknown
+): boolean {
+  return interactionMode === "conversation" && (task !== null || refineType != null)
+}
+
 function normalizeOutputType(v: unknown): OutputType | null {
   const s = String(v || "")
     .trim()
@@ -724,6 +732,7 @@ export async function POST(req: NextRequest) {
     if (
       !description || description.length > MAX_DESCRIPTION_CHARS || hasControlCharacters ||
       !model || !["conversation", "headless"].includes(interactionMode) ||
+      isInvalidInteractionCombination(interactionMode, task, body.refine_type) ||
       (suppliedTarget && !generationTarget) ||
       (task !== null && task !== "refine_prompt" && task !== "refine_prompt_variants") ||
       !idsAreValid(body.vault_ids, MAX_VAULT_IDS) || !idsAreValid(body.macro_ids, MAX_MACRO_IDS)

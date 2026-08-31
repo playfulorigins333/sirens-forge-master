@@ -205,6 +205,14 @@ export default function ChatUI({
       )
     } catch (err) {
       console.error("Failed to store Siren's Mind handoff:", err)
+      appendMessage({
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content:
+          "I couldn't securely transfer this prompt to Generator. Your completed result is still here; please try again.",
+        isError: true,
+      })
+      return
     }
 
     window.location.assign("/generate")

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
+import { isInvalidInteractionCombination } from "../../../app/api/nsfw-gpt/headless/route"
 const [route, chat, input, generator, page, bundle] = await Promise.all([
   readFile("app/api/nsfw-gpt/headless/route.ts", "utf8"), readFile("components/chat/ChatUI.tsx", "utf8"),
   readFile("components/chat/ChatInput.tsx", "utf8"), readFile("app/generate/page.tsx", "utf8"),
@@ -12,6 +13,12 @@ assert.match(route, /kind === "clarification"/)
 assert.match(route, /kind !== "prompt" \|\| !message \|\| !prompt \|\| !target/)
 assert.match(chat, /data\.kind === "clarification"/)
 assert.match(chat, /canUseInGenerator: true/)
+const storageWrite = chat.indexOf("window.sessionStorage.setItem(")
+const storageFailure = chat.indexOf("I couldn't securely transfer this prompt to Generator")
+const storageFailureReturn = chat.indexOf("return", storageFailure)
+const generatorNavigation = chat.indexOf('window.location.assign("/generate")')
+assert.ok(storageWrite >= 0 && storageFailure > storageWrite)
+assert.ok(storageFailureReturn > storageFailure && generatorNavigation > storageFailureReturn)
 assert.match(input, /onSend: \(userText: string, selectedMode: Mode\)/)
 assert.match(input, /await onSend\(trimmed, localMode\)/)
 assert.doesNotMatch(input, /setTimeout/)
@@ -26,4 +33,19 @@ assert.match(generator, /local source image must remain on Generator/)
 assert.doesNotMatch(generator, /IMAGE, VIDEO, or STORY output/)
 assert.match(bundle, /fluid, adaptive clarification/)
 assert.doesNotMatch(bundle, /Blocks generation until confirmation|Guide users through the funnel in order/)
+assert.equal(isInvalidInteractionCombination("conversation", "refine_prompt", undefined), true)
+assert.equal(isInvalidInteractionCombination("conversation", "refine_prompt_variants", undefined), true)
+assert.equal(isInvalidInteractionCombination("conversation", null, "cinematic"), true)
+assert.equal(isInvalidInteractionCombination("conversation", null, undefined), false)
+assert.equal(isInvalidInteractionCombination("headless", "refine_prompt", "cinematic"), false)
+assert.equal(isInvalidInteractionCombination("headless", "refine_prompt_variants", "photoreal"), false)
+const mixedModeRejection = route.indexOf("isInvalidInteractionCombination(interactionMode, task, body.refine_type)")
+const providerCall = route.indexOf("fetch(`${baseUrl}/chat/completions`")
+assert.ok(mixedModeRejection >= 0 && mixedModeRejection < providerCall)
+for (const invalidTask of ["refine_prompt", "refine_prompt_variants"]) {
+  assert.ok(route.includes(`task !== \"${invalidTask}\"`), `${invalidTask} remains bounded`)
+}
+assert.match(generator, /interaction_mode: "headless"[\s\S]*task: "refine_prompt_variants"/)
+assert.match(route, /interactionMode === "conversation" \? \[conversationTransport\] : \[\]/)
+assert.match(route, /ensureThreeRefineVariants/)
 console.log("Phase 6 Siren's Mind contracts: PASS")
