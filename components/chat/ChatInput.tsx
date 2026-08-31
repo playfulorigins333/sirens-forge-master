@@ -7,7 +7,7 @@ type Mode = "SAFE" | "NSFW" | "ULTRA"
 type ChatInputProps = {
   mode: Mode
   onModeChange: React.Dispatch<React.SetStateAction<Mode>>
-  onSend: (userText: string) => Promise<void> | void
+  onSend: (userText: string, selectedMode: Mode) => Promise<void> | void
 }
 
 export function ChatInput({
@@ -32,15 +32,9 @@ export function ChatInput({
     const trimmed = value.trim()
     if (!trimmed || sending) return
 
-    // Force parent to receive the latest selected mode before send
-    if (mode !== localMode) {
-      onModeChange(localMode)
-      await new Promise((resolve) => window.setTimeout(resolve, 0))
-    }
-
     setSending(true)
     try {
-      await onSend(trimmed)
+      await onSend(trimmed, localMode)
       setValue("")
     } finally {
       setSending(false)

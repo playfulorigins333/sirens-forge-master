@@ -15,6 +15,7 @@ type Message = {
     generationTarget?: GenerationTarget
     outputType?: OutputType
     negativePrompt?: string
+    prompt?: string
     canUseInGenerator?: boolean
   }
 }
@@ -27,9 +28,17 @@ type HeadlessHistoryMessage = {
 type HeadlessSuccessResponse = {
   status: "ok"
   mode: string
-  model: string
   output_type: string
   prompt: string
+  negative_prompt?: string | null
+}
+
+type ConversationResponse = {
+  kind: "clarification" | "prompt"
+  message: string
+  prompt: string | null
+  negative_prompt: string | null
+  generation_target: GenerationTarget | null
 }
 
 type HeadlessRefusalResponse = {
@@ -49,6 +58,9 @@ type OutputType = "IMAGE" | "VIDEO"
 
 type ChatUIProps = {
   initialGenerationTarget?: GenerationTarget | null
+  initialPrompt?: string | null
+  initialNegativePrompt?: string | null
+  initialIdentity?: string | null
 }
 
 const TARGET_SELECTION_PROMPT =
@@ -119,8 +131,13 @@ function parseGenerationTarget(input: string): GenerationTarget | null {
 
 export default function ChatUI({
   initialGenerationTarget = null,
+  initialPrompt = null,
+  initialNegativePrompt = null,
+  initialIdentity = null,
 }: ChatUIProps) {
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>(() => initialPrompt ? [{
+    id: "generator-context", role: "user", content: `Current prompt to refine:\n${initialPrompt}`,
+  }] : [])
   const [isTyping, setIsTyping] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
   const [generationTarget, setGenerationTarget] =
@@ -173,10 +190,11 @@ export default function ChatUI({
     if (!msg.meta?.canUseInGenerator) return
 
     const handoffPayload = {
-      prompt: msg.content,
+      prompt: msg.meta.prompt || msg.content,
       negative_prompt: msg.meta.negativePrompt || DEFAULT_NEGATIVE_PROMPT,
       output_type: msg.meta.outputType || "IMAGE",
       generation_target: msg.meta.generationTarget || "text_to_image",
+      identity: initialIdentity || undefined,
       created_at: Date.now(),
     }
 
@@ -189,25 +207,19 @@ export default function ChatUI({
       console.error("Failed to store Siren's Mind handoff:", err)
     }
 
-    const params = new URLSearchParams({
-      prompt: handoffPayload.prompt,
-      negative_prompt: handoffPayload.negative_prompt,
-      output_type: handoffPayload.output_type,
-      generation_target: handoffPayload.generation_target,
-      source: "siren_mind",
-    })
-
-    window.location.assign("/generate?" + params.toString())
+    window.location.assign("/generate")
   }
 
   const sendHeadlessRequest = async ({
     description,
     target,
     historyItems,
+    selectedMode,
   }: {
     description: string
     target: GenerationTarget
     historyItems: Message[]
+    selectedMode: "SAFE" | "NSFW" | "ULTRA"
   }) => {
     const resolvedOutputType = targetToOutputType(target)
 
@@ -217,7 +229,8 @@ export default function ChatUI({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        mode,
+        mode: selectedMode,
+        interaction_mode: "conversation",
         description,
         output_type: resolvedOutputType,
         generation_target: target,
@@ -226,21 +239,28 @@ export default function ChatUI({
     })
 
     const data = (await res.json()) as
+      | ConversationResponse
       | HeadlessSuccessResponse
       | HeadlessRefusalResponse
       | HeadlessErrorResponse
 
     await new Promise((r) => setTimeout(r, 350))
 
-    if ("status" in data && data.status === "ok") {
+    if ("kind" in data && data.kind === "clarification") {
+      appendMessage({ id: crypto.randomUUID(), role: "assistant", content: data.message })
+      return
+    }
+
+    if ("kind" in data && data.kind === "prompt" && data.prompt && data.generation_target) {
       appendMessage({
         id: crypto.randomUUID(),
         role: "assistant",
-        content: data.prompt,
+        content: data.message,
         meta: {
-          generationTarget: target,
-          outputType: resolvedOutputType,
-          negativePrompt: DEFAULT_NEGATIVE_PROMPT,
+          generationTarget: data.generation_target,
+          outputType: targetToOutputType(data.generation_target),
+          negativePrompt: data.negative_prompt || initialNegativePrompt || DEFAULT_NEGATIVE_PROMPT,
+          prompt: data.prompt,
           canUseInGenerator: true,
         },
       })
@@ -276,10 +296,10 @@ export default function ChatUI({
   }
 
   const handleStarterClick = (starter: string) => {
-    void handleSend(starter)
+    void handleSend(starter, mode)
   }
 
-  const handleSend = async (userText: string) => {
+  const handleSend = async (userText: string, selectedMode: "SAFE" | "NSFW" | "ULTRA") => {
     const trimmed = userText.trim()
     if (!trimmed) return
 
@@ -342,6 +362,7 @@ export default function ChatUI({
           description: descriptionToSend,
           target: resolvedTarget,
           historyItems,
+          selectedMode,
         })
       } catch (err) {
         console.error("Chat error:", err)
@@ -389,6 +410,7 @@ export default function ChatUI({
         description: trimmed,
         target: generationTarget,
         historyItems: baseMessages,
+        selectedMode,
       })
     } catch (err) {
       console.error("Chat error:", err)

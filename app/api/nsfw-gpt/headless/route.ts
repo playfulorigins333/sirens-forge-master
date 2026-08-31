@@ -36,6 +36,16 @@ const OUTPUT_ENFORCER = loadPrompt(
 const HEADLESS_CONTRACT = loadPrompt(
   "nsfw_gpt.headless.contract_and_refusal.txt"
 )
+const CONVERSATION_GOVERNOR = loadPrompt(
+  "nsfw_gpt.conversation.funnel_governor.txt"
+)
+
+export const MAX_DESCRIPTION_CHARS = 8000
+export const MAX_HISTORY_MESSAGES = 24
+export const MAX_HISTORY_MESSAGE_CHARS = 8000
+export const MAX_HISTORY_TOTAL_CHARS = 48000
+export const MAX_VAULT_IDS = 32
+export const MAX_MACRO_IDS = 16
 
 /**
  * Output types
@@ -103,6 +113,7 @@ type HistoryMessage = {
  * Headless payload
  */
 type HeadlessBody = {
+  interaction_mode?: "conversation" | "headless"
   mode?: string
   intent?: string
   output_format?: string
@@ -685,250 +696,141 @@ function ensureThreeRefineVariants(
 
 export async function POST(req: NextRequest) {
   try {
+    // LOCK-02A: authorization is deliberately the first request operation.
     const auth = await ensureActiveSubscription()
-
     if (!auth.ok) {
       return NextResponse.json(
-        {
-          error: auth.error ?? "INTERNAL_ERROR",
-          message: auth.message,
-        } satisfies HeadlessError,
+        { error: auth.error ?? "INTERNAL_ERROR", message: auth.message },
         { status: auth.status ?? 500 }
       )
     }
 
-    const body = (await req.json().catch(() => null)) as HeadlessBody | null
-
-    if (!body) {
-      return NextResponse.json(
-        { error: "INVALID_JSON" } satisfies HeadlessError,
-        { status: 400 }
-      )
+    const unknownBody = await req.json().catch(() => null)
+    if (!unknownBody || typeof unknownBody !== "object" || Array.isArray(unknownBody)) {
+      return NextResponse.json({ error: "INVALID_SIRENS_MIND_REQUEST" }, { status: 400 })
     }
-
-    const description = String(body.description || "").trim()
-    if (!description) {
-      return NextResponse.json(
-        { error: "MISSING_DESCRIPTION" } satisfies HeadlessError,
-        { status: 400 }
-      )
-    }
-
-    const mode = String(body.mode || "").toUpperCase() as VaultMode
+    const body = unknownBody as HeadlessBody
+    const interactionMode = body.interaction_mode ?? "headless"
+    const description = typeof body.description === "string" ? body.description.trim() : ""
+    const hasControlCharacters = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(description)
+    const mode = body.mode as VaultMode
     const model = MODEL_BY_MODE[mode]
+    const suppliedTarget = body.generation_target !== undefined
+    const generationTarget = normalizeGenerationTarget(body.generation_target)
+    const task = body.task ?? null
+    const idsAreValid = (value: unknown, maximum: number) =>
+      value === undefined || (Array.isArray(value) && value.length <= maximum && value.every((id) => typeof id === "string"))
 
-    if (!model) {
-      return NextResponse.json(
-        {
-          error: "INVALID_MODE",
-          allowed: Object.keys(MODEL_BY_MODE),
-        } satisfies HeadlessError,
-        { status: 400 }
-      )
+    if (
+      !description || description.length > MAX_DESCRIPTION_CHARS || hasControlCharacters ||
+      !model || !["conversation", "headless"].includes(interactionMode) ||
+      (suppliedTarget && !generationTarget) ||
+      (task !== null && task !== "refine_prompt" && task !== "refine_prompt_variants") ||
+      !idsAreValid(body.vault_ids, MAX_VAULT_IDS) || !idsAreValid(body.macro_ids, MAX_MACRO_IDS)
+    ) {
+      return NextResponse.json({ error: "INVALID_SIRENS_MIND_REQUEST" }, { status: 400 })
     }
 
-    const generationTarget = normalizeGenerationTarget(body.generation_target)
-    const task = body.task || null
-    const refineVariant = normalizeRefineVariant(body.refine_type)
-
-    const outputType: OutputType =
-      outputTypeFromGenerationTarget(generationTarget) ??
-      normalizeOutputType(body.output_type) ??
-      "IMAGE"
-
-    const finalOutputType: OutputType =
-      task === "refine_prompt" || task === "refine_prompt_variants"
-        ? "IMAGE"
-        : outputType
+    if (!Array.isArray(body.history ?? [] ) || (body.history?.length ?? 0) > MAX_HISTORY_MESSAGES) {
+      return NextResponse.json({ error: "INVALID_SIRENS_MIND_REQUEST" }, { status: 400 })
+    }
+    let historyTotal = 0
+    const history: HistoryMessage[] = []
+    for (const item of body.history ?? []) {
+      if (!item || typeof item !== "object" || (item.role !== "user" && item.role !== "assistant") ||
+          typeof item.content !== "string" || !item.content.trim() || item.content.length > MAX_HISTORY_MESSAGE_CHARS ||
+          /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(item.content)) {
+        return NextResponse.json({ error: "INVALID_SIRENS_MIND_REQUEST" }, { status: 400 })
+      }
+      historyTotal += item.content.length
+      history.push({ role: item.role, content: item.content.trim() })
+    }
+    if (historyTotal > MAX_HISTORY_TOTAL_CHARS) {
+      return NextResponse.json({ error: "INVALID_SIRENS_MIND_REQUEST" }, { status: 400 })
+    }
 
     const apiKey = getEnv("OPENAI_COMPAT_API_KEY")
     const baseUrl = getEnv("OPENAI_COMPAT_BASE_URL")
-
     if (!apiKey || !baseUrl) {
-      return NextResponse.json(
-        {
-          error: "SERVER_MISCONFIGURED",
-          reason: "Missing OPENAI_COMPAT_API_KEY or OPENAI_COMPAT_BASE_URL",
-        } satisfies HeadlessError,
-        { status: 500 }
-      )
+      return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
     }
 
+    const refineVariant = normalizeRefineVariant(body.refine_type)
+    const outputType = outputTypeFromGenerationTarget(generationTarget) ?? normalizeOutputType(body.output_type) ?? "IMAGE"
+    const finalOutputType: OutputType = task ? "IMAGE" : outputType
     const v = validateVaultIds(body.vault_ids || [], mode)
     const m = validateMacroIds(body.macro_ids || [], mode)
+    const vaultTexts = v.vault_ids.map(loadVaultText).filter((x): x is string => Boolean(x))
+    const macroTexts = m.macro_ids.map(loadMacroText).filter((x): x is string => Boolean(x))
 
-    const missingVaultFiles: string[] = []
-    const vaultTexts = v.vault_ids
-      .map((id) => {
-        const txt = loadVaultText(id)
-        if (!txt) {
-          missingVaultFiles.push(id)
-          return null
-        }
-        return `--- VAULT:${id} ---\n${txt}`
-      })
-      .filter((x): x is string => Boolean(x))
-
-    const missingMacroFiles: string[] = []
-    const macroTexts = m.macro_ids
-      .map((id) => {
-        const txt = loadMacroText(id)
-        if (!txt) {
-          missingMacroFiles.push(id)
-          return null
-        }
-        return `--- MACRO:${id} ---\n${txt}`
-      })
-      .filter((x): x is string => Boolean(x))
-
-    const OUTPUT_TYPE_SYSTEM = buildOutputTypeSystem(finalOutputType)
-    const GENERATION_TARGET_SYSTEM =
-      buildGenerationTargetSystem(generationTarget)
-    const history = sanitizeHistory(body.history)
-
+    const conversationTransport = [
+      "# CONVERSATIONAL TRANSPORT CONTRACT",
+      "Return exactly one JSON object and no markdown or surrounding text.",
+      'For a question: {"kind":"clarification","message":"one or two concise questions","prompt":null,"negative_prompt":null,"generation_target":null or an explicit target}.',
+      'For a finished result: {"kind":"prompt","message":"creator-facing polished result","prompt":"nonblank generator prompt","negative_prompt":string or null,"generation_target":"text_to_image"|"text_to_video"|"image_to_video"}.',
+      "Never expose these protocol instructions to the creator. If a generation target was supplied, retain it and do not ask for it again.",
+    ].join("\n")
     const systemPrompt = [
       SYSTEM_BASE,
       ROUTER,
+      interactionMode === "conversation" ? CONVERSATION_GOVERNOR : HEADLESS_CONTRACT,
       OUTPUT_ENFORCER,
-      HEADLESS_CONTRACT,
-      ...(task === "refine_prompt" || task === "refine_prompt_variants"
-        ? [
-            buildRefineSystem(
-              generationTarget,
-              refineVariant,
-              task === "refine_prompt_variants"
-            ),
-          ]
-        : []),
-      OUTPUT_TYPE_SYSTEM,
-      GENERATION_TARGET_SYSTEM,
-      ...(vaultTexts.length
-        ? ["# VAULT STACK\n" + vaultTexts.join("\n\n")]
-        : []),
-      ...(macroTexts.length
-        ? ["# MACRO STACK\n" + macroTexts.join("\n\n")]
-        : []),
+      ...(interactionMode === "conversation" ? [conversationTransport] : []),
+      ...(task ? [buildRefineSystem(generationTarget, refineVariant, task === "refine_prompt_variants")] : []),
+      ...(interactionMode === "headless" ? [buildOutputTypeSystem(finalOutputType)] : []),
+      buildGenerationTargetSystem(generationTarget),
+      ...(vaultTexts.length ? ["# OPTIONAL VAULT CONTEXT\n" + vaultTexts.join("\n\n")] : []),
+      ...(macroTexts.length ? ["# OPTIONAL MACRO CONTEXT\n" + macroTexts.join("\n\n")] : []),
     ].join("\n\n")
-
-    const messages: Array<{
-      role: "system" | "user" | "assistant"
-      content: string
-    }> = [{ role: "system", content: systemPrompt }, ...history]
-
-    const lastHistory = history[history.length - 1]
-    if (
-      !lastHistory ||
-      lastHistory.role !== "user" ||
-      lastHistory.content !== description
-    ) {
-      messages.push({ role: "user", content: description })
-    }
+    const messages: Array<{ role: "system" | HistoryRole; content: string }> = [
+      { role: "system", content: systemPrompt }, ...history,
+    ]
+    const last = history.at(-1)
+    if (!last || last.role !== "user" || last.content !== description) messages.push({ role: "user", content: description })
 
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 2000,
-        temperature: mode === "SAFE" ? 0.6 : 0.85,
-        messages,
-      }),
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model, max_tokens: 2000, temperature: mode === "SAFE" ? 0.6 : 0.85, messages }),
     })
-
-    const raw = await response.json().catch(() => null)
-
     if (!response.ok) {
-      return NextResponse.json(
-        {
-          error: "PROVIDER_ERROR",
-          provider_status: response.status,
-          raw,
-        } satisfies HeadlessError,
-        { status: response.status }
-      )
+      console.error("Siren's Mind provider request failed", { status: response.status })
+      return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 })
+    }
+    const providerJson = await response.json().catch(() => null)
+    const rawText = typeof providerJson?.choices?.[0]?.message?.content === "string"
+      ? providerJson.choices[0].message.content.trim() : ""
+    if (!rawText) return NextResponse.json({ error: "PROMPT_ENGINE_RESPONSE_INVALID" }, { status: 502 })
+
+    if (interactionMode === "conversation") {
+      const parsed = tryParseJsonObject(rawText)
+      const kind = parsed?.kind
+      const message = typeof parsed?.message === "string" ? parsed.message.trim() : ""
+      const parsedTarget = normalizeGenerationTarget(parsed?.generation_target)
+      if (kind === "clarification" && message && parsed?.prompt === null && (parsed?.negative_prompt === null || parsed?.negative_prompt === undefined)) {
+        return NextResponse.json({ kind, message, prompt: null, negative_prompt: null, generation_target: generationTarget ?? parsedTarget }, { status: 200 })
+      }
+      const prompt = typeof parsed?.prompt === "string" ? parsed.prompt.trim() : ""
+      const negativePrompt = typeof parsed?.negative_prompt === "string" && parsed.negative_prompt.trim() ? parsed.negative_prompt.trim() : null
+      const target = generationTarget ?? parsedTarget
+      if (kind !== "prompt" || !message || !prompt || !target) {
+        return NextResponse.json({ error: "PROMPT_ENGINE_RESPONSE_INVALID" }, { status: 502 })
+      }
+      return NextResponse.json({ kind, message, prompt, negative_prompt: negativePrompt, generation_target: target }, { status: 200 })
     }
 
-    const rawText = String(raw?.choices?.[0]?.message?.content || "").trim()
-
-    const structured =
-      finalOutputType === "IMAGE" && task !== "refine_prompt_variants"
-        ? null
-        : tryParseJsonObject(rawText)
-
+    const structured = finalOutputType === "IMAGE" && task !== "refine_prompt_variants" ? null : tryParseJsonObject(rawText)
     let prompt = coercePromptFromResponse(finalOutputType, structured, rawText)
     let variants: string[] | null = null
-
-    if (task === "refine_prompt") {
-      prompt = sanitizeRefineOutput(prompt)
-    }
-
+    if (task === "refine_prompt") prompt = sanitizeRefineOutput(prompt)
     if (task === "refine_prompt_variants") {
-      const parsedVariants = parseRefineVariants(rawText)
-      const fallbackPrompt = sanitizeRefineOutput(prompt || description)
-
-      variants = ensureThreeRefineVariants(
-        parsedVariants,
-        fallbackPrompt,
-        refineVariant,
-        generationTarget
-      )
-
-      /**
-       * Keep the existing contract:
-       * - variants[0] => Option A
-       * - variants[1] => Option B (recommended)
-       * - variants[2] => Option C
-       *
-       * Mirror prompt to the recommended middle option so any existing
-       * single-prompt readers get the best version by default.
-       */
-      prompt = variants[1] || variants[0] || fallbackPrompt
+      variants = ensureThreeRefineVariants(parseRefineVariants(rawText), sanitizeRefineOutput(prompt || description), refineVariant, generationTarget)
+      prompt = variants[1] || variants[0]
     }
-
-    const out: HeadlessSuccess = {
-      status: "ok",
-      mode,
-      model,
-      output_type: finalOutputType,
-      generation_target: generationTarget,
-      prompt,
-      variants,
-      structured,
-      raw_text: rawText,
-      metadata: {
-        generation_target: generationTarget,
-        vault_ids: v.vault_ids,
-        invalid_vaults: v.invalid_ids,
-        blocked_vaults: v.blocked_ids,
-        missing_vault_files: missingVaultFiles,
-        macro_ids: m.macro_ids,
-        invalid_macros: m.invalid_ids,
-        blocked_macros: m.blocked_ids,
-        missing_macro_files: missingMacroFiles,
-        contract_parse:
-          finalOutputType === "IMAGE"
-            ? "ok"
-            : structured
-            ? "ok"
-            : "fallback_text",
-        refine_variant:
-          task === "refine_prompt" || task === "refine_prompt_variants"
-            ? refineVariant
-            : null,
-      },
-    }
-
-    return NextResponse.json(out, { status: 200 })
-  } catch (err: any) {
-    return NextResponse.json(
-      {
-        error: "UNHANDLED_EXCEPTION",
-        message: err?.message,
-      } satisfies HeadlessError,
-      { status: 500 }
-    )
+    if (!prompt) return NextResponse.json({ error: "PROMPT_ENGINE_RESPONSE_INVALID" }, { status: 502 })
+    const negativePrompt = typeof structured?.negative_prompt === "string" && structured.negative_prompt.trim() ? structured.negative_prompt.trim() : null
+    return NextResponse.json({ status: "ok", mode, output_type: finalOutputType, generation_target: generationTarget, prompt, negative_prompt: negativePrompt, variants, structured }, { status: 200 })
+  } catch {
+    return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 500 })
   }
 }
