@@ -82,8 +82,9 @@ test("merge-blocker dispatch, recovery, result, Stitch, and Image conflict guard
   assert.match(read("app/api/generate/route.ts"), /message\.includes\("IDEMPOTENCY_CONFLICT"\)[\s\S]*status: 409/);
 });
 
-test("video stays unavailable and durable client tracks a submitted job immediately", () => {
-  assert.match(read("app/api/generate_video/route.ts"), /VIDEO_GENERATION_UNAVAILABLE/);
+test("durable Video application and client track submitted work immediately", () => {
+  assert.throws(() => read("app/api/generate_video/route.ts"));
+  assert.match(read("app/api/video/route.ts"), /submitVideoProject/);
   const client = read("app/generate/page.tsx");
   assert.match(client, /activeComputeJobIds/);
   assert.match(client, /sirensforge:active-compute-jobs/);
@@ -164,14 +165,13 @@ test("Pass 4C-A establishes a private Video Project and dependent Stitch contrac
   assert.doesNotMatch(pass4c, /https?:\/\/|signed_url.*jsonb_build_object|runpod\.ai|comfy|ffmpeg/i);
 });
 
-test("Pass 4C-A keeps creator Video disabled and generic helpers fail closed", async () => {
+test("Phase 4 activates only the dedicated Video project path while generic helpers fail closed", async () => {
   const helper = read("lib/compute-jobs.ts");
   assert.match(helper, /args\.workload === "video" \|\| args\.workload === "stitch"/);
-  for (const route of ["app/api/generate_video/route.ts", "app/api/video/route.ts"]) {
-    const source = read(route); assert.match(source, /VIDEO_GENERATION_UNAVAILABLE/); assert.doesNotMatch(source, /submit_video_project_compute_jobs|finalize_video|provider|runpod/i);
-  }
-  assert.match(read("app/generate/page.tsx"), /Image → Video · Coming Soon/);
-  assert.match(read("app/generate/page.tsx"), /Text → Video · Coming Soon/);
+  assert.throws(() => read("app/api/generate_video/route.ts"));
+  assert.match(read("app/api/video/route.ts"), /isVideoSubmissionReady/);
+  assert.match(read("lib/video/submission.ts"), /submit_video_project_compute_jobs/);
+  assert.doesNotMatch(read("app/generate/page.tsx"), /Video · Coming Soon/);
 });
 
 test("Pass 4C-A PostgreSQL integration has a third isolated CI database", () => {

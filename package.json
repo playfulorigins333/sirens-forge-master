@@ -9,7 +9,7 @@
     "test:image-model-validation": "tsx --test tools/image_model_validation/tests/*.test.ts",
     "test:identity-lora-metadata": "tsx backend/security/tests/identityLoraMetadataBehavior.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/loraCreateExactTwinBehavior.test.ts",
     "test:launch-observability-recovery": "tsx backend/operations/tests/launchObservabilityRecovery.test.ts",
-    "test:frontend-launch-readiness": "npm run test:identity-lora-metadata && npm run test:dataset-doctor-proxy && npm run test:phase3-image-application && tsx backend/security/tests/frontendLaunchReadiness.test.ts",
+    "test:frontend-launch-readiness": "npm run test:identity-lora-metadata && npm run test:dataset-doctor-proxy && npm run test:phase3-image-application && npm run test:phase4-video-application && tsx backend/security/tests/frontendLaunchReadiness.test.ts",
     "test:phase3-image-application": "tsx --test backend/compute/tests/phase3ImageApplicationContracts.test.ts",
     "test:generator-creation-loop": "tsx backend/security/tests/generatorCreationLoopContracts.test.ts",
     "test:final-launch-hardening": "node --experimental-test-module-mocks --import tsx backend/security/tests/lock02bGenerateAuthorization.test.ts",
@@ -79,7 +79,9 @@
     "test:dataset-training-decisions": "tsx --test backend/compute/tests/datasetTrainingDecisionContracts.test.ts",
     "test:dataset-training-decisions-postgres": "node backend/compute/tests/runDatasetTrainingDecisionPostgres.mjs",
     "test:dataset-doctor-proxy": "node --experimental-test-module-mocks --import tsx backend/security/tests/lock02fAuthenticatedApiBoundary.test.ts",
-    "test:trainer-orphan-cleanup-postgres": "node backend/compute/tests/runTrainerOrphanCleanupPostgres.mjs"
+    "test:trainer-orphan-cleanup-postgres": "node backend/compute/tests/runTrainerOrphanCleanupPostgres.mjs",
+    "test:phase4-video-application": "tsx --test backend/compute/tests/phase4VideoApplicationContracts.test.ts",
+    "test:phase4-video-application-postgres": "node backend/compute/tests/runPhase4VideoApplicationPostgres.mjs"
   },
   "repository": {
     "type": "git",

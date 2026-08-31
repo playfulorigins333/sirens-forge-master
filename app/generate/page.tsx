@@ -226,14 +226,6 @@ function modeLabel(mode: GenerationMode): string {
   }
 }
 
-async function fileToDataUrl(file: File): Promise<string> {
-  return await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Failed to read uploaded image."));
-    reader.readAsDataURL(file);
-  });
-}
 
 interface SubscriptionModalProps {
   open: boolean;
@@ -443,9 +435,9 @@ function GeneratorHeader(props: { activeMode: GenerationMode }) {
 
   const subtitle =
     props.activeMode === "image_to_video"
-      ? "Image → Video • Video generation coming soon"
+      ? "Image → Video • Private source to durable video"
       : props.activeMode === "text_to_video"
-      ? "Text → Video • Video generation coming soon"
+      ? "Text → Video • Durable video project"
       : "Text → Image • Image Generation";
 
   return (
@@ -501,8 +493,8 @@ function ModeTabs(props: {
 }) {
   const modes: { id: GenerationMode; label: string; icon: React.ElementType; unavailable?: boolean }[] = [
     { id: "text_to_image", label: "Text → Image", icon: FileText },
-    { id: "image_to_video", label: "Image → Video · Coming Soon", icon: ImageIcon, unavailable: true },
-    { id: "text_to_video", label: "Text → Video · Coming Soon", icon: VideoIcon, unavailable: true },
+    { id: "image_to_video", label: "Image → Video", icon: ImageIcon },
+    { id: "text_to_video", label: "Text → Video", icon: VideoIcon },
   ];
 
   return (
@@ -1546,6 +1538,10 @@ function VideoSettings(props: {
   duration: number;
   fps: number;
   motion: number;
+  minDuration: number;
+  maxDuration: number;
+  minMotion: number;
+  maxMotion: number;
   batchSize: number;
   onDurationChange: (value: number) => void;
   onFpsChange: (value: number) => void;
@@ -1589,8 +1585,8 @@ function VideoSettings(props: {
                 </div>
                 <input
                   type="range"
-                  min={5}
-                  max={25}
+                  min={props.minDuration}
+                  max={props.maxDuration}
                   step={1}
                   value={props.duration}
                   onChange={(e) => props.onDurationChange(parseInt(e.target.value, 10) || 10)}
@@ -1601,7 +1597,7 @@ function VideoSettings(props: {
               <div>
                 <p className="mb-1 font-semibold text-gray-200">FPS</p>
                 <div className="grid grid-cols-3 gap-2">
-                  {[12, 24, 30].map((fpsOption) => (
+                  {[30].map((fpsOption) => (
                     <button
                       key={fpsOption}
                       type="button"
@@ -1627,8 +1623,8 @@ function VideoSettings(props: {
                 </div>
                 <input
                   type="range"
-                  min={0.1}
-                  max={1}
+                  min={props.minMotion}
+                  max={props.maxMotion}
                   step={0.05}
                   value={props.motion}
                   onChange={(e) => props.onMotionChange(parseFloat(e.target.value))}
@@ -1636,26 +1632,7 @@ function VideoSettings(props: {
                 />
               </div>
 
-              <div>
-                <div className="mb-1 flex items-center justify-between">
-                  <p className="font-semibold text-gray-200">Batch Size</p>
-                  <span className="text-[11px] font-semibold text-purple-300">{props.batchSize}</span>
-                </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={4}
-                  step={1}
-                  value={props.batchSize}
-                  onChange={(e) =>
-                    props.onBatchSizeChange(Math.min(4, Math.max(1, parseInt(e.target.value, 10) || 1)))
-                  }
-                  className="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-800 accent-purple-500"
-                />
-                <p className="mt-1 text-[10px] text-gray-400">
-                  Video batch is visible now for launch planning. Final tier enforcement should remain backend-side.
-                </p>
-              </div>
+
             </CardContent>
           </motion.div>
         )}
@@ -2100,14 +2077,16 @@ function OutputPanel(props: {
     setCaptionCopySuccess("Caption export downloaded.");
   };
 
-  const handleDownloadLatest = () => {
+  const handleDownloadLatest = async () => {
     if (!latestItem?.url) return;
-    const link = document.createElement("a");
-    link.href = latestItem.url;
-    link.download = latestItem.kind === "video" ? "sirens-forge-output.mp4" : "sirens-forge-output.png";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    let downloadUrl = latestItem.url;
+    if (latestItem.privateAsset && latestItem.generationAssetId) {
+      const response = await fetch(`/api/library/assets/${encodeURIComponent(latestItem.generationAssetId)}/signed-url?mode=download`, { cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || typeof body.url !== "string") return;
+      downloadUrl = body.url;
+    }
+    const link = document.createElement("a"); link.href = downloadUrl; document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
   const handleCopyPrompt = async () => {
@@ -3238,6 +3217,9 @@ function HistorySidebar(props: {
 
 export default function GeneratePage() {
   const [generationAvailable, setGenerationAvailable] = useState<boolean | null>(null);
+  const [videoAvailable, setVideoAvailable] = useState<boolean | null>(null);
+  const [activeVideoProjectIds, setActiveVideoProjectIds] = useState<string[]>([]);
+  const [videoCaps, setVideoCaps] = useState({ min_duration_seconds: 10, max_duration_seconds: 15, min_motion_strength: 0.4, max_motion_strength: 0.8, default_motion_strength: 0.65 });
   const [durableCompute, setDurableCompute] = useState(false);
   const [activeComputeJobIds, setActiveComputeJobIds] = useState<string[]>([]);
   const [queuedComputeMessage, setQueuedComputeMessage] = useState<string | null>(null);
@@ -3252,6 +3234,7 @@ export default function GeneratePage() {
     fetch("/api/generate/availability", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => { if (current) { setGenerationAvailable(data?.available === true); setDurableCompute(data?.execution_mode === "durable"); } }).catch(() => { if (current) setGenerationAvailable(false); });
     return () => { current = false; };
   }, []);
+  useEffect(() => { let current=true; fetch("/api/video/availability",{cache:"no-store"}).then(r=>r.ok?r.json():Promise.reject()).then(data=>{if(current){setVideoAvailable(data.available===true);if(data.caps){setVideoCaps(data.caps);setVideoDuration(data.caps.min_duration_seconds);setVideoMotion(data.caps.default_motion_strength);}}}).catch(()=>{if(current)setVideoAvailable(false)});return()=>{current=false};}, []);
   useEffect(() => {
     try {
       const restored = JSON.parse(localStorage.getItem("sirensforge:active-compute-jobs") || "[]");
@@ -3363,9 +3346,9 @@ export default function GeneratePage() {
   const [batchSize, setBatchSize] = useState(1);
 
   const [videoDuration, setVideoDuration] = useState(10);
-  const [videoFps, setVideoFps] = useState(24);
-  const [videoMotion, setVideoMotion] = useState(0.45);
-  const [videoBatchSize, setVideoBatchSize] = useState(1);
+  const [videoFps] = useState(30);
+  const [videoMotion, setVideoMotion] = useState(0.65);
+  const [sourceGenerationAssetId, setSourceGenerationAssetId] = useState<string | null>(null);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
@@ -3375,6 +3358,10 @@ export default function GeneratePage() {
   const [isGenerating, setIsGenerating] = useState(false);
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  useEffect(() => {
+    try { const saved=JSON.parse(localStorage.getItem("sirensforge:active-video-projects")||"[]"); const valid=Array.isArray(saved)?[...new Set(saved.filter((id):id is string=>typeof id==="string"&&isUuidLike(id)))]:[]; localStorage.setItem("sirensforge:active-video-projects",JSON.stringify(valid)); setActiveVideoProjectIds(valid); } catch { localStorage.removeItem("sirensforge:active-video-projects"); }
+  }, []);
+  useEffect(() => { if(!activeVideoProjectIds.length)return; let active=true; const poll=async()=>{const remove:string[]=[];await Promise.all(activeVideoProjectIds.map(async projectId=>{const response=await fetch(`/api/video/${encodeURIComponent(projectId)}`,{cache:"no-store"}).catch(()=>null);if(!active||!response)return;if(response.status===404){remove.push(projectId);return}if(response.status===409||response.status>=500)return;const project=await response.json().catch(()=>({}));if(["queued","generating","stitching","cancelling"].includes(project.status)){setQueuedComputeMessage(`Video is ${project.status}.`);return}if(project.status==="failed"||project.status==="cancelled"){setErrorMessage(`Video generation ${project.status}.`);remove.push(projectId);return}const result=project.video_result,output=result?.output;if(project.status==="completed"&&isUuidLike(output?.id)){try{const signed=await fetch(`/api/library/assets/${encodeURIComponent(output.id)}/signed-url?mode=preview`,{cache:"no-store"});const body=await signed.json();if(!signed.ok||typeof body.url!=="string")return;const item:GeneratedItem={id:output.id,kind:"video",url:body.url,prompt:result.prompt||"",settings:result,createdAt:result.completed_at,dbGenerationId:result.generation_id,generationAssetId:output.id,privateAsset:true};const add=(previous:GeneratedItem[])=>previous.some(x=>x.generationAssetId===output.id)?previous:[item,...previous];setItems(previous=>add(previous).slice(0,12));setHistory(add);remove.push(projectId);}catch{return}}}));if(remove.length)setActiveVideoProjectIds(ids=>{const next=ids.filter(id=>!remove.includes(id));localStorage.setItem("sirensforge:active-video-projects",JSON.stringify(next));return next})};void poll();const timer=window.setInterval(poll,5000);return()=>{active=false;window.clearInterval(timer)};},[activeVideoProjectIds]);
 
   const [showSubModal, setShowSubModal] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
@@ -3469,10 +3456,11 @@ export default function GeneratePage() {
   }, [refineFeedback]);
 
   const hasGenerationInput =
-    mode === "image_to_video" ? Boolean(imageFile) : Boolean(prompt?.trim());
+    mode === "image_to_video" ? Boolean(imageFile || sourceGenerationAssetId) : Boolean(prompt?.trim());
 
-  const generateDisabledReason = generationAvailable !== true
-    ? generationAvailable === null ? "Checking generation availability…" : "Image generation is temporarily unavailable."
+  const selectedAvailability = mode === "text_to_image" ? generationAvailable : videoAvailable;
+  const generateDisabledReason = selectedAvailability !== true
+    ? selectedAvailability === null ? "Checking generation availability…" : "Generation is temporarily unavailable."
     : pendingIdentityId
       ? "Checking selected AI Twin…"
     : !hasGenerationInput
@@ -3948,7 +3936,7 @@ ${basePrompt}`,
     ) ?? null;
     const promptToUse = typeof overridePrompt === "string" ? overridePrompt : prompt;
 
-    if (mode === "image_to_video" && !imageFile) {
+    if (mode === "image_to_video" && !imageFile && !sourceGenerationAssetId) {
       setErrorMessage("Upload a source image before generating video.");
       return;
     }
@@ -3980,10 +3968,7 @@ ${basePrompt}`,
         identity_lora: selectedLoraId ? selectedLoraId : null,
       };
 
-      const runCount =
-        mode === "text_to_image"
-          ? Math.max(1, batchSize || 1)
-          : Math.max(1, videoBatchSize || 1);
+      const runCount = mode === "text_to_image" ? Math.max(1, batchSize || 1) : 1;
 
       const generatedAll: GeneratedItem[] = [];
 
@@ -4077,80 +4062,27 @@ ${basePrompt}`,
 
           generatedAll.push(...generated);
         } else {
-          const videoPayload = {
-            ...imageRequest,
-            mode,
-            seed: runSeed,
-            image_input:
-              mode === "image_to_video" && imageFile
-                ? {
-                    filename: imageFile.name,
-                    data_url: await fileToDataUrl(imageFile),
-                  }
-                : null,
-            video: {
-              duration: videoDuration,
-              fps: videoFps,
-              motion: videoMotion,
-              batch: 1,
-            },
-          };
-
-          const res = await fetch("/api/generate_video", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(videoPayload),
-          });
-
-          if (res.status === 402 || res.status === 403) {
-            let reason = "You need an active SirensForge subscription to use the generator.";
-            try {
-              const data = await res.json();
-              if (typeof data?.error === "string") reason = data.error;
-              else if (typeof data?.message === "string") reason = data.message;
-              else if (typeof data?.code === "string") reason = data.code;
-            } catch {}
-            setSubscriptionError(reason);
-            setShowSubModal(true);
-            setIsGenerating(false);
-            return;
+          let sourceAssetId = sourceGenerationAssetId;
+          if (mode === "image_to_video" && imageFile) {
+            const authority = await fetch("/api/video/source-upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_type: imageFile.type, size_bytes: imageFile.size }) });
+            const upload = await authority.json().catch(() => ({}));
+            if (!authority.ok) throw new Error(upload.error || "Source upload is unavailable.");
+            const put = await fetch(upload.upload_url, { method: "PUT", headers: { "Content-Type": upload.content_type }, body: imageFile });
+            if (!put.ok) throw new Error("Source image upload failed.");
+            const finalize = await fetch("/api/video/source-upload", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upload_id: upload.upload_id }) });
+            const imported = await finalize.json().catch(() => ({}));
+            if (!finalize.ok || !isUuidLike(imported.generation_asset_id)) throw new Error(imported.error || "Source image verification failed.");
+            sourceAssetId = imported.generation_asset_id;
+            setSourceGenerationAssetId(sourceAssetId);
           }
-
-          if (!res.ok) {
-            const text = await res.text().catch(() => "");
-            throw new Error(`Video generate failed (${res.status}): ${text || "Unknown error"}`);
-          }
-
-          const data = await res.json();
-          const outputs = Array.isArray(data?.outputs)
-            ? data.outputs
-            : data?.video_url
-            ? [data.video_url]
-            : [];
-
-          if (!outputs.length) {
-            throw new Error("/api/generate_video did not return outputs[] or video_url.");
-          }
-
-          const now = new Date().toISOString();
-          const generated: GeneratedItem[] = outputs.map((output: any) => {
-            const generationRecordId = getGenerationRecordId(output, data);
-
-            return {
-              id: generationRecordId || `${now}-${Math.random().toString(36).slice(2)}`,
-              kind: "video",
-              url: getOutputUrl(output),
-              prompt: promptToUse || "(Image-driven video)",
-              settings: {
-                ...videoPayload,
-                generation_id: generationRecordId,
-              },
-              createdAt: now,
-              dbGenerationId: generationRecordId,
-            };
-          });
-
-          generatedAll.push(...generated);
+          const videoPayload = { mode, prompt: promptToUse, negative_prompt: negativePrompt, body_type: bodyModeMap[baseModel] || "none", identity_id: selectedLoraId, source_generation_asset_id: mode === "image_to_video" ? sourceAssetId : null, requested_duration_seconds: videoDuration, motion_strength: videoMotion };
+          const submissionKey = await pendingSubmissionKey("sirensforge:pending-video-project", videoPayload);
+          const res = await fetch("/api/video", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": submissionKey }, body: JSON.stringify(videoPayload) });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || res.status !== 202 || !isUuidLike(data.project_id)) { if (res.status >= 400 && res.status < 500) clearPendingSubmission("sirensforge:pending-video-project", submissionKey); throw new Error(data.error || "Video submission failed."); }
+          const next = [...new Set([...activeVideoProjectIds, data.project_id])];
+          localStorage.setItem("sirensforge:active-video-projects", JSON.stringify(next)); setActiveVideoProjectIds(next);
+          clearPendingSubmission("sirensforge:pending-video-project", submissionKey); setQueuedComputeMessage("Your video project is safely queued."); setIsGenerating(false); return;
         }
       }
 
@@ -4393,11 +4325,15 @@ ${basePrompt}`,
                       duration={videoDuration}
                       fps={videoFps}
                       motion={videoMotion}
-                      batchSize={videoBatchSize}
+                      minDuration={videoCaps.min_duration_seconds}
+                      maxDuration={videoCaps.max_duration_seconds}
+                      minMotion={videoCaps.min_motion_strength}
+                      maxMotion={videoCaps.max_motion_strength}
+                      batchSize={1}
                       onDurationChange={setVideoDuration}
-                      onFpsChange={setVideoFps}
+                      onFpsChange={() => undefined}
                       onMotionChange={setVideoMotion}
-                      onBatchSizeChange={setVideoBatchSize}
+                      onBatchSizeChange={() => undefined}
                     />
                   )}
                 </div>
@@ -4419,7 +4355,7 @@ ${basePrompt}`,
                   <GenerateButton
                     mode={mode}
                     isGenerating={isGenerating}
-                    batchSize={mode === "text_to_image" ? batchSize : videoBatchSize}
+                    batchSize={mode === "text_to_image" ? batchSize : 1}
                     disabled={!canGenerate}
                     disabledReason={generateDisabledReason}
                     selectedIdentityLabel={selectedIdentityLabel}
@@ -4468,7 +4404,8 @@ ${basePrompt}`,
                   setRefineChoices(null);
                 }}
                 onTurnIntoVideo={(item) => {
-                  setPrompt(item.prompt);
+                  if (!item.privateAsset || !item.generationAssetId) { setErrorMessage("Only a private generated image can be turned into video."); return; }
+                  setPrompt(item.prompt); setSourceGenerationAssetId(item.generationAssetId); setImageFile(null); setImagePreviewUrl(item.url);
                   setMode("image_to_video");
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}

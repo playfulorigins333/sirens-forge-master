@@ -26,7 +26,7 @@ for(const malformed of [{success:false,images:["https://assets.test/a.png"]},{su
 
 assert.deepEqual(LAUNCH_CAPACITY,{beta_reserved:25,og_throne:50,early_bird:150});
 const home=await readFile("app/page.tsx","utf8"); assert(!home.includes("/120 LEFT")); assert(home.includes("LAUNCH_CAPACITY.early_bird")); assert(home.includes("useReducedMotion")); assert(home.includes("motion-reduce:animate-none")); assert(home.includes("Identity-first creation")); assert(home.includes("Generate directly, or add an AI Twin when you want a reusable identity")); assert(home.includes("Add an AI Twin when you want a consistent reusable identity.")); assert(home.includes("Choose whether to add an AI Twin")); assert(home.includes("Generate without one, or select an AI Twin")); assert(!home.includes("Your AI Twin identity anchors every generation.")); assert(!home.includes("Select or create your AI Twin before generating")); assert(!home.includes("Generate with your AI Twin"));
-const generator=await readFile("app/generate/page.tsx","utf8"); assert(!generator.includes('subscriptionStatus: "active"')); assert(generator.includes('disabled={mode.unavailable}')); assert(generator.includes("Image generation is temporarily unavailable."));
+const generator=await readFile("app/generate/page.tsx","utf8"); assert(!generator.includes('subscriptionStatus: "active"')); assert(generator.includes('disabled={mode.unavailable}')); assert(generator.includes("Generation is temporarily unavailable."));
 const route=await readFile("app/api/generate/route.ts","utf8"); assert(route.indexOf("isGenerationExecutionEnabled()")<route.indexOf("requireSirensApiConfig()")); assert(route.includes("resolveLoraStack(bodyMode, identityLora, userId)")); assert(route.includes('message === "IDENTITY_LORA_UNAVAILABLE"')); assert(route.includes('message: "Selected AI Twin is unavailable."')); assert(route.includes("{ status: 400 }"));
 assert(route.includes("parseGenerationSuccess")); assert(route.includes("GENERATION_HISTORY_PERSISTENCE_FAILED")); assert(route.includes("retry_generation: false"));
 const proxySource=await readFile("proxy.ts","utf8"); assert(proxySource.includes("supabase.auth.getUser()")); assert(proxySource.includes('const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"]')); assert(proxySource.includes("if (!user)")); assert(proxySource.includes("NextResponse.redirect"));
@@ -34,13 +34,11 @@ const nextConfig=await readFile("next.config.mjs","utf8"); for(const header of [
 assert(!/output\s*:\s*["']standalone["']/.test(nextConfig), "Vercel frontend must not force standalone output");
 const workflow=await readFile(".github/workflows/frontend-launch-readiness.yml","utf8"); assert(!workflow.includes("paths:")); assert(workflow.includes("npm audit --omit=dev --audit-level=high")); assert(workflow.includes("npm run build")); assert(workflow.includes('GENERATION_EXECUTION_ENABLED: "false"'));
 
-for (const videoPath of ["app/api/video/route.ts", "app/api/generate_video/route.ts"]) {
-  const videoRoute = await readFile(videoPath, "utf8");
-  assert(videoRoute.includes('error: "VIDEO_GENERATION_UNAVAILABLE"'), `${videoPath} must expose the stable unavailable contract`);
-  assert(videoRoute.includes("status: 503"), `${videoPath} must fail closed with 503`);
-  assert(!videoRoute.includes("RUNPOD_"), `${videoPath} must not contain executable RunPod routing`);
-  assert(!videoRoute.includes("resolveLoraStack("), `${videoPath} must not resolve LoRAs while video is disabled`);
-}
+const videoRoute = await readFile("app/api/video/route.ts", "utf8");
+assert(videoRoute.includes("isVideoSubmissionReady"));
+assert(videoRoute.includes("submitVideoProject"));
+await assert.rejects(readFile("app/api/generate_video/route.ts", "utf8"));
+assert(!videoRoute.includes("RUNPOD_"));
 
 assert.equal(hasFanvueGrantedPublicationScopes([], FANVUE_TEXT_PUBLICATION_SCOPES), false);
 assert.equal(hasFanvueGrantedPublicationScopes(["read:self"], FANVUE_TEXT_PUBLICATION_SCOPES), false);
@@ -60,6 +58,6 @@ const login=await readFile("app/login/LoginClient.tsx","utf8"); for(const contra
 const layout=await readFile("app/layout.tsx","utf8"); assert(!layout.includes('<main className="flex-1">')); assert(layout.includes('import "./reduced-motion.css"'));
 const reducedMotion=await readFile("app/reduced-motion.css","utf8"); assert(reducedMotion.includes("prefers-reduced-motion: reduce")); assert(reducedMotion.includes('[style*="box-shadow"]')); assert(reducedMotion.includes('[style*="background-position"]'));
 const sitemap=await readFile("app/sitemap.ts","utf8"); assert(!/dashboard|account|billing|login|generate/.test(sitemap));
-const faq=await readFile("app/faq/page.tsx","utf8"); assert(faq.includes("identity-first AI creation platform centered on reusable AI Twin identities")); assert(faq.includes("No. You can generate images without training or selecting an AI Twin.")); assert(faq.includes("optional custom-trained AI model (LoRA)")); assert(faq.includes("prompt-driven image creation with optional identity-anchored workflows")); assert(!faq.includes("Generation requires you to create and select an AI Twin identity")); assert(!faq.includes("create AI-generated images, videos")); assert(faq.includes("Video generation is Coming Soon")); assert(faq.includes("$1,333 one-time")); assert(faq.includes("OG Founder")); assert(faq.includes("$29.99/month")); assert(faq.includes("Early Bird")); assert(!faq.includes("Sirens Forge operates on a subscription model. You are billed on a recurring basis through our payment provider.")); assert(faq.includes("admin@sirensforge.vip")); for(const safetyGuidance of ["minors", "non-consensual acts", "real-person exploitation", "illegal activity"])assert(faq.includes(safetyGuidance),safetyGuidance);
+const faq=await readFile("app/faq/page.tsx","utf8"); assert(faq.includes("identity-first AI creation platform centered on reusable AI Twin identities")); assert(faq.includes("No. You can generate images without training or selecting an AI Twin.")); assert(faq.includes("optional custom-trained AI model (LoRA)")); assert(faq.includes("Text → Image, Text → Video, and Image → Video")); assert(!faq.includes("Generation requires you to create and select an AI Twin identity")); assert(!faq.includes("create AI-generated images, videos")); assert(!faq.includes("Video generation is Coming Soon")); assert(faq.includes("$1,333 one-time")); assert(faq.includes("OG Founder")); assert(faq.includes("$29.99/month")); assert(faq.includes("Early Bird")); assert(!faq.includes("Sirens Forge operates on a subscription model. You are billed on a recurring basis through our payment provider.")); assert(faq.includes("admin@sirensforge.vip")); for(const safetyGuidance of ["minors", "non-consensual acts", "real-person exploitation", "illegal activity"])assert(faq.includes(safetyGuidance),safetyGuidance);
 const footer=await readFile("components/layout/Footer.tsx","utf8"); assert(footer.includes("Identity-first AI media and creator workflows.")); assert(!footer.includes("AI generation for images, video"));
 console.log("frontend launch readiness focused contracts: PASS");
