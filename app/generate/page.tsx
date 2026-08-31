@@ -47,6 +47,8 @@ import { isPrivateCreatorGenerationOutput, parseCreatorGenerationOutputs } from 
 import { CREATION_LOOP_HANDOFF_STORAGE_KEY, parseCreationLoopHandoff } from "@/lib/creation-loop/handoff";
 import { resolveIncomingIdentity } from "@/lib/generation/identityHandoff";
 import { clearPendingSubmission, pendingSubmissionKey } from "@/lib/compute-idempotency-client";
+import { canonicalProjectId, restoreVideoProjectIds, shouldRetainVideoProject, shouldUploadVideoSource } from "@/lib/video/clientState";
+import { resolveGeneratedItemDownloadUrl } from "@/lib/generation/privateDownload";
 
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -154,6 +156,11 @@ async function resolveGenerationOutputUrl(output: any): Promise<string> {
   const body = await response.json();
   if (typeof body?.url !== "string" || !body.url) throw new Error("Private generation preview is unavailable.");
   return body.url;
+}
+
+async function downloadGeneratedItem(item: GeneratedItem): Promise<void> {
+  const url = await resolveGeneratedItemDownloadUrl(item);
+  const link = document.createElement("a"); link.href = url; document.body.appendChild(link); link.click(); document.body.removeChild(link);
 }
 
 function isUuidLike(value?: string | null): boolean {
@@ -1219,9 +1226,12 @@ function InlineUltraAddOnHelper(props: {
 
 function ImageToVideoUploadSection(props: {
   imageFile: File | null;
+  sourceGenerationAssetId: string | null;
   previewUrl: string | null;
   onFileChange: (file: File | null) => void;
+  onRemove: () => void;
 }) {
+  const hasSource = Boolean(props.imageFile || props.sourceGenerationAssetId);
   return (
     <Card className="sticky top-24 border-gray-800 bg-gray-900/80">
       <CardHeader className="pb-3">
@@ -1230,11 +1240,11 @@ function ImageToVideoUploadSection(props: {
           Source Image
         </CardTitle>
         <CardDescription className="text-xs text-gray-300">
-          Upload the image you want to animate into motion.
+          Choose an upload or retain an owned private generated image to animate.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {!props.imageFile ? (
+        {!hasSource ? (
           <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-gray-700 bg-gray-950 px-4 py-8 text-center transition-colors hover:border-purple-500/60">
             <Upload className="h-7 w-7 text-purple-400" />
             <span className="text-xs text-gray-300">Click to upload an image for animation</span>
@@ -1253,15 +1263,13 @@ function ImageToVideoUploadSection(props: {
             )}
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="truncate text-xs font-semibold text-gray-100">{props.imageFile.name}</div>
-                <div className="text-[10px] text-gray-400">
-                  {(props.imageFile.size / 1024 / 1024).toFixed(2)} MB
-                </div>
+                <div className="truncate text-xs font-semibold text-gray-100">{props.imageFile?.name ?? "Private generated image"}</div>
+                <div className="text-[10px] text-gray-400">{props.imageFile ? `${(props.imageFile.size / 1024 / 1024).toFixed(2)} MB` : "Owned private source retained"}</div>
               </div>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => props.onFileChange(null)}
+                onClick={props.onRemove}
                 className="border-gray-700 bg-gray-900 text-gray-100 hover:bg-gray-800"
               >
                 <X className="mr-2 h-4 w-4" />
@@ -2079,14 +2087,7 @@ function OutputPanel(props: {
 
   const handleDownloadLatest = async () => {
     if (!latestItem?.url) return;
-    let downloadUrl = latestItem.url;
-    if (latestItem.privateAsset && latestItem.generationAssetId) {
-      const response = await fetch(`/api/library/assets/${encodeURIComponent(latestItem.generationAssetId)}/signed-url?mode=download`, { cache: "no-store" });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok || typeof body.url !== "string") return;
-      downloadUrl = body.url;
-    }
-    const link = document.createElement("a"); link.href = downloadUrl; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    await downloadGeneratedItem(latestItem).catch(() => undefined);
   };
 
   const handleCopyPrompt = async () => {
@@ -2496,7 +2497,7 @@ function OutputPanel(props: {
                   size="icon"
                   variant="ghost"
                   type="button"
-                  onClick={() => window.open(item.url, "_blank")}
+                  onClick={() => void downloadGeneratedItem(item)}
                   className="bg-white/10 hover:bg-white/20"
                 >
                   <DownloadIcon />
@@ -3218,11 +3219,14 @@ function HistorySidebar(props: {
 export default function GeneratePage() {
   const [generationAvailable, setGenerationAvailable] = useState<boolean | null>(null);
   const [videoAvailable, setVideoAvailable] = useState<boolean | null>(null);
+  const [videoSourceUploadReady, setVideoSourceUploadReady] = useState(false);
   const [activeVideoProjectIds, setActiveVideoProjectIds] = useState<string[]>([]);
   const [videoCaps, setVideoCaps] = useState({ min_duration_seconds: 10, max_duration_seconds: 15, min_motion_strength: 0.4, max_motion_strength: 0.8, default_motion_strength: 0.65 });
   const [durableCompute, setDurableCompute] = useState(false);
   const [activeComputeJobIds, setActiveComputeJobIds] = useState<string[]>([]);
   const [queuedComputeMessage, setQueuedComputeMessage] = useState<string | null>(null);
+  const [videoProgressMessage, setVideoProgressMessage] = useState<string | null>(null);
+  const [cancellableVideoProjectIds, setCancellableVideoProjectIds] = useState<string[]>([]);
   const router = useRouter();
   const searchParams = useSearchParams();
   const promptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -3234,7 +3238,7 @@ export default function GeneratePage() {
     fetch("/api/generate/availability", { cache: "no-store" }).then((response) => response.ok ? response.json() : Promise.reject()).then((data) => { if (current) { setGenerationAvailable(data?.available === true); setDurableCompute(data?.execution_mode === "durable"); } }).catch(() => { if (current) setGenerationAvailable(false); });
     return () => { current = false; };
   }, []);
-  useEffect(() => { let current=true; fetch("/api/video/availability",{cache:"no-store"}).then(r=>r.ok?r.json():Promise.reject()).then(data=>{if(current){setVideoAvailable(data.available===true);if(data.caps){setVideoCaps(data.caps);setVideoDuration(data.caps.min_duration_seconds);setVideoMotion(data.caps.default_motion_strength);}}}).catch(()=>{if(current)setVideoAvailable(false)});return()=>{current=false};}, []);
+  useEffect(() => { let current=true; fetch("/api/video/availability",{cache:"no-store"}).then(r=>r.ok?r.json():Promise.reject()).then(data=>{if(current){setVideoAvailable(data.available===true);setVideoSourceUploadReady(data.source_upload_ready===true);if(data.caps){setVideoCaps(data.caps);setVideoDuration(data.caps.min_duration_seconds);setVideoMotion(data.caps.default_motion_strength);}}}).catch(()=>{if(current)setVideoAvailable(false)});return()=>{current=false};}, []);
   useEffect(() => {
     try {
       const restored = JSON.parse(localStorage.getItem("sirensforge:active-compute-jobs") || "[]");
@@ -3359,9 +3363,28 @@ export default function GeneratePage() {
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   useEffect(() => {
-    try { const saved=JSON.parse(localStorage.getItem("sirensforge:active-video-projects")||"[]"); const valid=Array.isArray(saved)?[...new Set(saved.filter((id):id is string=>typeof id==="string"&&isUuidLike(id)))]:[]; localStorage.setItem("sirensforge:active-video-projects",JSON.stringify(valid)); setActiveVideoProjectIds(valid); } catch { localStorage.removeItem("sirensforge:active-video-projects"); }
+    try { const valid = restoreVideoProjectIds(JSON.parse(localStorage.getItem("sirensforge:active-video-projects") || "[]")); localStorage.setItem("sirensforge:active-video-projects", JSON.stringify(valid)); setActiveVideoProjectIds(valid); }
+    catch { localStorage.removeItem("sirensforge:active-video-projects"); }
   }, []);
-  useEffect(() => { if(!activeVideoProjectIds.length)return; let active=true; const poll=async()=>{const remove:string[]=[];await Promise.all(activeVideoProjectIds.map(async projectId=>{const response=await fetch(`/api/video/${encodeURIComponent(projectId)}`,{cache:"no-store"}).catch(()=>null);if(!active||!response)return;if(response.status===404){remove.push(projectId);return}if(response.status===409||response.status>=500)return;const project=await response.json().catch(()=>({}));if(["queued","generating","stitching","cancelling"].includes(project.status)){setQueuedComputeMessage(`Video is ${project.status}.`);return}if(project.status==="failed"||project.status==="cancelled"){setErrorMessage(`Video generation ${project.status}.`);remove.push(projectId);return}const result=project.video_result,output=result?.output;if(project.status==="completed"&&isUuidLike(output?.id)){try{const signed=await fetch(`/api/library/assets/${encodeURIComponent(output.id)}/signed-url?mode=preview`,{cache:"no-store"});const body=await signed.json();if(!signed.ok||typeof body.url!=="string")return;const item:GeneratedItem={id:output.id,kind:"video",url:body.url,prompt:result.prompt||"",settings:result,createdAt:result.completed_at,dbGenerationId:result.generation_id,generationAssetId:output.id,privateAsset:true};const add=(previous:GeneratedItem[])=>previous.some(x=>x.generationAssetId===output.id)?previous:[item,...previous];setItems(previous=>add(previous).slice(0,12));setHistory(add);remove.push(projectId);}catch{return}}}));if(remove.length)setActiveVideoProjectIds(ids=>{const next=ids.filter(id=>!remove.includes(id));localStorage.setItem("sirensforge:active-video-projects",JSON.stringify(next));return next})};void poll();const timer=window.setInterval(poll,5000);return()=>{active=false;window.clearInterval(timer)};},[activeVideoProjectIds]);
+  useEffect(() => {
+    if (!activeVideoProjectIds.length) { setVideoProgressMessage(null); setCancellableVideoProjectIds([]); return; }
+    let active = true;
+    const poll = async () => { const remove: string[] = [], cancellable: string[] = [], progress: string[] = [];
+      await Promise.all(activeVideoProjectIds.map(async (projectId) => { const response = await fetch(`/api/video/${encodeURIComponent(projectId)}`, { cache: "no-store" }).catch(() => null); if (!active || !response) return;
+        if (response.status === 404) { setErrorMessage("A saved Video project is no longer available."); remove.push(projectId); return; }
+        if (shouldRetainVideoProject(response.status)) return;
+        const project = await response.json().catch(() => ({}));
+        if (["queued", "generating", "stitching", "cancelling"].includes(project.status)) { progress.push(project.status); if (project.can_cancel && project.status !== "cancelling") cancellable.push(projectId); return; }
+        if (project.status === "failed" || project.status === "cancelled") { setErrorMessage(`Video generation ${project.status}.`); remove.push(projectId); return; }
+        const result = project.video_result, output = result?.output;
+        if (project.status === "completed" && isUuidLike(output?.id)) { try { const signed = await fetch(`/api/library/assets/${encodeURIComponent(output.id)}/signed-url?mode=preview`, { cache: "no-store" }); const body = await signed.json(); if (!signed.ok || typeof body.url !== "string") return; const item: GeneratedItem = { id: output.id, kind: "video", url: body.url, prompt: result.prompt || "", settings: result, createdAt: result.completed_at, dbGenerationId: result.generation_id, generationAssetId: output.id, privateAsset: true }; const add = (previous: GeneratedItem[]) => previous.some((x) => x.generationAssetId === output.id) ? previous : [item, ...previous]; setItems((previous) => add(previous).slice(0, 12)); setHistory(add); remove.push(projectId); } catch { return; } }
+      }));
+      if (!active) return; setCancellableVideoProjectIds(cancellable); setVideoProgressMessage(progress.length ? `${progress.length} Video project${progress.length === 1 ? " is" : "s are"} queued or processing.` : null);
+      if (remove.length) setActiveVideoProjectIds((ids) => { const next = ids.filter((id) => !remove.includes(id)); localStorage.setItem("sirensforge:active-video-projects", JSON.stringify(next)); return next; });
+    };
+    void poll(); const timer = window.setInterval(poll, 5000); return () => { active = false; window.clearInterval(timer); };
+  }, [activeVideoProjectIds]);
+  const cancelVideoProject = async (projectId: string) => { const response = await fetch(`/api/video/${encodeURIComponent(projectId)}`, { method: "DELETE" }); const body = await response.json().catch(() => ({})); if (!response.ok) { setErrorMessage(body.error || "Video cancellation is temporarily unavailable."); return; } setCancellableVideoProjectIds((ids) => ids.filter((id) => id !== projectId)); setVideoProgressMessage("Video cancellation requested."); };
 
   const [showSubModal, setShowSubModal] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
@@ -3463,6 +3486,8 @@ export default function GeneratePage() {
     ? selectedAvailability === null ? "Checking generation availability…" : "Generation is temporarily unavailable."
     : pendingIdentityId
       ? "Checking selected AI Twin…"
+    : mode === "image_to_video" && Boolean(imageFile) && !sourceGenerationAssetId && !videoSourceUploadReady
+      ? "Private source upload is temporarily unavailable."
     : !hasGenerationInput
       ? mode === "image_to_video"
         ? "Upload a source image before generating video."
@@ -3793,14 +3818,8 @@ export default function GeneratePage() {
   }, [identitiesLoaded, identityOptions, pendingIdentityId]);
 
   useEffect(() => {
-    if (!imageFile) {
-      setImagePreviewUrl(null);
-      return;
-    }
-
-    const objectUrl = URL.createObjectURL(imageFile);
-    setImagePreviewUrl(objectUrl);
-
+    if (!imageFile) return;
+    const objectUrl = URL.createObjectURL(imageFile); setImagePreviewUrl(objectUrl);
     return () => URL.revokeObjectURL(objectUrl);
   }, [imageFile]);
 
@@ -4063,7 +4082,7 @@ ${basePrompt}`,
           generatedAll.push(...generated);
         } else {
           let sourceAssetId = sourceGenerationAssetId;
-          if (mode === "image_to_video" && imageFile) {
+          if (mode === "image_to_video" && shouldUploadVideoSource(imageFile, sourceGenerationAssetId)) {
             const authority = await fetch("/api/video/source-upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_type: imageFile.type, size_bytes: imageFile.size }) });
             const upload = await authority.json().catch(() => ({}));
             if (!authority.ok) throw new Error(upload.error || "Source upload is unavailable.");
@@ -4080,7 +4099,8 @@ ${basePrompt}`,
           const res = await fetch("/api/video", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": submissionKey }, body: JSON.stringify(videoPayload) });
           const data = await res.json().catch(() => ({}));
           if (!res.ok || res.status !== 202 || !isUuidLike(data.project_id)) { if (res.status >= 400 && res.status < 500) clearPendingSubmission("sirensforge:pending-video-project", submissionKey); throw new Error(data.error || "Video submission failed."); }
-          const next = [...new Set([...activeVideoProjectIds, data.project_id])];
+          const canonicalId = canonicalProjectId(data.project_id); if (!canonicalId) throw new Error("Video submission returned an invalid project ID.");
+          const next = [...new Set([...activeVideoProjectIds, canonicalId])];
           localStorage.setItem("sirensforge:active-video-projects", JSON.stringify(next)); setActiveVideoProjectIds(next);
           clearPendingSubmission("sirensforge:pending-video-project", submissionKey); setQueuedComputeMessage("Your video project is safely queued."); setIsGenerating(false); return;
         }
@@ -4200,8 +4220,10 @@ ${basePrompt}`,
           {mode === "image_to_video" && (
             <ImageToVideoUploadSection
               imageFile={imageFile}
+              sourceGenerationAssetId={sourceGenerationAssetId}
               previewUrl={imagePreviewUrl}
-              onFileChange={setImageFile}
+              onFileChange={(file) => { setImageFile(file); setSourceGenerationAssetId(null); if (!file) setImagePreviewUrl(null); }}
+              onRemove={() => { setImageFile(null); setSourceGenerationAssetId(null); setImagePreviewUrl(null); }}
             />
           )}
 
@@ -4392,6 +4414,8 @@ ${basePrompt}`,
 
           {errorMessage && <p className="text-[11px] text-red-400">{errorMessage}</p>}
           {queuedComputeMessage && <p className="text-[11px] text-purple-300">{queuedComputeMessage}</p>}
+          {videoProgressMessage && <p className="text-[11px] text-cyan-300" role="status">{videoProgressMessage}</p>}
+          {cancellableVideoProjectIds.map((projectId) => <Button key={projectId} type="button" variant="outline" aria-label={`Cancel Video project ${projectId}`} onClick={() => void cancelVideoProject(projectId)}>Cancel Video</Button>)}
 
           <Card className="border-gray-800 bg-gray-900/80">
             <CardContent className="p-4">

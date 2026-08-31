@@ -10,6 +10,14 @@ export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]
 
 export type VideoRequest = { mode: "text_to_video" | "image_to_video"; prompt: string; negative_prompt: string; body_type: "body_feminine" | "body_masculine" | "none"; identity_id: string | null; source_generation_asset_id: string | null; requested_duration_seconds: number; motion_strength: number };
 
+function canonicalUuid(value: unknown, error: string): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string") throw new Error(error);
+  const canonical = value.trim().toLowerCase();
+  if (!UUID_RE.test(canonical)) throw new Error(error);
+  return canonical;
+}
+
 export function parseVideoRequest(value: unknown, tier: "standard" | "og"): VideoRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("INVALID_VIDEO_REQUEST");
   const input = value as Record<string, unknown>;
@@ -18,13 +26,13 @@ export function parseVideoRequest(value: unknown, tier: "standard" | "og"): Vide
   const request = input as VideoRequest;
   if (!(["text_to_video","image_to_video"] as unknown[]).includes(request.mode) || typeof request.prompt !== "string" || typeof request.negative_prompt !== "string" || !(["body_feminine","body_masculine","none"] as unknown[]).includes(request.body_type)) throw new Error("INVALID_VIDEO_REQUEST");
   if (request.prompt.length > 4000 || request.negative_prompt.length > 4000 || (request.mode === "text_to_video" && !request.prompt.trim())) throw new Error("INVALID_VIDEO_REQUEST");
-  if (request.identity_id !== null && (typeof request.identity_id !== "string" || !UUID_RE.test(request.identity_id))) throw new Error("INVALID_VIDEO_IDENTITY");
-  if (request.source_generation_asset_id !== null && (typeof request.source_generation_asset_id !== "string" || !UUID_RE.test(request.source_generation_asset_id))) throw new Error("INVALID_VIDEO_SOURCE");
-  if ((request.mode === "text_to_video") !== (request.source_generation_asset_id === null)) throw new Error("INVALID_VIDEO_SOURCE");
+  const identityId = canonicalUuid(request.identity_id, "INVALID_VIDEO_IDENTITY");
+  const sourceAssetId = canonicalUuid(request.source_generation_asset_id, "INVALID_VIDEO_SOURCE");
+  if ((request.mode === "text_to_video") !== (sourceAssetId === null)) throw new Error("INVALID_VIDEO_SOURCE");
   const cap = VIDEO_TIERS[tier];
   if (!Number.isInteger(request.requested_duration_seconds) || request.requested_duration_seconds < cap.min_duration_seconds || request.requested_duration_seconds > cap.max_duration_seconds) throw new Error("VIDEO_DURATION_TIER_INVALID");
   if (typeof request.motion_strength !== "number" || !Number.isFinite(request.motion_strength) || request.motion_strength < cap.min_motion_strength || request.motion_strength > cap.max_motion_strength) throw new Error("VIDEO_MOTION_TIER_INVALID");
-  return { ...request, prompt: request.prompt.trim(), negative_prompt: request.negative_prompt.trim() };
+  return { ...request, prompt: request.prompt.trim(), negative_prompt: request.negative_prompt.trim(), identity_id: identityId, source_generation_asset_id: sourceAssetId };
 }
 
 function canonical(value: unknown): unknown { if (Array.isArray(value)) return value.map(canonical); if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a],[b]) => a.localeCompare(b)).map(([k,v]) => [k, canonical(v)])); return value; }
