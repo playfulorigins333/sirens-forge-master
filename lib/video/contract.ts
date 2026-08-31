@@ -37,3 +37,15 @@ export function parseVideoRequest(value: unknown, tier: "standard" | "og"): Vide
 
 function canonical(value: unknown): unknown { if (Array.isArray(value)) return value.map(canonical); if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a],[b]) => a.localeCompare(b)).map(([k,v]) => [k, canonical(v)])); return value; }
 export const videoRequestFingerprint = (request: VideoRequest) => createHash("sha256").update(JSON.stringify(canonical(request))).digest("hex");
+
+export const VIDEO_STATUSES = ["queued", "generating", "stitching", "cancelling", "completed", "failed", "cancelled"] as const;
+export type VideoStatus = typeof VIDEO_STATUSES[number];
+export const isVideoStatus = (value: unknown): value is VideoStatus => typeof value === "string" && (VIDEO_STATUSES as readonly string[]).includes(value);
+export const safeVideoErrorCode = (value: unknown): string | null => typeof value === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : null;
+
+export function parseVideoSubmissionResult(value: unknown): { project_id: string; status: VideoStatus; created_at: string | null; can_cancel: boolean } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>, projectId = typeof row.project_id === "string" ? row.project_id.toLowerCase() : "";
+  if (!UUID_RE.test(projectId) || !isVideoStatus(row.creator_status) || typeof row.can_cancel !== "boolean" || (row.created_at !== null && typeof row.created_at !== "string")) return null;
+  return { project_id: projectId, status: row.creator_status, created_at: row.created_at as string | null, can_cancel: row.can_cancel };
+}

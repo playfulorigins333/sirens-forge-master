@@ -7,9 +7,11 @@ do $$ begin
  if exists(select 1 from public.generations where mode='video_source_import' or metadata->>'source_mode'='video_source_import') then raise exception 'PHASE4_ROLLBACK_REFUSED_IMPORTED_SOURCE_DATA'; end if;
  if exists(select 1 from public.compute_jobs where workload='video' and request_payload ? 'identity_reference') then raise exception 'PHASE4_ROLLBACK_REFUSED_DURABLE_DATA'; end if;
 end$$;
-drop function if exists public.finalize_video_source_upload(uuid,uuid,uuid,text,bigint,text);
+drop function if exists public.creator_video_project_product(uuid,uuid);
+drop function if exists public.phase4_video_project_manifest(public.video_projects);
+drop function if exists public.finalize_video_source_upload(uuid,uuid,uuid,text,text,text,bigint,text);
 drop function if exists public.claim_video_source_upload_finalization(uuid,uuid,uuid);
-drop function if exists public.create_video_source_upload(uuid,uuid,text,text,text,text,text,bigint,timestamptz);
+drop function if exists public.create_video_source_upload(uuid,uuid,text,text,text,bigint,timestamptz);
 drop table if exists public.video_source_uploads;
 alter table public.video_projects alter column identity_id set not null;
 create or replace function public.submit_video_project_compute_jobs(p_owner_id uuid,p_identity_id uuid,p_source_generation_asset_id uuid,p_idempotency_key text,p_request_fingerprint text,p_request_payload jsonb,p_priority_class text)

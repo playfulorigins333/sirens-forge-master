@@ -7,3 +7,5 @@ export function resolveVideoSourceUploadConfig(env: NodeJS.ProcessEnv = process.
   return { endpoint: endpoint.toString(), bucket, accessKeyId, secretAccessKey, region: env.R2_REGION || env.AWS_DEFAULT_REGION || "auto" };
 }
 export function isVideoSourceUploadReady(env: NodeJS.ProcessEnv = process.env): boolean { try { resolveVideoSourceUploadConfig(env); return true; } catch { return false; } }
+export const isVideoSourceUploadInfraReady = (env: NodeJS.ProcessEnv = process.env) => env.VIDEO_SOURCE_UPLOAD_INFRA_READY === "true";
+export const isVideoSourceUploadOperational = (env: NodeJS.ProcessEnv = process.env) => isVideoSourceUploadInfraReady(env) && isVideoSourceUploadReady(env);

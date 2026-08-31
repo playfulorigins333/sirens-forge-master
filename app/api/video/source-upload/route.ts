@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { ensureActiveSubscription } from "@/lib/subscription-checker";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { isVideoSubmissionReady } from "@/lib/video/availability";
-import { isVideoSourceUploadReady, promoteClaimedSource, signStagingUpload, validateSourceMetadata, VIDEO_SOURCE_UPLOAD_TTL_SECONDS } from "@/lib/video/sourceUpload";
+import { isVideoSourceUploadOperational, promoteClaimedSource, signStagingUpload, validateSourceMetadata, VIDEO_SOURCE_FINALIZATION_TTL_SECONDS, VIDEO_SOURCE_SIGNED_PUT_TTL_SECONDS } from "@/lib/video/sourceUpload";
 import { UUID_RE } from "@/lib/video/contract";
 export const runtime = "nodejs"; export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "no-store" };
@@ -12,15 +12,15 @@ const unavailable = () => NextResponse.json({ error: "VIDEO_SOURCE_UPLOAD_UNAVAI
 export async function POST(req: NextRequest) {
   const auth = await ensureActiveSubscription();
   if (!auth.ok || !auth.user) return NextResponse.json({ error: auth.error, message: auth.message }, { status: auth.status, headers });
-  if (!isVideoSubmissionReady() || !isVideoSourceUploadReady()) return unavailable();
+  if (!isVideoSubmissionReady() || !isVideoSourceUploadOperational()) return unavailable();
   let mime: string, size: number;
   try { const body = await req.json(); if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).sort().join(",") !== "content_type,size_bytes") throw new Error(); mime = body.content_type; size = body.size_bytes; validateSourceMetadata(mime, size); }
   catch { return NextResponse.json({ error: "INVALID_VIDEO_SOURCE_UPLOAD" }, { status: 400, headers }); }
   try {
     const signed = await signStagingUpload({ ownerId: auth.user.id, mime, size });
-    const { error } = await getSupabaseAdmin().rpc("create_video_source_upload", { p_upload_id: signed.uploadId, p_owner_id: auth.user.id, p_staging_bucket: signed.bucket, p_staging_key: signed.stagingKey, p_final_bucket: signed.bucket, p_final_key: signed.finalKey, p_expected_mime: mime, p_expected_size: size, p_expires_at: new Date(Date.now() + VIDEO_SOURCE_UPLOAD_TTL_SECONDS * 1000).toISOString() });
+    const { error } = await getSupabaseAdmin().rpc("create_video_source_upload", { p_upload_id: signed.uploadId, p_owner_id: auth.user.id, p_staging_bucket: signed.bucket, p_staging_key: signed.stagingKey, p_expected_mime: mime, p_expected_size: size, p_expires_at: new Date(Date.now() + VIDEO_SOURCE_FINALIZATION_TTL_SECONDS * 1000).toISOString() });
     if (error) return unavailable();
-    return NextResponse.json({ upload_id: signed.uploadId, upload_url: signed.uploadUrl, content_type: mime, expires_in: VIDEO_SOURCE_UPLOAD_TTL_SECONDS }, { status: 201, headers });
+    return NextResponse.json({ upload_id: signed.uploadId, upload_url: signed.uploadUrl, content_type: mime, expires_in: VIDEO_SOURCE_SIGNED_PUT_TTL_SECONDS }, { status: 201, headers });
   } catch { return unavailable(); }
 }
 
@@ -38,11 +38,12 @@ export async function PATCH(req: NextRequest) {
   if (row.generation_asset_id) return NextResponse.json({ upload_id: id, generation_id: row.generation_id, generation_asset_id: row.generation_asset_id }, { headers });
   if (row.claimed !== true) return NextResponse.json({ error: "VIDEO_SOURCE_FINALIZATION_IN_PROGRESS" }, { status: 409, headers });
   try {
-    const verified = await promoteClaimedSource({ stagingKey: row.staging_key, finalKey: row.final_key, mime: row.expected_mime_type, size: Number(row.expected_size_bytes) });
-    const finalized = await admin.rpc("finalize_video_source_upload", { p_upload_id: id, p_owner_id: auth.user.id, p_claim_token: claimToken, p_mime_type: verified.mimeType, p_size_bytes: verified.sizeBytes, p_sha256: verified.sha256 });
+    const verified = await promoteClaimedSource({ bucket: row.staging_bucket, ownerId: auth.user.id, uploadId: id, claimToken, stagingKey: row.staging_key, mime: row.expected_mime_type, size: Number(row.expected_size_bytes) });
+    const finalized = await admin.rpc("finalize_video_source_upload", { p_upload_id: id, p_owner_id: auth.user.id, p_claim_token: claimToken, p_final_bucket: verified.bucket, p_final_key: verified.objectKey, p_mime_type: verified.mimeType, p_size_bytes: verified.sizeBytes, p_sha256: verified.sha256 });
     if (finalized.error) return unavailable();
     void verified.cleanup().catch(() => undefined);
     const result = Array.isArray(finalized.data) ? finalized.data[0] : finalized.data;
+    if (!result || typeof result.generation_id !== "string" || typeof result.generation_asset_id !== "string" || !UUID_RE.test(result.generation_id) || !UUID_RE.test(result.generation_asset_id)) return unavailable();
     return NextResponse.json({ upload_id: id, generation_id: result.generation_id, generation_asset_id: result.generation_asset_id }, { headers });
   } catch { return unavailable(); }
 }

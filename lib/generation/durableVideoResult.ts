@@ -1,13 +1,10 @@
 import { UUID_RE } from "@/lib/video/contract";
-type Row = Record<string, any>;
-export function parseExactVideoSafeResult(value: unknown, projectId: string): { assetId: string } | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const row = value as Row; if (Object.keys(row).sort().join(",") !== "asset_ids,generation_id,project_id") return null;
-  if (row.project_id !== projectId || row.generation_id !== projectId || !Array.isArray(row.asset_ids) || row.asset_ids.length !== 1 || !UUID_RE.test(row.asset_ids[0])) return null;
-  return { assetId: row.asset_ids[0].toLowerCase() };
-}
-export function videoResultRowsAreCanonical(input: { ownerId: string; projectId: string; assetId: string; project: Row | null; generation: Row | null; assets: Row[] | null }): boolean {
-  const { ownerId, projectId, assetId, project, generation, assets } = input; if (!project || !generation || !assets || assets.length !== 1) return false;
-  const asset = assets[0], object = Array.isArray(asset.private_storage_objects) ? asset.private_storage_objects[0] : asset.private_storage_objects;
-  return project.id === projectId && project.owner_id === ownerId && generation.id === projectId && generation.user_id === ownerId && generation.status === "completed" && generation.job_type === "video" && generation.image_url === null && asset.id === assetId && asset.generation_id === projectId && asset.owner_id === ownerId && asset.ordinal === 0 && asset.kind === "video" && object?.owner_id === ownerId && object?.storage_class === "creator_generation" && object?.mime_type === "video/mp4" && object?.bucket === project.storage_bucket && new RegExp(`^creator-video-projects/${projectId}/final/[^/]+$`).test(object?.object_key ?? "");
+export type DurableVideoProduct = { project_id: string; generation_id: string; prompt: string; negative_prompt: string; mode: "text_to_video" | "image_to_video"; body_type: "body_feminine" | "body_masculine" | "none"; completed_at: string; identity_id: string | null; source_generation_asset_id: string | null; requested_duration_seconds: number; motion_strength: number; actual_duration_ms: number; fps_millihz: number; width: number; height: number; output: { id: string; generation_id: string; kind: "video"; private_asset: true } };
+export function parseDurableVideoProduct(value: unknown, projectId: string): DurableVideoProduct | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null; const row = value as Record<string, any>;
+  const keys = ["actual_duration_ms","body_type","completed_at","fps_millihz","generation_id","height","identity_id","mode","motion_strength","negative_prompt","output","project_id","prompt","requested_duration_seconds","source_generation_asset_id","width"];
+  if (Object.keys(row).sort().join(",") !== keys.sort().join(",") || row.project_id !== projectId || row.generation_id !== projectId || !UUID_RE.test(row.project_id) || !["text_to_video","image_to_video"].includes(row.mode) || !["body_feminine","body_masculine","none"].includes(row.body_type) || typeof row.prompt !== "string" || typeof row.negative_prompt !== "string" || typeof row.completed_at !== "string" || !Number.isInteger(row.requested_duration_seconds) || typeof row.motion_strength !== "number" || !Number.isFinite(row.motion_strength) || !Number.isInteger(row.actual_duration_ms) || !Number.isInteger(row.fps_millihz) || !Number.isInteger(row.width) || !Number.isInteger(row.height)) return null;
+  for (const id of [row.identity_id,row.source_generation_asset_id]) if (id !== null && (typeof id !== "string" || !UUID_RE.test(id))) return null;
+  const output = row.output; if (!output || Object.keys(output).sort().join(",") !== "generation_id,id,kind,private_asset" || !UUID_RE.test(output.id) || output.generation_id !== projectId || output.kind !== "video" || output.private_asset !== true) return null;
+  return row as DurableVideoProduct;
 }

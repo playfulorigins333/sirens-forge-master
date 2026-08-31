@@ -47,7 +47,7 @@ import { isPrivateCreatorGenerationOutput, parseCreatorGenerationOutputs } from 
 import { CREATION_LOOP_HANDOFF_STORAGE_KEY, parseCreationLoopHandoff } from "@/lib/creation-loop/handoff";
 import { resolveIncomingIdentity } from "@/lib/generation/identityHandoff";
 import { clearPendingSubmission, pendingSubmissionKey } from "@/lib/compute-idempotency-client";
-import { canonicalProjectId, restoreVideoProjectIds, shouldRetainVideoProject, shouldUploadVideoSource } from "@/lib/video/clientState";
+import { canonicalProjectId, restoreVideoProjectIds, reusablePendingVideoSource, shouldClearPendingVideoSource, shouldRetainVideoProject, shouldUploadVideoSource, videoSourceFileKey, type PendingVideoSourceUpload } from "@/lib/video/clientState";
 import { resolveGeneratedItemDownloadUrl } from "@/lib/generation/privateDownload";
 
 const supabase = createBrowserClient(
@@ -1544,17 +1544,13 @@ function AdvancedSettings(props: {
 
 function VideoSettings(props: {
   duration: number;
-  fps: number;
   motion: number;
   minDuration: number;
   maxDuration: number;
   minMotion: number;
   maxMotion: number;
-  batchSize: number;
   onDurationChange: (value: number) => void;
-  onFpsChange: (value: number) => void;
   onMotionChange: (value: number) => void;
-  onBatchSizeChange: (value: number) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -1602,25 +1598,7 @@ function VideoSettings(props: {
                 />
               </div>
 
-              <div>
-                <p className="mb-1 font-semibold text-gray-200">FPS</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {[30].map((fpsOption) => (
-                    <button
-                      key={fpsOption}
-                      type="button"
-                      onClick={() => props.onFpsChange(fpsOption)}
-                      className={`rounded-lg px-3 py-2 text-[11px] font-medium ${
-                        props.fps === fpsOption
-                          ? "bg-purple-500 text-white"
-                          : "bg-gray-800 text-gray-300 hover:bg-gray-700"
-                      }`}
-                    >
-                      {fpsOption} fps
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <div className="rounded-lg border border-gray-800 bg-gray-950 px-3 py-2 text-gray-300"><span className="font-semibold text-gray-200">Output:</span> fixed 30 FPS · minimum 1080px short edge</div>
 
               <div>
                 <div className="mb-1 flex items-center justify-between">
@@ -3350,9 +3328,9 @@ export default function GeneratePage() {
   const [batchSize, setBatchSize] = useState(1);
 
   const [videoDuration, setVideoDuration] = useState(10);
-  const [videoFps] = useState(30);
   const [videoMotion, setVideoMotion] = useState(0.65);
   const [sourceGenerationAssetId, setSourceGenerationAssetId] = useState<string | null>(null);
+  const [pendingVideoSourceUpload, setPendingVideoSourceUpload] = useState<PendingVideoSourceUpload | null>(null);
 
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
@@ -3939,6 +3917,16 @@ ${basePrompt}`,
     }
   };
 
+  const submitVideoIntent = async (videoPayload: Record<string, unknown>) => {
+    const submissionKey = await pendingSubmissionKey("sirensforge:pending-video-project", videoPayload);
+    const res = await fetch("/api/video", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": submissionKey }, body: JSON.stringify(videoPayload) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || res.status !== 202 || !isUuidLike(data.project_id)) { if (res.status >= 400 && res.status < 500) clearPendingSubmission("sirensforge:pending-video-project", submissionKey); throw new Error(data.error || "Video submission failed."); }
+    const canonicalId = canonicalProjectId(data.project_id); if (!canonicalId) throw new Error("Video submission returned an invalid project ID.");
+    setActiveVideoProjectIds((ids) => { const next = [...new Set([...ids, canonicalId])]; localStorage.setItem("sirensforge:active-video-projects", JSON.stringify(next)); return next; });
+    clearPendingSubmission("sirensforge:pending-video-project", submissionKey); setVideoProgressMessage("Your Video project is safely queued.");
+  };
+
   const handleGenerate = async (overridePrompt?: string) => {
     const bodyModeMap: Record<string, string> = {
       feminine: "body_feminine",
@@ -4083,26 +4071,21 @@ ${basePrompt}`,
         } else {
           let sourceAssetId = sourceGenerationAssetId;
           if (mode === "image_to_video" && shouldUploadVideoSource(imageFile, sourceGenerationAssetId)) {
-            const authority = await fetch("/api/video/source-upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_type: imageFile.type, size_bytes: imageFile.size }) });
-            const upload = await authority.json().catch(() => ({}));
-            if (!authority.ok) throw new Error(upload.error || "Source upload is unavailable.");
-            const put = await fetch(upload.upload_url, { method: "PUT", headers: { "Content-Type": upload.content_type }, body: imageFile });
-            if (!put.ok) throw new Error("Source image upload failed.");
-            const finalize = await fetch("/api/video/source-upload", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upload_id: upload.upload_id }) });
+            const file = imageFile!; let pending = reusablePendingVideoSource(pendingVideoSourceUpload, file);
+            if (!pending) {
+              const authority = await fetch("/api/video/source-upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content_type: file.type, size_bytes: file.size }) });
+              const upload = await authority.json().catch(() => ({})); if (!authority.ok) throw new Error(upload.error || "Source upload is unavailable.");
+              const put = await fetch(upload.upload_url, { method: "PUT", headers: { "Content-Type": upload.content_type }, body: file }); if (!put.ok) throw new Error("Source image upload failed.");
+              pending = { fileKey: videoSourceFileKey(file), uploadId: upload.upload_id, putComplete: true }; setPendingVideoSourceUpload(pending);
+            }
+            let finalize: Response; try { finalize = await fetch("/api/video/source-upload", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ upload_id: pending.uploadId }) }); } catch { throw new Error("Source verification will resume on retry."); }
             const imported = await finalize.json().catch(() => ({}));
-            if (!finalize.ok || !isUuidLike(imported.generation_asset_id)) throw new Error(imported.error || "Source image verification failed.");
-            sourceAssetId = imported.generation_asset_id;
-            setSourceGenerationAssetId(sourceAssetId);
+            if (!finalize.ok) { if (shouldClearPendingVideoSource(finalize.status)) setPendingVideoSourceUpload(null); throw new Error(imported.error || (finalize.status === 409 ? "Source verification is already processing; retry shortly." : "Source verification will resume on retry.")); }
+            if (!isUuidLike(imported.generation_asset_id)) throw new Error("Source image verification failed.");
+            sourceAssetId = imported.generation_asset_id; setSourceGenerationAssetId(sourceAssetId); setPendingVideoSourceUpload(null);
           }
           const videoPayload = { mode, prompt: promptToUse, negative_prompt: negativePrompt, body_type: bodyModeMap[baseModel] || "none", identity_id: selectedLoraId, source_generation_asset_id: mode === "image_to_video" ? sourceAssetId : null, requested_duration_seconds: videoDuration, motion_strength: videoMotion };
-          const submissionKey = await pendingSubmissionKey("sirensforge:pending-video-project", videoPayload);
-          const res = await fetch("/api/video", { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": submissionKey }, body: JSON.stringify(videoPayload) });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok || res.status !== 202 || !isUuidLike(data.project_id)) { if (res.status >= 400 && res.status < 500) clearPendingSubmission("sirensforge:pending-video-project", submissionKey); throw new Error(data.error || "Video submission failed."); }
-          const canonicalId = canonicalProjectId(data.project_id); if (!canonicalId) throw new Error("Video submission returned an invalid project ID.");
-          const next = [...new Set([...activeVideoProjectIds, canonicalId])];
-          localStorage.setItem("sirensforge:active-video-projects", JSON.stringify(next)); setActiveVideoProjectIds(next);
-          clearPendingSubmission("sirensforge:pending-video-project", submissionKey); setQueuedComputeMessage("Your video project is safely queued."); setIsGenerating(false); return;
+          await submitVideoIntent(videoPayload); setIsGenerating(false); return;
         }
       }
 
@@ -4164,8 +4147,10 @@ ${basePrompt}`,
   };
 
   const handleHistoryRerun = (item: GeneratedItem) => {
-    setPrompt(item.prompt);
-    handleGenerate();
+    if (item.kind !== "video") { setPrompt(item.prompt); window.setTimeout(() => void handleGenerate(item.prompt), 0); return; }
+    const saved = item.settings;
+    const intent = { mode: saved.mode, prompt: saved.prompt, negative_prompt: saved.negative_prompt, body_type: saved.body_type, identity_id: saved.identity_id, source_generation_asset_id: saved.source_generation_asset_id, requested_duration_seconds: saved.requested_duration_seconds, motion_strength: saved.motion_strength };
+    setIsGenerating(true); setErrorMessage(null); void submitVideoIntent(intent).catch((error) => setErrorMessage(error instanceof Error ? error.message : "Video rerun failed.")).finally(() => setIsGenerating(false));
   };
 
   return (
@@ -4222,8 +4207,8 @@ ${basePrompt}`,
               imageFile={imageFile}
               sourceGenerationAssetId={sourceGenerationAssetId}
               previewUrl={imagePreviewUrl}
-              onFileChange={(file) => { setImageFile(file); setSourceGenerationAssetId(null); if (!file) setImagePreviewUrl(null); }}
-              onRemove={() => { setImageFile(null); setSourceGenerationAssetId(null); setImagePreviewUrl(null); }}
+              onFileChange={(file) => { setImageFile(file); setSourceGenerationAssetId(null); setPendingVideoSourceUpload(null); if (!file) setImagePreviewUrl(null); }}
+              onRemove={() => { setImageFile(null); setSourceGenerationAssetId(null); setPendingVideoSourceUpload(null); setImagePreviewUrl(null); }}
             />
           )}
 
@@ -4345,17 +4330,13 @@ ${basePrompt}`,
                   ) : (
                     <VideoSettings
                       duration={videoDuration}
-                      fps={videoFps}
                       motion={videoMotion}
                       minDuration={videoCaps.min_duration_seconds}
                       maxDuration={videoCaps.max_duration_seconds}
                       minMotion={videoCaps.min_motion_strength}
                       maxMotion={videoCaps.max_motion_strength}
-                      batchSize={1}
                       onDurationChange={setVideoDuration}
-                      onFpsChange={() => undefined}
                       onMotionChange={setVideoMotion}
-                      onBatchSizeChange={() => undefined}
                     />
                   )}
                 </div>
@@ -4429,7 +4410,7 @@ ${basePrompt}`,
                 }}
                 onTurnIntoVideo={(item) => {
                   if (!item.privateAsset || !item.generationAssetId) { setErrorMessage("Only a private generated image can be turned into video."); return; }
-                  setPrompt(item.prompt); setSourceGenerationAssetId(item.generationAssetId); setImageFile(null); setImagePreviewUrl(item.url);
+                  setPrompt(item.prompt); setSourceGenerationAssetId(item.generationAssetId); setImageFile(null); setPendingVideoSourceUpload(null); setImagePreviewUrl(item.url);
                   setMode("image_to_video");
                   window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
