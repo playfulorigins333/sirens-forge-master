@@ -61,6 +61,7 @@ type ChatUIProps = {
   initialPrompt?: string | null
   initialNegativePrompt?: string | null
   initialIdentity?: string | null
+  initialSourceGenerationAssetId?: string | null
 }
 
 const TARGET_SELECTION_PROMPT =
@@ -134,6 +135,7 @@ export default function ChatUI({
   initialPrompt = null,
   initialNegativePrompt = null,
   initialIdentity = null,
+  initialSourceGenerationAssetId = null,
 }: ChatUIProps) {
   const [messages, setMessages] = useState<Message[]>(() => initialPrompt ? [{
     id: "generator-context", role: "user", content: `Current prompt to refine:\n${initialPrompt}`,
@@ -195,6 +197,9 @@ export default function ChatUI({
       output_type: msg.meta.outputType || "IMAGE",
       generation_target: msg.meta.generationTarget || "text_to_image",
       identity: initialIdentity || undefined,
+      ...(msg.meta.generationTarget === "image_to_video" && initialSourceGenerationAssetId
+        ? { source_generation_asset_id: initialSourceGenerationAssetId }
+        : {}),
       created_at: Date.now(),
     }
 

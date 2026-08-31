@@ -108,6 +108,7 @@ type HandoffPayload = {
   created_at?: number;
   source?: string;
   identity?: string;
+  source_generation_asset_id?: string;
 };
 
 type NextPackSeedPayload = {
@@ -3629,6 +3630,12 @@ export default function GeneratePage() {
       typeof payload.identity === "string" && payload.identity.trim().length > 0
         ? payload.identity.trim()
         : "";
+    const incomingSourceGenerationAssetId =
+      incomingMode === "image_to_video" &&
+      typeof payload.source_generation_asset_id === "string" &&
+      isUuidLike(payload.source_generation_asset_id.trim())
+        ? payload.source_generation_asset_id.trim().toLowerCase()
+        : null;
 
     if (incomingPrompt) setPrompt(incomingPrompt);
     if (incomingNegative) setNegativePrompt(incomingNegative);
@@ -3638,6 +3645,11 @@ export default function GeneratePage() {
       setOutputType("IMAGE");
     }
     setMode(incomingMode);
+    if (incomingSourceGenerationAssetId) {
+      setSourceGenerationAssetId(incomingSourceGenerationAssetId);
+      setImageFile(null);
+      setPendingVideoSourceUpload(null);
+    }
     if (incomingIdentity) {
       setPendingIdentityId(incomingIdentity);
     }
@@ -4214,6 +4226,9 @@ ${basePrompt}`,
                 ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
                 ...(negativePrompt.trim() ? { negative_prompt: negativePrompt.trim() } : {}),
                 ...(identity ? { identity } : {}),
+                ...(mode === "image_to_video" && isUuidLike(sourceGenerationAssetId)
+                  ? { source_generation_asset_id: sourceGenerationAssetId!.toLowerCase() }
+                  : {}),
                 created_at: Date.now(),
               };
               try { window.sessionStorage.setItem(GENERATOR_MIND_CONTEXT_STORAGE_KEY, JSON.stringify(context)); }

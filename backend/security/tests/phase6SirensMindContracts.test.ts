@@ -30,6 +30,16 @@ for (const field of ["generation_target", "prompt", "negative_prompt", "identity
 for (const forbidden of ["artifact_r2_bucket", "artifact_r2_key", "provider", "checkpoint", "service_credentials"]) assert.ok(!page.includes(forbidden))
 assert.match(generator, /mode === "image_to_video" && imageFile && !sourceGenerationAssetId/)
 assert.match(generator, /local source image must remain on Generator/)
+assert.match(generator, /mode === "image_to_video" && isUuidLike\(sourceGenerationAssetId\)[\s\S]*source_generation_asset_id: sourceGenerationAssetId!\.toLowerCase\(\)/)
+assert.match(page, /parsed\.generation_target === "image_to_video"[\s\S]*canonicalUuid\(parsed\.source_generation_asset_id\)/)
+assert.match(page, /initialSourceGenerationAssetId=\{context\?\.source_generation_asset_id\}/)
+assert.match(chat, /msg\.meta\.generationTarget === "image_to_video" && initialSourceGenerationAssetId[\s\S]*source_generation_asset_id: initialSourceGenerationAssetId/)
+assert.match(generator, /incomingMode === "image_to_video"[\s\S]*isUuidLike\(payload\.source_generation_asset_id\.trim\(\)\)[\s\S]*setSourceGenerationAssetId\(incomingSourceGenerationAssetId\)[\s\S]*setImageFile\(null\)[\s\S]*setPendingVideoSourceUpload\(null\)/)
+assert.match(page, /canonicalUuid[\s\S]*\? trimmed\.toLowerCase\(\)[\s\S]*: undefined/)
+assert.doesNotMatch(chat, /source_generation_asset_id[\s\S]*URLSearchParams/)
+for (const forbidden of ["imagePreviewUrl", "signed_url", "storage_bucket", "object_key", "sha256", "File bytes"]) {
+  assert.ok(!page.includes(forbidden), `Mind context must not contain ${forbidden}`)
+}
 assert.doesNotMatch(generator, /IMAGE, VIDEO, or STORY output/)
 assert.match(bundle, /fluid, adaptive clarification/)
 assert.doesNotMatch(bundle, /Blocks generation until confirmation|Guide users through the funnel in order/)
