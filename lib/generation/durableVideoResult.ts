@@ -1,0 +1,16 @@
+import { UUID_RE } from "@/lib/video/contract";
+export type DurableVideoProduct = { project_id: string; generation_id: string; prompt: string; negative_prompt: string; mode: "text_to_video" | "image_to_video"; body_type: "body_feminine" | "body_masculine" | "none"; completed_at: string; identity_id: string | null; source_generation_asset_id: string | null; requested_duration_seconds: number; motion_strength: number; actual_duration_ms: number; fps_millihz: number; width: number; height: number; output: { id: string; generation_id: string; kind: "video"; private_asset: true } };
+export type DurableVideoProductError = { status: 404 | 409 | 503; error: "NOT_FOUND" | "VIDEO_RESULT_NOT_READY" | "VIDEO_RESULT_UNAVAILABLE" };
+export function mapDurableVideoProductRpcError(message: unknown): DurableVideoProductError {
+  if (typeof message === "string" && message.includes("VIDEO_PRODUCT_NOT_CANONICAL")) return { status: 409, error: "VIDEO_RESULT_NOT_READY" };
+  if (typeof message === "string" && message.includes("VIDEO_PROJECT_NOT_FOUND")) return { status: 404, error: "NOT_FOUND" };
+  return { status: 503, error: "VIDEO_RESULT_UNAVAILABLE" };
+}
+export function parseDurableVideoProduct(value: unknown, projectId: string): DurableVideoProduct | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null; const row = value as Record<string, any>;
+  const keys = ["actual_duration_ms","body_type","completed_at","fps_millihz","generation_id","height","identity_id","mode","motion_strength","negative_prompt","output","project_id","prompt","requested_duration_seconds","source_generation_asset_id","width"];
+  if (Object.keys(row).sort().join(",") !== keys.sort().join(",") || row.project_id !== projectId || row.generation_id !== projectId || !UUID_RE.test(row.project_id) || !["text_to_video","image_to_video"].includes(row.mode) || !["body_feminine","body_masculine","none"].includes(row.body_type) || typeof row.prompt !== "string" || typeof row.negative_prompt !== "string" || typeof row.completed_at !== "string" || !Number.isInteger(row.requested_duration_seconds) || typeof row.motion_strength !== "number" || !Number.isFinite(row.motion_strength) || !Number.isInteger(row.actual_duration_ms) || !Number.isInteger(row.fps_millihz) || !Number.isInteger(row.width) || !Number.isInteger(row.height)) return null;
+  for (const id of [row.identity_id,row.source_generation_asset_id]) if (id !== null && (typeof id !== "string" || !UUID_RE.test(id))) return null;
+  const output = row.output; if (!output || Object.keys(output).sort().join(",") !== "generation_id,id,kind,private_asset" || !UUID_RE.test(output.id) || output.generation_id !== projectId || output.kind !== "video" || output.private_asset !== true) return null;
+  return row as DurableVideoProduct;
+}

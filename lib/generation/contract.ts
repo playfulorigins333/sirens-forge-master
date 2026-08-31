@@ -313,7 +313,7 @@ export function getTierVideoCaps(tier: Tier) {
     return {
       minDuration: 10,
       maxDuration: 15,
-      minFps: 24,
+      minFps: 30,
       maxFps: 30,
       minMotion: 0.4,
       maxMotion: 0.8,
@@ -326,7 +326,7 @@ export function getTierVideoCaps(tier: Tier) {
   return {
     minDuration: 20,
     maxDuration: 25,
-    minFps: 24,
+    minFps: 30,
     maxFps: 30,
     minMotion: 0.6,
     maxMotion: 1.0,

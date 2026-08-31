@@ -1,0 +1,18 @@
+import { NextRequest, NextResponse } from "next/server";
+import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { mapDurableVideoProductRpcError, parseDurableVideoProduct } from "@/lib/generation/durableVideoResult";
+import { isVideoStatus, safeVideoErrorCode, UUID_RE } from "@/lib/video/contract";
+export const runtime = "nodejs"; export const dynamic = "force-dynamic"; const headers = { "Cache-Control": "no-store" };
+async function subject(context: { params: Promise<{ projectId: string }> }) { const auth = await ensureActiveSubscription(); if (!auth.ok || !auth.user) return { response: NextResponse.json({ error: auth.error, message: auth.message }, { status: auth.status, headers }) }; const { projectId: raw } = await context.params, projectId = raw.trim().toLowerCase(); if (!UUID_RE.test(projectId)) return { response: NextResponse.json({ error: "NOT_FOUND" }, { status: 404, headers }) }; return { ownerId: auth.user.id, projectId }; }
+export async function GET(_req: NextRequest, context: { params: Promise<{ projectId: string }> }) {
+  const value = await subject(context); if (value.response) return value.response; const admin = getSupabaseAdmin();
+  const statusCall = await admin.rpc("creator_video_project_status", { p_owner_id: value.ownerId, p_project_id: value.projectId });
+  if (statusCall.error) return NextResponse.json({ error: statusCall.error.message.includes("VIDEO_PROJECT_NOT_FOUND") ? "NOT_FOUND" : "VIDEO_STATUS_UNAVAILABLE" }, { status: statusCall.error.message.includes("VIDEO_PROJECT_NOT_FOUND") ? 404 : 503, headers });
+  const status = Array.isArray(statusCall.data) ? statusCall.data[0] : statusCall.data;
+  if (!status || status.project_id !== value.projectId || !isVideoStatus(status.creator_status) || typeof status.can_cancel !== "boolean" || (status.safe_error_code !== null && safeVideoErrorCode(status.safe_error_code) === null)) return NextResponse.json({ error: "VIDEO_STATUS_UNAVAILABLE" }, { status: 503, headers });
+  const response: Record<string, unknown> = { project_id: value.projectId, status: status.creator_status, created_at: status.created_at, started_at: status.started_at, completed_at: status.completed_at, safe_error_code: safeVideoErrorCode(status.safe_error_code), can_cancel: status.can_cancel };
+  if (status.creator_status === "completed") { const productCall = await admin.rpc("creator_video_project_product", { p_owner_id: value.ownerId, p_project_id: value.projectId }); if (productCall.error) { const mapped = mapDurableVideoProductRpcError(productCall.error.message); return NextResponse.json({ error: mapped.error }, { status: mapped.status, headers }); } const product = parseDurableVideoProduct(productCall.data, value.projectId); if (!product) return NextResponse.json({ error: "VIDEO_RESULT_UNAVAILABLE" }, { status: 503, headers }); response.video_result = product; }
+  return NextResponse.json(response, { headers });
+}
+export async function DELETE(_req: NextRequest, context: { params: Promise<{ projectId: string }> }) { const value = await subject(context); if (value.response) return value.response; const call = await getSupabaseAdmin().rpc("cancel_video_project", { p_owner_id: value.ownerId, p_project_id: value.projectId }); if (call.error) return NextResponse.json({ error: call.error.message.includes("VIDEO_PROJECT_NOT_FOUND") ? "NOT_FOUND" : "VIDEO_CANCEL_UNAVAILABLE" }, { status: call.error.message.includes("VIDEO_PROJECT_NOT_FOUND") ? 404 : 503, headers }); if (!isVideoStatus(call.data)) return NextResponse.json({ error: "VIDEO_CANCEL_UNAVAILABLE" }, { status: 503, headers }); return NextResponse.json({ project_id: value.projectId, status: call.data }, { headers }); }

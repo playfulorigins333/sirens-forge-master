@@ -17,7 +17,7 @@ export default function FAQPage() {
       <section>
         <h2 className="text-xl font-semibold">2. Do I need an AI Twin identity to generate?</h2>
         <p>
-          No. You can generate images without training or selecting an AI Twin. If you want a reusable character or consistent identity across generations, you can create and select an AI Twin identity.
+          No. You can generate images and videos without training or selecting an AI Twin. If you want a reusable character or consistent identity across generations, you can create and optionally select an AI Twin identity.
         </p>
       </section>
 
@@ -31,7 +31,7 @@ export default function FAQPage() {
       <section>
         <h2 className="text-xl font-semibold">4. What can I create?</h2>
         <p>
-          Sirens Forge supports prompt-driven image creation with optional identity-anchored workflows using an AI Twin or the Siren’s Mind assistant. Image generation availability is shown in the generator. Video generation is Coming Soon.
+          Sirens Forge supports Text → Image, Text → Video, and Image → Video creation, with an optional AI Twin. Current submission availability is shown in the generator.
         </p>
       </section>
 
