@@ -87,7 +87,8 @@ test("video stays unavailable and durable client tracks a submitted job immediat
   const client = read("app/generate/page.tsx");
   assert.match(client, /activeComputeJobIds/);
   assert.match(client, /sirensforge:active-compute-jobs/);
-  assert.match(client, /new Set\(\[\.\.\.ids, data\.job_id\]\)/);
+  assert.match(client, /new Set\(\[\.\.\.ids, canonicalJobId\]\)/);
+  assert.match(client, /const canonicalJobId = canonicalComputeJobId\(data\?\.job_id\)/);
   assert.match(client, /ids\.filter\(\(id\) => !terminalIds\.includes\(id\)\)/);
   assert.match(client, /job\.status === "completed"/);
   assert.match(client, /job\.status === "failed"/);

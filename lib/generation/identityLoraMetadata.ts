@@ -53,10 +53,10 @@ export async function resolveOwnedIdentityLoraMetadata(
 
   try {
     const metadata = await (deps ?? serverDependencies()).loadOwnedCompletedLora(loraId, userId);
-    const artifactBucket = metadata?.artifact_r2_bucket?.trim();
+    const artifactBucket = metadata?.artifact_r2_bucket?.trim() || null;
     const artifactKey = metadata?.artifact_r2_key?.trim();
     const triggerToken = metadata?.trigger_token?.trim();
-    if (!metadata || !artifactBucket || !artifactKey || !triggerToken) throw new Error(IDENTITY_UNAVAILABLE);
+    if (!metadata || !artifactKey || !triggerToken) throw new Error(IDENTITY_UNAVAILABLE);
     return { artifact_r2_bucket: artifactBucket, artifact_r2_key: artifactKey, trigger_token: triggerToken };
   } catch {
     throw new Error(IDENTITY_UNAVAILABLE);
@@ -68,10 +68,13 @@ export async function buildDurableIdentityReference(
   userId: string,
   deps?: IdentityLoraMetadataDependencies,
 ): Promise<DurableIdentityReference> {
-  const metadata = await resolveOwnedIdentityLoraMetadata(loraId, userId, deps);
+  const canonicalId = loraId.trim().toLowerCase();
+  if (!UUID.test(canonicalId)) throw new Error(IDENTITY_UNAVAILABLE);
+  const metadata = await resolveOwnedIdentityLoraMetadata(canonicalId, userId, deps);
+  if (!metadata.artifact_r2_bucket) throw new Error(IDENTITY_UNAVAILABLE);
   return {
-    id: loraId,
-    bucket: metadata.artifact_r2_bucket!,
+    id: canonicalId,
+    bucket: metadata.artifact_r2_bucket,
     key: metadata.artifact_r2_key,
     trigger_token: metadata.trigger_token,
   };

@@ -160,6 +160,12 @@ function isUuidLike(value?: string | null): boolean {
   return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function canonicalComputeJobId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return isUuidLike(trimmed) ? trimmed.toLowerCase() : null;
+}
+
 function getGenerationRecordId(output: any, responseData?: any): string | null {
   if (output && typeof output === "object") {
     const direct =
@@ -3247,15 +3253,18 @@ export default function GeneratePage() {
     return () => { current = false; };
   }, []);
   useEffect(() => {
-    if (!durableCompute) return;
-    if (activeComputeJobIds.length) return;
     try {
       const restored = JSON.parse(localStorage.getItem("sirensforge:active-compute-jobs") || "[]");
-      if (Array.isArray(restored)) setActiveComputeJobIds([...new Set(restored.filter((id): id is string => typeof id === "string"))]);
+      if (Array.isArray(restored)) {
+        const canonical = restored.map(canonicalComputeJobId).filter((id): id is string => id !== null);
+        const unique = [...new Set(canonical)];
+        localStorage.setItem("sirensforge:active-compute-jobs", JSON.stringify(unique));
+        setActiveComputeJobIds(unique);
+      }
     } catch { /* Invalid local state is ignored; it never marks a job complete. */ }
-  }, [durableCompute, activeComputeJobIds.length]);
+  }, []);
   useEffect(() => {
-    if (!durableCompute || !activeComputeJobIds.length) return;
+    if (!activeComputeJobIds.length) return;
     let active = true;
     const poll = async () => {
       const terminalIds: string[] = [];
@@ -3265,6 +3274,10 @@ export default function GeneratePage() {
         if (!active) return;
         if (!response?.ok) {
           if (response?.status === 409) setErrorMessage("Your completed image could not be recovered yet. It remains available for another recovery attempt.");
+          else if (response?.status === 404) {
+            setErrorMessage("A saved image generation job is no longer available.");
+            terminalIds.push(jobId);
+          }
           return;
         }
         const job = await response.json();
@@ -3324,7 +3337,7 @@ export default function GeneratePage() {
     };
     void poll(); const timer = window.setInterval(poll, 5000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [durableCompute, activeComputeJobIds]);
+  }, [activeComputeJobIds]);
   const [outputType, setOutputType] = useState<"IMAGE" | "STORY">("IMAGE");
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState(DEFAULT_NEGATIVE_PROMPT);
@@ -3983,12 +3996,14 @@ ${basePrompt}`,
           body: JSON.stringify(durableIntent),
         });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok || res.status !== 202 || typeof data?.job_id !== "string") {
+        const canonicalJobId = canonicalComputeJobId(data?.job_id);
+        const acceptedStatuses = ["queued", "running", "recovering", "cancelling", "completed", "failed", "cancelled"];
+        if (!res.ok || res.status !== 202 || data?.workload !== "image" || !canonicalJobId || !acceptedStatuses.includes(data?.status)) {
           if (res.status >= 400 && res.status < 500) clearPendingSubmission("sirensforge:pending-image-compute", submissionKey);
           throw new Error(data?.error || "Durable generation submission failed.");
         }
         setActiveComputeJobIds((ids) => {
-          const next = [...new Set([...ids, data.job_id])];
+          const next = [...new Set([...ids, canonicalJobId])];
           localStorage.setItem("sirensforge:active-compute-jobs", JSON.stringify(next));
           return next;
         });

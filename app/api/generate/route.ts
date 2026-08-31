@@ -21,6 +21,8 @@ import { verifyPrivateGenerationObject } from "../../../lib/private-creator-medi
 import { randomUUID } from "node:crypto";
 import { computePriorityForTier, isDurableComputeJobsEnabled, submitComputeJob, toCreatorComputeStatus } from "../../../lib/compute-jobs";
 import { buildDurableIdentityReference } from "../../../lib/generation/identityLoraMetadata";
+import { normalizeDurableImageSettings } from "../../../lib/generation/durableImageRequest";
+import { isPrivateCreatorMediaDeliveryReady } from "../../../lib/private-creator-media/r2Config";
 
 type GenerateImageRequest = {
   prompt?: string;
@@ -194,7 +196,7 @@ export async function POST(req: NextRequest) {
 
     const userId = auth.user.id;
     const durableComputeEnabled = isDurableComputeJobsEnabled();
-    if (durableComputeEnabled && !isPrivateCreatorMediaEnabled()) {
+    if (durableComputeEnabled && !isPrivateCreatorMediaDeliveryReady()) {
       return NextResponse.json(
         { error: "GENERATION_UNAVAILABLE", message: "Image generation is temporarily unavailable." },
         { status: 503 },
@@ -256,11 +258,15 @@ export async function POST(req: NextRequest) {
     };
 
     if (durableComputeEnabled) {
+      if (body.identity_lora !== undefined && body.identity_lora !== null && typeof body.identity_lora !== "string") {
+        return NextResponse.json({ error: "IDENTITY_LORA_UNAVAILABLE", message: "Selected AI Twin is unavailable." }, { status: 400 });
+      }
       const idempotencyKey = req.headers.get("idempotency-key")?.trim();
       if (!idempotencyKey || idempotencyKey.length > 128) return NextResponse.json({ error: "INVALID_IDEMPOTENCY_KEY" }, { status: 400 });
       const identityReference = identityLora
         ? await buildDurableIdentityReference(identityLora, userId)
         : null;
+      const durableSettings = normalizeDurableImageSettings(normalized);
       const job = await submitComputeJob({
         ownerId: userId,
         workload: "image",
@@ -270,14 +276,9 @@ export async function POST(req: NextRequest) {
           prompt,
           negative_prompt: negativePrompt,
           body_presentation: bodyMode,
-          identity_id: identityLora,
+          identity_id: identityReference?.id ?? null,
           ...(identityReference ? { identity_reference: identityReference } : {}),
-          width: normalized.width,
-          height: normalized.height,
-          steps: normalized.steps,
-          cfg: normalized.cfg,
-          seed: normalized.seed,
-          output_count: normalized.batch,
+          ...durableSettings,
         },
       });
       return NextResponse.json(toCreatorComputeStatus(job), { status: 202 });

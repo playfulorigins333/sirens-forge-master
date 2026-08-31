@@ -15,10 +15,10 @@ export type CreatorImageResult = {
   outputs: Array<{ id: string; generation_id: string; kind: "image"; ordinal: number; private_asset: true }>;
 };
 
-export async function loadCreatorImageResult(admin: any, ownerId: string, reference: any): Promise<CreatorImageResult | null> {
+export async function loadCreatorImageResult(admin: any, ownerId: string, expectedJobId: string, reference: any): Promise<CreatorImageResult | null> {
   const generationId = reference?.generation_id;
   const assetIds = reference?.asset_ids;
-  if (!UUID_RE.test(generationId ?? "") || !Array.isArray(assetIds) || assetIds.length < 1 || assetIds.length > 4 ||
+  if (!UUID_RE.test(expectedJobId) || !UUID_RE.test(generationId ?? "") || generationId !== expectedJobId || !Array.isArray(assetIds) || assetIds.length < 1 || assetIds.length > 4 ||
       new Set(assetIds).size !== assetIds.length || assetIds.some((id: unknown) => typeof id !== "string" || !UUID_RE.test(id))) return null;
 
   const { data: generation, error: generationError } = await admin.from("generations")
