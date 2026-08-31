@@ -61,7 +61,7 @@ const subscriptionModuleUrl = new URL(
   import.meta.url
 )
 
-mock.module(subscriptionModuleUrl, {
+mock.module(subscriptionModuleUrl.href, {
   namedExports: {
     ensureActiveSubscription: async () => {
       authCalls += 1

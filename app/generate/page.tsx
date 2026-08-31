@@ -3845,7 +3845,6 @@ export default function GeneratePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "ULTRA",
-          interaction_mode: "headless",
           description: `${refineInstruction}
 
 Prompt:

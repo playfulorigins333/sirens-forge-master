@@ -3,7 +3,7 @@
 > Canonical, exhaustive route-local authorization inventory for the Next.js frontend repository. Each row is one exported HTTP method. The regression contract parses this table directly; do not add, remove, or rename a route without updating its row.
 
 **Reviewed source baseline:** `644cecd523e31d6664b491e365a4456eccfec9ed`
-**Inventory:** 99 route files / 115 route-method entries
+**Inventory:** 100 route files / 116 route-method entries
 **Review result:** all entries PASS; no frozen or design-blocked authorization defects identified.  
 **Cross-repo closure:** the separate Railway/FastAPI repository `playfulorigins333/sirens-forge-api` is covered by merged API PR #4 (`2c84f8620dc626a449740b6e946fef1388605cee`), whose inventory covers 10 business endpoints plus FastAPI framework docs/schema routes and whose regression test enforces the privileged-ingress boundary. Railway Production successfully deployed that exact merge SHA.
 
@@ -121,6 +121,7 @@
 | `/api/lora/train` | `app/api/lora/train/route.ts` | `POST` | Authenticated creator | AUTHENTICATED + OWNER + ENTITLED | Server session/entitlement helper | Jobs/assets bound to authenticated user; caller IDs revalidated | Authoritative active-subscription check | None | None | Service-role/storage access follows identity and entitlement gates | Structured request/ID checks; sanitized service errors | PASS | `app/api/lora/train/route.ts`; inventory contract test |
 | `/api/lora/upload-dataset` | `app/api/lora/upload-dataset/route.ts` | `POST` | Authenticated creator | AUTHENTICATED + OWNER + ENTITLED | Server session/entitlement helper | Jobs/assets bound to authenticated user; caller IDs revalidated | Authoritative active-subscription check | None | None | Service-role/storage access follows identity and entitlement gates | Structured request/ID checks; sanitized service errors | PASS | `app/api/lora/upload-dataset/route.ts`; inventory contract test |
 | `/api/nsfw-gpt/headless` | `app/api/nsfw-gpt/headless/route.ts` | `POST` | Authenticated creator | AUTHENTICATED + OWNER + ENTITLED | Server session/entitlement helper | Jobs/assets bound to authenticated user; caller IDs revalidated | Authoritative active-subscription check | None | None | Service-role/storage access follows identity and entitlement gates | Structured request/ID checks; sanitized service errors | PASS | `app/api/nsfw-gpt/headless/route.ts`; inventory contract test |
+| `/api/sirens-mind/chat` | `app/api/sirens-mind/chat/route.ts` | `POST` | Entitled authenticated creator using conversational Siren's Mind | AUTHENTICATED + ENTITLED | `ensureActiveSubscription()` runs before body parsing or provider work | No caller-selected resource ownership; bounded conversation and optional safe context only | Active subscription and current policy acceptance required | None | Server-only OpenAI-compatible provider credentials | No service-role client or persistence; provider call occurs only after entitlement | Exact mode; bounded user/assistant history and context; finite timeout; sanitized errors | PASS | `app/api/sirens-mind/chat/route.ts`; Phase 6A behavioral tests; inventory contract test |
 | `/api/payment-v2/claim` | `app/api/payment-v2/claim/route.ts` | `POST` | Authenticated creator | AUTHENTICATED + OWNER | Supabase server-authenticated user/session | Billing/claim/customer lookup bound to authenticated user | Not required by this route contract | None | None | Service/provider access follows server identity resolution | Validated fixed product/action inputs; sanitized provider errors | PASS | `app/api/payment-v2/claim/route.ts`; inventory contract test; frozen Payment V2 contract tests |
 | `/api/payment-v2/claim-status` | `app/api/payment-v2/claim-status/route.ts` | `GET` | Authenticated creator | AUTHENTICATED + OWNER | Supabase server-authenticated user/session | Billing/claim/customer lookup bound to authenticated user | Not required by this route contract | None | None | Service/provider access follows server identity resolution | Validated fixed product/action inputs; sanitized provider errors | PASS | `app/api/payment-v2/claim-status/route.ts`; inventory contract test; frozen Payment V2 contract tests |
 | `/api/payment-v2/readiness` | `app/api/payment-v2/readiness/route.ts` | `GET` | Unauthenticated readiness client | PUBLIC | No identity required; deliberately read-only/public | No creator resource accepted | Not required by this route contract | None | None | Read-only aggregate/configuration access only | No mutation input; bounded readiness response and safe errors | PASS | `app/api/payment-v2/readiness/route.ts`; inventory contract test |
@@ -142,7 +143,7 @@
 
 ## Disposition summary
 
-- PASS: **115**
+- PASS: **116**
 - FIXED-IN-THIS-GATE: **0**
 - BLOCKED-FROZEN: **0**
 - NEEDS-SEPARATE-DESIGN: **0**

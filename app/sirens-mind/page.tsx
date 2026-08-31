@@ -28,12 +28,19 @@ export default function SirensMindPage() {
         const sourceGenerationAssetId = parsed.generation_target === "image_to_video"
           ? canonicalUuid(parsed.source_generation_asset_id)
           : undefined
+        const prompt = typeof parsed.prompt === "string" && parsed.prompt.length <= 8000
+          ? parsed.prompt
+          : undefined
+        const negativePrompt = typeof parsed.negative_prompt === "string" && parsed.negative_prompt.length <= 8000
+          ? parsed.negative_prompt
+          : undefined
+        const identity = canonicalUuid(parsed.identity)
         setContext({
           version: 1,
           generation_target: parsed.generation_target,
-          ...(typeof parsed.prompt === "string" ? { prompt: parsed.prompt } : {}),
-          ...(typeof parsed.negative_prompt === "string" ? { negative_prompt: parsed.negative_prompt } : {}),
-          ...(typeof parsed.identity === "string" ? { identity: parsed.identity } : {}),
+          ...(prompt !== undefined ? { prompt } : {}),
+          ...(negativePrompt !== undefined ? { negative_prompt: negativePrompt } : {}),
+          ...(identity ? { identity } : {}),
           ...(sourceGenerationAssetId ? { source_generation_asset_id: sourceGenerationAssetId } : {}),
           created_at: parsed.created_at,
         })
