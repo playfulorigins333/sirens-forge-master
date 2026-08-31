@@ -1,5 +1,11 @@
 import { UUID_RE } from "@/lib/video/contract";
 export type DurableVideoProduct = { project_id: string; generation_id: string; prompt: string; negative_prompt: string; mode: "text_to_video" | "image_to_video"; body_type: "body_feminine" | "body_masculine" | "none"; completed_at: string; identity_id: string | null; source_generation_asset_id: string | null; requested_duration_seconds: number; motion_strength: number; actual_duration_ms: number; fps_millihz: number; width: number; height: number; output: { id: string; generation_id: string; kind: "video"; private_asset: true } };
+export type DurableVideoProductError = { status: 404 | 409 | 503; error: "NOT_FOUND" | "VIDEO_RESULT_NOT_READY" | "VIDEO_RESULT_UNAVAILABLE" };
+export function mapDurableVideoProductRpcError(message: unknown): DurableVideoProductError {
+  if (typeof message === "string" && message.includes("VIDEO_PRODUCT_NOT_CANONICAL")) return { status: 409, error: "VIDEO_RESULT_NOT_READY" };
+  if (typeof message === "string" && message.includes("VIDEO_PROJECT_NOT_FOUND")) return { status: 404, error: "NOT_FOUND" };
+  return { status: 503, error: "VIDEO_RESULT_UNAVAILABLE" };
+}
 export function parseDurableVideoProduct(value: unknown, projectId: string): DurableVideoProduct | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null; const row = value as Record<string, any>;
   const keys = ["actual_duration_ms","body_type","completed_at","fps_millihz","generation_id","height","identity_id","mode","motion_strength","negative_prompt","output","project_id","prompt","requested_duration_seconds","source_generation_asset_id","width"];
