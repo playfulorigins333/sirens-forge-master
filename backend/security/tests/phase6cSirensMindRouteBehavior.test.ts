@@ -69,7 +69,13 @@ try {
 
   providerOutput = `Visible survives${RP_META_SENTINEL}{malformed`; providerCalls = 0
   response = await invoke("let's roleplay in the tavern"); events = await streamText(response)
-  assert.match(events, /Visible survives/); assert.match(events, /event: continuity/); assert.equal(telemetry.at(-1).continuitySource, "fallback"); assert.equal(providerCalls, 1)
+  assert.match(events, /Visible survives/); assert.doesNotMatch(events, /SIRENS_FORGE_INTERNAL_META|malformed/); assert.match(events, /event: continuity/); assert.equal(telemetry.at(-1).continuitySource, "fallback"); assert.equal(providerCalls, 1)
+
+  for (const providerState of [null, { ...state, summary: "x".repeat(3501) }]) {
+    providerOutput = `Continuing${RP_META_SENTINEL}${JSON.stringify({ state: providerState, handoff: null })}`; providerCalls = 0
+    response = await invoke("continue", {}, state); events = await streamText(response)
+    assert.match(events, /event: continuity/); assert.match(events, /"persona":"p"/); assert.equal(telemetry.at(-1).continuitySource, "fallback"); assert.equal(providerCalls, 1)
+  }
 
   providerOutput = "I make room beside the hearth."; providerCalls = 0
   response = await invoke("I take the drink and sit closer to the fire.", {}, fallbackState); events = await streamText(response)
@@ -80,8 +86,12 @@ try {
   assert.match(events, /event: continuity\ndata: null/); assert.equal(telemetry.at(-1).continuitySource, "cleared")
 
   providerOutput = `Goodbye anyway${RP_META_SENTINEL}${JSON.stringify({ state, handoff: null })}`
-  response = await invoke("stop roleplay", {}, state); events = await streamText(response)
+  response = await invoke("I want to go out of character", {}, state); events = await streamText(response)
   assert.match(events, /event: continuity\ndata: null/); assert.doesNotMatch(events, /event: continuity\ndata: \{/)
+
+  providerOutput = `We continue${RP_META_SENTINEL}${JSON.stringify({ state, handoff: null })}`
+  response = await invoke("keep going, don't stop roleplay", {}, state); events = await streamText(response)
+  assert.match(events, /event: continuity\ndata: \{/); assert.equal(telemetry.at(-1).continuitySource, "provider")
 
   providerOutput = `Context${RP_META_SENTINEL}${JSON.stringify({ state, handoff: null })}`
   response = await invoke("let's roleplay", { generation_target: "text_to_image", prompt: "prior prompt", identity_id: A }); await streamText(response)

@@ -46,10 +46,28 @@ test("fallback continuity is valid, bounded, sanitized, and preserves establishe
   assert.match(firstTurn.summary, /Assistant:/)
 })
 
-test("explicit RP exit detection is narrow", () => {
-  for (const phrase of ["stop roleplay", "stop the roleplay", "end roleplay", "end the roleplay", "exit roleplay", "quit roleplay", "leave roleplay", "out of character", "OOC"]) assert.equal(explicitlyExitsRp(phrase), true)
-  assert.equal(explicitlyExitsRp("end the scene"), false)
-  assert.equal(explicitlyExitsRp("What does roleplay mean?"), false)
+test("explicit RP exit detection recognizes normalized affirmative creator intent", () => {
+  const affirmative = [
+    "stop roleplay", "stop the roleplay", "please stop roleplay", "stop roleplay please", "stop roleplay now",
+    "end roleplay", "end the roleplay", "exit roleplay", "quit roleplay", "leave roleplay", "drop the roleplay",
+    "go out of character", "out of character", "OOC", "OOC please", "let’s stop role-play", "we can stop roleplay now",
+    "I want to stop roleplay", "I want to go out of character", "take me out of roleplay",
+    "  PLEASE\tSTOP   ROLEPLAY!!!  ", "Could you please stop roleplay?", "I’d like to go OOC.",
+  ]
+  for (const phrase of affirmative) assert.equal(explicitlyExitsRp(phrase), true, phrase)
+})
+
+test("explicit RP exit detection rejects negation, discussion, reference, and unrelated narrative intent", () => {
+  const notExit = [
+    "don't stop roleplay", "do not stop roleplay", "don't stop the roleplay", "never stop roleplay", "don't go OOC",
+    "do not go OOC", "no OOC", "stay in character, no OOC", "don't go out of character",
+    "I don't want to stop roleplay", "I do not want to end roleplay", "don't take me out of roleplay", "keep going, don't stop roleplay",
+    "what does OOC mean?", "what does \"stop roleplay\" mean?", "how do I stop roleplay later?",
+    "can someone say \"stop roleplay\"?", "if I say stop roleplay, what happens?", "you said \"out of character\"",
+    "the phrase \"end roleplay\" sounds awkward", "don't use the words \"stop roleplay\"", "tell me how OOC works",
+    "end the scene", "the character shouts stop roleplay", "roleplay should not stop",
+  ]
+  for (const phrase of notExit) assert.equal(explicitlyExitsRp(phrase), false, phrase)
 })
 
 function providerStream(chunks: Uint8Array[]) {

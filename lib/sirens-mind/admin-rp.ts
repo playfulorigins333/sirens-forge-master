@@ -31,8 +31,33 @@ export function shouldActivateRp(message: string, continuity: RpContinuity | nul
   return /\b(?:let(?:'|’)s\s+roleplay|start\s+(?:a\s+)?role-?play|(?:continue|resume)\s+our\s+scene|(?:stay|continue)\s+in\s+character)\b/i.test(message)
 }
 
+const QUOTED_TEXT = /["“”][^"“”]*["“”]/u
+const EXIT_DISCUSSION = /^(?:what|why|when|where|how)\b|^(?:tell|explain|show)\s+me\b|^if\s+i\s+say\b|^you\s+(?:said|wrote|used)\b|^the\s+(?:phrase|word|words)\b|^can\s+(?:someone|anyone|people)\b/u
+const EXIT_ACTION = "(?:(?:stop|end|exit|quit|leave|drop) (?:the )?roleplay|go (?:out of character|ooc)|(?:take|bring) me out of (?:the )?roleplay)(?: now| for now)?"
+const EXIT_REQUEST = `(?:${EXIT_ACTION}|out of character|ooc)`
+const EXIT_INTENT = new RegExp(
+  `^(?:(?:please )?(?:${EXIT_REQUEST})|(?:${EXIT_REQUEST}) (?:please|now|for now)|` +
+  `(?:let us|we can|we should|i want to|i would like to|i want us to|i think we should) (?:${EXIT_ACTION})|` +
+  `(?:can|could|would|will) you (?:please )?(?:${EXIT_ACTION})|can we (?:please )?(?:${EXIT_ACTION}))$`,
+  "u",
+)
+
+function normalizeRpIntent(message: string): string {
+  return message.normalize("NFKC")
+    .replace(/[’‘]/g, "'")
+    .toLocaleLowerCase("en-US")
+    .replace(/\brole[\s‐‑‒–—-]+play\b/gu, "roleplay")
+    .replace(/\blet's\b/gu, "let us")
+    .replace(/\bi['’]?d\b/gu, "i would")
+    .replace(/[^\p{L}\p{N}']+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 export function explicitlyExitsRp(message: string): boolean {
-  return /\b(?:stop\s+(?:the\s+)?role-?play|end\s+(?:the\s+)?role-?play|exit\s+role-?play|quit\s+role-?play|leave\s+role-?play|out\s+of\s+character|ooc)\b/i.test(message)
+  const normalized = normalizeRpIntent(message)
+  if (!normalized || QUOTED_TEXT.test(message.normalize("NFKC")) || EXIT_DISCUSSION.test(normalized)) return false
+  return EXIT_INTENT.test(normalized)
 }
 
 export function fallbackRpContinuity({ previous, latestUser, latestAssistant }: {
