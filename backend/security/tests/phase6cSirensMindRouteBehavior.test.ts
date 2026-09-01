@@ -101,6 +101,15 @@ try {
   providerCalls = 0; response = await invoke("The bartender says \"stop roleplay\" and laughs.", {}, state); events = await streamText(response)
   assert.equal(providerCalls, 1); assert.equal(events.match(/event: continuity/g)?.length, 1); assert.match(events, /event: continuity\ndata: \{/); assert.notEqual(telemetry.at(-1).continuitySource, "cleared")
 
+  for (const deferredExit of ["Stop roleplay after this scene.", "End roleplay if I say red."]) {
+    providerCalls = 0; response = await invoke(deferredExit, {}, state); events = await streamText(response)
+    assert.equal(providerRequest.stream, true); assert.equal(providerCalls, 1); assert.equal(events.match(/event: continuity/g)?.length, 1)
+    assert.match(events, /event: continuity\ndata: \{/); assert.equal(telemetry.at(-1).interactionClass, "admin_rp"); assert.notEqual(telemetry.at(-1).continuitySource, "cleared")
+  }
+
+  providerCalls = 0; response = await invoke("Could we stop roleplay?", {}, state); events = await streamText(response)
+  assert.equal(providerCalls, 1); assert.equal(events.match(/event: continuity/g)?.length, 1); assert.match(events, /event: continuity\ndata: null/); assert.equal(telemetry.at(-1).continuitySource, "cleared")
+
   providerOutput = `Context${RP_META_SENTINEL}${JSON.stringify({ state, handoff: null })}`
   response = await invoke("let's roleplay", { generation_target: "text_to_image", prompt: "prior prompt", identity_id: A }); await streamText(response)
   assert.ok(!providerRequest.messages[0].content.includes("prior prompt")); assert.ok(providerRequest.messages.some((message: any) => message.role === "user" && message.content.includes("prior prompt")))

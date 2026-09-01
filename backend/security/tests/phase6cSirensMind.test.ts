@@ -58,6 +58,7 @@ test("explicit RP exit detection recognizes normalized affirmative creator inten
     "Let's stop roleplay and talk normally.", "I want to stop roleplay because I need to step away.",
     "Can we go OOC for a second? I need to clarify something.", "Stop roleplay. I need to ask about \"the camera angle\".",
     "Okay, let's stop roleplay now.", "Alright, OOC for a minute.", "I need to leave roleplay because dinner is ready.",
+    "Can we stop roleplay?", "Could we stop roleplay?", "Can we go OOC?", "Could we go OOC?",
   ]
   for (const phrase of affirmative) assert.equal(explicitlyExitsRp(phrase), true, phrase)
 })
@@ -76,6 +77,11 @@ test("explicit RP exit detection rejects negation, discussion, reference, and un
     "make the bartender yell \"OOC\"", "you said \"out of character\" earlier", "stop roleplay means leave the scene",
     "the character says 'stop roleplay' and laughs", "stop roleplay and don't actually stop",
     "if I say, stop roleplay, don't actually stop", "the character says, stop roleplay, and laughs",
+    "stop roleplay when we reach the cabin", "stop roleplay once the scene ends", "stop roleplay after this scene",
+    "stop roleplay before I log off", "stop roleplay if I say red", "end roleplay when I tell you to",
+    "go OOC once we finish this part", "leave roleplay after the next reply", "end roleplay at the end of this scene",
+    "stop roleplay whenever the bell rings", "stop roleplay until tomorrow", "stop roleplay later",
+    "stop roleplay unless I ask to continue", "stop roleplay as soon as we reach the cabin", "stop roleplay afterwards",
   ]
   for (const phrase of notExit) assert.equal(explicitlyExitsRp(phrase), false, phrase)
 })
