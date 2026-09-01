@@ -8,6 +8,7 @@ import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, pars
 import { shouldActivateLongformStory } from "../../../../lib/sirens-mind/story"
 
 export const runtime = "nodejs"
+export const maxDuration = 300
 export const MAX_MESSAGE_CHARS = 8000
 export const MAX_HISTORY_MESSAGES = 24
 export const MAX_HISTORY_MESSAGE_CHARS = 8000
@@ -15,6 +16,7 @@ export const MAX_HISTORY_TOTAL_CHARS = 48000
 export const MAX_CONTEXT_CHARS = 16000
 export const MAX_PROVIDER_OUTPUT_TOKENS = 2000
 export const LONGFORM_STORY_MAX_OUTPUT_TOKENS = 5000
+export const LONGFORM_STORY_STREAM_TIMEOUT_MS = 240_000
 export const MAX_REPLY_CHARS = 12000
 export const PROVIDER_TIMEOUT_MS = 20000
 
@@ -143,20 +145,22 @@ export async function POST(req: NextRequest) {
   if (!apiKey || !baseUrl) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
   const model = process.env[`SIRENS_MIND_${mode}_MODEL`] || DEFAULT_MODELS[mode]
   const continuity = parseRpContinuity(body.continuity)
+  const rpAuthorized = adminRpAuthorized(auth.user.id)
   const storyActive = shouldActivateLongformStory(body.message as string)
-  const rpActive = !storyActive && adminRpAuthorized(auth.user.id) && shouldActivateRp(body.message as string, continuity)
+  const rpActive = !storyActive && rpAuthorized && shouldActivateRp(body.message as string, continuity)
   if (storyActive) {
     const storyPrompt = [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.longform_story.system.txt"), capabilityCatalog].join("\n\n")
     const storyMessages = [
       { role: "system" as const, content: storyPrompt },
       { role: "user" as const, content: identityDataMessage(identities, activeIdentityId) },
       ...contextMessage,
+      ...(rpAuthorized && continuity ? [{ role: "user" as const, content: continuityReferenceMessage(continuity) }] : []),
       ...history,
       { role: "user" as const, content: (body.message as string).trim() },
     ]
     const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
     const abort = () => controller.abort(); req.signal.addEventListener("abort", abort, { once: true })
-    const timeout = setTimeout(abort, RP_STREAM_TIMEOUT_MS)
+    const timeout = setTimeout(abort, LONGFORM_STORY_STREAM_TIMEOUT_MS)
     let response: Response
     try {
       response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, signal: controller.signal,

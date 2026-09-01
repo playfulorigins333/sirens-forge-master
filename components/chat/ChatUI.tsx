@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
 import { buildBoundedChatHistory } from "../../lib/sirens-mind/chat-history"
+import { createTextBatcher } from "../../lib/sirens-mind/stream-batcher"
 
 type Role = "user" | "assistant"
 
@@ -71,6 +72,8 @@ export default function ChatUI({
   const [isTyping, setIsTyping] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const activeStreamBatcherRef = useRef<{ dispose: () => void } | null>(null)
+  useEffect(() => () => { activeStreamBatcherRef.current?.dispose() }, [])
   useEffect(() => {
     if (messages.length === 0 && !isTyping) return
 
@@ -154,19 +157,31 @@ export default function ChatUI({
       if (!res.ok || !res.body) throw new Error("SIRENS_MIND_STREAM_UNAVAILABLE")
       const assistantId = crypto.randomUUID()
       appendMessage({ id: assistantId, role: "assistant", content: "" })
+      const batcher = createTextBatcher(
+        (text) => setMessages((items) => items.map((item) => item.id === assistantId ? { ...item, content: item.content + text } : item)),
+        (flush) => window.setTimeout(flush, 40),
+        (handle) => window.clearTimeout(handle as number),
+      )
+      activeStreamBatcherRef.current = batcher
       const reader = res.body.getReader(), decoder = new TextDecoder(); let buffer = "", handoff: ConversationHandoff | null = null
       const applyEvent = (record: string) => {
         let event = "message", data = ""
         for (const line of record.split(/\r?\n/)) { if (line.startsWith("event:")) event = line.slice(6).trim(); else if (line.startsWith("data:")) data += line.slice(5).trimStart() }
         if (!data) return
         const payload = JSON.parse(data)
-        if (event === "delta" && typeof payload?.text === "string") { if (payload.text) setIsTyping(false); setMessages((items) => items.map((item) => item.id === assistantId ? { ...item, content: item.content + payload.text } : item)) }
-        else if (event === "handoff") handoff = payload
+        if (event === "delta" && typeof payload?.text === "string") { if (payload.text) setIsTyping(false); batcher.append(payload.text) }
+        else if (event === "done") batcher.flush()
+        else if (event === "handoff") { batcher.flush(); handoff = payload }
         else if (event === "continuity") { try { payload === null ? window.sessionStorage.removeItem(SIREN_MIND_CONTINUITY_STORAGE_KEY) : window.sessionStorage.setItem(SIREN_MIND_CONTINUITY_STORAGE_KEY, JSON.stringify(payload)) } catch { /* ordinary chat remains usable */ } }
-        else if (event === "error") throw new Error("SIRENS_MIND_STREAM_ERROR")
+        else if (event === "error") { batcher.flush(); throw new Error("SIRENS_MIND_STREAM_ERROR") }
       }
-      while (true) { const { done, value } = await reader.read(); buffer += decoder.decode(value, { stream: !done }); let match: RegExpExecArray | null; while ((match = /\r?\n\r?\n/.exec(buffer))) { applyEvent(buffer.slice(0, match.index)); buffer = buffer.slice(match.index + match[0].length) } if (done) break }
-      if (buffer.trim()) applyEvent(buffer)
+      try {
+        while (true) { const { done, value } = await reader.read(); buffer += decoder.decode(value, { stream: !done }); let match: RegExpExecArray | null; while ((match = /\r?\n\r?\n/.exec(buffer))) { applyEvent(buffer.slice(0, match.index)); buffer = buffer.slice(match.index + match[0].length) } if (done) break }
+        if (buffer.trim()) applyEvent(buffer)
+      } finally {
+        batcher.flush(); batcher.dispose()
+        if (activeStreamBatcherRef.current === batcher) activeStreamBatcherRef.current = null
+      }
       if (handoff) setMessages((items) => items.map((item) => item.id === assistantId ? { ...item, meta: { generationTarget: handoff!.generation_target, outputType: handoff!.output_type, negativePrompt: handoff!.negative_prompt || initialNegativePrompt || DEFAULT_NEGATIVE_PROMPT, prompt: handoff!.prompt, identityId: handoff!.identity_id, canUseInGenerator: true } } : item))
       return
     }
