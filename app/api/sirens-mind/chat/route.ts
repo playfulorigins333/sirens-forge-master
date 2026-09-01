@@ -5,14 +5,18 @@ import { ensureActiveSubscription } from "../../../../lib/subscription-checker"
 import { buildCapabilityCatalog, CapabilityCatalogUnavailableError } from "../../../../lib/sirens-mind/capabilities"
 import { identityDataMessage, loadOwnedIdentities, validIdentityId, type OwnedIdentity } from "../../../../lib/sirens-mind/identities"
 import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, parseRpContinuity, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
+import { shouldActivateLongformStory } from "../../../../lib/sirens-mind/story"
 
 export const runtime = "nodejs"
+export const maxDuration = 300
 export const MAX_MESSAGE_CHARS = 8000
 export const MAX_HISTORY_MESSAGES = 24
 export const MAX_HISTORY_MESSAGE_CHARS = 8000
 export const MAX_HISTORY_TOTAL_CHARS = 48000
 export const MAX_CONTEXT_CHARS = 16000
 export const MAX_PROVIDER_OUTPUT_TOKENS = 2000
+export const LONGFORM_STORY_MAX_OUTPUT_TOKENS = 5000
+export const LONGFORM_STORY_STREAM_TIMEOUT_MS = 240_000
 export const MAX_REPLY_CHARS = 12000
 export const PROVIDER_TIMEOUT_MS = 20000
 
@@ -141,7 +145,44 @@ export async function POST(req: NextRequest) {
   if (!apiKey || !baseUrl) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
   const model = process.env[`SIRENS_MIND_${mode}_MODEL`] || DEFAULT_MODELS[mode]
   const continuity = parseRpContinuity(body.continuity)
-  const rpActive = adminRpAuthorized(auth.user.id) && shouldActivateRp(body.message as string, continuity)
+  const rpAuthorized = adminRpAuthorized(auth.user.id)
+  const storyActive = shouldActivateLongformStory(body.message as string)
+  const rpActive = !storyActive && rpAuthorized && shouldActivateRp(body.message as string, continuity)
+  if (storyActive) {
+    const storyPrompt = [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.longform_story.system.txt"), capabilityCatalog].join("\n\n")
+    const storyMessages = [
+      { role: "system" as const, content: storyPrompt },
+      { role: "user" as const, content: identityDataMessage(identities, activeIdentityId) },
+      ...contextMessage,
+      ...(rpAuthorized && continuity ? [{ role: "user" as const, content: continuityReferenceMessage(continuity) }] : []),
+      ...history,
+      { role: "user" as const, content: (body.message as string).trim() },
+    ]
+    const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
+    const abort = () => controller.abort(); req.signal.addEventListener("abort", abort, { once: true })
+    const timeout = setTimeout(abort, LONGFORM_STORY_STREAM_TIMEOUT_MS)
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({ model, max_tokens: LONGFORM_STORY_MAX_OUTPUT_TOKENS, temperature: mode === "SAFE" ? 0.6 : 0.85, stream: true, stream_options: { include_usage: true }, messages: storyMessages }) })
+    } catch (error) {
+      clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
+      const timedOut = error instanceof Error && error.name === "AbortError"
+      telemetry({ requestId, interactionClass: "story", mode, model, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) })
+      return NextResponse.json({ error: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE" }, { status: timedOut ? 504 : 502 })
+    }
+    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "story", mode, model, ok: false, code: "PROMPT_ENGINE_UNAVAILABLE", httpStatus: 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) }); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
+    const encoder = new TextEncoder(); let outputChars = 0, firstTokenMs: number | null = null
+    const stream = new ReadableStream<Uint8Array>({ async start(target) {
+      let ok = false, code = "OK", usage: any = null
+      try {
+        const result = await consumeProviderSse(response.body!, (text) => { if (!text) return; if (firstTokenMs === null) firstTokenMs = Date.now() - started; outputChars += text.length; target.enqueue(encoder.encode(sse("delta", { text }))) })
+        usage = result.usage; target.enqueue(encoder.encode(sse("done", {}))); ok = true
+      } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: code }))) }
+      finally { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "story", mode, model, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced: false, identityUsed: Boolean(activeIdentityId) }); target.close() }
+    }, cancel() { abort() } })
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } })
+  }
   if (rpActive) {
     const rpModel = process.env.SIRENS_MIND_ADMIN_RP_MODEL?.trim() || model
     const rpPrompt = [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.admin_rp.system.txt"), capabilityCatalog].join("\n\n")
