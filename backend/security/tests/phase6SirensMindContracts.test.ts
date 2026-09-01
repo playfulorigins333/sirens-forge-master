@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import { mock } from "node:test"
 
-type AuthResult = { ok: boolean; error?: string; message?: string; status?: number }
+type AuthResult = { ok: boolean; user?: { id: string }; error?: string; message?: string; status?: number }
 let authResult: AuthResult = { ok: false, error: "UNAUTHENTICATED", message: "Denied", status: 401 }
 let authCalls = 0
 let providerCalls = 0
@@ -20,6 +20,11 @@ globalThis.fetch = async (_input, init) => {
 }
 const subscriptionModuleUrl = new URL("../../../lib/subscription-checker.ts", import.meta.url)
 mock.module(subscriptionModuleUrl.href, { namedExports: { ensureActiveSubscription: async () => { authCalls += 1; return authResult } } })
+const identitiesModuleUrl = new URL("../../../lib/sirens-mind/identities.ts", import.meta.url)
+mock.module(identitiesModuleUrl.href, { namedExports: {
+  loadOwnedIdentities: async () => [], validIdentityId: (value: unknown) => typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value),
+  identityDataMessage: () => "BEGIN CREATOR-OWNED IDENTITY DATA\n[]\nEND CREATOR-OWNED IDENTITY DATA",
+} })
 const routeUrl = new URL("../../../app/api/sirens-mind/chat/route.ts", import.meta.url)
 const { POST, MAX_HISTORY_MESSAGES, MAX_HISTORY_MESSAGE_CHARS, MAX_HISTORY_TOTAL_CHARS } = await import(routeUrl.href)
 
@@ -27,7 +32,7 @@ function request(body: unknown) {
   return new Request("http://localhost/api/sirens-mind/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
 }
 async function invoke(body: unknown) { return POST(request(body) as any) }
-function reset(auth: AuthResult = { ok: true, status: 200 }) {
+function reset(auth: AuthResult = { ok: true, user: { id: "10000000-0000-4000-8000-000000000001" }, status: 200 }) {
   authResult = auth; authCalls = 0; providerCalls = 0; parsedBodies = 0; lastProviderBody = null
   process.env.OPENAI_COMPAT_API_KEY = "test-key"; process.env.OPENAI_COMPAT_BASE_URL = "https://provider.test"
   providerResponse = async () => Response.json({ choices: [{ message: { content: '{"reply":"Hello — what would you like to explore?","handoff":null}' } }] })
@@ -69,9 +74,9 @@ try {
   assert.equal(response.status, 200)
   assert.equal(providerCalls, 1)
   assert.ok(!lastProviderBody.messages[0].content.includes(maliciousContext))
-  assert.equal(lastProviderBody.messages[1].role, "user")
-  assert.match(lastProviderBody.messages[1].content, /CREATOR-SUPPLIED DATA/)
-  assert.ok(lastProviderBody.messages[1].content.includes(maliciousContext))
+  assert.equal(lastProviderBody.messages[2].role, "user")
+  assert.match(lastProviderBody.messages[2].content, /CREATOR-SUPPLIED DATA/)
+  assert.ok(lastProviderBody.messages[2].content.includes(maliciousContext))
   assert.deepEqual(lastProviderBody.messages.at(-1), { role: "user", content: "Keep helping with my portrait" })
 
   reset(); await invoke({ mode: "SAFE", message: "are you able to find your vaults", history: [] })
@@ -89,7 +94,7 @@ try {
   ]) {
     reset(); providerResponse = async () => Response.json({ choices: [{ message: { content: JSON.stringify({ reply: "Your finished prompt is ready.", handoff }) } }] })
     response = await invoke({ mode: "ULTRA", message: "Build it", history: [], context: { generation_target: handoff.generation_target } })
-    assert.deepEqual((await response.json()).handoff, handoff)
+    assert.deepEqual((await response.json()).handoff, { ...handoff, identity_id: null })
   }
 
   reset(); providerResponse = async () => Response.json({ choices: [{ message: { content: "A normal unstructured conversational answer." } }] })

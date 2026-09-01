@@ -16,6 +16,7 @@ type Message = {
     outputType?: OutputType
     negativePrompt?: string
     prompt?: string
+    identityId?: string | null
     canUseInGenerator?: boolean
   }
 }
@@ -30,6 +31,7 @@ type ConversationHandoff = {
   negative_prompt: string | null
   output_type: "IMAGE" | "VIDEO"
   generation_target: GenerationTarget
+  identity_id: string | null
 }
 
 type ConversationResponse = {
@@ -104,7 +106,7 @@ export default function ChatUI({
       negative_prompt: msg.meta.negativePrompt || DEFAULT_NEGATIVE_PROMPT,
       output_type: msg.meta.outputType || "IMAGE",
       generation_target: msg.meta.generationTarget || "text_to_image",
-      identity: initialIdentity || undefined,
+      identity: msg.meta.identityId || undefined,
       ...(msg.meta.generationTarget === "image_to_video" && initialSourceGenerationAssetId
         ? { source_generation_asset_id: initialSourceGenerationAssetId }
         : {}),
@@ -151,6 +153,7 @@ export default function ChatUI({
           ...(initialGenerationTarget ? { generation_target: initialGenerationTarget } : {}),
           ...(initialPrompt ? { prompt: initialPrompt } : {}),
           ...(initialNegativePrompt ? { negative_prompt: initialNegativePrompt } : {}),
+          ...(initialIdentity ? { identity_id: initialIdentity } : {}),
         },
       }),
     })
@@ -170,6 +173,7 @@ export default function ChatUI({
         outputType: handoff.output_type,
         negativePrompt: handoff.negative_prompt || initialNegativePrompt || DEFAULT_NEGATIVE_PROMPT,
         prompt: handoff.prompt,
+        identityId: handoff.identity_id,
         canUseInGenerator: true,
       } } : {}),
     })

@@ -1,53 +1,11 @@
-SIRENS FORGE NSFW GPT — CONVERSATIONAL SYSTEM BUNDLE
+SIRENS FORGE — CONVERSATIONAL RUNTIME ARCHITECTURE
 
-This system bundle defines the full behavior for the
-Sirens Forge NSFW GPT when operating in Conversational Mode.
-
-This bundle MUST be used for:
-- NSFW GPT UI page
-- Any user-facing chat experience
-
----
-
-APPLIED SYSTEM FILES (IN ORDER)
-
+Normal subscriber chat is composed server-side by /api/sirens-mind/chat in this order:
 1. nsfw_gpt.system.base.txt
-   - Core identity and hard rules
-   - Generator compatibility
-   - Mode governance
+2. nsfw_gpt.conversation.funnel_governor.txt
+3. the real, mode-gated canonical Vault/Macro capability catalog
+4. the dedicated conversational response and Generator-handoff runtime
 
-2. nsfw_gpt.router.system.txt
-   - Determines Conversational vs Headless behavior
+The legacy router, Generator compatibility enforcer, and headless contract are not part of normal conversation. Headless remains separately composed from the base, router, output enforcer, headless contract, and explicitly requested canonical Vault/Macro stack.
 
-3. nsfw_gpt.conversation.funnel_governor.txt
-   - Applies fluid, adaptive clarification
-   - Asks only 1–2 targeted questions when needed
-   - Generates immediately when creator intent is clear
-
-4. nsfw_gpt.output.generator_compat_enforcer.txt
-   - Ensures prompt outputs are generator-safe
-
----
-
-CONVERSATIONAL MODE GUARANTEES
-
-When this bundle is active, the assistant MUST:
-
-- Adapt to the clarity of the creator's request
-- Infer optional creative layers when safe and useful
-- Educate without overwhelming
-- Never require a confirmation gate
-- Produce the polished prompt as soon as intent is sufficient
-- Produce generator-compatible outputs only
-
----
-
-STRICT SEPARATION OF CONCERNS
-
-This bundle:
-- Produces prompts ONLY
-- Does NOT execute generation
-- Does NOT store data
-- Does NOT manage persistence
-
-All execution is handled by downstream systems.
+Capability recipes are creative guidance only and never override mode, legality, safety, or response contracts. This file documents the runtime; it is not loaded as the Production conversational prompt.
