@@ -55,21 +55,43 @@ test("continuity is structurally bounded and remains user reference data", () =>
   assert.deepEqual(parseRpContinuity(withContract), withContract)
   assert.equal(parseRpContinuity({ ...state, role_contract: "x".repeat(2401) }), null)
   assert.equal(parseRpContinuity({ ...state, role_contract: "unsafe\u0000contract" }), null)
+  assert.doesNotMatch(continuityReferenceMessage(withContract), /role_contract|Creator is dominant/)
+  assert.match(roleContractReferenceMessage(withContract.role_contract), /Creator is dominant/)
 })
 
 test("server-managed role contracts seed, persist, update conservatively, and remain delimited data", () => {
   const activation = "Let's roleplay. I am an adult male traveler and dominant aggressor. You are an adult female bartender in the resisting submissive role. Stay in character."
   const seeded = resolveRpRoleContract(activation, null)
   assert.deepEqual(seeded, { contract: activation, source: "activation" })
-  assert.equal(resolveRpRoleContract("I am walking toward the fire.", { ...state, role_contract: seeded.contract! }).source, "continuity")
-  assert.equal(resolveRpRoleContract("You're freezing.", { ...state, role_contract: seeded.contract! }).contract, seeded.contract)
-  const updated = resolveRpRoleContract("From now on I am the submissive role and you are dominant.", { ...state, role_contract: seeded.contract! })
-  assert.equal(updated.source, "updated")
-  assert.match(updated.contract!, /LATEST EXPLICIT CREATOR ROLE REASSIGNMENT/)
-  assert.match(updated.contract!, /I am the submissive role and you are dominant/)
-  for (const directive of ["switch our roles", "change your character to the dominant role"]) {
-    assert.equal(resolveRpRoleContract(directive, { ...state, role_contract: seeded.contract! }).source, "updated")
+  const prior = { ...state, role_contract: seeded.contract! }
+  for (const narrative of [
+    "I am walking toward the fire.", "You're freezing.",
+    "I set the glass down and give you a dominant stare.",
+    "I make my way closer, resisting a grin.",
+    "I change my stance and watch you carefully.",
+    "I set my hand on the bar while you remain stubborn.",
+    "I make you wait while I look around the room.",
+  ]) {
+    assert.deepEqual(resolveRpRoleContract(narrative, prior), { contract: seeded.contract, source: "continuity" }, narrative)
   }
+  for (const directive of [
+    "From now on I am the submissive role and you are dominant.",
+    "From now on you are the dominant role.",
+    "Change my role to submissive.", "Change your role to dominant.", "Switch our roles.",
+    "Swap our roles.", "Reverse the dynamic.", "Make your character the dominant role.",
+    "Your character is now the submissive one.", "I am now the dominant one.",
+    "You are now the detective.", "Your character is now the bartender.",
+    "From now on you're my wife.", "Change our relationship to rivals.",
+    "Switch to third person.", "Use third person from now on.", "Change the POV to first person.",
+    "change your character to the dominant role",
+  ]) {
+    const updated = resolveRpRoleContract(directive, prior)
+    assert.equal(updated.source, "updated", directive)
+    assert.match(updated.contract!, /LATEST EXPLICIT CREATOR ROLE REASSIGNMENT/, directive)
+    assert.match(updated.contract!, new RegExp(directive.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), directive)
+  }
+  const restarted = "Let's roleplay. You are an adult female bartender. I am an adult male traveler. I am the dominant role and you are the resisting/submissive role."
+  assert.deepEqual(resolveRpRoleContract(restarted, { ...state, role_contract: "stale roles" }), { contract: restarted, source: "updated" })
   const bounded = resolveRpRoleContract(`${activation} ${"middle ".repeat(600)} The bartender remains resisting and submissive.`, null).contract!
   assert.equal(bounded.length, 2400)
   assert.match(bounded, /bounded middle omitted/)
