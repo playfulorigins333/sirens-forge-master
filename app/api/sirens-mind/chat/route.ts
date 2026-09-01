@@ -4,7 +4,7 @@ import path from "node:path"
 import { ensureActiveSubscription } from "../../../../lib/subscription-checker"
 import { buildCapabilityCatalog, CapabilityCatalogUnavailableError } from "../../../../lib/sirens-mind/capabilities"
 import { identityDataMessage, loadOwnedIdentities, validIdentityId, type OwnedIdentity } from "../../../../lib/sirens-mind/identities"
-import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, parseRpContinuity, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
+import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, explicitlyExitsRp, fallbackRpContinuity, parseRpContinuity, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
 import { shouldActivateLongformStory } from "../../../../lib/sirens-mind/story"
 
 export const runtime = "nodejs"
@@ -184,6 +184,7 @@ export async function POST(req: NextRequest) {
     return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } })
   }
   if (rpActive) {
+    const explicitRpExit = explicitlyExitsRp(body.message as string)
     const rpModel = process.env.SIRENS_MIND_ADMIN_RP_MODEL?.trim() || model
     const rpPrompt = [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.admin_rp.system.txt"), capabilityCatalog].join("\n\n")
     const rpMessages = [
@@ -204,27 +205,35 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
       const timedOut = error instanceof Error && error.name === "AbortError"
-      telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) })
+      telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: false, continuitySource: "none" })
       return NextResponse.json({ error: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE" }, { status: timedOut ? 504 : 502 })
     }
-    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: "PROMPT_ENGINE_UNAVAILABLE", httpStatus: 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) }); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
-    const encoder = new TextEncoder(); let outputChars = 0, firstTokenMs: number | null = null
+    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: "PROMPT_ENGINE_UNAVAILABLE", httpStatus: 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: false, continuitySource: "none" }); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
+    const encoder = new TextEncoder(); let outputChars = 0, visibleAssistant = "", firstTokenMs: number | null = null
     const stream = new ReadableStream<Uint8Array>({ async start(target) {
-      let ok = false, code = "OK", handoffProduced = false, usage: any = null
+      let ok = false, code = "OK", handoffProduced = false, usage: any = null, continuityProduced = false, continuitySource: "provider" | "fallback" | "cleared" | "none" = "none"
       try {
-        const result = await consumeProviderSse(response.body!, (text) => { if (!text) return; if (firstTokenMs === null) firstTokenMs = Date.now() - started; outputChars += text.length; target.enqueue(encoder.encode(sse("delta", { text }))) })
+        const result = await consumeProviderSse(response.body!, (text) => { if (!text) return; if (firstTokenMs === null) firstTokenMs = Date.now() - started; outputChars += text.length; visibleAssistant += text; target.enqueue(encoder.encode(sse("delta", { text }))) })
         usage = result.usage
         const meta = result.metadata && typeof result.metadata === "object" ? result.metadata as any : null
-        const hasState = Boolean(meta && Object.hasOwn(meta, "state"))
-        const state = hasState && meta.state !== null ? parseRpContinuity(meta.state) : null
+        const state = meta && Object.hasOwn(meta, "state") && meta.state !== null ? parseRpContinuity(meta.state) : null
         const handoff = parseHandoff(meta?.handoff, ownedIds, activeIdentityId)
         if (handoff) { handoffProduced = true; target.enqueue(encoder.encode(sse("handoff", handoff))) }
-        if (hasState && (meta.state === null || state)) target.enqueue(encoder.encode(sse("continuity", state)))
+        if (explicitRpExit) {
+          continuityProduced = true; continuitySource = "cleared"
+          target.enqueue(encoder.encode(sse("continuity", null)))
+        } else if (state) {
+          continuityProduced = true; continuitySource = "provider"
+          target.enqueue(encoder.encode(sse("continuity", state)))
+        } else {
+          continuityProduced = true; continuitySource = "fallback"
+          target.enqueue(encoder.encode(sse("continuity", fallbackRpContinuity({ previous: continuity, latestUser: body.message as string, latestAssistant: visibleAssistant }))))
+        }
         target.enqueue(encoder.encode(sse("done", {}))); ok = true
       } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: code }))) }
       finally {
         clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
-        telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced, identityUsed: Boolean(activeIdentityId) }); target.close()
+        telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced, identityUsed: Boolean(activeIdentityId), continuityProduced, continuitySource }); target.close()
       }
     }, cancel() { abort() } })
     return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } })

@@ -6,6 +6,7 @@ export type RpContinuity = { version: 1; persona: string; relationship: string; 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const LIMITS = { persona: 1500, relationship: 1200, scene: 2000, summary: 3500 } as const
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/
+const CONTROL_CHARACTERS_GLOBAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g
 
 export function adminRpAuthorized(userId: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.SIRENS_MIND_ADMIN_RP_ENABLED !== "true" || !UUID.test(userId)) return false
@@ -28,6 +29,36 @@ export function parseRpContinuity(value: unknown): RpContinuity | null {
 export function shouldActivateRp(message: string, continuity: RpContinuity | null): boolean {
   if (continuity) return true
   return /\b(?:let(?:'|’)s\s+roleplay|start\s+(?:a\s+)?role-?play|(?:continue|resume)\s+our\s+scene|(?:stay|continue)\s+in\s+character)\b/i.test(message)
+}
+
+export function explicitlyExitsRp(message: string): boolean {
+  return /\b(?:stop\s+(?:the\s+)?role-?play|end\s+(?:the\s+)?role-?play|exit\s+role-?play|quit\s+role-?play|leave\s+role-?play|out\s+of\s+character|ooc)\b/i.test(message)
+}
+
+export function fallbackRpContinuity({ previous, latestUser, latestAssistant }: {
+  previous: RpContinuity | null
+  latestUser: string
+  latestAssistant: string
+}): RpContinuity {
+  const clean = (value: string) => value.replace(CONTROL_CHARACTERS_GLOBAL, "").trim()
+  const rolling = [
+    previous?.summary ? `Prior summary: ${previous.summary}` : "",
+    `Creator: ${latestUser}`,
+    `Assistant: ${latestAssistant}`,
+  ].filter(Boolean).map(clean).join("\n")
+  let summary = rolling.slice(-LIMITS.summary)
+  const state: RpContinuity = {
+    version: 1,
+    persona: previous?.persona ?? "",
+    relationship: previous?.relationship ?? "",
+    scene: previous?.scene ?? "",
+    summary,
+  }
+  while (!parseRpContinuity(state) && summary.length) {
+    summary = summary.slice(Math.max(1, JSON.stringify(state).length - 8192))
+    state.summary = summary
+  }
+  return state
 }
 
 export function continuityReferenceMessage(state: RpContinuity) {

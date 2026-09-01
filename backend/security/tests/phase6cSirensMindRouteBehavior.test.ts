@@ -8,6 +8,9 @@ const FOREIGN = "10000000-0000-4000-8000-00000000000c"
 let userId = A, providerCalls = 0, providerRequest: any, providerOutput = "Visible", providerError: Error | null = null
 const originalFetch = globalThis.fetch
 const oldEnv = { ...process.env }
+const telemetry: any[] = []
+const originalConsoleInfo = console.info
+console.info = (value?: unknown) => { if (typeof value === "string") telemetry.push(JSON.parse(value)) }
 process.env.OPENAI_COMPAT_API_KEY = "test"
 process.env.OPENAI_COMPAT_BASE_URL = "https://provider.test"
 
@@ -40,7 +43,7 @@ try {
   process.env.SIRENS_MIND_ADMIN_RP_MODEL = "admin/rp-model"
 
   userId = FOREIGN; providerCalls = 0
-  let response = await invoke("let's roleplay")
+  let response = await invoke("let's roleplay", {}, state)
   assert.match(response.headers.get("content-type") || "", /application\/json/); assert.equal(providerRequest.stream, undefined); assert.equal(providerRequest.model, "openai/gpt-5-mini"); assert.equal(providerCalls, 1)
   assert.ok(!providerRequest.messages[0].content.includes("INTERNAL ROLEPLAY RUNTIME"))
 
@@ -52,14 +55,33 @@ try {
   response = await invoke("let's roleplay")
   assert.match(response.headers.get("content-type") || "", /text\/event-stream/); assert.equal(providerRequest.stream, true); assert.equal(providerRequest.model, "admin/rp-model"); assert.equal(providerCalls, 1)
   assert.ok(providerRequest.messages[0].content.includes("INTERNAL ROLEPLAY RUNTIME")); assert.match(await streamText(response), /event: continuity/)
+  assert.equal(telemetry.at(-1).continuitySource, "provider"); assert.equal(telemetry.at(-1).continuityProduced, true)
 
   providerOutput = `Still here${RP_META_SENTINEL}{bad`; providerCalls = 0
   response = await invoke("continue", {}, state); let events = await streamText(response)
-  assert.match(events, /Still here/); assert.doesNotMatch(events, /event: continuity/); assert.equal(providerCalls, 1)
+  assert.match(events, /Still here/); assert.match(events, /event: continuity/); assert.match(events, /"persona":"p"/); assert.match(events, /"relationship":"r"/); assert.match(events, /"scene":"s"/); assert.equal(providerCalls, 1)
+  assert.equal(telemetry.at(-1).continuitySource, "fallback")
 
-  providerOutput = `Goodbye${RP_META_SENTINEL}${JSON.stringify({ state: null, handoff: null })}`
+  providerOutput = "The fire welcomes you."; providerCalls = 0
+  response = await invoke("let's roleplay by the fire"); events = await streamText(response)
+  assert.match(events, /The fire welcomes you/); assert.match(events, /event: continuity/); assert.match(events, /Creator/); assert.match(events, /Assistant/); assert.equal(providerCalls, 1)
+  const fallbackState = JSON.parse(events.match(/event: continuity\ndata: (.+)\n/)![1])
+
+  providerOutput = `Visible survives${RP_META_SENTINEL}{malformed`; providerCalls = 0
+  response = await invoke("let's roleplay in the tavern"); events = await streamText(response)
+  assert.match(events, /Visible survives/); assert.match(events, /event: continuity/); assert.equal(telemetry.at(-1).continuitySource, "fallback"); assert.equal(providerCalls, 1)
+
+  providerOutput = "I make room beside the hearth."; providerCalls = 0
+  response = await invoke("I take the drink and sit closer to the fire.", {}, fallbackState); events = await streamText(response)
+  assert.equal(providerRequest.stream, true); assert.match(events, /event: continuity/); assert.equal(providerCalls, 1); assert.equal(telemetry.at(-1).interactionClass, "admin_rp")
+
+  providerOutput = "Goodbye"
   response = await invoke("stop roleplay", {}, state); events = await streamText(response)
-  assert.match(events, /event: continuity\ndata: null/)
+  assert.match(events, /event: continuity\ndata: null/); assert.equal(telemetry.at(-1).continuitySource, "cleared")
+
+  providerOutput = `Goodbye anyway${RP_META_SENTINEL}${JSON.stringify({ state, handoff: null })}`
+  response = await invoke("stop roleplay", {}, state); events = await streamText(response)
+  assert.match(events, /event: continuity\ndata: null/); assert.doesNotMatch(events, /event: continuity\ndata: \{/)
 
   providerOutput = `Context${RP_META_SENTINEL}${JSON.stringify({ state, handoff: null })}`
   response = await invoke("let's roleplay", { generation_target: "text_to_image", prompt: "prior prompt", identity_id: A }); await streamText(response)
@@ -80,6 +102,7 @@ try {
   console.log("Phase 6C route behavior: PASS")
 } finally {
   globalThis.fetch = originalFetch
+  console.info = originalConsoleInfo
   for (const key of Object.keys(process.env)) if (!(key in oldEnv)) delete process.env[key]
   Object.assign(process.env, oldEnv)
 }
