@@ -1,109 +1,34 @@
-/**
- * ULTRA MACRO REGISTRY
- *
- * Macros are intensity / modifier layers.
- * They NEVER replace vaults.
- * They stack on top of vaults to amplify tone, pacing, power, realism, or extremity.
- *
- * Rules:
- * - Macros are always optional
- * - Macros are mode-gated
- * - Macros do NOT inject raw text directly (validated + loaded via runtime files)
- */
-
-export type Mode = "SAFE" | "NSFW" | "ULTRA";
+/** Canonical Macro registry. IDs map exactly to macros/<id>.txt. */
+import { MODE_RANK, type Mode } from "./vault_registry"
 
 export interface MacroDefinition {
-  id: string;
-  label: string;
-  minMode: Mode;
+  id: string
+  label: string
+  minMode: Mode
+  category: "detail" | "escalation" | "perspective" | "intensity"
+  description: string
 }
 
-/**
- * MODE ORDER — used for gating
- */
-const MODE_ORDER: Mode[] = ["SAFE", "NSFW", "ULTRA"];
+export const MACROS: readonly MacroDefinition[] = [
+  { id: "macro_detail_amplifier", label: "Detail Amplifier", minMode: "SAFE", category: "detail", description: "Adds tactile realism, micro-detail, sensory layering, and physical cues." },
+  { id: "macro_escalation_pressure", label: "Escalation Pressure", minMode: "NSFW", category: "escalation", description: "Builds progressive pressure, anticipation, and tension." },
+  { id: "macro_intensity_ultra", label: "Intensity Ultra", minMode: "ULTRA", category: "intensity", description: "Sustains maximum energy, intensity, and relentless pacing." },
+  { id: "macro_perspective_control", label: "Perspective Control", minMode: "NSFW", category: "perspective", description: "Guides viewpoint, positioning, focus, and controlled framing." },
+  { id: "macro_taboo_amplifier_ultra", label: "Taboo Amplifier Ultra", minMode: "ULTRA", category: "intensity", description: "Adds ULTRA-only transgressive creative framing." },
+] as const
 
-function modeAllows(current: Mode, required: Mode) {
-  return MODE_ORDER.indexOf(current) >= MODE_ORDER.indexOf(required);
+const MACRO_MAP = new Map(MACROS.map((macro) => [macro.id, macro]))
+export function listMacrosForMode(mode: Mode): MacroDefinition[] {
+  return MACROS.filter((macro) => MODE_RANK[mode] >= MODE_RANK[macro.minMode])
 }
-
-/**
- * MACRO REGISTRY (LOCKED)
- * IDs must match filenames in:
- * prompts/nsfw_gpt/macros/<id>.txt
- */
-export const MACROS: MacroDefinition[] = [
-  // 🔥 INTENSITY & DEPTH
-  { id: "macro_intensity_boost", label: "Intensity Boost", minMode: "NSFW" },
-  { id: "macro_slow_burn", label: "Slow Burn Escalation", minMode: "NSFW" },
-  { id: "macro_relentless", label: "Relentless Pace", minMode: "ULTRA" },
-
-  // 🧠 PSYCHOLOGICAL / CONTROL
-  { id: "macro_power_imbalance", label: "Power Imbalance", minMode: "NSFW" },
-  { id: "macro_psychological_pressure", label: "Psychological Pressure", minMode: "ULTRA" },
-  { id: "macro_submission_focus", label: "Submission Focus", minMode: "NSFW" },
-  { id: "macro_domination_focus", label: "Domination Focus", minMode: "NSFW" },
-
-  // 🧪 REALISM / PHYSICALITY
-  { id: "macro_heightened_realism", label: "Heightened Physical Realism", minMode: "NSFW" },
-  { id: "macro_sensory_overload", label: "Sensory Overload", minMode: "ULTRA" },
-  { id: "macro_exhaustion", label: "Endurance & Fatigue", minMode: "ULTRA" },
-
-  // 🎭 PERFORMANCE / DISPLAY
-  { id: "macro_performative", label: "Performative Emphasis", minMode: "NSFW" },
-  { id: "macro_exhibitionism", label: "Exhibitionism Amplifier", minMode: "ULTRA" },
-  { id: "macro_voyeur_pressure", label: "Voyeur Pressure", minMode: "ULTRA" },
-
-  // 💥 EXTREMITY (LOCKED)
-  { id: "macro_no_limits", label: "No Limits Layer", minMode: "ULTRA" },
-  { id: "macro_edge_play", label: "Edge Play Intensifier", minMode: "ULTRA" },
-  { id: "macro_overstimulation", label: "Overstimulation", minMode: "ULTRA" },
-];
-
-/**
- * QUICK LOOKUP
- */
-const MACRO_MAP = new Map(MACROS.map((m) => [m.id, m]));
-
-/**
- * VALIDATION RESULT
- */
-export interface MacroValidationResult {
-  macro_ids: string[];
-  invalid_ids: string[];
-  blocked_ids: string[];
-}
-
-/**
- * VALIDATE MACROS AGAINST MODE
- */
-export function validateMacroIds(
-  input: string[] | undefined,
-  mode: Mode
-): MacroValidationResult {
-  const macro_ids: string[] = [];
-  const invalid_ids: string[] = [];
-  const blocked_ids: string[] = [];
-
-  if (!Array.isArray(input)) {
-    return { macro_ids, invalid_ids, blocked_ids };
-  }
-
+export function validateMacroIds(input: string[] | undefined, mode: Mode) {
+  const macro_ids: string[] = [], invalid_ids: string[] = [], blocked_ids: string[] = []
+  if (!Array.isArray(input)) return { macro_ids, invalid_ids, blocked_ids }
   for (const id of input) {
-    const macro = MACRO_MAP.get(id);
-    if (!macro) {
-      invalid_ids.push(id);
-      continue;
-    }
-
-    if (!modeAllows(mode, macro.minMode)) {
-      blocked_ids.push(id);
-      continue;
-    }
-
-    macro_ids.push(id);
+    const macro = MACRO_MAP.get(id)
+    if (!macro) invalid_ids.push(id)
+    else if (MODE_RANK[mode] < MODE_RANK[macro.minMode]) blocked_ids.push(id)
+    else macro_ids.push(id)
   }
-
-  return { macro_ids, invalid_ids, blocked_ids };
+  return { macro_ids, invalid_ids, blocked_ids }
 }

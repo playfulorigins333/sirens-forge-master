@@ -18,6 +18,11 @@ const nextConfig = {
   // ⭐ CRITICAL: silence Turbopack + webpack conflict
   turbopack: {},
 
+  outputFileTracingIncludes: {
+    "/api/sirens-mind/chat": ["./prompts/nsfw_gpt/**/*.txt"],
+    "/api/nsfw-gpt/headless": ["./prompts/nsfw_gpt/**/*.txt"],
+  },
+
   async redirects() {
     return [];
   },
