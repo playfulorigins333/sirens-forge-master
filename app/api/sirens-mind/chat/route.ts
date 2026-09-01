@@ -4,6 +4,7 @@ import path from "node:path"
 import { ensureActiveSubscription } from "../../../../lib/subscription-checker"
 import { buildCapabilityCatalog, CapabilityCatalogUnavailableError } from "../../../../lib/sirens-mind/capabilities"
 import { identityDataMessage, loadOwnedIdentities, validIdentityId, type OwnedIdentity } from "../../../../lib/sirens-mind/identities"
+import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, parseRpContinuity, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
 
 export const runtime = "nodejs"
 export const MAX_MESSAGE_CHARS = 8000
@@ -34,6 +35,12 @@ const MODES = new Set<Mode>(["SAFE", "NSFW", "ULTRA"])
 
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/
 const TARGETS = new Set<GenerationTarget>(["text_to_image", "text_to_video", "image_to_video"])
+
+function telemetry(fields: Record<string, unknown>) {
+  try { console.info(JSON.stringify({ event: "sirens_mind_turn", schemaVersion: 1, ...fields })) } catch { /* telemetry cannot affect responses */ }
+}
+
+function sse(event: string, data: unknown) { return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n` }
 
 function promptFile(file: string): string {
   return fs.readFileSync(path.join(process.cwd(), "prompts", "nsfw_gpt", file), "utf8")
@@ -124,11 +131,63 @@ export async function POST(req: NextRequest) {
   const ownedIds = new Set(identities.map((identity) => identity.id.toLowerCase()))
   const suggestedIdentityId = context.identity_id?.toLowerCase()
   const activeIdentityId = suggestedIdentityId && ownedIds.has(suggestedIdentityId) ? suggestedIdentityId : null
+  const safeContext = { ...context, identity_id: activeIdentityId }
+  const contextMessage = Object.keys(safeContext).some((key) => (safeContext as any)[key])
+    ? [{ role: "user" as const, content: `BEGIN PRIOR GENERATOR CONTEXT (CREATOR-SUPPLIED DATA)\n${JSON.stringify(safeContext)}\nEND PRIOR GENERATOR CONTEXT` }]
+    : []
 
   const apiKey = process.env.OPENAI_COMPAT_API_KEY
   const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
   if (!apiKey || !baseUrl) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
   const model = process.env[`SIRENS_MIND_${mode}_MODEL`] || DEFAULT_MODELS[mode]
+  const continuity = parseRpContinuity(body.continuity)
+  const rpActive = adminRpAuthorized(auth.user.id) && shouldActivateRp(body.message as string, continuity)
+  if (rpActive) {
+    const rpModel = process.env.SIRENS_MIND_ADMIN_RP_MODEL?.trim() || model
+    const rpPrompt = [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.admin_rp.system.txt"), capabilityCatalog].join("\n\n")
+    const rpMessages = [
+      { role: "system" as const, content: rpPrompt },
+      { role: "user" as const, content: identityDataMessage(identities, activeIdentityId) },
+      ...contextMessage,
+      ...(continuity ? [{ role: "user" as const, content: continuityReferenceMessage(continuity) }] : []),
+      ...history,
+      { role: "user" as const, content: (body.message as string).trim() },
+    ]
+    const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
+    const abort = () => controller.abort(); req.signal.addEventListener("abort", abort, { once: true })
+    const timeout = setTimeout(abort, RP_STREAM_TIMEOUT_MS)
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({ model: rpModel, max_tokens: MAX_PROVIDER_OUTPUT_TOKENS, temperature: mode === "SAFE" ? 0.6 : 0.85, stream: true, stream_options: { include_usage: true }, messages: rpMessages }) })
+    } catch (error) {
+      clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
+      const timedOut = error instanceof Error && error.name === "AbortError"
+      telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) })
+      return NextResponse.json({ error: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE" }, { status: timedOut ? 504 : 502 })
+    }
+    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: "PROMPT_ENGINE_UNAVAILABLE", httpStatus: 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) }); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
+    const encoder = new TextEncoder(); let outputChars = 0, firstTokenMs: number | null = null
+    const stream = new ReadableStream<Uint8Array>({ async start(target) {
+      let ok = false, code = "OK", handoffProduced = false, usage: any = null
+      try {
+        const result = await consumeProviderSse(response.body!, (text) => { if (!text) return; if (firstTokenMs === null) firstTokenMs = Date.now() - started; outputChars += text.length; target.enqueue(encoder.encode(sse("delta", { text }))) })
+        usage = result.usage
+        const meta = result.metadata && typeof result.metadata === "object" ? result.metadata as any : null
+        const hasState = Boolean(meta && Object.hasOwn(meta, "state"))
+        const state = hasState && meta.state !== null ? parseRpContinuity(meta.state) : null
+        const handoff = parseHandoff(meta?.handoff, ownedIds, activeIdentityId)
+        if (handoff) { handoffProduced = true; target.enqueue(encoder.encode(sse("handoff", handoff))) }
+        if (hasState && (meta.state === null || state)) target.enqueue(encoder.encode(sse("continuity", state)))
+        target.enqueue(encoder.encode(sse("done", {}))); ok = true
+      } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: code }))) }
+      finally {
+        clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
+        telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced, identityUsed: Boolean(activeIdentityId) }); target.close()
+      }
+    }, cancel() { abort() } })
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } })
+  }
 
   const runtimeContract = [
     "# SIREN'S MIND CONVERSATIONAL RUNTIME",
@@ -146,14 +205,12 @@ export async function POST(req: NextRequest) {
   ].join("\n")
   const systemPrompt = [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.conversation.funnel_governor.txt"), capabilityCatalog, runtimeContract].join("\n\n")
   const identityMessage = [{ role: "user" as const, content: identityDataMessage(identities, activeIdentityId) }]
-  const safeContext = { ...context, identity_id: activeIdentityId }
-  const contextMessage = Object.keys(safeContext).some((key) => (safeContext as any)[key])
-    ? [{ role: "user" as const, content: `BEGIN PRIOR GENERATOR CONTEXT (CREATOR-SUPPLIED DATA)\n${JSON.stringify(safeContext)}\nEND PRIOR GENERATOR CONTEXT` }]
-    : []
   const messages = [{ role: "system" as const, content: systemPrompt }, ...identityMessage, ...contextMessage, ...history, { role: "user" as const, content: (body.message as string).trim() }]
 
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS)
+  const started = Date.now(), requestId = crypto.randomUUID()
+  const logConversation = (ok: boolean, code: string, httpStatus: number, outputChars: number, handoffProduced = false, usage?: any) => telemetry({ requestId, interactionClass: "conversation", mode, model, ok, code, httpStatus, historyCount: history.length, inputChars: (body.message as string).length, outputChars, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs: null, handoffProduced, identityUsed: Boolean(activeIdentityId) })
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",
@@ -161,24 +218,27 @@ export async function POST(req: NextRequest) {
       signal: controller.signal,
       body: JSON.stringify({ model, max_tokens: MAX_PROVIDER_OUTPUT_TOKENS, temperature: mode === "SAFE" ? 0.6 : 0.85, messages }),
     })
-    if (!response.ok) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 })
+    if (!response.ok) { logConversation(false, "PROMPT_ENGINE_UNAVAILABLE", 502, 0); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
     const providerBody = await response.json().catch(() => null)
     const content = typeof providerBody?.choices?.[0]?.message?.content === "string" ? providerBody.choices[0].message.content.trim() : ""
-    if (!content) return NextResponse.json({ error: "PROMPT_ENGINE_RESPONSE_INVALID" }, { status: 502 })
+    if (!content) { logConversation(false, "PROMPT_ENGINE_RESPONSE_INVALID", 502, 0, false, providerBody?.usage); return NextResponse.json({ error: "PROMPT_ENGINE_RESPONSE_INVALID" }, { status: 502 }) }
     let parsed: any
     try {
       parsed = JSON.parse(content)
     } catch {
-      return NextResponse.json({ status: "ok", reply: content.slice(0, MAX_REPLY_CHARS), handoff: null }, { status: 200 })
+      const reply = content.slice(0, MAX_REPLY_CHARS); logConversation(true, "OK", 200, reply.length, false, providerBody?.usage)
+      return NextResponse.json({ status: "ok", reply, handoff: null }, { status: 200 })
     }
     const reply = typeof parsed?.reply === "string" ? parsed.reply.trim() : ""
     const handoff = parseHandoff(parsed?.handoff, ownedIds, activeIdentityId)
     if (!reply || reply.length > MAX_REPLY_CHARS || handoff === undefined) {
-      return NextResponse.json({ error: "PROMPT_ENGINE_RESPONSE_INVALID" }, { status: 502 })
+      logConversation(false, "PROMPT_ENGINE_RESPONSE_INVALID", 502, 0, false, providerBody?.usage); return NextResponse.json({ error: "PROMPT_ENGINE_RESPONSE_INVALID" }, { status: 502 })
     }
+    logConversation(true, "OK", 200, reply.length, Boolean(handoff), providerBody?.usage)
     return NextResponse.json({ status: "ok", reply, handoff }, { status: 200 })
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") return NextResponse.json({ error: "PROMPT_ENGINE_TIMEOUT" }, { status: 504 })
+    if (error instanceof Error && error.name === "AbortError") { logConversation(false, "PROMPT_ENGINE_TIMEOUT", 504, 0); return NextResponse.json({ error: "PROMPT_ENGINE_TIMEOUT" }, { status: 504 }) }
+    logConversation(false, "PROMPT_ENGINE_UNAVAILABLE", 502, 0)
     return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 })
   } finally {
     clearTimeout(timeout)

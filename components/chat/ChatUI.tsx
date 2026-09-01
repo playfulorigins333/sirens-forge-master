@@ -60,6 +60,7 @@ const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
 
 const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff"
+const SIREN_MIND_CONTINUITY_STORAGE_KEY = "sirensforge:sirens_mind_internal_continuity"
 
 export default function ChatUI({
   initialGenerationTarget = null,
@@ -142,6 +143,8 @@ export default function ChatUI({
     historyItems: Message[]
     selectedMode: "SAFE" | "NSFW" | "ULTRA"
   }) => {
+    let continuity: unknown
+    try { const stored = window.sessionStorage.getItem(SIREN_MIND_CONTINUITY_STORAGE_KEY); continuity = stored ? JSON.parse(stored) : undefined } catch { continuity = undefined }
     const res = await fetch("/api/sirens-mind/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -155,8 +158,29 @@ export default function ChatUI({
           ...(initialNegativePrompt ? { negative_prompt: initialNegativePrompt } : {}),
           ...(initialIdentity ? { identity_id: initialIdentity } : {}),
         },
+        ...(continuity ? { continuity } : {}),
       }),
     })
+    if (res.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
+      if (!res.ok || !res.body) throw new Error("SIRENS_MIND_STREAM_UNAVAILABLE")
+      const assistantId = crypto.randomUUID()
+      appendMessage({ id: assistantId, role: "assistant", content: "" })
+      const reader = res.body.getReader(), decoder = new TextDecoder(); let buffer = "", handoff: ConversationHandoff | null = null
+      const applyEvent = (record: string) => {
+        let event = "message", data = ""
+        for (const line of record.split(/\r?\n/)) { if (line.startsWith("event:")) event = line.slice(6).trim(); else if (line.startsWith("data:")) data += line.slice(5).trimStart() }
+        if (!data) return
+        const payload = JSON.parse(data)
+        if (event === "delta" && typeof payload?.text === "string") { if (payload.text) setIsTyping(false); setMessages((items) => items.map((item) => item.id === assistantId ? { ...item, content: item.content + payload.text } : item)) }
+        else if (event === "handoff") handoff = payload
+        else if (event === "continuity") { try { payload === null ? window.sessionStorage.removeItem(SIREN_MIND_CONTINUITY_STORAGE_KEY) : window.sessionStorage.setItem(SIREN_MIND_CONTINUITY_STORAGE_KEY, JSON.stringify(payload)) } catch { /* ordinary chat remains usable */ } }
+        else if (event === "error") throw new Error("SIRENS_MIND_STREAM_ERROR")
+      }
+      while (true) { const { done, value } = await reader.read(); buffer += decoder.decode(value, { stream: !done }); let match: RegExpExecArray | null; while ((match = /\r?\n\r?\n/.exec(buffer))) { applyEvent(buffer.slice(0, match.index)); buffer = buffer.slice(match.index + match[0].length) } if (done) break }
+      if (buffer.trim()) applyEvent(buffer)
+      if (handoff) setMessages((items) => items.map((item) => item.id === assistantId ? { ...item, meta: { generationTarget: handoff!.generation_target, outputType: handoff!.output_type, negativePrompt: handoff!.negative_prompt || initialNegativePrompt || DEFAULT_NEGATIVE_PROMPT, prompt: handoff!.prompt, identityId: handoff!.identity_id, canUseInGenerator: true } } : item))
+      return
+    }
     const data = (await res.json()) as ConversationResponse | ChatErrorResponse
     if (!res.ok || !("status" in data) || data.status !== "ok") {
       appendMessage({
