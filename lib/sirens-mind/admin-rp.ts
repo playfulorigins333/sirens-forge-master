@@ -31,33 +31,39 @@ export function shouldActivateRp(message: string, continuity: RpContinuity | nul
   return /\b(?:let(?:'|’)s\s+roleplay|start\s+(?:a\s+)?role-?play|(?:continue|resume)\s+our\s+scene|(?:stay|continue)\s+in\s+character)\b/i.test(message)
 }
 
-const QUOTED_TEXT = /["“”][^"“”]*["“”]/u
-const EXIT_DISCUSSION = /^(?:what|why|when|where|how)\b|^(?:tell|explain|show)\s+me\b|^if\s+i\s+say\b|^you\s+(?:said|wrote|used)\b|^the\s+(?:phrase|word|words)\b|^can\s+(?:someone|anyone|people)\b/u
-const EXIT_ACTION = "(?:(?:stop|end|exit|quit|leave|drop) (?:the )?roleplay|go (?:out of character|ooc)|(?:take|bring) me out of (?:the )?roleplay)(?: now| for now)?"
+const EXIT_ACTION = "(?:(?:stop|end|exit|quit|leave|drop) (?:the )?roleplay|go (?:out of character|ooc)|(?:take|bring) me out of (?:the )?roleplay)"
 const EXIT_REQUEST = `(?:${EXIT_ACTION}|out of character|ooc)`
-const EXIT_INTENT = new RegExp(
-  `^(?:(?:please )?(?:${EXIT_REQUEST})|(?:${EXIT_REQUEST}) (?:please|now|for now)|` +
-  `(?:let us|we can|we should|i want to|i would like to|i want us to|i think we should) (?:${EXIT_ACTION})|` +
-  `(?:can|could|would|will) you (?:please )?(?:${EXIT_ACTION})|can we (?:please )?(?:${EXIT_ACTION}))$`,
+const AFFIRMATIVE_EXIT_CLAUSE = new RegExp(
+  `^(?:(?:(?:okay|ok|alright|right) )?(?:please )?${EXIT_REQUEST}|` +
+  `(?:(?:okay|ok|alright|right) )?(?:let us|we can|we should|i want to|i would like to|i need to|i want us to|i think we should) ${EXIT_ACTION}|` +
+  `(?:(?:okay|ok|alright|right) )?(?:(?:can|could|would|will) you|can we)(?: please)? ${EXIT_ACTION})(?=$|\\s)`,
   "u",
 )
+const REFERENCE_AFTER_EXIT = /^(?:is|means?|meant|refers?|sounds?|phrase|word|command)\b/u
+const NEGATION_AFTER_EXIT = /^(?:and )?(?:do not|don't|never|not|no)\b/u
 
-function normalizeRpIntent(message: string): string {
+function normalizedUnquotedRpClauses(message: string): string[] {
   return message.normalize("NFKC")
     .replace(/[’‘]/g, "'")
+    .replace(/“[^”]*”|"[^"]*"|«[^»]*»/gu, " ")
+    .replace(/(^|[\s([{])'[^'\n]+'(?=$|[\s.,!?;:)\]}])/gu, "$1 ")
     .toLocaleLowerCase("en-US")
     .replace(/\brole[\s‐‑‒–—-]+play\b/gu, "roleplay")
     .replace(/\blet's\b/gu, "let us")
     .replace(/\bi['’]?d\b/gu, "i would")
-    .replace(/[^\p{L}\p{N}']+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim()
+    .replace(/[.!?;—–\n\r]+/gu, "\n")
+    .split("\n")
+    .map((clause) => clause.replace(/[^\p{L}\p{N}']+/gu, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
 }
 
 export function explicitlyExitsRp(message: string): boolean {
-  const normalized = normalizeRpIntent(message)
-  if (!normalized || QUOTED_TEXT.test(message.normalize("NFKC")) || EXIT_DISCUSSION.test(normalized)) return false
-  return EXIT_INTENT.test(normalized)
+  for (const clause of normalizedUnquotedRpClauses(message)) {
+    const candidate = AFFIRMATIVE_EXIT_CLAUSE.exec(clause)
+    const remainder = candidate ? clause.slice(candidate[0].length).trimStart() : ""
+    if (candidate && !REFERENCE_AFTER_EXIT.test(remainder) && !NEGATION_AFTER_EXIT.test(remainder)) return true
+  }
+  return false
 }
 
 export function fallbackRpContinuity({ previous, latestUser, latestAssistant }: {

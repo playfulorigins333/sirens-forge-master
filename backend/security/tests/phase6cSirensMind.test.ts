@@ -53,6 +53,11 @@ test("explicit RP exit detection recognizes normalized affirmative creator inten
     "go out of character", "out of character", "OOC", "OOC please", "let’s stop role-play", "we can stop roleplay now",
     "I want to stop roleplay", "I want to go out of character", "take me out of roleplay",
     "  PLEASE\tSTOP   ROLEPLAY!!!  ", "Could you please stop roleplay?", "I’d like to go OOC.",
+    "OOC, I need to ask you something.", "OOC — quick question.", "Stop roleplay, I'm done.",
+    "Stop roleplay for now, I need a minute.", "Please stop roleplay — I need to ask something.",
+    "Let's stop roleplay and talk normally.", "I want to stop roleplay because I need to step away.",
+    "Can we go OOC for a second? I need to clarify something.", "Stop roleplay. I need to ask about \"the camera angle\".",
+    "Okay, let's stop roleplay now.", "Alright, OOC for a minute.", "I need to leave roleplay because dinner is ready.",
   ]
   for (const phrase of affirmative) assert.equal(explicitlyExitsRp(phrase), true, phrase)
 })
@@ -65,7 +70,12 @@ test("explicit RP exit detection rejects negation, discussion, reference, and un
     "what does OOC mean?", "what does \"stop roleplay\" mean?", "how do I stop roleplay later?",
     "can someone say \"stop roleplay\"?", "if I say stop roleplay, what happens?", "you said \"out of character\"",
     "the phrase \"end roleplay\" sounds awkward", "don't use the words \"stop roleplay\"", "tell me how OOC works",
-    "end the scene", "the character shouts stop roleplay", "roleplay should not stop",
+    "end the scene", "the character shouts stop roleplay", "roleplay should not stop", "I don't think we should stop roleplay",
+    "we should not stop roleplay", "if I say stop roleplay, don't actually stop", "can you explain how to stop roleplay?",
+    "I almost said stop roleplay", "the phrase stop roleplay sounds awkward", "the character says \"stop roleplay\" and laughs",
+    "make the bartender yell \"OOC\"", "you said \"out of character\" earlier", "stop roleplay means leave the scene",
+    "the character says 'stop roleplay' and laughs", "stop roleplay and don't actually stop",
+    "if I say, stop roleplay, don't actually stop", "the character says, stop roleplay, and laughs",
   ]
   for (const phrase of notExit) assert.equal(explicitlyExitsRp(phrase), false, phrase)
 })
