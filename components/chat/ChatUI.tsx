@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react"
 import { ChatMessage } from "./ChatMessage"
 import { ChatInput } from "./ChatInput"
+import { buildBoundedChatHistory } from "../../lib/sirens-mind/chat-history"
 
 type Role = "user" | "assistant"
 
@@ -19,11 +20,6 @@ type Message = {
     identityId?: string | null
     canUseInGenerator?: boolean
   }
-}
-
-type ChatHistoryMessage = {
-  role: Role
-  content: string
 }
 
 type ConversationHandoff = {
@@ -92,13 +88,6 @@ export default function ChatUI({
     setMessages((prev) => [...prev, msg])
   }
 
-  const buildHistory = (items: Message[]): ChatHistoryMessage[] => {
-    return items
-      .filter((item) => !item.isError && item.id !== "generator-context")
-      .slice(-24)
-      .map((item) => ({ role: item.role, content: item.content }))
-  }
-
   const handleUsePrompt = (msg: Message) => {
     if (!msg.meta?.canUseInGenerator) return
 
@@ -151,7 +140,7 @@ export default function ChatUI({
       body: JSON.stringify({
         mode: selectedMode,
         message,
-        history: buildHistory(historyItems),
+        history: buildBoundedChatHistory(historyItems),
         context: {
           ...(initialGenerationTarget ? { generation_target: initialGenerationTarget } : {}),
           ...(initialPrompt ? { prompt: initialPrompt } : {}),
