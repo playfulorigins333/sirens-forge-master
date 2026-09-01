@@ -237,7 +237,7 @@ export default function ChatUI({
         <div className="absolute bottom-0 right-0 h-[24rem] w-[28rem] bg-[radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.08),transparent_68%)]" />
       </div>
 
-      <main className="relative z-10 mx-auto flex h-dvh w-full max-w-6xl flex-col px-4 pt-4 sm:px-6 sm:pt-6">
+      <main className="relative z-10 mx-auto flex h-dvh w-full max-w-[78rem] flex-col px-4 pt-4 sm:px-6 sm:pt-6">
         <header className="mb-4 flex shrink-0 flex-col gap-4 border-l-2 border-fuchsia-400/40 pl-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent sm:text-[32px]">
