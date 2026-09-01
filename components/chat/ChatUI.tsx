@@ -230,14 +230,14 @@ export default function ChatUI({
   }
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-black text-white">
+    <div className="relative h-dvh w-full overflow-hidden bg-black text-white">
       <div className="pointer-events-none fixed inset-0">
         <div className="absolute inset-0 bg-[#05060a]" />
         <div className="absolute inset-y-0 left-0 w-[22rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.10),transparent_72%)]" />
         <div className="absolute bottom-0 right-0 h-[24rem] w-[28rem] bg-[radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.08),transparent_68%)]" />
       </div>
 
-      <main className="relative z-10 mx-auto flex h-screen w-full max-w-4xl flex-col px-4 pt-4 sm:px-6 sm:pt-6">
+      <main className="relative z-10 mx-auto flex h-dvh w-full max-w-6xl flex-col px-4 pt-4 sm:px-6 sm:pt-6">
         <header className="mb-4 flex shrink-0 flex-col gap-4 border-l-2 border-fuchsia-400/40 pl-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent sm:text-[32px]">
@@ -319,8 +319,8 @@ export default function ChatUI({
           </div>
         </section> : null}
 
-        <section className="shrink-0 border-t border-white/10 bg-black/95 pb-4 pt-3 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]">
-          <div className="mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
+        <section className={`shrink-0 border-t border-white/10 bg-black/95 shadow-[0_-18px_40px_rgba(0,0,0,0.55)] ${messages.length > 0 ? "pb-3 pt-2" : "pb-4 pt-3"}`}>
+          {messages.length === 0 ? <div className="mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200">
                 Start Here
@@ -332,12 +332,13 @@ export default function ChatUI({
             <div className="w-fit rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
               Chat - Prompt - Generator
             </div>
-          </div>
+          </div> : null}
 
           <ChatInput
             mode={mode}
             onModeChange={setMode}
             onSend={handleSend}
+            compact={messages.length > 0}
           />
         </section>
       </main>

@@ -8,12 +8,14 @@ type ChatInputProps = {
   mode: Mode
   onModeChange: React.Dispatch<React.SetStateAction<Mode>>
   onSend: (userText: string, selectedMode: Mode) => Promise<void> | void
+  compact?: boolean
 }
 
 export function ChatInput({
   mode,
   onModeChange,
   onSend,
+  compact = false,
 }: ChatInputProps) {
   const [value, setValue] = useState("")
   const [sending, setSending] = useState(false)
@@ -69,15 +71,15 @@ export function ChatInput({
   }
 
   return (
-    <div className="space-y-3">
+    <div className={compact ? "space-y-2" : "space-y-3"}>
       <div className="flex flex-wrap gap-2">
         {modeButton("SAFE")}
         {modeButton("NSFW")}
         {modeButton("ULTRA")}
       </div>
 
-      <div className="rounded-[24px] border border-white/10 bg-[#0d0e13] p-3">
-        <div className="flex items-end gap-3 rounded-[20px] border border-white/10 bg-black px-4 py-3">
+      <div className={`rounded-[24px] border border-white/10 bg-[#0d0e13] ${compact ? "p-2" : "p-3"}`}>
+        <div className={`flex items-end gap-3 rounded-[20px] border border-white/10 bg-black px-4 ${compact ? "py-2" : "py-3"}`}>
           <textarea
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -98,7 +100,7 @@ export function ChatInput({
           </button>
         </div>
 
-        <div className="mt-3 flex items-center justify-between px-1">
+        <div className={`${compact ? "mt-2" : "mt-3"} flex items-center justify-between gap-3 px-1`}>
           <div className="text-[11px] uppercase tracking-[0.16em] text-zinc-500">
             Press Enter to send
           </div>

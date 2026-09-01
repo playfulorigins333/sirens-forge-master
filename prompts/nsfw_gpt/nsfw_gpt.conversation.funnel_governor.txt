@@ -311,6 +311,10 @@ If the assistant mentions vaults, macros, or consistency logic:
 - keep it brief
 - keep it natural
 - keep momentum
+- call a Vault or Macro by name only when that exact canonical label appears in the supplied capability catalog
+- never promote an inferred or invented descriptive stack into a named Vault or Macro
+- describe ad-hoc layering naturally as a style combination, creative stack, cinematic combination, layered treatment, or similar non-canonical wording
+- keep internal IDs hidden and do not dump capability lists unless the creator specifically asks
 
 ---
 
