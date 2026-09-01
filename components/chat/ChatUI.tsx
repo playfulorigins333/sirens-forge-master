@@ -15,32 +15,31 @@ type Message = {
     generationTarget?: GenerationTarget
     outputType?: OutputType
     negativePrompt?: string
+    prompt?: string
     canUseInGenerator?: boolean
   }
 }
 
-type HeadlessHistoryMessage = {
+type ChatHistoryMessage = {
   role: Role
   content: string
 }
 
-type HeadlessSuccessResponse = {
-  status: "ok"
-  mode: string
-  model: string
-  output_type: string
+type ConversationHandoff = {
   prompt: string
+  negative_prompt: string | null
+  output_type: "IMAGE" | "VIDEO"
+  generation_target: GenerationTarget
 }
 
-type HeadlessRefusalResponse = {
-  status: "refused"
-  error_code: string
-  reason: string
+type ConversationResponse = {
+  status: "ok"
+  reply: string
+  handoff: ConversationHandoff | null
 }
 
-type HeadlessErrorResponse = {
+type ChatErrorResponse = {
   error: string
-  reason?: string
   message?: string
 }
 
@@ -49,102 +48,30 @@ type OutputType = "IMAGE" | "VIDEO"
 
 type ChatUIProps = {
   initialGenerationTarget?: GenerationTarget | null
+  initialPrompt?: string | null
+  initialNegativePrompt?: string | null
+  initialIdentity?: string | null
+  initialSourceGenerationAssetId?: string | null
 }
-
-const TARGET_SELECTION_PROMPT =
-  "What are we building this for - text-to-image, text-to-video, or image-to-video?"
 
 const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs"
 
 const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff"
 
-function targetToOutputType(target: GenerationTarget): OutputType {
-  if (target === "text_to_image") return "IMAGE"
-  return "VIDEO"
-}
-
-function targetToLabel(target: GenerationTarget): string {
-  switch (target) {
-    case "text_to_image":
-      return "text-to-image"
-    case "text_to_video":
-      return "text-to-video"
-    case "image_to_video":
-      return "image-to-video"
-    default:
-      return "text-to-image"
-  }
-}
-
-function parseGenerationTarget(input: string): GenerationTarget | null {
-  const normalized = input.trim().toLowerCase()
-
-  const compact = normalized
-    .replace(/[_–—-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-
-  if (
-    compact.includes("image to video") ||
-    compact.includes("img to video") ||
-    compact.includes("image into video") ||
-    compact.includes("animate image") ||
-    compact.includes("animate this image")
-  ) {
-    return "image_to_video"
-  }
-
-  if (
-    compact.includes("text to video") ||
-    compact.includes("prompt to video") ||
-    compact === "video" ||
-    compact === "text video"
-  ) {
-    return "text_to_video"
-  }
-
-  if (
-    compact.includes("text to image") ||
-    compact.includes("prompt to image") ||
-    compact.includes("still image") ||
-    compact === "image" ||
-    compact === "still"
-  ) {
-    return "text_to_image"
-  }
-
-  return null
-}
-
 export default function ChatUI({
   initialGenerationTarget = null,
+  initialPrompt = null,
+  initialNegativePrompt = null,
+  initialIdentity = null,
+  initialSourceGenerationAssetId = null,
 }: ChatUIProps) {
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>(() => initialPrompt ? [{
+    id: "generator-context", role: "user", content: `Current prompt to refine:\n${initialPrompt}`,
+  }] : [])
   const [isTyping, setIsTyping] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
-  const [generationTarget, setGenerationTarget] =
-    useState<GenerationTarget | null>(initialGenerationTarget)
-  const [awaitingGenerationTarget, setAwaitingGenerationTarget] =
-    useState(false)
-  const [pendingDescription, setPendingDescription] = useState<string | null>(
-    null,
-  )
-  const [pendingHistoryBase, setPendingHistoryBase] = useState<Message[] | null>(
-    null,
-  )
-
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
-
-  useEffect(() => {
-    if (initialGenerationTarget) {
-      setGenerationTarget(initialGenerationTarget)
-      setAwaitingGenerationTarget(false)
-      setPendingDescription(null)
-      setPendingHistoryBase(null)
-    }
-  }, [initialGenerationTarget])
-
   useEffect(() => {
     if (messages.length === 0 && !isTyping) return
 
@@ -162,21 +89,25 @@ export default function ChatUI({
     setMessages((prev) => [...prev, msg])
   }
 
-  const buildHistory = (items: Message[]): HeadlessHistoryMessage[] => {
-    return items.slice(0, -1).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }))
+  const buildHistory = (items: Message[]): ChatHistoryMessage[] => {
+    return items
+      .filter((item) => !item.isError && item.id !== "generator-context")
+      .slice(-24)
+      .map((item) => ({ role: item.role, content: item.content }))
   }
 
   const handleUsePrompt = (msg: Message) => {
     if (!msg.meta?.canUseInGenerator) return
 
     const handoffPayload = {
-      prompt: msg.content,
+      prompt: msg.meta.prompt || msg.content,
       negative_prompt: msg.meta.negativePrompt || DEFAULT_NEGATIVE_PROMPT,
       output_type: msg.meta.outputType || "IMAGE",
       generation_target: msg.meta.generationTarget || "text_to_image",
+      identity: initialIdentity || undefined,
+      ...(msg.meta.generationTarget === "image_to_video" && initialSourceGenerationAssetId
+        ? { source_generation_asset_id: initialSourceGenerationAssetId }
+        : {}),
       created_at: Date.now(),
     }
 
@@ -187,217 +118,79 @@ export default function ChatUI({
       )
     } catch (err) {
       console.error("Failed to store Siren's Mind handoff:", err)
-    }
-
-    const params = new URLSearchParams({
-      prompt: handoffPayload.prompt,
-      negative_prompt: handoffPayload.negative_prompt,
-      output_type: handoffPayload.output_type,
-      generation_target: handoffPayload.generation_target,
-      source: "siren_mind",
-    })
-
-    window.location.assign("/generate?" + params.toString())
-  }
-
-  const sendHeadlessRequest = async ({
-    description,
-    target,
-    historyItems,
-  }: {
-    description: string
-    target: GenerationTarget
-    historyItems: Message[]
-  }) => {
-    const resolvedOutputType = targetToOutputType(target)
-
-    const res = await fetch("/api/nsfw-gpt/headless", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        mode,
-        description,
-        output_type: resolvedOutputType,
-        generation_target: target,
-        history: buildHistory(historyItems),
-      }),
-    })
-
-    const data = (await res.json()) as
-      | HeadlessSuccessResponse
-      | HeadlessRefusalResponse
-      | HeadlessErrorResponse
-
-    await new Promise((r) => setTimeout(r, 350))
-
-    if ("status" in data && data.status === "ok") {
-      appendMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: data.prompt,
-        meta: {
-          generationTarget: target,
-          outputType: resolvedOutputType,
-          negativePrompt: DEFAULT_NEGATIVE_PROMPT,
-          canUseInGenerator: true,
-        },
-      })
-      return
-    }
-
-    if ("error_code" in data) {
-      appendMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: data.error_code + ": " + data.reason,
-        isError: true,
-      })
-      return
-    }
-
-    if ("error" in data) {
-      appendMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: data.reason || data.message || data.error,
-        isError: true,
-      })
-      return
-    }
-
-    appendMessage({
-      id: crypto.randomUUID(),
-      role: "assistant",
-      content: "SYSTEM_ERROR: Invalid response format.",
-      isError: true,
-    })
-  }
-
-  const handleStarterClick = (starter: string) => {
-    void handleSend(starter)
-  }
-
-  const handleSend = async (userText: string) => {
-    const trimmed = userText.trim()
-    if (!trimmed) return
-
-    if (awaitingGenerationTarget) {
-      const userMessage: Message = {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: trimmed,
-      }
-
-      setMessages((prev) => [...prev, userMessage])
-
-      const resolvedTarget = parseGenerationTarget(trimmed)
-
-      if (!resolvedTarget) {
-        appendMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content:
-            "Choose one so I can shape it correctly: text-to-image, text-to-video, or image-to-video.",
-          isError: true,
-        })
-        return
-      }
-
-      setGenerationTarget(resolvedTarget)
-      setAwaitingGenerationTarget(false)
-
       appendMessage({
         id: crypto.randomUUID(),
         role: "assistant",
         content:
-          "Got it - I'll use " +
-          targetToLabel(resolvedTarget) +
-          " for this thread.",
+          "I couldn't securely transfer this prompt to Generator. Your completed result is still here; please try again.",
+        isError: true,
       })
-
-      const descriptionToSend = pendingDescription
-      const historyBase = pendingHistoryBase
-
-      setPendingDescription(null)
-      setPendingHistoryBase(null)
-
-      if (!descriptionToSend) {
-        return
-      }
-
-      const syntheticPendingUserMessage: Message = {
-        id: "pending-description",
-        role: "user",
-        content: descriptionToSend,
-      }
-
-      const historyItems = [...(historyBase ?? []), syntheticPendingUserMessage]
-
-      setIsTyping(true)
-
-      try {
-        await sendHeadlessRequest({
-          description: descriptionToSend,
-          target: resolvedTarget,
-          historyItems,
-        })
-      } catch (err) {
-        console.error("Chat error:", err)
-
-        appendMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          content: "SYSTEM_ERROR: Failed to reach prompt engine.",
-          isError: true,
-        })
-      } finally {
-        setIsTyping(false)
-      }
-
       return
     }
 
-    const userMessage: Message = {
-      id: crypto.randomUUID(),
-      role: "user",
-      content: trimmed,
-    }
+    window.location.assign("/generate")
+  }
 
+  const sendChatRequest = async ({
+    message,
+    historyItems,
+    selectedMode,
+  }: {
+    message: string
+    historyItems: Message[]
+    selectedMode: "SAFE" | "NSFW" | "ULTRA"
+  }) => {
+    const res = await fetch("/api/sirens-mind/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: selectedMode,
+        message,
+        history: buildHistory(historyItems),
+        context: {
+          ...(initialGenerationTarget ? { generation_target: initialGenerationTarget } : {}),
+          ...(initialPrompt ? { prompt: initialPrompt } : {}),
+          ...(initialNegativePrompt ? { negative_prompt: initialNegativePrompt } : {}),
+        },
+      }),
+    })
+    const data = (await res.json()) as ConversationResponse | ChatErrorResponse
+    if (!res.ok || !("status" in data) || data.status !== "ok") {
+      appendMessage({
+        id: crypto.randomUUID(), role: "assistant",
+        content: "Siren's Mind is temporarily unavailable. Please try again.", isError: true,
+      })
+      return
+    }
+    const handoff = data.handoff
+    appendMessage({
+      id: crypto.randomUUID(), role: "assistant", content: data.reply,
+      ...(handoff ? { meta: {
+        generationTarget: handoff.generation_target,
+        outputType: handoff.output_type,
+        negativePrompt: handoff.negative_prompt || initialNegativePrompt || DEFAULT_NEGATIVE_PROMPT,
+        prompt: handoff.prompt,
+        canUseInGenerator: true,
+      } } : {}),
+    })
+  }
+
+  const handleStarterClick = (starter: string) => { void handleSend(starter, mode) }
+
+  const handleSend = async (userText: string, selectedMode: "SAFE" | "NSFW" | "ULTRA") => {
+    const trimmed = userText.trim()
+    if (!trimmed) return
+    const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: trimmed }
     const baseMessages = [...messages, userMessage]
     setMessages(baseMessages)
-
-    if (!generationTarget) {
-      setPendingDescription(trimmed)
-      setPendingHistoryBase(messages)
-      setAwaitingGenerationTarget(true)
-
-      appendMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: TARGET_SELECTION_PROMPT,
-      })
-
-      return
-    }
-
     setIsTyping(true)
-
     try {
-      await sendHeadlessRequest({
-        description: trimmed,
-        target: generationTarget,
-        historyItems: baseMessages,
-      })
+      await sendChatRequest({ message: trimmed, historyItems: messages, selectedMode })
     } catch (err) {
       console.error("Chat error:", err)
-
       appendMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: "SYSTEM_ERROR: Failed to reach prompt engine.",
-        isError: true,
+        id: crypto.randomUUID(), role: "assistant",
+        content: "Siren's Mind is temporarily unavailable. Please try again.", isError: true,
       })
     } finally {
       setIsTyping(false)
@@ -471,7 +264,7 @@ export default function ChatUI({
           </section>
         ) : null}
 
-        <section className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {messages.length > 0 || isTyping ? <section className="min-h-0 flex-1 overflow-y-auto pr-1">
           <div className="flex flex-col gap-5 pb-5">
             {messages.map((msg) => (
               <ChatMessage
@@ -492,7 +285,7 @@ export default function ChatUI({
 
             <div ref={messagesEndRef} className="h-6" />
           </div>
-        </section>
+        </section> : null}
 
         <section className="shrink-0 border-t border-white/10 bg-black/95 pb-4 pt-3 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]">
           <div className="mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">

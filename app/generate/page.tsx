@@ -56,6 +56,7 @@ const supabase = createBrowserClient(
 );
 
 const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff";
+const GENERATOR_MIND_CONTEXT_STORAGE_KEY = "sirensforge:generator_mind_context";
 const NEXT_PACK_SEED_STORAGE_KEY = "sirensforge:next_pack_seed";
 const DEFAULT_NEGATIVE_PROMPT =
   "cartoon, 3d, render, low res, low resolution, blurry, poor quality, jpeg artifacts, cgi, bad anatomy, deformed, extra fingers, extra limbs";
@@ -107,6 +108,7 @@ type HandoffPayload = {
   created_at?: number;
   source?: string;
   identity?: string;
+  source_generation_asset_id?: string;
 };
 
 type NextPackSeedPayload = {
@@ -974,7 +976,7 @@ function FloatingSirensMindDock(props: {
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-zinc-800 bg-black/30 px-3 py-3 text-[11px] leading-5 text-zinc-300">
-                      Rough idea? Let Siren’s Mind shape it into a generator-ready IMAGE, VIDEO, or STORY output.
+                      Rough idea? Let Siren’s Mind shape it into a generator-ready Image or Video prompt.
                     </div>
                   )}
 
@@ -3628,6 +3630,12 @@ export default function GeneratePage() {
       typeof payload.identity === "string" && payload.identity.trim().length > 0
         ? payload.identity.trim()
         : "";
+    const incomingSourceGenerationAssetId =
+      incomingMode === "image_to_video" &&
+      typeof payload.source_generation_asset_id === "string" &&
+      isUuidLike(payload.source_generation_asset_id.trim())
+        ? payload.source_generation_asset_id.trim().toLowerCase()
+        : null;
 
     if (incomingPrompt) setPrompt(incomingPrompt);
     if (incomingNegative) setNegativePrompt(incomingNegative);
@@ -3637,6 +3645,11 @@ export default function GeneratePage() {
       setOutputType("IMAGE");
     }
     setMode(incomingMode);
+    if (incomingSourceGenerationAssetId) {
+      setSourceGenerationAssetId(incomingSourceGenerationAssetId);
+      setImageFile(null);
+      setPendingVideoSourceUpload(null);
+    }
     if (incomingIdentity) {
       setPendingIdentityId(incomingIdentity);
     }
@@ -3836,7 +3849,7 @@ export default function GeneratePage() {
 
 Prompt:
 ${basePrompt}`,
-          generation_target: mode,
+          generation_target: mode === "image_to_image" ? "text_to_image" : mode,
           task: "refine_prompt_variants",
           refine_type: variant,
         }),
@@ -4199,7 +4212,28 @@ ${basePrompt}`,
             open={sirensMindDockOpen}
             hasPrompt={Boolean(prompt.trim())}
             onToggle={() => setSirensMindDockOpen((value) => !value)}
-            onOpenBrain={() => router.push("/sirens-mind")}
+            onOpenBrain={() => {
+              if (mode === "image_to_video" && imageFile && !sourceGenerationAssetId) {
+                setErrorMessage("Your local source image must remain on Generator. Use the inline AI Refine tools so the private File is not discarded.");
+                return;
+              }
+              const identity = loraSelection.mode === "single" && loraSelection.selected.length === 1 && isUuidLike(loraSelection.selected[0])
+                ? loraSelection.selected[0] : undefined;
+              const context = {
+                version: 1,
+                generation_target: mode === "image_to_image" ? "text_to_image" : mode,
+                ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
+                ...(negativePrompt.trim() ? { negative_prompt: negativePrompt.trim() } : {}),
+                ...(identity ? { identity } : {}),
+                ...(mode === "image_to_video" && isUuidLike(sourceGenerationAssetId)
+                  ? { source_generation_asset_id: sourceGenerationAssetId!.toLowerCase() }
+                  : {}),
+                created_at: Date.now(),
+              };
+              try { window.sessionStorage.setItem(GENERATOR_MIND_CONTEXT_STORAGE_KEY, JSON.stringify(context)); }
+              catch { setErrorMessage("Siren’s Mind could not be opened without losing your context."); return; }
+              router.push("/sirens-mind");
+            }}
           />
 
           {mode === "image_to_video" && (

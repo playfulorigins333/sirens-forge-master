@@ -61,7 +61,10 @@ assert(sirensMind.includes("window.sessionStorage.setItem("));
 for (const field of ["prompt:", "negative_prompt:", "output_type:", "generation_target:"]) {
   assert(sirensMind.includes(field), `Siren's Mind handoff field missing: ${field}`);
 }
-assert(sirensMind.includes('window.location.assign("/generate?" + params.toString())'));
+assert(sirensMind.includes("source_generation_asset_id"));
+assert(generator.includes("setSourceGenerationAssetId(incomingSourceGenerationAssetId)"));
+assert(generator.includes('mode === "image_to_video" && imageFile && !sourceGenerationAssetId'));
+assert(sirensMind.includes('window.location.assign("/generate")'));
 assert(generator.includes("window.sessionStorage.getItem(SIREN_MIND_HANDOFF_STORAGE_KEY)"));
 assert(generator.includes("if (incomingPrompt) setPrompt(incomingPrompt)"));
 assert(generator.includes("setMode(incomingMode)"));

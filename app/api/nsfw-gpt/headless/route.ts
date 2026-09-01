@@ -4,9 +4,9 @@ import path from "path"
 import {
   validateVaultIds,
   type Mode as VaultMode,
-} from "@/prompts/nsfw_gpt/vault_registry"
-import { validateMacroIds } from "@/prompts/nsfw_gpt/macro_registry"
-import { ensureActiveSubscription } from "@/lib/subscription-checker"
+} from "../../../../prompts/nsfw_gpt/vault_registry"
+import { validateMacroIds } from "../../../../prompts/nsfw_gpt/macro_registry"
+import { ensureActiveSubscription } from "../../../../lib/subscription-checker"
 
 export const runtime = "nodejs"
 

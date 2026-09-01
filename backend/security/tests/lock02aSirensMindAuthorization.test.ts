@@ -6,7 +6,7 @@ const source = readFileSync(routePath, "utf8")
 
 assert.match(
   source,
-  /import \{ ensureActiveSubscription \} from "@\/lib\/subscription-checker"/,
+  /import \{ ensureActiveSubscription \} from "\.\.\/\.\.\/\.\.\/\.\.\/lib\/subscription-checker"/,
   "headless route must reuse the canonical subscription helper"
 )
 assert.doesNotMatch(
