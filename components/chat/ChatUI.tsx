@@ -264,7 +264,7 @@ export default function ChatUI({
           </section>
         ) : null}
 
-        <section className="min-h-0 flex-1 overflow-y-auto pr-1">
+        {messages.length > 0 || isTyping ? <section className="min-h-0 flex-1 overflow-y-auto pr-1">
           <div className="flex flex-col gap-5 pb-5">
             {messages.map((msg) => (
               <ChatMessage
@@ -285,7 +285,7 @@ export default function ChatUI({
 
             <div ref={messagesEndRef} className="h-6" />
           </div>
-        </section>
+        </section> : null}
 
         <section className="shrink-0 border-t border-white/10 bg-black/95 pb-4 pt-3 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]">
           <div className="mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
