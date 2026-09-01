@@ -7,6 +7,22 @@ import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, expl
 const USER = "123e4567-e89b-42d3-a456-426614174000"
 const state = { version: 1 as const, persona: "Siren", relationship: "trusted", scene: "studio", summary: "A scene began." }
 
+test("admin RP prompt protects embodiment, progression, adult safety, and metadata contracts", () => {
+  const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.admin_rp.system.txt"), "utf8")
+  assert.match(prompt, /Embody the active character in interactive RP/)
+  assert.match(prompt, /default character actions and dialogue to first person/)
+  assert.match(prompt, /address the creator as "you"/)
+  assert.match(prompt, /explicit request for third-person, narrator, screenplay, or another POV/)
+  assert.match(prompt, /Advance established consensual adult scenes with meaningful forward movement/)
+  assert.match(prompt, /do not recycle hesitation, obstacles, confirmation requests, excuses, or internal-conflict stall loops/)
+  assert.match(prompt, /every sexual participant must be an adult/)
+  assert.match(prompt, /Never introduce minors or age-ambiguous people as sexual participants, witnesses, voyeur\/exposure\/risk devices, or sexual-scene complications/)
+  assert.match(prompt, /must remain consensual and revocable/)
+  assert.match(prompt, /never imply that the creator permanently surrendered the ability to stop/)
+  assert.equal(prompt.match(new RegExp(RP_META_SENTINEL, "g"))?.length, 1)
+  assert.match(prompt, /{"state":{"version":1,"persona":"","relationship":"","scene":"","summary":""}\|null,"handoff":null\|/)
+})
+
 test("admin authorization and activation fail closed", () => {
   assert.equal(adminRpAuthorized(USER, {}), false)
   assert.equal(adminRpAuthorized(USER, { SIRENS_MIND_ADMIN_RP_ENABLED: "TRUE", SIRENS_MIND_ADMIN_RP_USER_IDS: USER }), false)
