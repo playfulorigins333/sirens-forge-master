@@ -51,7 +51,7 @@ test("desktop reading layout and conversational naming contracts remain explicit
   const input = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatInput.tsx"), "utf8")
   const governor = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.conversation.funnel_governor.txt"), "utf8")
 
-  assert.match(chatUi, /w-full max-w-6xl/)
+  assert.match(chatUi, /w-full max-w-\[78rem\]/)
   assert.doesNotMatch(chatUi, /max-w-4xl/)
   assert.match(chatUi, /min-h-0 flex-1 overflow-y-auto/)
   assert.match(chatUi, /messages\.length === 0 \? <div[^>]*>[\s\S]*Start Here[\s\S]*Chat - Prompt - Generator[\s\S]*<\/div> : null/)
