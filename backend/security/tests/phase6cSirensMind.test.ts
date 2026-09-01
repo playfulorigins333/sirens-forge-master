@@ -71,6 +71,11 @@ test("server-managed role contracts seed, persist, update conservatively, and re
     "I change my stance and watch you carefully.",
     "I set my hand on the bar while you remain stubborn.",
     "I make you wait while I look around the room.",
+    "I am now walking toward the fire.",
+    "You are now standing by the door.",
+    "From now on I am walking beside you.",
+    "From now on you're standing by the window.",
+    "I am now looking at you.",
   ]) {
     assert.deepEqual(resolveRpRoleContract(narrative, prior), { contract: seeded.contract, source: "continuity" }, narrative)
   }

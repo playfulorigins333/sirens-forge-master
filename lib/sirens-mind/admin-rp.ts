@@ -41,11 +41,11 @@ const FRESH_RP_SETUP = /^(?:let(?:'|’)s\s+roleplay|start\s+(?:a\s+)?role-?play
 const EXPLICIT_ROLE_DIRECTIVES = [
   /^(?:switch|swap) our roles?\b/i,
   /^reverse (?:the )?dynamic\b/i,
-  /^from now on (?:i am|i'm|you are|you're|your character is)\b/i,
+  /^from now on (?:i am|i'm|you are|you're|your character is) (?:the|my|your) (?![\p{L}'-]+ing\b)[\p{L}][\p{L}'-]*/iu,
   /^(?:change|reassign) (?:my|your) role to\b/i,
   /^change your character to (?:the )?.+\brole\b/i,
   /^make your character (?:the )?.+\brole\b/i,
-  /^(?:i am|i'm|you are|you're|your character is) now (?:the )?\S+/i,
+  /^(?:i am|i'm|you are|you're|your character is) now (?:the|my|your) (?![\p{L}'-]+ing\b)[\p{L}][\p{L}'-]*/iu,
   /^change our relationship to\b/i,
   /^switch to (?:first|second|third) person\b/i,
   /^use (?:first|second|third) person from now on\b/i,
