@@ -83,7 +83,7 @@
     "test:phase4-video-application": "tsx --test backend/compute/tests/phase4VideoApplicationContracts.test.ts",
     "test:phase4-video-application-postgres": "node backend/compute/tests/runPhase4VideoApplicationPostgres.mjs",
     "test:phase6-sirens-mind": "node --experimental-test-module-mocks --import tsx backend/security/tests/phase6SirensMindContracts.test.ts",
-    "test:phase6b-sirens-mind": "tsx --test backend/security/tests/phase6bSirensMindContracts.test.ts"
+    "test:phase6b-sirens-mind": "tsx --test backend/security/tests/phase6bSirensMindContracts.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6bSirensMindBehavior.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6bHeadlessCapabilityBehavior.test.ts"
   },
   "repository": {
     "type": "git",

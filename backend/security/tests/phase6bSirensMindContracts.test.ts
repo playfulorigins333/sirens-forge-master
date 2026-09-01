@@ -4,6 +4,7 @@ import { test } from "node:test"
 import { VAULT_DEFS, listVaultsForMode, validateVaultIds } from "../../../prompts/nsfw_gpt/vault_registry"
 import { MACROS, listMacrosForMode, validateMacroIds } from "../../../prompts/nsfw_gpt/macro_registry"
 import { buildCapabilityCatalog } from "../../../lib/sirens-mind/capabilities"
+import { identityDataMessage, MAX_IDENTITY_DATA_CHARS, usableOwnedIdentities } from "../../../lib/sirens-mind/identities"
 
 const root = process.cwd()
 const file = (kind: string, id: string) => readFileSync(`${root}/prompts/nsfw_gpt/${kind}/${id}.txt`, "utf8")
@@ -41,6 +42,19 @@ test("single authority and browser/server identity boundaries remain explicit", 
   assert.match(route, /ensureActiveSubscription\(\)/)
   assert.match(route, /loadOwnedIdentities\(auth\.user\.id\)/)
   assert.doesNotMatch(identity, /getSupabaseAdmin|service_role/)
-  assert.match(identity, /select\("id,name,description"\)/)
+  assert.match(identity, /select\("id,name,description,artifact_r2_bucket,artifact_r2_key,trigger_token"\)/)
   assert.match(route, /CAPABILITY_CATALOG_UNAVAILABLE/)
+})
+test("usable identities exclude blank artifacts and model data remains complete", () => {
+  const good = { id: "10000000-0000-4000-8000-000000000001", name: "Active", description: "x".repeat(500), artifact_r2_bucket: "b", artifact_r2_key: "k", trigger_token: "t" }
+  const rows = [good, { ...good, id: "10000000-0000-4000-8000-000000000002", artifact_r2_bucket: "" }, { ...good, id: "10000000-0000-4000-8000-000000000003", artifact_r2_key: "   " }, { ...good, id: "10000000-0000-4000-8000-000000000004", trigger_token: "" }]
+  assert.deepEqual(usableOwnedIdentities(rows).map(x => x.id), [good.id])
+  const many = Array.from({ length: 50 }, (_, i) => ({ id: `10000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`, name: "n".repeat(120), description: "d".repeat(500) }))
+  const active = many.at(-1)!.id
+  const message = identityDataMessage(many, active)
+  const serialized = message.split("\n")[1]
+  assert.ok(message.length <= MAX_IDENTITY_DATA_CHARS)
+  const parsed = JSON.parse(serialized)
+  assert.equal(parsed.active_identity_id, active); assert.ok(parsed.identities.some((x: any) => x.id === active))
+  assert.ok(parsed.identities.every((x: any) => x.name.length === 120 && x.description.length === 500))
 })

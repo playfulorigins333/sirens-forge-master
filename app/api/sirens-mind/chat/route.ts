@@ -71,8 +71,11 @@ function parseHandoff(value: unknown, ownedIds: Set<string>, activeIdentityId: s
   const outputType = raw.output_type
   if (!prompt || prompt.length > MAX_MESSAGE_CHARS || !TARGETS.has(target as GenerationTarget)) return undefined
   if ((target === "text_to_image" && outputType !== "IMAGE") || (target !== "text_to_image" && outputType !== "VIDEO")) return undefined
-  if (raw.identity_id != null && (!validIdentityId(raw.identity_id) || !ownedIds.has(raw.identity_id as string))) return undefined
-  const identityId = typeof raw.identity_id === "string" ? raw.identity_id : activeIdentityId
+  const hasIdentity = Object.hasOwn(raw, "identity_id")
+  if (hasIdentity && raw.identity_id !== null && !validIdentityId(raw.identity_id)) return null
+  const providerIdentityId = typeof raw.identity_id === "string" ? raw.identity_id.toLowerCase() : null
+  if (providerIdentityId && !ownedIds.has(providerIdentityId)) return null
+  const identityId = hasIdentity ? providerIdentityId : activeIdentityId
   return { prompt, negative_prompt: negativePrompt, output_type: outputType as "IMAGE" | "VIDEO", generation_target: target as GenerationTarget, identity_id: identityId }
 }
 
@@ -118,8 +121,9 @@ export async function POST(req: NextRequest) {
     if (error instanceof CapabilityCatalogUnavailableError) return NextResponse.json({ error: "CAPABILITY_CATALOG_UNAVAILABLE" }, { status: 503 })
     return NextResponse.json({ error: "IDENTITY_CATALOG_UNAVAILABLE" }, { status: 503 })
   }
-  const ownedIds = new Set(identities.map((identity) => identity.id))
-  const activeIdentityId = context.identity_id && ownedIds.has(context.identity_id) ? context.identity_id : null
+  const ownedIds = new Set(identities.map((identity) => identity.id.toLowerCase()))
+  const suggestedIdentityId = context.identity_id?.toLowerCase()
+  const activeIdentityId = suggestedIdentityId && ownedIds.has(suggestedIdentityId) ? suggestedIdentityId : null
 
   const apiKey = process.env.OPENAI_COMPAT_API_KEY
   const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
