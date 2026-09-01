@@ -5,6 +5,7 @@ export type RpContinuity = { version: 1; persona: string; relationship: string; 
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const LIMITS = { persona: 1500, relationship: 1200, scene: 2000, summary: 3500 } as const
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/
 
 export function adminRpAuthorized(userId: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.SIRENS_MIND_ADMIN_RP_ENABLED !== "true" || !UUID.test(userId)) return false
@@ -18,7 +19,7 @@ export function parseRpContinuity(value: unknown): RpContinuity | null {
   if (raw.version !== 1 || Object.keys(raw).some((key) => !["version", ...Object.keys(LIMITS)].includes(key))) return null
   const state = { version: 1 as const, persona: "", relationship: "", scene: "", summary: "" }
   for (const key of Object.keys(LIMITS) as (keyof typeof LIMITS)[]) {
-    if (typeof raw[key] !== "string" || raw[key].length > LIMITS[key]) return null
+    if (typeof raw[key] !== "string" || raw[key].length > LIMITS[key] || CONTROL_CHARACTERS.test(raw[key])) return null
     state[key] = raw[key]
   }
   return JSON.stringify(state).length <= 8192 ? state : null

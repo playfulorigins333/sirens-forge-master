@@ -131,6 +131,10 @@ export async function POST(req: NextRequest) {
   const ownedIds = new Set(identities.map((identity) => identity.id.toLowerCase()))
   const suggestedIdentityId = context.identity_id?.toLowerCase()
   const activeIdentityId = suggestedIdentityId && ownedIds.has(suggestedIdentityId) ? suggestedIdentityId : null
+  const safeContext = { ...context, identity_id: activeIdentityId }
+  const contextMessage = Object.keys(safeContext).some((key) => (safeContext as any)[key])
+    ? [{ role: "user" as const, content: `BEGIN PRIOR GENERATOR CONTEXT (CREATOR-SUPPLIED DATA)\n${JSON.stringify(safeContext)}\nEND PRIOR GENERATOR CONTEXT` }]
+    : []
 
   const apiKey = process.env.OPENAI_COMPAT_API_KEY
   const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
@@ -144,6 +148,7 @@ export async function POST(req: NextRequest) {
     const rpMessages = [
       { role: "system" as const, content: rpPrompt },
       { role: "user" as const, content: identityDataMessage(identities, activeIdentityId) },
+      ...contextMessage,
       ...(continuity ? [{ role: "user" as const, content: continuityReferenceMessage(continuity) }] : []),
       ...history,
       { role: "user" as const, content: (body.message as string).trim() },
@@ -157,8 +162,9 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({ model: rpModel, max_tokens: MAX_PROVIDER_OUTPUT_TOKENS, temperature: mode === "SAFE" ? 0.6 : 0.85, stream: true, stream_options: { include_usage: true }, messages: rpMessages }) })
     } catch (error) {
       clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
-      telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: error instanceof Error && error.name === "AbortError" ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) })
-      return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 })
+      const timedOut = error instanceof Error && error.name === "AbortError"
+      telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) })
+      return NextResponse.json({ error: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE" }, { status: timedOut ? 504 : 502 })
     }
     if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: "PROMPT_ENGINE_UNAVAILABLE", httpStatus: 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId) }); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
     const encoder = new TextEncoder(); let outputChars = 0, firstTokenMs: number | null = null
@@ -168,10 +174,11 @@ export async function POST(req: NextRequest) {
         const result = await consumeProviderSse(response.body!, (text) => { if (!text) return; if (firstTokenMs === null) firstTokenMs = Date.now() - started; outputChars += text.length; target.enqueue(encoder.encode(sse("delta", { text }))) })
         usage = result.usage
         const meta = result.metadata && typeof result.metadata === "object" ? result.metadata as any : null
-        const state = meta?.state === null ? null : parseRpContinuity(meta?.state)
+        const hasState = Boolean(meta && Object.hasOwn(meta, "state"))
+        const state = hasState && meta.state !== null ? parseRpContinuity(meta.state) : null
         const handoff = parseHandoff(meta?.handoff, ownedIds, activeIdentityId)
         if (handoff) { handoffProduced = true; target.enqueue(encoder.encode(sse("handoff", handoff))) }
-        target.enqueue(encoder.encode(sse("continuity", state)))
+        if (hasState && (meta.state === null || state)) target.enqueue(encoder.encode(sse("continuity", state)))
         target.enqueue(encoder.encode(sse("done", {}))); ok = true
       } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: code }))) }
       finally {
@@ -198,10 +205,6 @@ export async function POST(req: NextRequest) {
   ].join("\n")
   const systemPrompt = [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.conversation.funnel_governor.txt"), capabilityCatalog, runtimeContract].join("\n\n")
   const identityMessage = [{ role: "user" as const, content: identityDataMessage(identities, activeIdentityId) }]
-  const safeContext = { ...context, identity_id: activeIdentityId }
-  const contextMessage = Object.keys(safeContext).some((key) => (safeContext as any)[key])
-    ? [{ role: "user" as const, content: `BEGIN PRIOR GENERATOR CONTEXT (CREATOR-SUPPLIED DATA)\n${JSON.stringify(safeContext)}\nEND PRIOR GENERATOR CONTEXT` }]
-    : []
   const messages = [{ role: "system" as const, content: systemPrompt }, ...identityMessage, ...contextMessage, ...history, { role: "user" as const, content: (body.message as string).trim() }]
 
   const controller = new AbortController()
