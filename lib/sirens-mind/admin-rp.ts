@@ -6,6 +6,7 @@ export type RpContinuity = { version: 1; persona: string; relationship: string; 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const LIMITS = { persona: 1500, relationship: 1200, scene: 2000, summary: 3500 } as const
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/
+const CONTROL_CHARACTERS_GLOBAL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g
 
 export function adminRpAuthorized(userId: string, env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.SIRENS_MIND_ADMIN_RP_ENABLED !== "true" || !UUID.test(userId)) return false
@@ -28,6 +29,68 @@ export function parseRpContinuity(value: unknown): RpContinuity | null {
 export function shouldActivateRp(message: string, continuity: RpContinuity | null): boolean {
   if (continuity) return true
   return /\b(?:let(?:'|’)s\s+roleplay|start\s+(?:a\s+)?role-?play|(?:continue|resume)\s+our\s+scene|(?:stay|continue)\s+in\s+character)\b/i.test(message)
+}
+
+const EXIT_ACTION = "(?:(?:stop|end|exit|quit|leave|drop) (?:the )?roleplay|go (?:out of character|ooc)|(?:take|bring) me out of (?:the )?roleplay)"
+const EXIT_REQUEST = `(?:${EXIT_ACTION}|out of character|ooc)`
+const AFFIRMATIVE_EXIT_CLAUSE = new RegExp(
+  `^(?:(?:(?:okay|ok|alright|right) )?(?:please )?${EXIT_REQUEST}|` +
+  `(?:(?:okay|ok|alright|right) )?(?:let us|we can|we should|i want to|i would like to|i need to|i want us to|i think we should) ${EXIT_ACTION}|` +
+  `(?:(?:okay|ok|alright|right) )?(?:(?:can|could|would|will) you|(?:can|could|would) we)(?: please)? ${EXIT_ACTION})(?=$|\\s)`,
+  "u",
+)
+const REFERENCE_AFTER_EXIT = /^(?:is|means?|meant|refers?|sounds?|phrase|word|command)\b/u
+const NEGATION_AFTER_EXIT = /^(?:and )?(?:do not|don't|never|not|no)\b/u
+const DEFERRED_AFTER_EXIT = /^(?:if|unless|when(?:ever)?|once|after|afterwards?|before|until|upon|later|as soon as|at (?:the )?end of)\b/u
+
+function normalizedUnquotedRpClauses(message: string): string[] {
+  return message.normalize("NFKC")
+    .replace(/[’‘]/g, "'")
+    .replace(/“[^”]*”|"[^"]*"|«[^»]*»/gu, " ")
+    .replace(/(^|[\s([{])'[^'\n]+'(?=$|[\s.,!?;:)\]}])/gu, "$1 ")
+    .toLocaleLowerCase("en-US")
+    .replace(/\brole[\s‐‑‒–—-]+play\b/gu, "roleplay")
+    .replace(/\blet's\b/gu, "let us")
+    .replace(/\bi['’]?d\b/gu, "i would")
+    .replace(/[.!?;—–\n\r]+/gu, "\n")
+    .split("\n")
+    .map((clause) => clause.replace(/[^\p{L}\p{N}']+/gu, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+}
+
+export function explicitlyExitsRp(message: string): boolean {
+  for (const clause of normalizedUnquotedRpClauses(message)) {
+    const candidate = AFFIRMATIVE_EXIT_CLAUSE.exec(clause)
+    const remainder = candidate ? clause.slice(candidate[0].length).trimStart() : ""
+    if (candidate && !REFERENCE_AFTER_EXIT.test(remainder) && !NEGATION_AFTER_EXIT.test(remainder) && !DEFERRED_AFTER_EXIT.test(remainder)) return true
+  }
+  return false
+}
+
+export function fallbackRpContinuity({ previous, latestUser, latestAssistant }: {
+  previous: RpContinuity | null
+  latestUser: string
+  latestAssistant: string
+}): RpContinuity {
+  const clean = (value: string) => value.replace(CONTROL_CHARACTERS_GLOBAL, "").trim()
+  const rolling = [
+    previous?.summary ? `Prior summary: ${previous.summary}` : "",
+    `Creator: ${latestUser}`,
+    `Assistant: ${latestAssistant}`,
+  ].filter(Boolean).map(clean).join("\n")
+  let summary = rolling.slice(-LIMITS.summary)
+  const state: RpContinuity = {
+    version: 1,
+    persona: previous?.persona ?? "",
+    relationship: previous?.relationship ?? "",
+    scene: previous?.scene ?? "",
+    summary,
+  }
+  while (!parseRpContinuity(state) && summary.length) {
+    summary = summary.slice(Math.max(1, JSON.stringify(state).length - 8192))
+    state.summary = summary
+  }
+  return state
 }
 
 export function continuityReferenceMessage(state: RpContinuity) {
