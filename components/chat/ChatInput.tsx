@@ -1,6 +1,9 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+
+const TEXTAREA_MIN_HEIGHT = 34
+const TEXTAREA_MAX_HEIGHT = 192
 
 type Mode = "SAFE" | "NSFW" | "ULTRA"
 
@@ -20,6 +23,43 @@ export function ChatInput({
   const [value, setValue] = useState("")
   const [sending, setSending] = useState(false)
   const [localMode, setLocalMode] = useState<Mode>(mode)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const resizeTextarea = useCallback(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    // Reset first so scrollHeight reflects shrinking content as well as growth.
+    textarea.style.height = "auto"
+    const nextHeight = Math.min(
+      TEXTAREA_MAX_HEIGHT,
+      Math.max(TEXTAREA_MIN_HEIGHT, textarea.scrollHeight)
+    )
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY =
+      textarea.scrollHeight > TEXTAREA_MAX_HEIGHT ? "auto" : "hidden"
+
+    if (!textarea.value) textarea.scrollTop = 0
+  }, [])
+
+  useLayoutEffect(() => {
+    resizeTextarea()
+  }, [resizeTextarea, value])
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || typeof ResizeObserver === "undefined") return
+
+    let previousWidth = textarea.getBoundingClientRect().width
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width
+      if (width === previousWidth) return
+      previousWidth = width
+      resizeTextarea()
+    })
+    observer.observe(textarea)
+    return () => observer.disconnect()
+  }, [resizeTextarea])
 
   useEffect(() => {
     setLocalMode(mode)
@@ -46,7 +86,7 @@ export function ChatInput({
   const handleKeyDown = async (
     e: React.KeyboardEvent<HTMLTextAreaElement>
   ) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       await submit()
     }
@@ -81,12 +121,13 @@ export function ChatInput({
       <div className={`rounded-[24px] border border-white/10 bg-[#0d0e13] ${compact ? "p-2" : "p-3"}`}>
         <div className={`flex items-end gap-3 rounded-[20px] border border-white/10 bg-black px-4 ${compact ? "py-2" : "py-3"}`}>
           <textarea
+            ref={textareaRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Describe the scene, AI Twin, mood, image/video goal, or rough idea..."
             rows={1}
-            className="max-h-48 min-h-[34px] flex-1 resize-none bg-transparent text-[15px] leading-7 text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
+            className="max-h-48 min-h-[34px] flex-1 resize-none overflow-y-hidden bg-transparent text-[15px] leading-7 text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
           />
 
           <button
