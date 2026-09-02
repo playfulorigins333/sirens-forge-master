@@ -1,0 +1,2 @@
+import { NextRequest, NextResponse } from "next/server";import { requireCreatorReplyActor } from "@/lib/sirens-mind/creator-reply-access";import { resumeConversation } from "@/lib/sirens-mind/creator-reply-service"
+export async function POST(_:NextRequest,{params}:{params:Promise<{conversationId:string}>}){const[{userId},p]=await Promise.all([requireCreatorReplyActor(),params]);try{return NextResponse.json({conversation:await resumeConversation(userId,p.conversationId)})}catch{return NextResponse.json({error:"Not found"},{status:404})}}

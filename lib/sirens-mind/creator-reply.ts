@@ -1,6 +1,10 @@
 export const CREATOR_REPLY_STREAM_TIMEOUT_MS = 60_000
+/** @deprecated Phase 6F.2 DB state is authoritative; retained for compatibility tests only. */
 export const CREATOR_REPLY_THREAD_KEY = "sirensforge:sirens_mind_creator_reply_thread"
+/** @deprecated Phase 6F.2 DB state is authoritative; retained for compatibility tests only. */
 export const CREATOR_REPLY_CONTINUITY_PREFIX = "sirensforge:sirens_mind_creator_reply_continuity:"
+export const CREATOR_REPLY_SELECTED_SUBSCRIBER_KEY = "sirensforge:sirens_mind_creator_reply_selected_subscriber"
+export const CREATOR_REPLY_SELECTED_CONVERSATION_KEY = "sirensforge:sirens_mind_creator_reply_selected_conversation"
 
 export type CreatorReplyContinuity = {
   version: 1
@@ -24,6 +28,11 @@ export function creatorReplyAuthorized(userId: string, env: NodeJS.ProcessEnv = 
   if (env.SIRENS_MIND_CREATOR_REPLY_ENABLED !== "true" || !UUID.test(userId)) return false
   return (env.SIRENS_MIND_CREATOR_REPLY_USER_IDS || "").split(",").map((id) => id.trim().toLowerCase())
     .filter((id) => UUID.test(id)).includes(userId.toLowerCase())
+}
+
+/** Future paid entitlement is added only here; today the internal allowlist remains authoritative. */
+export function creatorReplyAccessAllowed(userId: string, env: NodeJS.ProcessEnv = process.env) {
+  return creatorReplyAuthorized(userId, env)
 }
 
 export function parseCreatorReplyContinuity(value: unknown): CreatorReplyContinuity | null {

@@ -86,7 +86,8 @@
     "test:phase6b-sirens-mind": "tsx --test backend/security/tests/phase6bSirensMindContracts.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6bSirensMindBehavior.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6bHeadlessCapabilityBehavior.test.ts",
     "test:phase6c-sirens-mind": "tsx --test backend/security/tests/phase6cSirensMind.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6cSirensMindRouteBehavior.test.ts",
     "test:phase6d-sirens-mind": "tsx --test backend/security/tests/phase6dSirensMind.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6dSirensMindRouteBehavior.test.ts",
-    "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6fCreatorReplyRouteBehavior.test.ts"
+    "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6fCreatorReplyRouteBehavior.test.ts",
+    "test:phase6f2-creator-reply-subscribers": "tsx --test backend/security/tests/phase6f2CreatorReplySubscribers.test.ts"
   },
   "repository": {
     "type": "git",
@@ -114,6 +115,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "resend": "^6.20.0",
+    "server-only": "^0.0.1",
     "stripe": "^20.0.0",
     "tailwind-merge": "^3.4.0",
     "tailwindcss-animate": "^1.0.7",
