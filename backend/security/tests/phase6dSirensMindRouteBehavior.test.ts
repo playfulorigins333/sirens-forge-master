@@ -39,12 +39,14 @@ try {
   assert.equal(providerRequest.max_tokens, 2000); assert.equal(providerRequest.stream, undefined); assert.equal(providerCalls, 1)
 
   providerCalls = 0
-  response = await invoke("Write this scene as a 2,000-word story.", "NSFW", { version: 1, persona: "p", relationship: "r", scene: "s", summary: "secret" })
+  response = await invoke("Write this scene as a 2,000-word story.", "NSFW", { version: 1, persona: "p", relationship: "r", scene: "s", summary: "secret", role_contract: "STORY-MUST-NOT-SEE-THIS-CONTRACT" })
   assert.match(response.headers.get("content-type") || "", /text\/event-stream/)
   assert.equal(providerRequest.max_tokens, 5000); assert.equal(providerRequest.stream, true); assert.equal(providerRequest.model, "openai/gpt-4o"); assert.equal(providerCalls, 1)
   assert.match(providerRequest.messages[0].content, /LONG-FORM STORY RUNTIME/); assert.doesNotMatch(providerRequest.messages[0].content, /INTERNAL ROLEPLAY RUNTIME/)
   const continuityMessages = providerRequest.messages.filter((message: any) => message.content.includes("secret"))
   assert.equal(continuityMessages.length, 1); assert.equal(continuityMessages[0].role, "user"); assert.ok(!providerRequest.messages[0].content.includes("secret"))
+  const providerMessages = JSON.stringify(providerRequest.messages)
+  assert.doesNotMatch(providerMessages, /CREATOR ROLEPLAY ROLE CONTRACT|STORY-MUST-NOT-SEE-THIS-CONTRACT|role_contract/)
   const events = await response.text()
   assert.match(events, /event: delta[\s\S]*Finished prose[\s\S]*event: done/); assert.doesNotMatch(events, /event: (?:handoff|continuity)/)
   assert.doesNotMatch(events, /PRIVATE|LONG-FORM STORY RUNTIME/)

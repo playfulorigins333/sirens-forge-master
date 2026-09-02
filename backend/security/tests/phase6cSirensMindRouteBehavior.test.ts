@@ -34,7 +34,7 @@ globalThis.fetch = async (_input, init) => {
 const { POST } = await import(new URL("../../../app/api/sirens-mind/chat/route.ts", import.meta.url).href)
 const state = { version: 1, persona: "p", relationship: "r", scene: "s", summary: "sum" }
 const handoff = (identity: unknown = "omit") => ({ prompt: "portrait", negative_prompt: null, output_type: "IMAGE", generation_target: "text_to_image", ...(identity === "omit" ? {} : { identity_id: identity }) })
-const invoke = (message: string, context: object = {}, continuity?: unknown) => POST(new Request("http://test/api/sirens-mind/chat", { method: "POST", body: JSON.stringify({ mode: "SAFE", message, history: [], context, ...(continuity ? { continuity } : {}) }) }) as any)
+const invoke = (message: string, context: object = {}, continuity?: unknown, history: unknown[] = []) => POST(new Request("http://test/api/sirens-mind/chat", { method: "POST", body: JSON.stringify({ mode: "SAFE", message, history, context, ...(continuity ? { continuity } : {}) }) }) as any)
 const streamText = async (response: Response) => await response.text()
 
 try {
@@ -56,9 +56,33 @@ try {
   assert.match(response.headers.get("content-type") || "", /text\/event-stream/); assert.equal(providerRequest.stream, true); assert.equal(providerRequest.model, "admin/rp-model"); assert.equal(providerCalls, 1)
   assert.ok(providerRequest.messages[0].content.includes("INTERNAL ROLEPLAY RUNTIME")); assert.match(await streamText(response), /event: continuity/)
   assert.equal(telemetry.at(-1).continuitySource, "provider"); assert.equal(telemetry.at(-1).continuityProduced, true)
+  assert.equal(telemetry.at(-1).roleContractUsed, true); assert.equal(telemetry.at(-1).roleContractSource, "activation")
+
+  const activation = "Let's roleplay. I am an adult male traveler and dominant aggressor. You are an adult female bartender in the resisting submissive role. Stay in character and preserve those roles."
+  providerOutput = `I resist without taking control.${RP_META_SENTINEL}${JSON.stringify({ state: { ...state, role_contract: "provider attempted rewrite" }, handoff: null })}`; providerCalls = 0
+  response = await invoke(activation); let events = await streamText(response)
+  const activatedState = JSON.parse(events.match(/event: continuity\ndata: (.+)\n/)![1])
+  assert.equal(activatedState.role_contract, activation); assert.equal(providerCalls, 1)
+  assert.doesNotMatch(JSON.stringify(telemetry.at(-1)), /adult male traveler|provider attempted rewrite/)
+
+  providerOutput = `I keep resisting.${RP_META_SENTINEL}${JSON.stringify({ state, handoff: null })}`; providerCalls = 0
+  response = await invoke("I step behind the bar.", {}, activatedState, [
+    { role: "user", content: activation }, { role: "assistant", content: "I narrow my eyes." },
+  ]); events = await streamText(response)
+  const referenceIndex = providerRequest.messages.findIndex((message: any) => message.content.includes("BEGIN CREATOR ROLEPLAY ROLE CONTRACT"))
+  assert.equal(referenceIndex, providerRequest.messages.length - 2)
+  assert.equal(providerRequest.messages.at(-1).content, "I step behind the bar.")
+  assert.match(providerRequest.messages[referenceIndex].content, /adult male traveler/)
+  assert.match(events, /adult male traveler/); assert.equal(providerCalls, 1)
+  assert.equal(telemetry.at(-1).roleContractUsed, true); assert.equal(telemetry.at(-1).roleContractSource, "continuity")
+
+  providerOutput = `Roles changed.${RP_META_SENTINEL}${JSON.stringify({ state, handoff: null })}`
+  response = await invoke("From now on I am the submissive role and you are dominant.", {}, activatedState); events = await streamText(response)
+  assert.match(events, /LATEST EXPLICIT CREATOR ROLE REASSIGNMENT/)
+  assert.equal(telemetry.at(-1).roleContractSource, "updated")
 
   providerOutput = `Still here${RP_META_SENTINEL}{bad`; providerCalls = 0
-  response = await invoke("continue", {}, state); let events = await streamText(response)
+  response = await invoke("continue", {}, state); events = await streamText(response)
   assert.match(events, /Still here/); assert.match(events, /event: continuity/); assert.match(events, /"persona":"p"/); assert.match(events, /"relationship":"r"/); assert.match(events, /"scene":"s"/); assert.equal(providerCalls, 1)
   assert.equal(telemetry.at(-1).continuitySource, "fallback")
 

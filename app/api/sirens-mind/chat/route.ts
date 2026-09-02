@@ -4,7 +4,7 @@ import path from "node:path"
 import { ensureActiveSubscription } from "../../../../lib/subscription-checker"
 import { buildCapabilityCatalog, CapabilityCatalogUnavailableError } from "../../../../lib/sirens-mind/capabilities"
 import { identityDataMessage, loadOwnedIdentities, validIdentityId, type OwnedIdentity } from "../../../../lib/sirens-mind/identities"
-import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, explicitlyExitsRp, fallbackRpContinuity, parseRpContinuity, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
+import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, explicitlyExitsRp, fallbackRpContinuity, parseRpContinuity, pinRpRoleContract, resolveRpRoleContract, roleContractReferenceMessage, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
 import { shouldActivateLongformStory } from "../../../../lib/sirens-mind/story"
 
 export const runtime = "nodejs"
@@ -185,6 +185,7 @@ export async function POST(req: NextRequest) {
   }
   if (rpActive) {
     const explicitRpExit = explicitlyExitsRp(body.message as string)
+    const roleContract = resolveRpRoleContract(body.message as string, continuity)
     const rpModel = process.env.SIRENS_MIND_ADMIN_RP_MODEL?.trim() || model
     const rpPrompt = [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.admin_rp.system.txt"), capabilityCatalog].join("\n\n")
     const rpMessages = [
@@ -193,6 +194,7 @@ export async function POST(req: NextRequest) {
       ...contextMessage,
       ...(continuity ? [{ role: "user" as const, content: continuityReferenceMessage(continuity) }] : []),
       ...history,
+      ...(roleContract.contract ? [{ role: "user" as const, content: roleContractReferenceMessage(roleContract.contract) }] : []),
       { role: "user" as const, content: (body.message as string).trim() },
     ]
     const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
@@ -205,10 +207,10 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
       const timedOut = error instanceof Error && error.name === "AbortError"
-      telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: false, continuitySource: "none" })
+      telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: false, continuitySource: "none", roleContractUsed: Boolean(roleContract.contract), roleContractSource: roleContract.source })
       return NextResponse.json({ error: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE" }, { status: timedOut ? 504 : 502 })
     }
-    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: "PROMPT_ENGINE_UNAVAILABLE", httpStatus: 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: false, continuitySource: "none" }); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
+    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok: false, code: "PROMPT_ENGINE_UNAVAILABLE", httpStatus: 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, providerPromptTokens: null, providerCompletionTokens: null, providerTotalTokens: null, providerUsageAvailable: false, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: false, continuitySource: "none", roleContractUsed: Boolean(roleContract.contract), roleContractSource: roleContract.source }); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
     const encoder = new TextEncoder(); let outputChars = 0, visibleAssistant = "", firstTokenMs: number | null = null
     const stream = new ReadableStream<Uint8Array>({ async start(target) {
       let ok = false, code = "OK", handoffProduced = false, usage: any = null, continuityProduced = false, continuitySource: "provider" | "fallback" | "cleared" | "none" = "none"
@@ -224,16 +226,16 @@ export async function POST(req: NextRequest) {
           target.enqueue(encoder.encode(sse("continuity", null)))
         } else if (state) {
           continuityProduced = true; continuitySource = "provider"
-          target.enqueue(encoder.encode(sse("continuity", state)))
+          target.enqueue(encoder.encode(sse("continuity", pinRpRoleContract(state, roleContract.contract))))
         } else {
           continuityProduced = true; continuitySource = "fallback"
-          target.enqueue(encoder.encode(sse("continuity", fallbackRpContinuity({ previous: continuity, latestUser: body.message as string, latestAssistant: visibleAssistant }))))
+          target.enqueue(encoder.encode(sse("continuity", fallbackRpContinuity({ previous: pinRpRoleContract(continuity ?? { version: 1, persona: "", relationship: "", scene: "", summary: "" }, roleContract.contract), latestUser: body.message as string, latestAssistant: visibleAssistant }))))
         }
         target.enqueue(encoder.encode(sse("done", {}))); ok = true
       } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: code }))) }
       finally {
         clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
-        telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced, identityUsed: Boolean(activeIdentityId), continuityProduced, continuitySource }); target.close()
+        telemetry({ requestId, interactionClass: "admin_rp", mode, model: rpModel, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced, identityUsed: Boolean(activeIdentityId), continuityProduced, continuitySource, roleContractUsed: Boolean(roleContract.contract), roleContractSource: roleContract.source }); target.close()
       }
     }, cancel() { abort() } })
     return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } })
