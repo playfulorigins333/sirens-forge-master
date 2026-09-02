@@ -86,7 +86,7 @@
     "test:phase6b-sirens-mind": "tsx --test backend/security/tests/phase6bSirensMindContracts.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6bSirensMindBehavior.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6bHeadlessCapabilityBehavior.test.ts",
     "test:phase6c-sirens-mind": "tsx --test backend/security/tests/phase6cSirensMind.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6cSirensMindRouteBehavior.test.ts",
     "test:phase6d-sirens-mind": "tsx --test backend/security/tests/phase6dSirensMind.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6dSirensMindRouteBehavior.test.ts",
-    "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts"
+    "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6fCreatorReplyRouteBehavior.test.ts"
   },
   "repository": {
     "type": "git",

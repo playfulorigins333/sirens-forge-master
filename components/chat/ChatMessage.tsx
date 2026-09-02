@@ -10,6 +10,7 @@ type ChatMessageProps = {
   onUsePrompt?: () => void
   showUsePrompt?: boolean
   showCopyReply?: boolean
+  userLabel?: string
 }
 
 export function ChatMessage({
@@ -20,6 +21,7 @@ export function ChatMessage({
   onUsePrompt,
   showUsePrompt = false,
   showCopyReply = false,
+  userLabel = "You",
 }: ChatMessageProps) {
   const isAssistant = role === "assistant"
   const [copied, setCopied] = React.useState(false)
@@ -102,7 +104,7 @@ export function ChatMessage({
     <div className="flex justify-end">
       <div className="max-w-[85%] min-w-0 rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(17,17,22,0.98),rgba(10,10,14,0.98))] px-5 py-4 sm:max-w-[80%]">
         <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-          You
+          {userLabel}
         </div>
 
         <div className="break-words whitespace-pre-wrap text-[15px] leading-8 text-zinc-100 [overflow-wrap:anywhere]">
