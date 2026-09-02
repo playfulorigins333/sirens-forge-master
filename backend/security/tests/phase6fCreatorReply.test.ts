@@ -74,10 +74,7 @@ test("production prompt strictly grounds subscriber facts, agency, and continuit
     "background", "occupation", "motives or intentions", "emotional state", "next actions",
     "next dialogue", "descriptive states as well as voluntary actions",
   ]) assert.match(prompt, new RegExp(prohibition))
-  for (const productionRegression of [
-    "You don't move", "the door you're still blocking", "You city types",
-    "tall, built like someone who spends more time outdoors than in",
-  ]) assert.match(prompt, new RegExp(productionRegression.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+  assert.match(prompt, /omit it rather than filling it in/)
   assert.match(prompt, /progressing through creator actions or dialogue/)
   assert.match(prompt, /rather than puppeting the subscriber/)
   assert.match(prompt, /power dynamics do not waive subscriber agency/)
@@ -85,16 +82,21 @@ test("production prompt strictly grounds subscriber facts, agency, and continuit
   assert.match(prompt, /never convert them into authoritative subscriber facts/)
 })
 
-test("production prompt preserves subscriber-supplied scenario world-state", () => {
+test("production prompt preserves subscriber-supplied scenario world-state without negative-example priming", () => {
   const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
   assert.match(prompt, /STRICT SCENARIO FIDELITY/)
   assert.match(prompt, /subscriber-supplied scene setup, timing, roles, events, and already-stated subscriber actions as authoritative current world-state/)
-  assert.match(prompt, /Do not contradict them, rewind them, replace them with a different state, or silently add facts that change their meaning/)
-  assert.match(prompt, /do not change that into the creator having closed hours ago/)
-  assert.match(prompt, /do not invent a sign saying the location is closed/)
-  assert.match(prompt, /do not reposition the subscriber as merely standing in the doorway/)
-  assert.match(prompt, /do not imply unsupported history, timing, rules, signage, objects, prior events, or subscriber state/)
-  assert.match(prompt, /prefer creator dialogue\/action/)
+  assert.match(prompt, /Preserve their temporal order and completion state exactly/)
+  assert.match(prompt, /continue from the completed state rather than moving the subscriber backward/)
+  assert.match(prompt, /Keep venue or business status consistent with the supplied timeline/)
+  assert.match(prompt, /Do not create unstated operational status, policies, signage, objects, prior events, timing, rules, history, or subscriber state/)
+  assert.match(prompt, /GROUNDING CHECK BEFORE OUTPUT/)
+  assert.match(prompt, /Favor omission over invention and continuation over reinterpretation/)
+  for (const primingLiteral of [
+    "You don't move", "the door you're still blocking", "You city types",
+    "tall, built like someone who spends more time outdoors than in",
+    "closed hours ago", "sign saying the location is closed", "standing in the doorway",
+  ]) assert.doesNotMatch(prompt, new RegExp(primingLiteral.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"))
 })
 
 test("Creator Reply uses a dedicated system stack while general Siren's Mind retains the generic base", () => {
