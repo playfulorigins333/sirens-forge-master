@@ -84,10 +84,11 @@
     "test:phase4-video-application-postgres": "node backend/compute/tests/runPhase4VideoApplicationPostgres.mjs",
     "test:phase6-sirens-mind": "node --experimental-test-module-mocks --import tsx backend/security/tests/phase6SirensMindContracts.test.ts",
     "test:phase6b-sirens-mind": "tsx --test backend/security/tests/phase6bSirensMindContracts.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6bSirensMindBehavior.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6bHeadlessCapabilityBehavior.test.ts",
-    "test:phase6c-sirens-mind": "tsx --test backend/security/tests/phase6cSirensMind.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6cSirensMindRouteBehavior.test.ts",
-    "test:phase6d-sirens-mind": "tsx --test backend/security/tests/phase6dSirensMind.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6dSirensMindRouteBehavior.test.ts",
-    "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts && node --experimental-test-module-mocks --import tsx backend/security/tests/phase6fCreatorReplyRouteBehavior.test.ts",
-    "test:phase6f2-creator-reply-subscribers": "tsx --test backend/security/tests/phase6f2CreatorReplySubscribers.test.ts"
+    "test:phase6c-sirens-mind": "tsx --test backend/security/tests/phase6cSirensMind.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6cSirensMindRouteBehavior.test.ts",
+    "test:phase6d-sirens-mind": "tsx --test backend/security/tests/phase6dSirensMind.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6dSirensMindRouteBehavior.test.ts",
+    "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6fCreatorReplyRouteBehavior.test.ts",
+    "test:phase6f2-creator-reply-subscribers": "node --conditions=react-server --import tsx --test backend/security/tests/phase6f2CreatorReplySubscribers.test.ts",
+    "test:phase6f2-creator-reply-postgres": "node backend/security/tests/runPhase6f2CreatorReplyPostgres.mjs"
   },
   "repository": {
     "type": "git",

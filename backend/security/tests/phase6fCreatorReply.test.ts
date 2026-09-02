@@ -66,7 +66,9 @@ test("production prompt defines both pronoun directions and agency", () => {
 
 test("production prompt strictly grounds subscriber facts, agency, and continuity", () => {
   const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
-  assert.match(prompt, /Every subscriber-specific claim must come from subscriber-authored input/)
+  assert.match(prompt, /Every subscriber-specific claim must come from the current subscriber-authored message/)
+  assert.match(prompt, /Prior creator outbound replies are scene\/dialogue history, never factual evidence/)
+  assert.match(prompt, /Subscriber Profile \/ Key Notes reference data/)
   for (const prohibition of [
     "subscriber appearance", "body type or other physical traits", "posture or physical position",
     "background", "occupation", "motives or intentions", "emotional state", "next actions",
@@ -87,17 +89,18 @@ test("workspace is hidden and configured without generator or billing UX", () =>
   const ui = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatUI.tsx"), "utf8")
   const message = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatMessage.tsx"), "utf8")
   const page = fs.readFileSync(path.join(process.cwd(), "app/sirens-mind/replies/page.tsx"), "utf8")
+  const workspace = fs.readFileSync(path.join(process.cwd(), "components/chat/CreatorReplyWorkspace.tsx"), "utf8")
   assert.match(page, /creatorReplyAuthorized/)
   assert.match(page, /notFound\(\)/)
   assert.match(ui, /experience="creator_reply"|experience === "creator_reply"/)
   assert.match(ui, /Paste subscriber message\.\.\./)
-  assert.match(ui, /New Subscriber/)
-  assert.match(ui, /disabled=\{requestActive\}/)
-  assert.match(ui, /if \(requestActive\) return/)
+  assert.match(workspace, /New Subscriber/)
+  assert.match(workspace, /disabled=\{saving\}/)
+  assert.match(ui, /subscriber_id: subscriberId, conversation_id: conversationId/)
   assert.match(ui, /completed: true/)
   assert.match(ui, /msg\.completed === true/)
   assert.match(ui, /userLabel=\{creatorReply \? "Subscriber" : "You"\}/)
-  assert.match(ui, /catch \{ setThreadId\(crypto\.randomUUID\(\)\) \}/)
+  assert.doesNotMatch(ui, /setThreadId|creator_reply_continuity/)
   assert.match(message, /Copy Reply/)
   assert.doesNotMatch(page, /billing|upgrade|entitlement/i)
 })

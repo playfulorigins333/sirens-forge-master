@@ -1,0 +1,7 @@
+import { NextRequest, NextResponse } from "next/server"
+import { requireCreatorReplyActor } from "@/lib/sirens-mind/creator-reply-access"
+import { deleteSubscriber, getSubscriber, setSubscriberArchived, updateSubscriber } from "@/lib/sirens-mind/creator-reply-service"
+const missing=()=>NextResponse.json({error:"Not found"},{status:404})
+export async function GET(_:NextRequest,{params}:{params:Promise<{subscriberId:string}>}){const[{userId},p]=await Promise.all([requireCreatorReplyActor(),params]);try{return NextResponse.json({subscriber:await getSubscriber(userId,p.subscriberId)})}catch{return missing()}}
+export async function PATCH(req:NextRequest,{params}:{params:Promise<{subscriberId:string}>}){const[{userId},p,body]=await Promise.all([requireCreatorReplyActor(),params,req.json()]);try{if(body.action==="archive"||body.action==="unarchive")return NextResponse.json({subscriber:await setSubscriberArchived(userId,p.subscriberId,body.action==="archive")});return NextResponse.json({subscriber:await updateSubscriber(userId,p.subscriberId,body)})}catch{return NextResponse.json({error:"Subscriber could not be updated."},{status:400})}}
+export async function DELETE(_:NextRequest,{params}:{params:Promise<{subscriberId:string}>}){const[{userId},p]=await Promise.all([requireCreatorReplyActor(),params]);try{await deleteSubscriber(userId,p.subscriberId);return new NextResponse(null,{status:204})}catch{return missing()}}

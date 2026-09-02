@@ -1,3 +1,4 @@
+import "server-only"
 import crypto from "node:crypto"
 
 const PREFIX = "v1"
@@ -28,6 +29,9 @@ export function decryptCreatorReplyData(envelope: string, aad: string, env: Node
   const decipher = crypto.createDecipheriv("aes-256-gcm", key(env), iv)
   decipher.setAAD(Buffer.from(aad)); decipher.setAuthTag(tag)
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8")
+}
+export function assertCreatorReplyKeyVersion(storedVersion: number, env: NodeJS.ProcessEnv = process.env) {
+  if (storedVersion !== creatorReplyDataKeyVersion(env)) throw new Error("CREATOR_REPLY_DATA_KEY_VERSION_UNSUPPORTED")
 }
 export const subscriberNotesAad = (workspaceId: string, subscriberId: string) => `creator-reply:subscriber-notes:${workspaceId}:${subscriberId}`
 export const conversationCheckpointAad = (workspaceId: string, conversationId: string) => `creator-reply:conversation-checkpoint:${workspaceId}:${conversationId}`
