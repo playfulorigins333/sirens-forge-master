@@ -85,6 +85,18 @@ test("production prompt strictly grounds subscriber facts, agency, and continuit
   assert.match(prompt, /never convert them into authoritative subscriber facts/)
 })
 
+test("production prompt preserves subscriber-supplied scenario world-state", () => {
+  const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
+  assert.match(prompt, /STRICT SCENARIO FIDELITY/)
+  assert.match(prompt, /subscriber-supplied scene setup, timing, roles, events, and already-stated subscriber actions as authoritative current world-state/)
+  assert.match(prompt, /Do not contradict them, rewind them, replace them with a different state, or silently add facts that change their meaning/)
+  assert.match(prompt, /do not change that into the creator having closed hours ago/)
+  assert.match(prompt, /do not invent a sign saying the location is closed/)
+  assert.match(prompt, /do not reposition the subscriber as merely standing in the doorway/)
+  assert.match(prompt, /do not imply unsupported history, timing, rules, signage, objects, prior events, or subscriber state/)
+  assert.match(prompt, /prefer creator dialogue\/action/)
+})
+
 test("workspace is hidden and configured without generator or billing UX", () => {
   const ui = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatUI.tsx"), "utf8")
   const message = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatMessage.tsx"), "utf8")
