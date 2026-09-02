@@ -35,6 +35,11 @@ export function creatorReplyAccessAllowed(userId: string, env: NodeJS.ProcessEnv
   return creatorReplyAuthorized(userId, env)
 }
 
+export function resolveCreatorReplyModel(mode: "SAFE" | "NSFW" | "ULTRA", fallback: string, env: NodeJS.ProcessEnv = process.env) {
+  const configured = env[`SIRENS_MIND_CREATOR_REPLY_${mode}_MODEL`]?.trim()
+  return configured || fallback
+}
+
 export function parseCreatorReplyContinuity(value: unknown): CreatorReplyContinuity | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const raw = value as Record<string, unknown>
@@ -68,4 +73,9 @@ export function fallbackCreatorReplyContinuity(previous: CreatorReplyContinuity 
   const prior = previous?.summary.trim() ? `Prior summary: ${previous.summary.trim()}\n` : ""
   const summary = `${prior}Subscriber: ${subscriber.trim()}\nCreator Reply: ${reply.trim()}`.slice(-LIMITS.summary)
   return { version: 1, creator_persona: previous?.creator_persona ?? "", subscriber_persona: previous?.subscriber_persona ?? "", relationship: previous?.relationship ?? "", scene: previous?.scene ?? "", summary }
+}
+
+/** Provider-authored continuity is never authoritative; exact role-tagged recent turns carry continuity. */
+export function authoritativeCreatorReplyContinuity(): CreatorReplyContinuity {
+  return { version: 1, creator_persona: "", subscriber_persona: "", relationship: "", scene: "", summary: "" }
 }

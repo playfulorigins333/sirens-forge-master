@@ -6,9 +6,10 @@ import { buildCapabilityCatalog, CapabilityCatalogUnavailableError } from "../..
 import { identityDataMessage, loadOwnedIdentities, validIdentityId, type OwnedIdentity } from "../../../../lib/sirens-mind/identities"
 import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, explicitlyExitsRp, fallbackRpContinuity, parseRpContinuity, pinRpRoleContract, resolveRpRoleContract, roleContractReferenceMessage, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
 import { shouldActivateLongformStory } from "../../../../lib/sirens-mind/story"
-import { creatorReplyAccessAllowed, creatorReplyContinuityReference, creatorReplySubscriberProfileReference, fallbackCreatorReplyContinuity, inboundSubscriberMessage, outboundCreatorReply, parseCreatorReplyContinuity, validCreatorReplyThreadId, CREATOR_REPLY_STREAM_TIMEOUT_MS } from "../../../../lib/sirens-mind/creator-reply"
+import { authoritativeCreatorReplyContinuity, creatorReplyAccessAllowed, creatorReplySubscriberProfileReference, inboundSubscriberMessage, outboundCreatorReply, resolveCreatorReplyModel, validCreatorReplyThreadId, CREATOR_REPLY_STREAM_TIMEOUT_MS } from "../../../../lib/sirens-mind/creator-reply"
 import { loadCreatorReplyAuthority, saveCreatorReplyCheckpoint } from "../../../../lib/sirens-mind/creator-reply-service"
 import { trimCreatorReplyTurns } from "../../../../lib/sirens-mind/creator-reply-checkpoint"
+import { validateCreatorReplyCandidate } from "../../../../lib/sirens-mind/creator-reply-validator"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -152,6 +153,58 @@ export async function POST(req: NextRequest) {
     try { creatorAuthority = await loadCreatorReplyAuthority(auth.user.id, body.subscriber_id as string, body.conversation_id as string) }
     catch { return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 }) }
   }
+  const apiKey = process.env.OPENAI_COMPAT_API_KEY
+  const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
+  if (!apiKey || !baseUrl) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
+  const generalModel = process.env[`SIRENS_MIND_${mode}_MODEL`] || DEFAULT_MODELS[mode]
+  const model = creatorReplyRequested ? resolveCreatorReplyModel(mode, generalModel) : generalModel
+
+  if (creatorReplyRequested) {
+    const creatorMessages = [
+      { role: "system" as const, content: [creatorReplyModeGovernance(mode), promptFile("nsfw_gpt.creator_reply.system.txt")].join("\n\n") },
+      { role: "user" as const, content: creatorReplySubscriberProfileReference(creatorAuthority!.subscriber) },
+      ...creatorAuthority!.checkpoint.recent_turns.map((entry) => entry.role === "subscriber"
+        ? { role: "user" as const, content: inboundSubscriberMessage(entry.text, true) }
+        : { role: "assistant" as const, content: outboundCreatorReply(entry.text) }),
+      { role: "user" as const, content: inboundSubscriberMessage((body.message as string).trim()) },
+    ]
+    const authoritativeSources = [creatorAuthority!.subscriber.display_name, creatorAuthority!.subscriber.platform, creatorAuthority!.subscriber.platform_handle || "", creatorAuthority!.subscriber.key_notes,
+      ...creatorAuthority!.checkpoint.recent_turns.filter((entry) => entry.role === "subscriber").map((entry) => entry.text), (body.message as string).trim()]
+    const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
+    const abort = () => controller.abort(); req.signal.addEventListener("abort", abort, { once: true })
+    const timeout = setTimeout(abort, CREATOR_REPLY_STREAM_TIMEOUT_MS)
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({ model, max_tokens: MAX_PROVIDER_OUTPUT_TOKENS, temperature: CREATOR_REPLY_TEMPERATURE, stream: true, stream_options: { include_usage: true }, messages: creatorMessages }) })
+    } catch (error) {
+      clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
+      const timedOut = error instanceof Error && error.name === "AbortError"
+      telemetry({ requestId, interactionClass: "creator_reply", mode, model, temperature: CREATOR_REPLY_TEMPERATURE, ok: false, validationOutcome: "NOT_RUN", continuityOutcome: "NOT_SAVED", code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", historyCount: creatorAuthority!.checkpoint.recent_turns.length, providerUsageAvailable: false, durationMs: Date.now() - started })
+      return NextResponse.json({ error: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE" }, { status: timedOut ? 504 : 502 })
+    }
+    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
+    const encoder = new TextEncoder(); let visible = "", firstTokenMs: number | null = null
+    const stream = new ReadableStream<Uint8Array>({ async start(target) {
+      let ok = false, code = "OK", usage: any = null, continuityOutcome = "NOT_SAVED", validationOutcome = "NOT_RUN"
+      try {
+        const result = await consumeProviderSse(response.body!, (text) => { if (!text) return; if (firstTokenMs === null) firstTokenMs = Date.now() - started; visible += text })
+        usage = result.usage
+        const validation = validateCreatorReplyCandidate(visible, result.metadata, authoritativeSources)
+        validationOutcome = validation.code
+        if (!validation.ok) { code = "CREATOR_REPLY_GROUNDING_REJECTED"; target.enqueue(encoder.encode(sse("error", { error: code }))); return }
+        visible = validation.text
+        const updated = { ...creatorAuthority!.checkpoint, continuity: authoritativeCreatorReplyContinuity(), recent_turns: trimCreatorReplyTurns([...creatorAuthority!.checkpoint.recent_turns, { role: "subscriber" as const, text: (body.message as string).trim() }, { role: "creator" as const, text: visible }]) }
+        target.enqueue(encoder.encode(sse("delta", { text: visible })))
+        try { await saveCreatorReplyCheckpoint(auth.user!.id, creatorAuthority!, updated); continuityOutcome = "SAVED"; target.enqueue(encoder.encode(sse("memory_status", { saved: true }))); ok = true }
+        catch (error) { code = error instanceof Error && error.message === "CHECKPOINT_CONFLICT" ? "CHECKPOINT_CONFLICT" : "CHECKPOINT_SAVE_FAILED"; continuityOutcome = code; target.enqueue(encoder.encode(sse("memory_status", { saved: false, conflict: code === "CHECKPOINT_CONFLICT" }))) }
+        target.enqueue(encoder.encode(sse("done", { checkpoint_saved: ok })))
+      } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: "CREATOR_REPLY_UNAVAILABLE" }))) }
+      finally { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "creator_reply", mode, model, temperature: CREATOR_REPLY_TEMPERATURE, ok, code, validationOutcome, continuityOutcome, historyCount: creatorAuthority!.checkpoint.recent_turns.length, outputChars: ok ? visible.length : 0, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs }); target.close() }
+    }, cancel() { abort() } })
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } })
+  }
+
   let capabilityCatalog: string
   let identities: OwnedIdentity[]
   try {
@@ -169,54 +222,6 @@ export async function POST(req: NextRequest) {
     ? [{ role: "user" as const, content: `BEGIN PRIOR GENERATOR CONTEXT (CREATOR-SUPPLIED DATA)\n${JSON.stringify(safeContext)}\nEND PRIOR GENERATOR CONTEXT` }]
     : []
 
-  const apiKey = process.env.OPENAI_COMPAT_API_KEY
-  const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
-  if (!apiKey || !baseUrl) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
-  const model = process.env[`SIRENS_MIND_${mode}_MODEL`] || DEFAULT_MODELS[mode]
-  if (creatorReplyRequested) {
-    const creatorContinuity = creatorAuthority!.checkpoint.continuity
-    const creatorMessages = [
-      { role: "system" as const, content: [creatorReplyModeGovernance(mode), promptFile("nsfw_gpt.creator_reply.system.txt")].join("\n\n") },
-      { role: "user" as const, content: identityDataMessage(identities, activeIdentityId) },
-      { role: "user" as const, content: creatorReplySubscriberProfileReference(creatorAuthority!.subscriber) },
-      { role: "user" as const, content: creatorReplyContinuityReference(creatorContinuity) },
-      ...creatorAuthority!.checkpoint.recent_turns.map((entry) => entry.role === "subscriber"
-        ? { role: "user" as const, content: inboundSubscriberMessage(entry.text, true) }
-        : { role: "assistant" as const, content: outboundCreatorReply(entry.text) }),
-      { role: "user" as const, content: inboundSubscriberMessage((body.message as string).trim()) },
-    ]
-    const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
-    const abort = () => controller.abort(); req.signal.addEventListener("abort", abort, { once: true })
-    const timeout = setTimeout(abort, CREATOR_REPLY_STREAM_TIMEOUT_MS)
-    let response: Response
-    try {
-      response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ model, max_tokens: MAX_PROVIDER_OUTPUT_TOKENS, temperature: CREATOR_REPLY_TEMPERATURE, stream: true, stream_options: { include_usage: true }, messages: creatorMessages }) })
-    } catch (error) {
-      clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
-      const timedOut = error instanceof Error && error.name === "AbortError"
-      telemetry({ requestId, interactionClass: "creator_reply", mode, model, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, continuityProduced: false, continuitySource: "none" })
-      return NextResponse.json({ error: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE" }, { status: timedOut ? 504 : 502 })
-    }
-    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
-    const encoder = new TextEncoder(); let visible = "", firstTokenMs: number | null = null
-    const stream = new ReadableStream<Uint8Array>({ async start(target) {
-      let ok = false, code = "OK", usage: any = null, source: "provider" | "fallback" = "fallback"
-      try {
-        const result = await consumeProviderSse(response.body!, (text) => { if (!text) return; if (firstTokenMs === null) firstTokenMs = Date.now() - started; visible += text; target.enqueue(encoder.encode(sse("delta", { text }))) })
-        usage = result.usage
-        const providerState = parseCreatorReplyContinuity((result.metadata as any)?.state)
-        const state = providerState ?? fallbackCreatorReplyContinuity(creatorContinuity, body.message as string, visible)
-        source = providerState ? "provider" : "fallback"
-        const updated = { ...creatorAuthority!.checkpoint, continuity: state, recent_turns: trimCreatorReplyTurns([...creatorAuthority!.checkpoint.recent_turns, { role: "subscriber" as const, text: (body.message as string).trim() }, { role: "creator" as const, text: visible }]) }
-        try { await saveCreatorReplyCheckpoint(auth.user!.id, creatorAuthority!, updated); target.enqueue(encoder.encode(sse("memory_status", { saved: true }))); ok = true }
-        catch (error) { code = error instanceof Error && error.message === "CHECKPOINT_CONFLICT" ? "CHECKPOINT_CONFLICT" : "CHECKPOINT_SAVE_FAILED"; target.enqueue(encoder.encode(sse("memory_status", { saved: false, conflict: code === "CHECKPOINT_CONFLICT" }))) }
-        target.enqueue(encoder.encode(sse("done", { checkpoint_saved: ok })))
-      } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: code }))) }
-      finally { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "creator_reply", mode, model, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: visible.length, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: true, continuitySource: source }); target.close() }
-    }, cancel() { abort() } })
-    return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } })
-  }
   const continuity = parseRpContinuity(body.continuity)
   const rpAuthorized = adminRpAuthorized(auth.user.id)
   const storyActive = shouldActivateLongformStory(body.message as string)

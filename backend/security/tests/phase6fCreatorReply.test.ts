@@ -78,8 +78,8 @@ test("production prompt strictly grounds subscriber facts, agency, and continuit
   assert.match(prompt, /progressing through creator actions or dialogue/)
   assert.match(prompt, /rather than puppeting the subscriber or expanding the environment/)
   assert.match(prompt, /power dynamics do not waive subscriber agency/)
-  assert.match(prompt, /subscriber_persona` may contain only subscriber facts explicitly grounded in subscriber-authored messages/)
-  assert.match(prompt, /never convert them into authoritative subscriber facts/)
+  assert.match(prompt, /Put every restatement of a subscriber or world fact in a `grounded_reference` segment/)
+  assert.match(prompt, /application derives bounded continuity only from authoritative role-tagged turns/)
 })
 
 test("production prompt preserves subscriber-supplied scenario world-state without negative-example priming", () => {
