@@ -358,7 +358,7 @@ export default function ChatUI({
           </div>
         </section> : null}
 
-        {creatorReply && messages.length === 0 && !isTyping ? <div className="min-h-0 flex-1" /> : null}
+        {creatorReply && messages.length === 0 && !isTyping ? <div className="flex-1 min-h-0" /> : null}
 
         <section className={`shrink-0 border-t border-white/10 ${embedded ? "bg-[#07080c]/92" : "bg-black/95 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]"} ${messages.length > 0 ? "pb-3 pt-2" : "pb-4 pt-3"}`}>
           {messages.length === 0 ? <div className={creatorReply ? "" : "mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between"}>
