@@ -22,6 +22,7 @@ export const LONGFORM_STORY_MAX_OUTPUT_TOKENS = 5000
 export const LONGFORM_STORY_STREAM_TIMEOUT_MS = 240_000
 export const MAX_REPLY_CHARS = 12000
 export const PROVIDER_TIMEOUT_MS = 20000
+export const CREATOR_REPLY_TEMPERATURE = 0.4
 
 type Mode = "SAFE" | "NSFW" | "ULTRA"
 type GenerationTarget = "text_to_image" | "text_to_video" | "image_to_video"
@@ -190,7 +191,7 @@ export async function POST(req: NextRequest) {
     let response: Response
     try {
       response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, signal: controller.signal,
-        body: JSON.stringify({ model, max_tokens: MAX_PROVIDER_OUTPUT_TOKENS, temperature: mode === "SAFE" ? 0.6 : 0.85, stream: true, stream_options: { include_usage: true }, messages: creatorMessages }) })
+        body: JSON.stringify({ model, max_tokens: MAX_PROVIDER_OUTPUT_TOKENS, temperature: CREATOR_REPLY_TEMPERATURE, stream: true, stream_options: { include_usage: true }, messages: creatorMessages }) })
     } catch (error) {
       clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
       const timedOut = error instanceof Error && error.name === "AbortError"
