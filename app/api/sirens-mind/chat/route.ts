@@ -6,6 +6,7 @@ import { buildCapabilityCatalog, CapabilityCatalogUnavailableError } from "../..
 import { identityDataMessage, loadOwnedIdentities, validIdentityId, type OwnedIdentity } from "../../../../lib/sirens-mind/identities"
 import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, explicitlyExitsRp, fallbackRpContinuity, parseRpContinuity, pinRpRoleContract, resolveRpRoleContract, roleContractReferenceMessage, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
 import { shouldActivateLongformStory } from "../../../../lib/sirens-mind/story"
+import { creatorReplyAuthorized, creatorReplyContinuityReference, fallbackCreatorReplyContinuity, inboundSubscriberMessage, outboundCreatorReply, parseCreatorReplyContinuity, validCreatorReplyThreadId, CREATOR_REPLY_STREAM_TIMEOUT_MS } from "../../../../lib/sirens-mind/creator-reply"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -123,6 +124,11 @@ export async function POST(req: NextRequest) {
   }
 
   if (!auth.user?.id) return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 })
+  const creatorReplyRequested = body.experience === "creator_reply"
+  if (body.experience !== undefined && body.experience !== "general" && !creatorReplyRequested) return NextResponse.json({ error: "INVALID_SIRENS_MIND_REQUEST" }, { status: 400 })
+  if (creatorReplyRequested && (!creatorReplyAuthorized(auth.user.id) || !validCreatorReplyThreadId(body.thread_id))) {
+    return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 })
+  }
   let capabilityCatalog: string
   let identities: OwnedIdentity[]
   try {
@@ -144,6 +150,47 @@ export async function POST(req: NextRequest) {
   const baseUrl = process.env.OPENAI_COMPAT_BASE_URL
   if (!apiKey || !baseUrl) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
   const model = process.env[`SIRENS_MIND_${mode}_MODEL`] || DEFAULT_MODELS[mode]
+  if (creatorReplyRequested) {
+    const creatorContinuity = parseCreatorReplyContinuity(body.creator_reply_continuity)
+    const creatorMessages = [
+      { role: "system" as const, content: [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.creator_reply.system.txt")].join("\n\n") },
+      { role: "user" as const, content: identityDataMessage(identities, activeIdentityId) },
+      ...(creatorContinuity ? [{ role: "user" as const, content: creatorReplyContinuityReference(creatorContinuity) }] : []),
+      ...history.map((entry) => entry.role === "user"
+        ? { role: "user" as const, content: inboundSubscriberMessage(entry.content, true) }
+        : { role: "assistant" as const, content: outboundCreatorReply(entry.content) }),
+      { role: "user" as const, content: inboundSubscriberMessage((body.message as string).trim()) },
+    ]
+    const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
+    const abort = () => controller.abort(); req.signal.addEventListener("abort", abort, { once: true })
+    const timeout = setTimeout(abort, CREATOR_REPLY_STREAM_TIMEOUT_MS)
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl}/chat/completions`, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, signal: controller.signal,
+        body: JSON.stringify({ model, max_tokens: MAX_PROVIDER_OUTPUT_TOKENS, temperature: mode === "SAFE" ? 0.6 : 0.85, stream: true, stream_options: { include_usage: true }, messages: creatorMessages }) })
+    } catch (error) {
+      clearTimeout(timeout); req.signal.removeEventListener("abort", abort)
+      const timedOut = error instanceof Error && error.name === "AbortError"
+      telemetry({ requestId, interactionClass: "creator_reply", mode, model, ok: false, code: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE", httpStatus: timedOut ? 504 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: 0, durationMs: Date.now() - started, firstTokenMs: null, handoffProduced: false, continuityProduced: false, continuitySource: "none" })
+      return NextResponse.json({ error: timedOut ? "PROMPT_ENGINE_TIMEOUT" : "PROMPT_ENGINE_UNAVAILABLE" }, { status: timedOut ? 504 : 502 })
+    }
+    if (!response.ok || !response.body) { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 502 }) }
+    const encoder = new TextEncoder(); let visible = "", firstTokenMs: number | null = null
+    const stream = new ReadableStream<Uint8Array>({ async start(target) {
+      let ok = false, code = "OK", usage: any = null, source: "provider" | "fallback" = "fallback"
+      try {
+        const result = await consumeProviderSse(response.body!, (text) => { if (!text) return; if (firstTokenMs === null) firstTokenMs = Date.now() - started; visible += text; target.enqueue(encoder.encode(sse("delta", { text }))) })
+        usage = result.usage
+        const providerState = parseCreatorReplyContinuity((result.metadata as any)?.state)
+        const state = providerState ?? fallbackCreatorReplyContinuity(creatorContinuity, body.message as string, visible)
+        source = providerState ? "provider" : "fallback"
+        target.enqueue(encoder.encode(sse("creator_reply_continuity", state)))
+        target.enqueue(encoder.encode(sse("done", {}))); ok = true
+      } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: code }))) }
+      finally { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "creator_reply", mode, model, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: visible.length, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: true, continuitySource: source }); target.close() }
+    }, cancel() { abort() } })
+    return new Response(stream, { headers: { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", Connection: "keep-alive" } })
+  }
   const continuity = parseRpContinuity(body.continuity)
   const rpAuthorized = adminRpAuthorized(auth.user.id)
   const storyActive = shouldActivateLongformStory(body.message as string)

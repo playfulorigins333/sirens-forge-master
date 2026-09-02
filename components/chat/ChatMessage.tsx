@@ -9,6 +9,7 @@ type ChatMessageProps = {
   isTyping?: boolean
   onUsePrompt?: () => void
   showUsePrompt?: boolean
+  showCopyReply?: boolean
 }
 
 export function ChatMessage({
@@ -18,8 +19,16 @@ export function ChatMessage({
   isTyping = false,
   onUsePrompt,
   showUsePrompt = false,
+  showCopyReply = false,
 }: ChatMessageProps) {
   const isAssistant = role === "assistant"
+  const [copied, setCopied] = React.useState(false)
+
+  const copyReply = async () => {
+    await navigator.clipboard.writeText(content)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
+  }
 
   if (isTyping) {
     return (
@@ -78,6 +87,11 @@ export function ChatMessage({
                 Send to Generator →
               </button>
             </div>
+          )}
+          {showCopyReply && content && !isError && (
+            <button type="button" onClick={copyReply} className="mt-4 rounded-full border border-fuchsia-300/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-fuchsia-200 transition hover:bg-fuchsia-500/10">
+              {copied ? "Copied" : "Copy Reply"}
+            </button>
           )}
         </div>
       </div>
