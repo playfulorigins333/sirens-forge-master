@@ -1,14 +1,17 @@
 insert into auth.users(id) values ('10000000-0000-4000-8000-000000000001'),('10000000-0000-4000-8000-000000000002');
-do $$ declare w uuid; w2 uuid; s uuid; c uuid; ok boolean;
+do $$ declare w uuid;w2 uuid;s uuid:='20000000-0000-4000-8000-000000000001';c1 uuid:='30000000-0000-4000-8000-000000000001';c2 uuid:='30000000-0000-4000-8000-000000000002';failed_s uuid:='20000000-0000-4000-8000-000000000099';ok boolean;
 begin
- w:=public.ensure_creator_reply_workspace('10000000-0000-4000-8000-000000000001');
- assert w=public.ensure_creator_reply_workspace('10000000-0000-4000-8000-000000000001');
- w2:=public.ensure_creator_reply_workspace('10000000-0000-4000-8000-000000000002'); assert w<>w2;
- assert exists(select 1 from public.sirens_mind_creator_reply_workspace_members where workspace_id=w and role='owner');
- insert into public.sirens_mind_creator_reply_subscribers(workspace_id,created_by_user_id,display_name,platform) values(w,'10000000-0000-4000-8000-000000000001','Mike','OnlyFans') returning id into s;
- insert into public.sirens_mind_creator_reply_conversations(workspace_id,subscriber_id,created_by_user_id,status,checkpoint_ciphertext,checkpoint_key_version) values(w,s,'10000000-0000-4000-8000-000000000001','active','encrypted',1) returning id into c;
- begin insert into public.sirens_mind_creator_reply_conversations(workspace_id,subscriber_id,created_by_user_id,status,checkpoint_ciphertext,checkpoint_key_version) values(w,s,'10000000-0000-4000-8000-000000000001','active','encrypted',1);raise exception 'one active invariant failed';exception when unique_violation then null;end;
- ok:=public.creator_reply_save_checkpoint(w,s,c,0,'encrypted-v2',1);assert ok;assert not public.creator_reply_save_checkpoint(w,s,c,0,'stale',1);assert (select checkpoint_revision=1 and checkpoint_ciphertext='encrypted-v2' from public.sirens_mind_creator_reply_conversations where id=c);
- delete from public.sirens_mind_creator_reply_subscribers where id=s;assert not exists(select 1 from public.sirens_mind_creator_reply_conversations where id=c);
- assert (select relrowsecurity from pg_class where oid='public.sirens_mind_creator_reply_subscribers'::regclass);
+ w:=ensure_creator_reply_workspace('10000000-0000-4000-8000-000000000001');w2:=ensure_creator_reply_workspace('10000000-0000-4000-8000-000000000002');assert w<>w2;
+ perform creator_reply_create_subscriber(w,'10000000-0000-4000-8000-000000000001',s,c1,'40000000-0000-4000-8000-000000000001','Mike','OnlyFans',null,null,null,'encrypted',1);
+ assert exists(select 1 from sirens_mind_creator_reply_subscribers where id=s);assert exists(select 1 from sirens_mind_creator_reply_conversations where id=c1 and status='active');
+ begin perform creator_reply_create_subscriber(w,'10000000-0000-4000-8000-000000000001',failed_s,c1,'40000000-0000-4000-8000-000000000099','Fail','OnlyFans',null,null,null,'encrypted',1);raise exception 'expected failure';exception when unique_violation then null;end;
+ assert not exists(select 1 from sirens_mind_creator_reply_subscribers where id=failed_s);
+ perform creator_reply_new_conversation(w,'10000000-0000-4000-8000-000000000001',s,c2,'40000000-0000-4000-8000-000000000002','encrypted',1);assert (select status='paused' from sirens_mind_creator_reply_conversations where id=c1);assert (select status='active' from sirens_mind_creator_reply_conversations where id=c2);
+ begin perform creator_reply_new_conversation(w,'10000000-0000-4000-8000-000000000001',s,c2,'40000000-0000-4000-8000-000000000003','encrypted',1);raise exception 'expected failure';exception when unique_violation then null;end;assert (select status='active' from sirens_mind_creator_reply_conversations where id=c2);
+ perform creator_reply_resume_conversation(w,'10000000-0000-4000-8000-000000000001',c1);assert (select status='active' from sirens_mind_creator_reply_conversations where id=c1);assert (select status='paused' from sirens_mind_creator_reply_conversations where id=c2);
+ begin perform creator_reply_resume_conversation(w2,'10000000-0000-4000-8000-000000000002',c2);raise exception 'expected failure';exception when others then if sqlerrm='expected failure' then raise;end if;end;assert (select status='active' from sirens_mind_creator_reply_conversations where id=c1);
+ assert not creator_reply_save_checkpoint(w,s,c2,0,'stale-paused',1);ok:=creator_reply_save_checkpoint(w,s,c1,0,'encrypted-v2',1);assert ok;assert not creator_reply_save_checkpoint(w,s,c1,0,'stale',1);
+ begin insert into sirens_mind_creator_reply_conversations(workspace_id,subscriber_id,created_by_user_id,status,checkpoint_ciphertext,checkpoint_key_version) values(w,s,'10000000-0000-4000-8000-000000000001','active','x',1);raise exception 'expected unique';exception when unique_violation then null;end;
+ delete from sirens_mind_creator_reply_subscribers where id=s;assert not exists(select 1 from sirens_mind_creator_reply_conversations where subscriber_id=s);
+ assert not has_function_privilege('anon','public.creator_reply_new_conversation(uuid,uuid,uuid,uuid,uuid,text,integer)','execute');assert not has_function_privilege('authenticated','public.creator_reply_resume_conversation(uuid,uuid,uuid)','execute');assert has_function_privilege('service_role','public.creator_reply_create_subscriber(uuid,uuid,uuid,uuid,uuid,text,text,text,text,integer,text,integer)','execute');
 end $$;

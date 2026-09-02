@@ -5,14 +5,15 @@ export type CreatorReplyCheckpoint = { version: 1; label: string; continuity: Cr
 export const emptyCreatorReplyContinuity = (): CreatorReplyContinuity => ({ version: 1, creator_persona: "", subscriber_persona: "", relationship: "", scene: "", summary: "" })
 export const emptyCreatorReplyCheckpoint = (): CreatorReplyCheckpoint => ({ version: 1, label: "", continuity: emptyCreatorReplyContinuity(), recent_turns: [] })
 export function trimCreatorReplyTurns(input: CreatorReplyTurn[]) {
-  const turns = input.filter(t => (t.role === "subscriber" || t.role === "creator") && typeof t.text === "string").map(t => ({...t,text:t.text.slice(0,MAX_SINGLE_STORED_TURN_CHARS)})).slice(-MAX_RECENT_TURNS)
-  while (turns.reduce((n,t)=>n+t.text.length,0)>MAX_RECENT_TAIL_TOTAL_CHARS) turns.shift()
+  if (input.length % 2 !== 0 || input.some((turn,index) => !turn || turn.role !== (index % 2 === 0 ? "subscriber" : "creator") || typeof turn.text !== "string")) return []
+  const turns = input.map(t => ({...t,text:t.text.slice(0,MAX_SINGLE_STORED_TURN_CHARS)})).slice(-MAX_RECENT_TURNS)
+  while (turns.reduce((n,t)=>n+t.text.length,0)>MAX_RECENT_TAIL_TOTAL_CHARS) turns.splice(0,2)
   return turns
 }
 export function parseCreatorReplyCheckpoint(value: unknown): CreatorReplyCheckpoint | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const v=value as Record<string,unknown>, continuity=parseCreatorReplyContinuity(v.continuity)
   if (v.version!==1 || typeof v.label!=="string" || v.label.length>160 || !continuity || !Array.isArray(v.recent_turns)) return null
-  const turns=trimCreatorReplyTurns(v.recent_turns as CreatorReplyTurn[])
-  return turns.length===v.recent_turns.length ? {version:1,label:v.label,continuity,recent_turns:turns} : null
+  const rawTurns=v.recent_turns as CreatorReplyTurn[], turns=trimCreatorReplyTurns(rawTurns)
+  return (rawTurns.length===0 || turns.length>0) && turns.length===rawTurns.length ? {version:1,label:v.label,continuity,recent_turns:turns} : null
 }
