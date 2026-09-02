@@ -76,6 +76,11 @@ test("server-managed role contracts seed, persist, update conservatively, and re
     "From now on I am walking beside you.",
     "From now on you're standing by the window.",
     "I am now looking at you.",
+    "I am now the one holding the knife.",
+    "You are now the last person in the room.",
+    "From now on I am the one pouring drinks.",
+    "From now on you are the person standing by the window.",
+    "Your character is now the one looking at the door.",
   ]) {
     assert.deepEqual(resolveRpRoleContract(narrative, prior), { contract: seeded.contract, source: "continuity" }, narrative)
   }
@@ -87,6 +92,8 @@ test("server-managed role contracts seed, persist, update conservatively, and re
     "Your character is now the submissive one.", "I am now the dominant one.",
     "You are now the detective.", "Your character is now the bartender.",
     "From now on you're my wife.", "Change our relationship to rivals.",
+    "From now on, you're my wife.",
+    "From now on, I am the submissive role and you are dominant.",
     "Switch to third person.", "Use third person from now on.", "Change the POV to first person.",
     "change your character to the dominant role",
   ]) {
