@@ -64,6 +64,25 @@ test("production prompt defines both pronoun directions and agency", () => {
   assert.match(prompt, /never invent new subscriber dialogue/)
 })
 
+test("production prompt strictly grounds subscriber facts, agency, and continuity", () => {
+  const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
+  assert.match(prompt, /Every subscriber-specific claim must come from subscriber-authored input/)
+  for (const prohibition of [
+    "subscriber appearance", "body type or other physical traits", "posture or physical position",
+    "background", "occupation", "motives or intentions", "emotional state", "next actions",
+    "next dialogue", "descriptive states as well as voluntary actions",
+  ]) assert.match(prompt, new RegExp(prohibition))
+  for (const productionRegression of [
+    "You don't move", "the door you're still blocking", "You city types",
+    "tall, built like someone who spends more time outdoors than in",
+  ]) assert.match(prompt, new RegExp(productionRegression.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+  assert.match(prompt, /progressing through creator actions or dialogue/)
+  assert.match(prompt, /rather than puppeting the subscriber/)
+  assert.match(prompt, /power dynamics do not waive subscriber agency/)
+  assert.match(prompt, /subscriber_persona` may contain only subscriber facts explicitly grounded in subscriber-authored messages/)
+  assert.match(prompt, /never convert them into authoritative subscriber facts/)
+})
+
 test("workspace is hidden and configured without generator or billing UX", () => {
   const ui = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatUI.tsx"), "utf8")
   const message = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatMessage.tsx"), "utf8")
