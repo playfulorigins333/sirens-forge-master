@@ -97,6 +97,17 @@ test("production prompt preserves subscriber-supplied scenario world-state", () 
   assert.match(prompt, /prefer creator dialogue\/action/)
 })
 
+test("Creator Reply uses a dedicated system stack while general Siren's Mind retains the generic base", () => {
+  const route = fs.readFileSync(path.join(process.cwd(), "app/api/sirens-mind/chat/route.ts"), "utf8")
+  const creatorBranch = route.slice(route.indexOf("if (creatorReplyRequested) {", route.indexOf("const model =")), route.indexOf("const continuity =", route.indexOf("const model =")))
+  assert.match(creatorBranch, /creatorReplyModeGovernance\(mode\)/)
+  assert.match(creatorBranch, /promptFile\("nsfw_gpt\.creator_reply\.system\.txt"\)/)
+  assert.doesNotMatch(creatorBranch, /promptFile\("nsfw_gpt\.system\.base\.txt"\)/)
+
+  const generalAssembly = route.slice(route.indexOf("const runtimeContract ="))
+  assert.match(generalAssembly, /const systemPrompt = \[promptFile\("nsfw_gpt\.system\.base\.txt"\)/)
+})
+
 test("workspace is hidden and configured without generator or billing UX", () => {
   const ui = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatUI.tsx"), "utf8")
   const message = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatMessage.tsx"), "utf8")
@@ -107,7 +118,7 @@ test("workspace is hidden and configured without generator or billing UX", () =>
   assert.match(ui, /experience="creator_reply"|experience === "creator_reply"/)
   assert.match(ui, /Paste subscriber message\.\.\./)
   assert.match(workspace, /New Subscriber/)
-  assert.match(workspace, /disabled=\{saving\}/)
+  assert.match(workspace, /disabled=\{formSaving\}/)
   assert.match(ui, /subscriber_id: subscriberId, conversation_id: conversationId/)
   assert.match(ui, /completed: true/)
   assert.match(ui, /msg\.completed === true/)

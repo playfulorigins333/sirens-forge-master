@@ -53,6 +53,21 @@ function promptFile(file: string): string {
   return fs.readFileSync(path.join(process.cwd(), "prompts", "nsfw_gpt", file), "utf8")
 }
 
+function creatorReplyModeGovernance(mode: Mode): string {
+  const selectedMode = {
+    SAFE: "PG-13 and non-explicit. Adult flirting and romance are allowed within SAFE boundaries.",
+    NSFW: "Explicit consensual adult sexual content is allowed. No minors and no actual non-consensual behavior.",
+    ULTRA: "Explicit consensual adult kink, power-play, and CNC fantasy are allowed within platform legality. CNC must remain fictional, pre-negotiated, consensual, and revocable. No minors.",
+  }[mode]
+
+  return [
+    "# CREATOR REPLY runtime contract",
+    `CREATOR REPLY MODE: ${mode}`,
+    selectedMode,
+    "Apply this mode ceiling to the dedicated Creator Reply contract below. Return only one ready-to-send creator reply.",
+  ].join("\n")
+}
+
 function invalidText(value: unknown, max: number): boolean {
   return typeof value !== "string" || !value.trim() || value.length > max || CONTROL_CHARACTERS.test(value)
 }
@@ -160,7 +175,7 @@ export async function POST(req: NextRequest) {
   if (creatorReplyRequested) {
     const creatorContinuity = creatorAuthority!.checkpoint.continuity
     const creatorMessages = [
-      { role: "system" as const, content: [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.creator_reply.system.txt")].join("\n\n") },
+      { role: "system" as const, content: [creatorReplyModeGovernance(mode), promptFile("nsfw_gpt.creator_reply.system.txt")].join("\n\n") },
       { role: "user" as const, content: identityDataMessage(identities, activeIdentityId) },
       { role: "user" as const, content: creatorReplySubscriberProfileReference(creatorAuthority!.subscriber) },
       { role: "user" as const, content: creatorReplyContinuityReference(creatorContinuity) },
