@@ -50,6 +50,7 @@ type ChatUIProps = {
   experience?: "general" | "creator_reply"
   subscriberId?: string
   conversationId?: string
+  embedded?: boolean
   initialGenerationTarget?: GenerationTarget | null
   initialPrompt?: string | null
   initialNegativePrompt?: string | null
@@ -67,6 +68,7 @@ export default function ChatUI({
   experience = "general",
   subscriberId,
   conversationId,
+  embedded = false,
   initialGenerationTarget = null,
   initialPrompt = null,
   initialNegativePrompt = null,
@@ -248,44 +250,60 @@ export default function ChatUI({
   }
 
   return (
-    <div className="relative h-dvh w-full overflow-hidden bg-black text-white">
-      <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[#05060a]" />
-        <div className="absolute inset-y-0 left-0 w-[22rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.10),transparent_72%)]" />
-        <div className="absolute bottom-0 right-0 h-[24rem] w-[28rem] bg-[radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.08),transparent_68%)]" />
-      </div>
+    <div
+      className={
+        embedded
+          ? "flex h-full min-h-0 w-full flex-1 flex-col text-white"
+          : "relative h-dvh w-full overflow-hidden bg-black text-white"
+      }
+    >
+      {!embedded ? (
+        <div className="pointer-events-none fixed inset-0">
+          <div className="absolute inset-0 bg-[#05060a]" />
+          <div className="absolute inset-y-0 left-0 w-[22rem] bg-[radial-gradient(circle_at_left,rgba(168,85,247,0.10),transparent_72%)]" />
+          <div className="absolute bottom-0 right-0 h-[24rem] w-[28rem] bg-[radial-gradient(circle_at_bottom_right,rgba(34,211,238,0.08),transparent_68%)]" />
+        </div>
+      ) : null}
 
-      <main className="relative z-10 mx-auto flex h-dvh w-full max-w-[78rem] flex-col px-4 pt-4 sm:px-6 sm:pt-6">
-        <header className="mb-4 flex shrink-0 flex-col gap-4 border-l-2 border-fuchsia-400/40 pl-5 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent sm:text-[32px]">
-              {creatorReply ? "Creator Reply" : "A Siren's Mind"}
-            </h1>
+      <main
+        className={
+          embedded
+            ? "flex h-full min-h-0 w-full flex-1 flex-col px-3 pb-3 pt-3 sm:px-4 sm:pb-4 sm:pt-4"
+            : "relative z-10 mx-auto flex h-dvh w-full max-w-[78rem] flex-col px-4 pt-4 sm:px-6 sm:pt-6"
+        }
+      >
+        {!embedded ? (
+          <header className="mb-4 flex shrink-0 flex-col gap-4 border-l-2 border-fuchsia-400/40 pl-5 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent sm:text-[32px]">
+                {creatorReply ? "Creator Reply" : "A Siren's Mind"}
+              </h1>
 
-            <p className="mt-2 text-[12px] uppercase tracking-[0.16em] text-zinc-500 sm:text-[13px]">
-              {creatorReply ? "Paste what they said. Get what to send." : "Erotic Prompt Intelligence"}
-            </p>
-          </div>
+              <p className="mt-2 text-[12px] uppercase tracking-[0.16em] text-zinc-500 sm:text-[13px]">
+                {creatorReply ? "Paste what they said. Get what to send." : "Erotic Prompt Intelligence"}
+              </p>
+            </div>
 
-          <nav className="flex flex-wrap gap-2 sm:justify-end">
-            {!creatorReply ? <><button
-              type="button"
-              onClick={() => window.location.assign("/dashboard")}
-              className="rounded-full border border-white/10 bg-white/[0.035] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-300 transition hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
-            >
-              Dashboard
-            </button>
+            <nav className="flex flex-wrap gap-2 sm:justify-end">
+              {!creatorReply ? <><button
+                type="button"
+                onClick={() => window.location.assign("/dashboard")}
+                className="rounded-full border border-white/10 bg-white/[0.035] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-300 transition hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
+              >
+                Dashboard
+              </button>
 
-            <button
-              type="button"
-              onClick={() => window.location.assign("/generate")}
-              className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-500/15 hover:text-white"
-            >
-              Generator
-            </button>
-            </> : null}
-          </nav>
-        </header>
+              <button
+                type="button"
+                onClick={() => window.location.assign("/generate")}
+                className="rounded-full border border-cyan-500/20 bg-cyan-500/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-500/15 hover:text-white"
+              >
+                Generator
+              </button>
+              </> : null}
+            </nav>
+          </header>
+        ) : null}
 
         {!creatorReply && messages.length === 0 && !isTyping ? (
           <section className="mb-4 shrink-0 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.82),rgba(7,7,10,0.82))] px-5 py-5">
@@ -340,7 +358,9 @@ export default function ChatUI({
           </div>
         </section> : null}
 
-        <section className={`shrink-0 border-t border-white/10 bg-black/95 shadow-[0_-18px_40px_rgba(0,0,0,0.55)] ${messages.length > 0 ? "pb-3 pt-2" : "pb-4 pt-3"}`}>
+        {creatorReply && messages.length === 0 && !isTyping ? <div className="min-h-0 flex-1" /> : null}
+
+        <section className={`shrink-0 border-t border-white/10 ${embedded ? "bg-[#07080c]/92" : "bg-black/95 shadow-[0_-18px_40px_rgba(0,0,0,0.55)]"} ${messages.length > 0 ? "pb-3 pt-2" : "pb-4 pt-3"}`}>
           {messages.length === 0 ? <div className={creatorReply ? "" : "mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between"}>
             {!creatorReply ? <>
             <div>
