@@ -61,7 +61,7 @@ test("production prompt defines both pronoun directions and agency", () => {
   assert.match(prompt, /you\/your\/yours means the SUBSCRIBER/)
   assert.match(prompt, /"You are X".*creator's role/)
   assert.match(prompt, /"I am X".*subscriber's role/)
-  assert.match(prompt, /never invent new subscriber dialogue/)
+  assert.match(prompt, /Do not invent new subscriber dialogue/)
 })
 
 test("production prompt strictly grounds subscriber facts, agency, and continuity", () => {
@@ -72,11 +72,11 @@ test("production prompt strictly grounds subscriber facts, agency, and continuit
   for (const prohibition of [
     "subscriber appearance", "body type or other physical traits", "posture or physical position",
     "background", "occupation", "motives or intentions", "emotional state", "next actions",
-    "next dialogue", "descriptive states as well as voluntary actions",
+    "next dialogue", "descriptive states as well as voluntary actions", "physical effects on the subscriber",
   ]) assert.match(prompt, new RegExp(prohibition))
   assert.match(prompt, /omit it rather than filling it in/)
   assert.match(prompt, /progressing through creator actions or dialogue/)
-  assert.match(prompt, /rather than puppeting the subscriber/)
+  assert.match(prompt, /rather than puppeting the subscriber or expanding the environment/)
   assert.match(prompt, /power dynamics do not waive subscriber agency/)
   assert.match(prompt, /subscriber_persona` may contain only subscriber facts explicitly grounded in subscriber-authored messages/)
   assert.match(prompt, /never convert them into authoritative subscriber facts/)
@@ -85,12 +85,15 @@ test("production prompt strictly grounds subscriber facts, agency, and continuit
 test("production prompt preserves subscriber-supplied scenario world-state without negative-example priming", () => {
   const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
   assert.match(prompt, /STRICT SCENARIO FIDELITY/)
-  assert.match(prompt, /subscriber-supplied scene setup, timing, roles, events, and already-stated subscriber actions as authoritative current world-state/)
+  assert.match(prompt, /subscriber-supplied scene setup, timing, roles, events, environmental facts, and already-stated subscriber actions as authoritative current world-state/)
   assert.match(prompt, /Preserve their temporal order and completion state exactly/)
   assert.match(prompt, /continue from the completed state rather than moving the subscriber backward/)
   assert.match(prompt, /Keep venue or business status consistent with the supplied timeline/)
-  assert.match(prompt, /Do not create unstated operational status, policies, signage, objects, prior events, timing, rules, history, or subscriber state/)
+  assert.match(prompt, /Environmental narration may only restate or stylistically rephrase environmental facts already supplied/)
+  assert.match(prompt, /may not introduce new props, furnishings, occupants, operational conditions, prior events, policies, signage, objects, timing, rules, history, or other world-state/)
+  assert.match(prompt, /may not add a physical consequence, reaction, follow-on movement, or new state for the subscriber unless that consequence or state was explicitly supplied/)
   assert.match(prompt, /GROUNDING CHECK BEFORE OUTPUT/)
+  assert.match(prompt, /every factual claim about the subscriber or established world-state must be supported by an allowed grounding source/)
   assert.match(prompt, /Favor omission over invention and continuation over reinterpretation/)
   for (const primingLiteral of [
     "You don't move", "the door you're still blocking", "You city types",
@@ -117,6 +120,10 @@ test("workspace is hidden and configured without generator or billing UX", () =>
   const workspace = fs.readFileSync(path.join(process.cwd(), "components/chat/CreatorReplyWorkspace.tsx"), "utf8")
   assert.match(page, /creatorReplyAuthorized/)
   assert.match(page, /notFound\(\)/)
+  assert.match(page, /data-creator-reply-page/)
+  assert.match(page, /h-dvh overflow-hidden/)
+  assert.match(page, /section\[class\*=\"min-h-\[32rem\]\"\]/)
+  assert.match(page, /min-height: 0 !important/)
   assert.match(ui, /experience="creator_reply"|experience === "creator_reply"/)
   assert.match(ui, /Paste subscriber message\.\.\./)
   assert.match(workspace, /New Subscriber/)
@@ -125,6 +132,8 @@ test("workspace is hidden and configured without generator or billing UX", () =>
   assert.match(ui, /completed: true/)
   assert.match(ui, /msg\.completed === true/)
   assert.match(ui, /userLabel=\{creatorReply \? "Subscriber" : "You"\}/)
+  assert.match(ui, /min-h-0 flex-1 overflow-y-auto/)
+  assert.match(ui, /shrink-0 border-t border-white\/10/)
   assert.doesNotMatch(ui, /setThreadId|creator_reply_continuity/)
   assert.match(message, /Copy Reply/)
   assert.doesNotMatch(page, /billing|upgrade|entitlement/i)
