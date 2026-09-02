@@ -2,7 +2,7 @@ import LoginClient from "./LoginClient";
 import {
   AUTH_ERROR_MESSAGES,
   buildAuthCallbackUrl,
-  canonicalizePaymentContinuation,
+  canonicalizeLoginContinuation,
   paymentFirstAuthContinuationEnabled,
   sanitizeAuthError,
   sanitizeLoginMode,
@@ -25,7 +25,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
     recognized.has(key) && typeof value === "string"
   );
   const next = singleQueryValue(params.next);
-  const continuation = enabled && unambiguous ? canonicalizePaymentContinuation(next) : null;
+  const continuation = unambiguous ? canonicalizeLoginContinuation(next, enabled) : null;
   const errorCode = sanitizeAuthError(singleQueryValue(params.error));
   const origin = trustedApplicationOrigin(
     process.env.NEXT_PUBLIC_SITE_URL,

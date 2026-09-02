@@ -37,6 +37,31 @@ export function canonicalizePaymentContinuation(candidate: unknown): string | nu
   return sessionId ? `/billing/success?session_id=${encodeURIComponent(sessionId)}` : null;
 }
 
+/**
+ * Same-origin post-auth destination for ordinary protected application routes.
+ * Payment success remains reserved for canonicalizePaymentContinuation so a
+ * generic next parameter can never bypass payment-success validation.
+ */
+export function canonicalizeApplicationContinuation(candidate: unknown): string | null {
+  if (typeof candidate !== "string" || !candidate.startsWith("/") || candidate.startsWith("//")) return null;
+  if (candidate.includes("\\") || /[\u0000-\u001f\u007f]/.test(candidate) || candidate.includes("#")) return null;
+  const rawPath = candidate.split("?", 1)[0];
+  if (rawPath.includes("%") || rawPath.split("/").some((segment) => segment === "." || segment === "..")) return null;
+  let parsed: URL;
+  try { parsed = new URL(candidate, "https://application-continuation.invalid"); } catch { return null; }
+  if (parsed.origin !== "https://application-continuation.invalid" || parsed.username || parsed.password) return null;
+  if (parsed.pathname === "/login" || parsed.pathname.startsWith("/auth/") || parsed.pathname === "/billing/success") return null;
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+export function canonicalizeLoginContinuation(candidate: unknown, paymentContinuationEnabled: boolean): string | null {
+  if (paymentContinuationEnabled) {
+    const payment = canonicalizePaymentContinuation(candidate);
+    if (payment) return payment;
+  }
+  return canonicalizeApplicationContinuation(candidate);
+}
+
 export function sanitizeLoginMode(value: unknown): LoginMode {
   return value === "signup" ? "signup" : "login";
 }
