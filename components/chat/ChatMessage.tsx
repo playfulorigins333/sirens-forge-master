@@ -9,6 +9,8 @@ type ChatMessageProps = {
   isTyping?: boolean
   onUsePrompt?: () => void
   showUsePrompt?: boolean
+  showCopyReply?: boolean
+  userLabel?: string
 }
 
 export function ChatMessage({
@@ -18,8 +20,17 @@ export function ChatMessage({
   isTyping = false,
   onUsePrompt,
   showUsePrompt = false,
+  showCopyReply = false,
+  userLabel = "You",
 }: ChatMessageProps) {
   const isAssistant = role === "assistant"
+  const [copied, setCopied] = React.useState(false)
+
+  const copyReply = async () => {
+    await navigator.clipboard.writeText(content)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1500)
+  }
 
   if (isTyping) {
     return (
@@ -79,6 +90,11 @@ export function ChatMessage({
               </button>
             </div>
           )}
+          {showCopyReply && content && !isError && (
+            <button type="button" onClick={copyReply} className="mt-4 rounded-full border border-fuchsia-300/25 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-fuchsia-200 transition hover:bg-fuchsia-500/10">
+              {copied ? "Copied" : "Copy Reply"}
+            </button>
+          )}
         </div>
       </div>
     )
@@ -88,7 +104,7 @@ export function ChatMessage({
     <div className="flex justify-end">
       <div className="max-w-[85%] min-w-0 rounded-[24px] border border-white/10 bg-[linear-gradient(180deg,rgba(17,17,22,0.98),rgba(10,10,14,0.98))] px-5 py-4 sm:max-w-[80%]">
         <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
-          You
+          {userLabel}
         </div>
 
         <div className="break-words whitespace-pre-wrap text-[15px] leading-8 text-zinc-100 [overflow-wrap:anywhere]">

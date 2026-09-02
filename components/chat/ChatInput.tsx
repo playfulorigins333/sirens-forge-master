@@ -12,6 +12,7 @@ type ChatInputProps = {
   onModeChange: React.Dispatch<React.SetStateAction<Mode>>
   onSend: (userText: string, selectedMode: Mode) => Promise<void> | void
   compact?: boolean
+  placeholder?: string
 }
 
 export function ChatInput({
@@ -19,6 +20,7 @@ export function ChatInput({
   onModeChange,
   onSend,
   compact = false,
+  placeholder = "Describe the scene, AI Twin, mood, image/video goal, or rough idea...",
 }: ChatInputProps) {
   const [value, setValue] = useState("")
   const [sending, setSending] = useState(false)
@@ -125,7 +127,7 @@ export function ChatInput({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Describe the scene, AI Twin, mood, image/video goal, or rough idea..."
+            placeholder={placeholder}
             rows={1}
             className="max-h-48 min-h-[34px] flex-1 resize-none overflow-y-hidden bg-transparent text-[15px] leading-7 text-zinc-100 placeholder:text-zinc-500 focus:outline-none"
           />

@@ -13,6 +13,7 @@ type Message = {
   role: Role
   content: string
   isError?: boolean
+  completed?: boolean
   meta?: {
     generationTarget?: GenerationTarget
     outputType?: OutputType
@@ -46,6 +47,7 @@ type GenerationTarget = "text_to_image" | "text_to_video" | "image_to_video"
 type OutputType = "IMAGE" | "VIDEO"
 
 type ChatUIProps = {
+  experience?: "general" | "creator_reply"
   initialGenerationTarget?: GenerationTarget | null
   initialPrompt?: string | null
   initialNegativePrompt?: string | null
@@ -60,20 +62,32 @@ const SIREN_MIND_HANDOFF_STORAGE_KEY = "sirensforge:siren_mind_handoff"
 const SIREN_MIND_CONTINUITY_STORAGE_KEY = "sirensforge:sirens_mind_internal_continuity"
 
 export default function ChatUI({
+  experience = "general",
   initialGenerationTarget = null,
   initialPrompt = null,
   initialNegativePrompt = null,
   initialIdentity = null,
   initialSourceGenerationAssetId = null,
 }: ChatUIProps) {
+  const creatorReply = experience === "creator_reply"
   const [messages, setMessages] = useState<Message[]>(() => initialPrompt ? [{
     id: "generator-context", role: "user", content: `Current prompt to refine:\n${initialPrompt}`,
   }] : [])
   const [isTyping, setIsTyping] = useState(false)
-  const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">("SAFE")
+  const [requestActive, setRequestActive] = useState(false)
+  const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">(creatorReply ? "ULTRA" : "SAFE")
+  const [threadId, setThreadId] = useState("")
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const activeStreamBatcherRef = useRef<{ dispose: () => void } | null>(null)
   useEffect(() => () => { activeStreamBatcherRef.current?.dispose() }, [])
+  useEffect(() => {
+    if (!creatorReply) return
+    try {
+      const stored = window.sessionStorage.getItem("sirensforge:sirens_mind_creator_reply_thread")
+      if (stored && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stored)) setThreadId(stored)
+      else { const next = crypto.randomUUID(); window.sessionStorage.setItem("sirensforge:sirens_mind_creator_reply_thread", next); setThreadId(next) }
+    } catch { setThreadId(crypto.randomUUID()) }
+  }, [creatorReply])
   useEffect(() => {
     if (messages.length === 0 && !isTyping) return
 
@@ -136,12 +150,15 @@ export default function ChatUI({
     selectedMode: "SAFE" | "NSFW" | "ULTRA"
   }) => {
     let continuity: unknown
-    try { const stored = window.sessionStorage.getItem(SIREN_MIND_CONTINUITY_STORAGE_KEY); continuity = stored ? JSON.parse(stored) : undefined } catch { continuity = undefined }
+    const continuityKey = creatorReply ? `sirensforge:sirens_mind_creator_reply_continuity:${threadId}` : SIREN_MIND_CONTINUITY_STORAGE_KEY
+    try { const stored = window.sessionStorage.getItem(continuityKey); continuity = stored ? JSON.parse(stored) : undefined } catch { continuity = undefined }
     const res = await fetch("/api/sirens-mind/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode: selectedMode,
+        experience,
+        ...(creatorReply ? { thread_id: threadId } : {}),
         message,
         history: buildBoundedChatHistory(historyItems),
         context: {
@@ -150,7 +167,7 @@ export default function ChatUI({
           ...(initialNegativePrompt ? { negative_prompt: initialNegativePrompt } : {}),
           ...(initialIdentity ? { identity_id: initialIdentity } : {}),
         },
-        ...(continuity ? { continuity } : {}),
+        ...(continuity ? creatorReply ? { creator_reply_continuity: continuity } : { continuity } : {}),
       }),
     })
     if (res.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
@@ -170,9 +187,13 @@ export default function ChatUI({
         if (!data) return
         const payload = JSON.parse(data)
         if (event === "delta" && typeof payload?.text === "string") { if (payload.text) setIsTyping(false); batcher.append(payload.text) }
-        else if (event === "done") batcher.flush()
+        else if (event === "done") {
+          batcher.flush()
+          setMessages((items) => items.map((item) => item.id === assistantId ? { ...item, completed: true } : item))
+        }
         else if (event === "handoff") { batcher.flush(); handoff = payload }
-        else if (event === "continuity") { try { payload === null ? window.sessionStorage.removeItem(SIREN_MIND_CONTINUITY_STORAGE_KEY) : window.sessionStorage.setItem(SIREN_MIND_CONTINUITY_STORAGE_KEY, JSON.stringify(payload)) } catch { /* ordinary chat remains usable */ } }
+        else if (event === "continuity" && !creatorReply) { try { payload === null ? window.sessionStorage.removeItem(SIREN_MIND_CONTINUITY_STORAGE_KEY) : window.sessionStorage.setItem(SIREN_MIND_CONTINUITY_STORAGE_KEY, JSON.stringify(payload)) } catch { /* ordinary chat remains usable */ } }
+        else if (event === "creator_reply_continuity" && creatorReply) { try { window.sessionStorage.setItem(continuityKey, JSON.stringify(payload)) } catch { /* current chat remains usable */ } }
         else if (event === "error") { batcher.flush(); throw new Error("SIRENS_MIND_STREAM_ERROR") }
       }
       try {
@@ -195,7 +216,7 @@ export default function ChatUI({
     }
     const handoff = data.handoff
     appendMessage({
-      id: crypto.randomUUID(), role: "assistant", content: data.reply,
+      id: crypto.randomUUID(), role: "assistant", content: data.reply, completed: true,
       ...(handoff ? { meta: {
         generationTarget: handoff.generation_target,
         outputType: handoff.output_type,
@@ -209,13 +230,22 @@ export default function ChatUI({
 
   const handleStarterClick = (starter: string) => { void handleSend(starter, mode) }
 
+  const handleNewSubscriber = () => {
+    if (requestActive) return
+    const next = crypto.randomUUID()
+    setMessages([])
+    setThreadId(next)
+    try { window.sessionStorage.setItem("sirensforge:sirens_mind_creator_reply_thread", next) } catch { /* current tab still has the boundary */ }
+  }
+
   const handleSend = async (userText: string, selectedMode: "SAFE" | "NSFW" | "ULTRA") => {
     const trimmed = userText.trim()
-    if (!trimmed) return
+    if (!trimmed || (creatorReply && !threadId)) return
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: trimmed }
     const baseMessages = [...messages, userMessage]
     setMessages(baseMessages)
     setIsTyping(true)
+    if (creatorReply) setRequestActive(true)
     try {
       await sendChatRequest({ message: trimmed, historyItems: messages, selectedMode })
     } catch (err) {
@@ -226,6 +256,7 @@ export default function ChatUI({
       })
     } finally {
       setIsTyping(false)
+      if (creatorReply) setRequestActive(false)
     }
   }
 
@@ -241,16 +272,16 @@ export default function ChatUI({
         <header className="mb-4 flex shrink-0 flex-col gap-4 border-l-2 border-fuchsia-400/40 pl-5 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-pink-300 bg-clip-text text-[28px] font-semibold tracking-tight text-transparent sm:text-[32px]">
-              A Siren's Mind
+              {creatorReply ? "Creator Reply" : "A Siren's Mind"}
             </h1>
 
             <p className="mt-2 text-[12px] uppercase tracking-[0.16em] text-zinc-500 sm:text-[13px]">
-              Erotic Prompt Intelligence
+              {creatorReply ? "Paste what they said. Get what to send." : "Erotic Prompt Intelligence"}
             </p>
           </div>
 
           <nav className="flex flex-wrap gap-2 sm:justify-end">
-            <button
+            {creatorReply ? <button type="button" disabled={requestActive} onClick={handleNewSubscriber} className="rounded-full border border-fuchsia-300/25 bg-fuchsia-500/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-fuchsia-200 disabled:cursor-not-allowed disabled:opacity-40">New Subscriber</button> : <><button
               type="button"
               onClick={() => window.location.assign("/dashboard")}
               className="rounded-full border border-white/10 bg-white/[0.035] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-300 transition hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
@@ -265,10 +296,11 @@ export default function ChatUI({
             >
               Generator
             </button>
+            </>}
           </nav>
         </header>
 
-        {messages.length === 0 && !isTyping ? (
+        {!creatorReply && messages.length === 0 && !isTyping ? (
           <section className="mb-4 shrink-0 rounded-[22px] border border-white/10 bg-[linear-gradient(180deg,rgba(10,10,14,0.82),rgba(7,7,10,0.82))] px-5 py-5">
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-fuchsia-300/70">
               Optional Starters
@@ -305,6 +337,8 @@ export default function ChatUI({
                 content={msg.content}
                 isError={msg.isError}
                 showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
+                showCopyReply={creatorReply && msg.role === "assistant" && msg.completed === true && !msg.isError}
+                userLabel={creatorReply ? "Subscriber" : "You"}
                 onUsePrompt={
                   msg.meta?.canUseInGenerator
                     ? () => handleUsePrompt(msg)
@@ -320,7 +354,8 @@ export default function ChatUI({
         </section> : null}
 
         <section className={`shrink-0 border-t border-white/10 bg-black/95 shadow-[0_-18px_40px_rgba(0,0,0,0.55)] ${messages.length > 0 ? "pb-3 pt-2" : "pb-4 pt-3"}`}>
-          {messages.length === 0 ? <div className="mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between">
+          {messages.length === 0 ? <div className={creatorReply ? "" : "mb-3 flex flex-col gap-2 px-1 sm:flex-row sm:items-end sm:justify-between"}>
+            {!creatorReply ? <>
             <div>
               <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-fuchsia-200">
                 Start Here
@@ -332,6 +367,7 @@ export default function ChatUI({
             <div className="w-fit rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-200">
               Chat - Prompt - Generator
             </div>
+            </> : null}
           </div> : null}
 
           <ChatInput
@@ -339,6 +375,7 @@ export default function ChatUI({
             onModeChange={setMode}
             onSend={handleSend}
             compact={messages.length > 0}
+            placeholder={creatorReply ? "Paste subscriber message..." : undefined}
           />
         </section>
       </main>
