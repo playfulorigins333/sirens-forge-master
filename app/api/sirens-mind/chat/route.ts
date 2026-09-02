@@ -6,7 +6,9 @@ import { buildCapabilityCatalog, CapabilityCatalogUnavailableError } from "../..
 import { identityDataMessage, loadOwnedIdentities, validIdentityId, type OwnedIdentity } from "../../../../lib/sirens-mind/identities"
 import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, explicitlyExitsRp, fallbackRpContinuity, parseRpContinuity, pinRpRoleContract, resolveRpRoleContract, roleContractReferenceMessage, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
 import { shouldActivateLongformStory } from "../../../../lib/sirens-mind/story"
-import { creatorReplyAuthorized, creatorReplyContinuityReference, fallbackCreatorReplyContinuity, inboundSubscriberMessage, outboundCreatorReply, parseCreatorReplyContinuity, validCreatorReplyThreadId, CREATOR_REPLY_STREAM_TIMEOUT_MS } from "../../../../lib/sirens-mind/creator-reply"
+import { creatorReplyAccessAllowed, creatorReplyContinuityReference, creatorReplySubscriberProfileReference, fallbackCreatorReplyContinuity, inboundSubscriberMessage, outboundCreatorReply, parseCreatorReplyContinuity, validCreatorReplyThreadId, CREATOR_REPLY_STREAM_TIMEOUT_MS } from "../../../../lib/sirens-mind/creator-reply"
+import { loadCreatorReplyAuthority, saveCreatorReplyCheckpoint } from "../../../../lib/sirens-mind/creator-reply-service"
+import { trimCreatorReplyTurns } from "../../../../lib/sirens-mind/creator-reply-checkpoint"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -126,8 +128,13 @@ export async function POST(req: NextRequest) {
   if (!auth.user?.id) return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 })
   const creatorReplyRequested = body.experience === "creator_reply"
   if (body.experience !== undefined && body.experience !== "general" && !creatorReplyRequested) return NextResponse.json({ error: "INVALID_SIRENS_MIND_REQUEST" }, { status: 400 })
-  if (creatorReplyRequested && (!creatorReplyAuthorized(auth.user.id) || !validCreatorReplyThreadId(body.thread_id))) {
+  if (creatorReplyRequested && (!creatorReplyAccessAllowed(auth.user.id) || !validCreatorReplyThreadId(body.subscriber_id) || !validCreatorReplyThreadId(body.conversation_id))) {
     return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 })
+  }
+  let creatorAuthority: Awaited<ReturnType<typeof loadCreatorReplyAuthority>> | null = null
+  if (creatorReplyRequested) {
+    try { creatorAuthority = await loadCreatorReplyAuthority(auth.user.id, body.subscriber_id as string, body.conversation_id as string) }
+    catch { return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 }) }
   }
   let capabilityCatalog: string
   let identities: OwnedIdentity[]
@@ -151,14 +158,15 @@ export async function POST(req: NextRequest) {
   if (!apiKey || !baseUrl) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
   const model = process.env[`SIRENS_MIND_${mode}_MODEL`] || DEFAULT_MODELS[mode]
   if (creatorReplyRequested) {
-    const creatorContinuity = parseCreatorReplyContinuity(body.creator_reply_continuity)
+    const creatorContinuity = creatorAuthority!.checkpoint.continuity
     const creatorMessages = [
       { role: "system" as const, content: [promptFile("nsfw_gpt.system.base.txt"), promptFile("nsfw_gpt.creator_reply.system.txt")].join("\n\n") },
       { role: "user" as const, content: identityDataMessage(identities, activeIdentityId) },
-      ...(creatorContinuity ? [{ role: "user" as const, content: creatorReplyContinuityReference(creatorContinuity) }] : []),
-      ...history.map((entry) => entry.role === "user"
-        ? { role: "user" as const, content: inboundSubscriberMessage(entry.content, true) }
-        : { role: "assistant" as const, content: outboundCreatorReply(entry.content) }),
+      { role: "user" as const, content: creatorReplySubscriberProfileReference(creatorAuthority!.subscriber) },
+      { role: "user" as const, content: creatorReplyContinuityReference(creatorContinuity) },
+      ...creatorAuthority!.checkpoint.recent_turns.map((entry) => entry.role === "subscriber"
+        ? { role: "user" as const, content: inboundSubscriberMessage(entry.text, true) }
+        : { role: "assistant" as const, content: outboundCreatorReply(entry.text) }),
       { role: "user" as const, content: inboundSubscriberMessage((body.message as string).trim()) },
     ]
     const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
@@ -184,8 +192,10 @@ export async function POST(req: NextRequest) {
         const providerState = parseCreatorReplyContinuity((result.metadata as any)?.state)
         const state = providerState ?? fallbackCreatorReplyContinuity(creatorContinuity, body.message as string, visible)
         source = providerState ? "provider" : "fallback"
-        target.enqueue(encoder.encode(sse("creator_reply_continuity", state)))
-        target.enqueue(encoder.encode(sse("done", {}))); ok = true
+        const updated = { ...creatorAuthority!.checkpoint, continuity: state, recent_turns: trimCreatorReplyTurns([...creatorAuthority!.checkpoint.recent_turns, { role: "subscriber" as const, text: (body.message as string).trim() }, { role: "creator" as const, text: visible }]) }
+        try { await saveCreatorReplyCheckpoint(auth.user!.id, creatorAuthority!, updated); target.enqueue(encoder.encode(sse("memory_status", { saved: true }))); ok = true }
+        catch (error) { code = error instanceof Error && error.message === "CHECKPOINT_CONFLICT" ? "CHECKPOINT_CONFLICT" : "CHECKPOINT_SAVE_FAILED"; target.enqueue(encoder.encode(sse("memory_status", { saved: false, conflict: code === "CHECKPOINT_CONFLICT" }))) }
+        target.enqueue(encoder.encode(sse("done", { checkpoint_saved: ok })))
       } catch { code = "PROMPT_ENGINE_STREAM_ERROR"; target.enqueue(encoder.encode(sse("error", { error: code }))) }
       finally { clearTimeout(timeout); req.signal.removeEventListener("abort", abort); telemetry({ requestId, interactionClass: "creator_reply", mode, model, ok, code, httpStatus: ok ? 200 : 502, historyCount: history.length, inputChars: (body.message as string).length, outputChars: visible.length, providerPromptTokens: usage?.prompt_tokens ?? null, providerCompletionTokens: usage?.completion_tokens ?? null, providerTotalTokens: usage?.total_tokens ?? null, providerUsageAvailable: Boolean(usage), durationMs: Date.now() - started, firstTokenMs, handoffProduced: false, identityUsed: Boolean(activeIdentityId), continuityProduced: true, continuitySource: source }); target.close() }
     }, cancel() { abort() } })

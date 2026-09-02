@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation"
-import ChatUI from "@/components/chat/ChatUI"
+import CreatorReplyWorkspace from "@/components/chat/CreatorReplyWorkspace"
 import { ensureActiveSubscription } from "@/lib/subscription-checker"
-import { creatorReplyAuthorized } from "@/lib/sirens-mind/creator-reply"
+import { creatorReplyAccessAllowed } from "@/lib/sirens-mind/creator-reply"
 
 export default async function CreatorRepliesPage() {
+  // creatorReplyAccessAllowed centralizes the existing creatorReplyAuthorized policy.
   const auth = await ensureActiveSubscription()
-  if (!auth.ok || !auth.user?.id || !creatorReplyAuthorized(auth.user.id)) notFound()
-  return <ChatUI experience="creator_reply" />
+  if (!auth.ok || !auth.user?.id || !creatorReplyAccessAllowed(auth.user.id)) notFound()
+  return <CreatorReplyWorkspace />
 }

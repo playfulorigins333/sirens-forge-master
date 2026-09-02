@@ -48,6 +48,8 @@ type OutputType = "IMAGE" | "VIDEO"
 
 type ChatUIProps = {
   experience?: "general" | "creator_reply"
+  subscriberId?: string
+  conversationId?: string
   initialGenerationTarget?: GenerationTarget | null
   initialPrompt?: string | null
   initialNegativePrompt?: string | null
@@ -63,6 +65,8 @@ const SIREN_MIND_CONTINUITY_STORAGE_KEY = "sirensforge:sirens_mind_internal_cont
 
 export default function ChatUI({
   experience = "general",
+  subscriberId,
+  conversationId,
   initialGenerationTarget = null,
   initialPrompt = null,
   initialNegativePrompt = null,
@@ -76,18 +80,9 @@ export default function ChatUI({
   const [isTyping, setIsTyping] = useState(false)
   const [requestActive, setRequestActive] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">(creatorReply ? "ULTRA" : "SAFE")
-  const [threadId, setThreadId] = useState("")
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const activeStreamBatcherRef = useRef<{ dispose: () => void } | null>(null)
   useEffect(() => () => { activeStreamBatcherRef.current?.dispose() }, [])
-  useEffect(() => {
-    if (!creatorReply) return
-    try {
-      const stored = window.sessionStorage.getItem("sirensforge:sirens_mind_creator_reply_thread")
-      if (stored && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(stored)) setThreadId(stored)
-      else { const next = crypto.randomUUID(); window.sessionStorage.setItem("sirensforge:sirens_mind_creator_reply_thread", next); setThreadId(next) }
-    } catch { setThreadId(crypto.randomUUID()) }
-  }, [creatorReply])
   useEffect(() => {
     if (messages.length === 0 && !isTyping) return
 
@@ -150,24 +145,24 @@ export default function ChatUI({
     selectedMode: "SAFE" | "NSFW" | "ULTRA"
   }) => {
     let continuity: unknown
-    const continuityKey = creatorReply ? `sirensforge:sirens_mind_creator_reply_continuity:${threadId}` : SIREN_MIND_CONTINUITY_STORAGE_KEY
-    try { const stored = window.sessionStorage.getItem(continuityKey); continuity = stored ? JSON.parse(stored) : undefined } catch { continuity = undefined }
+    const continuityKey = SIREN_MIND_CONTINUITY_STORAGE_KEY
+    if (!creatorReply) try { const stored = window.sessionStorage.getItem(continuityKey); continuity = stored ? JSON.parse(stored) : undefined } catch { continuity = undefined }
     const res = await fetch("/api/sirens-mind/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode: selectedMode,
         experience,
-        ...(creatorReply ? { thread_id: threadId } : {}),
+        ...(creatorReply ? { subscriber_id: subscriberId, conversation_id: conversationId } : {}),
         message,
-        history: buildBoundedChatHistory(historyItems),
+        history: creatorReply ? [] : buildBoundedChatHistory(historyItems),
         context: {
           ...(initialGenerationTarget ? { generation_target: initialGenerationTarget } : {}),
           ...(initialPrompt ? { prompt: initialPrompt } : {}),
           ...(initialNegativePrompt ? { negative_prompt: initialNegativePrompt } : {}),
           ...(initialIdentity ? { identity_id: initialIdentity } : {}),
         },
-        ...(continuity ? creatorReply ? { creator_reply_continuity: continuity } : { continuity } : {}),
+        ...(!creatorReply && continuity ? { continuity } : {}),
       }),
     })
     if (res.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
@@ -193,7 +188,7 @@ export default function ChatUI({
         }
         else if (event === "handoff") { batcher.flush(); handoff = payload }
         else if (event === "continuity" && !creatorReply) { try { payload === null ? window.sessionStorage.removeItem(SIREN_MIND_CONTINUITY_STORAGE_KEY) : window.sessionStorage.setItem(SIREN_MIND_CONTINUITY_STORAGE_KEY, JSON.stringify(payload)) } catch { /* ordinary chat remains usable */ } }
-        else if (event === "creator_reply_continuity" && creatorReply) { try { window.sessionStorage.setItem(continuityKey, JSON.stringify(payload)) } catch { /* current chat remains usable */ } }
+        else if (event === "memory_status" && creatorReply && payload?.saved === false) { batcher.flush(); appendMessage({ id: crypto.randomUUID(), role: "assistant", content: payload?.conflict ? "Reply generated, but this conversation changed elsewhere and memory was not saved." : "Reply generated, but conversation memory was not saved.", isError: true }) }
         else if (event === "error") { batcher.flush(); throw new Error("SIRENS_MIND_STREAM_ERROR") }
       }
       try {
@@ -230,17 +225,9 @@ export default function ChatUI({
 
   const handleStarterClick = (starter: string) => { void handleSend(starter, mode) }
 
-  const handleNewSubscriber = () => {
-    if (requestActive) return
-    const next = crypto.randomUUID()
-    setMessages([])
-    setThreadId(next)
-    try { window.sessionStorage.setItem("sirensforge:sirens_mind_creator_reply_thread", next) } catch { /* current tab still has the boundary */ }
-  }
-
   const handleSend = async (userText: string, selectedMode: "SAFE" | "NSFW" | "ULTRA") => {
     const trimmed = userText.trim()
-    if (!trimmed || (creatorReply && !threadId)) return
+    if (!trimmed || (creatorReply && (!subscriberId || !conversationId))) return
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: trimmed }
     const baseMessages = [...messages, userMessage]
     setMessages(baseMessages)
@@ -281,7 +268,7 @@ export default function ChatUI({
           </div>
 
           <nav className="flex flex-wrap gap-2 sm:justify-end">
-            {creatorReply ? <button type="button" disabled={requestActive} onClick={handleNewSubscriber} className="rounded-full border border-fuchsia-300/25 bg-fuchsia-500/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-fuchsia-200 disabled:cursor-not-allowed disabled:opacity-40">New Subscriber</button> : <><button
+            {!creatorReply ? <><button
               type="button"
               onClick={() => window.location.assign("/dashboard")}
               className="rounded-full border border-white/10 bg-white/[0.035] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-300 transition hover:border-fuchsia-300/30 hover:bg-fuchsia-500/10 hover:text-white"
@@ -296,7 +283,7 @@ export default function ChatUI({
             >
               Generator
             </button>
-            </>}
+            </> : null}
           </nav>
         </header>
 
