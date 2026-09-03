@@ -6,7 +6,7 @@ import { buildCapabilityCatalog, CapabilityCatalogUnavailableError } from "../..
 import { identityDataMessage, loadOwnedIdentities, validIdentityId, type OwnedIdentity } from "../../../../lib/sirens-mind/identities"
 import { adminRpAuthorized, consumeProviderSse, continuityReferenceMessage, explicitlyExitsRp, fallbackRpContinuity, parseRpContinuity, pinRpRoleContract, resolveRpRoleContract, roleContractReferenceMessage, RP_STREAM_TIMEOUT_MS, shouldActivateRp } from "../../../../lib/sirens-mind/admin-rp"
 import { shouldActivateLongformStory } from "../../../../lib/sirens-mind/story"
-import { creatorReplyAccessAllowed, deriveCreatorReplyContinuity, resolveCreatorReplyModel, validCreatorReplyThreadId, CREATOR_REPLY_STREAM_TIMEOUT_MS } from "../../../../lib/sirens-mind/creator-reply"
+import { buildCreatorReplyAuthoritySources, creatorReplyAccessAllowed, deriveCreatorReplyContinuity, resolveCreatorReplyModel, validCreatorReplyThreadId, CREATOR_REPLY_STREAM_TIMEOUT_MS } from "../../../../lib/sirens-mind/creator-reply"
 import { loadCreatorReplyAuthority, saveCreatorReplyCheckpoint } from "../../../../lib/sirens-mind/creator-reply-service"
 import { trimCreatorReplyTurns } from "../../../../lib/sirens-mind/creator-reply-checkpoint"
 import { validateCreatorReplyCandidate } from "../../../../lib/sirens-mind/creator-reply-validator"
@@ -145,10 +145,22 @@ export async function POST(req: NextRequest) {
   const model = creatorReplyRequested ? resolveCreatorReplyModel(mode, generalModel) : generalModel
 
   if (creatorReplyRequested) {
-    const inbound=(body.message as string).trim()
-    const creatorMessages=buildCreatorReplyMessages({mode,systemPrompt:promptFile("nsfw_gpt.creator_reply.system.txt"),subscriber:creatorAuthority!.subscriber,continuity:creatorAuthority!.checkpoint.continuity,recentTurns:creatorAuthority!.checkpoint.recent_turns,inbound})
-    const authoritativeSources = [creatorAuthority!.subscriber.display_name, creatorAuthority!.subscriber.platform, creatorAuthority!.subscriber.platform_handle || "", creatorAuthority!.subscriber.key_notes,
-      ...creatorAuthority!.checkpoint.recent_turns.filter((entry) => entry.role === "subscriber").map((entry) => entry.text), (body.message as string).trim()]
+    const inbound = (body.message as string).trim()
+    const authoritativeSources = buildCreatorReplyAuthoritySources({
+      subscriber: creatorAuthority!.subscriber,
+      continuity: creatorAuthority!.checkpoint.continuity,
+      recentTurns: creatorAuthority!.checkpoint.recent_turns,
+      inbound,
+    })
+    const creatorMessages = buildCreatorReplyMessages({
+      mode,
+      systemPrompt: promptFile("nsfw_gpt.creator_reply.system.txt"),
+      subscriber: creatorAuthority!.subscriber,
+      continuity: creatorAuthority!.checkpoint.continuity,
+      recentTurns: creatorAuthority!.checkpoint.recent_turns,
+      inbound,
+      authoritySources: authoritativeSources,
+    })
     const started = Date.now(), requestId = crypto.randomUUID(), controller = new AbortController()
     const abort = () => controller.abort(); req.signal.addEventListener("abort", abort, { once: true })
     const timeout = setTimeout(abort, CREATOR_REPLY_STREAM_TIMEOUT_MS)
@@ -173,7 +185,7 @@ export async function POST(req: NextRequest) {
         validationOutcome = validation.code
         if (!validation.ok) { code = "CREATOR_REPLY_GROUNDING_REJECTED"; target.enqueue(encoder.encode(sse("error", { error: code }))); return }
         visible = validation.text
-        const updated = { ...creatorAuthority!.checkpoint, continuity: deriveCreatorReplyContinuity(creatorAuthority!.checkpoint.continuity,creatorAuthority!.subscriber,inbound), recent_turns: trimCreatorReplyTurns([...creatorAuthority!.checkpoint.recent_turns, { role: "subscriber" as const, text: inbound }, { role: "creator" as const, text: visible }]) }
+        const updated = { ...creatorAuthority!.checkpoint, continuity: deriveCreatorReplyContinuity(creatorAuthority!.checkpoint.continuity, creatorAuthority!.subscriber, inbound), recent_turns: trimCreatorReplyTurns([...creatorAuthority!.checkpoint.recent_turns, { role: "subscriber" as const, text: inbound }, { role: "creator" as const, text: visible }]) }
         target.enqueue(encoder.encode(sse("delta", { text: visible })))
         try { await saveCreatorReplyCheckpoint(auth.user!.id, creatorAuthority!, updated); continuityOutcome = "SAVED"; target.enqueue(encoder.encode(sse("memory_status", { saved: true }))); ok = true }
         catch (error) { code = error instanceof Error && error.message === "CHECKPOINT_CONFLICT" ? "CHECKPOINT_CONFLICT" : "CHECKPOINT_SAVE_FAILED"; continuityOutcome = code; target.enqueue(encoder.encode(sse("memory_status", { saved: false, conflict: code === "CHECKPOINT_CONFLICT" }))) }
