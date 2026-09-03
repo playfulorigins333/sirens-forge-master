@@ -59,7 +59,7 @@ test("tone-only Creator Direction preserves the active role persona kink and Dom
   const direction = "Keep the control but make it warmer and more playful."
   assert.equal(creatorDomStyleRequirement(direction), "")
 
-  const system = creatorReplyDirectionSystemMessage(direction)
+  const system = creatorReplyDirectionSystemMessage()
   assert.match(system, /supersedes ONLY the creator-side dimensions it explicitly changes/)
   assert.match(system, /Preserve the current creator role, persona, kink\/dynamic, and specialized Dom style/)
   assert.match(system, /tone-only rewrite must keep the existing specialized Dom style recognizable/)
@@ -97,12 +97,12 @@ test("explicit male Brat Tamer switch ignores excluded Findom Goddess and Mommy 
   assert.match(normalized, /STYLE TRANSITION REQUIREMENT/)
   assert.match(normalized, /ACTIVE CREATOR ROLE: MALE/)
 
-  const system = creatorReplyDirectionSystemMessage(direction)
+  const system = creatorReplyDirectionSystemMessage()
   assert.match(system, /newly named choice becomes authoritative and conflicting prior creator-side choices are retired/)
 
   const draft = "Serve your Goddess with a generous tribute first. Then we'll see if you've earned more attention."
   const task = creatorReplyDirectionMessage(direction, draft)
-  assert.match(task, /retire incompatible prior creator-side role\/persona\/style markers and mechanics/)
-  assert.match(task, /explicitly replaced creator-side dimensions no longer leak from the prior draft/)
+  assert.match(task, /Retire incompatible prior creator-side titles, framing, commercial mechanics, role markers, and specialized-style behavior/)
+  assert.match(task, /contains no incompatible carryover from the replaced creator configuration/)
   assert.match(task, /tribute/)
 })
