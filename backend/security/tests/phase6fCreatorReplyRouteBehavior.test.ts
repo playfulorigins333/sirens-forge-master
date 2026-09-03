@@ -200,7 +200,7 @@ try {
   assert.match(directionMessages, /mandatory rewrite instruction/)
   assert.match(directionMessages, /Make it more dominant, but not mean\./)
   assert.match(directionMessages, /CREATOR_DIRECTION \(EXECUTE THIS\)/)
-  assert.match(directionMessages, /DRAFT_TO_REVISE \(REFERENCE TEXT ONLY/)
+  assert.match(directionMessages, /DRAFT_TO_REVISE \(REFERENCE TEXT AND CURRENT CREATOR-STYLE AUTHORITY/)
   assert.match(directionMessages, /very short or fragmentary creator_direction as a complete instruction/)
   assert.match(directionMessages, /measurable creator constraints/)
   assert.match(directionMessages, /draft_to_revise/)
@@ -224,8 +224,49 @@ try {
   assert.match(terseDirectionMessages, /2-3 lines max\./)
   assert.match(terseDirectionMessages, /Brevity never makes the direction optional or lower priority/)
   assert.match(terseDirectionMessages, /satisfy the constraint literally/)
-  assert.match(terseDirectionMessages, /visible reply itself to fit within that line limit/)
+  assert.match(terseDirectionMessages, /Rewrite the current draft into 2 to 3 short, newline-separated visible lines/)
   assert.match(events, /event: delta/)
+
+  // Exact hard-switch canary uses one call, keeps raw direction at user level, validates, and replaces the checkpoint draft.
+  const canary = "Switch the creator to a male Brat Tamer. Confident, amused, teasing, and firmly in control. Make the Brat Tamer dynamic recognizable through challenge, correction, playful consequences, and handling defiance. Drop the Mommy Domme, Goddess, and Findomme dynamics unless the subscriber actually established one of them. Do not invent any subscriber action, feeling, preference, role, or prior behavior."
+  recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: "Send your Goddess a tribute." }]
+  providerVisible = "Look at me and listen to Sir. Think you can test my patience? Try, and I'll choose a playful consequence."
+  providerMetadata = { version: 3, claims: [] }
+  providerCalls = 0
+  saved = null
+  response = await invokeDirection({ message: canary })
+  events = await response.text()
+  assert.equal(providerCalls, 1)
+  assert.ok(saved)
+  assert.equal(saved.value.recent_turns.at(-1).text, providerVisible)
+  assert.doesNotMatch(providerVisible, /Mommy|Goddess|Findom|tribute|payment/i)
+  assert.match(providerVisible, /Sir|test|playful consequence/i)
+  assert.match(events, /"saved":true/)
+  assert.equal(providerRequest.messages.filter((message: any) => message.role === "system").length, 1)
+  assert.doesNotMatch(providerRequest.messages[0].content, /Switch the creator to a male Brat Tamer/)
+  assert.equal(providerRequest.messages.at(-1).role, "user")
+  assert.match(providerRequest.messages.at(-1).content, /Switch the creator to a male Brat Tamer/)
+  assert.doesNotMatch(JSON.stringify(providerRequest.messages), /Send your Goddess a tribute/)
+
+  // Tone/continuation/intensity directions preserve the active role/style through the draft authority.
+  for (const [direction, next] of [
+    ["Keep the control but make it warmer and more playful.", "Come here, trouble. Sir is still in control, but I might smile while I set your next playful challenge."],
+    ["Continue from there, but make the next beat more teasing.", "Careful, trouble. Keep testing Sir and I'll keep you guessing about that next playful consequence."],
+    ["Too rough. Pull it back.", "Easy, trouble. Sir is in control, and this challenge stays warm, light, and playful."],
+  ] as const) {
+    recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: providerVisible }]
+    providerVisible = next
+    providerCalls = 0
+    saved = null
+    response = await invokeDirection({ message: direction })
+    events = await response.text()
+    assert.equal(providerCalls, 1)
+    assert.ok(saved)
+    assert.equal(saved.value.recent_turns.at(-1).text, next)
+    assert.match(next, /Sir|control|challenge|testing|consequence/i)
+    assert.doesNotMatch(next, /Mommy|Goddess|Findom|tribute|payment/i)
+    assert.match(events, /"saved":true/)
+  }
 
   // A Creator Direction completion that repeats the draft verbatim is a failed rewrite and must not be displayed or saved.
   const mommyDraft = "Oh, my sweet boy, tell Mommy exactly what you were imagining."

@@ -114,13 +114,15 @@ test("production prompt defines paid kink semantics instead of flattening them i
   assert.match(prompt, /Do NOT reduce Findom to generic dominance/)
   assert.match(prompt, /tip for my attention/)
   assert.match(prompt, /Do NOT invent that the subscriber is wealthy, has paid before, has a spending history/)
-  assert.match(prompt, /FEMDOM \/ DOMME \/ GODDESS/)
+  assert.match(prompt, /FEMDOM \/ DOMME/)
+  assert.match(prompt, /- GODDESS:/)
   assert.match(prompt, /Do not automatically turn ordinary Femdom into Findom/)
   assert.match(prompt, /JOI \/ INSTRUCTION PLAY/)
   assert.match(prompt, /EDGING \/ ORGASM CONTROL \/ DENIAL \/ CHASTITY/)
   assert.match(prompt, /HUMILIATION \/ DEGRADATION \/ SPH/)
   assert.match(prompt, /CUCKOLD \/ CUCK \/ JEALOUSY FANTASY/)
-  assert.match(prompt, /MOMMY \/ SOFT DOMME \/ CAREGIVER DOMINANCE/)
+  assert.match(prompt, /MOMMY DOMME \/ CAREGIVER DOMINANCE/)
+  assert.match(prompt, /SOFT \/ GENTLE DOMME/)
   assert.match(prompt, /When multiple kinks are requested together, combine their defining mechanisms/)
 })
 
@@ -165,6 +167,14 @@ test("Creator Direction uses an isolated route and cannot enter subscriber conti
   assert.match(route, /revisedTurns\[revisedTurns\.length - 1\] = \{ role: "creator", text: visible \}/)
   assert.doesNotMatch(route, /deriveCreatorReplyContinuity/)
   assert.doesNotMatch(route, /role: "subscriber" as const, text: direction/)
+})
+
+test("grounding manifest contract requires final-visible lexical anchors rather than summaries", () => {
+  const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
+  assert.match(prompt, /`claim` is a visible-text anchor, not a summary/)
+  assert.match(prompt, /exact, non-empty, contiguous substring from the FINAL visible reply/)
+  assert.match(prompt, /Do not paraphrase it, change its words/)
+  assert.doesNotMatch(prompt, /copy the relevant words from the visible reply as closely as possible/)
 })
 
 test("workspace explicitly distinguishes subscriber messages from creator directions", () => {
