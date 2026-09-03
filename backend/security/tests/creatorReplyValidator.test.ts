@@ -1,10 +1,60 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { validateCreatorReplyCandidate } from "../../../lib/sirens-mind/creator-reply-validator"
-const valid=(segments:unknown[],sources:string[]=[])=>validateCreatorReplyCandidate("",{version:2,segments},sources)
-test("renders leading commands, questions, challenges, creator actions, and thoughts",()=>{for(const value of ["command_come_closer","command_answer","challenge_continue","ask_intent"])assert.equal(valid([{kind:"speech",value}]).ok,true);for(const [kind,value] of [["action","grin"],["thought","curious"]])assert.equal(valid([{kind,value}]).ok,true)})
-test("closed primitives cannot encode command compliance or mid-sentence subscriber action",()=>{assert.equal(valid([{kind:"speech",value:"command_come_closer"}]).text,"Come closer.");for(const text of ["You kneel for me.","I grin as you kneel in front of me."])assert.equal(valid([{kind:"action",value:"grin",text}]).code,"INVALID_SEGMENT")})
-test("creator action cannot smuggle environmental props",()=>{assert.equal(valid([{kind:"action",value:"wait",text:"I lean against the dumpster and wait."}]).code,"INVALID_SEGMENT")})
-test("free-form dialogue cannot smuggle world state, subscriber action, or motive",()=>{assert.equal(valid([{kind:"speech",value:"cautious",text:"The alley is empty, and I know you came here for me."}]).code,"INVALID_SEGMENT")})
-test("grounded evidence must equal one complete authoritative source and renders exactly",()=>{assert.equal(valid([{kind:"grounded",evidence:"dark alley"}],["dark alley"]).text,"dark alley");assert.equal(valid([{kind:"grounded",evidence:"dark alley",text:"A dumpster sits in the dark alley."}],["dark alley"]).code,"UNGROUNDED_REFERENCE");assert.equal(valid([{kind:"grounded",evidence:"dark alley"}],["We meet in a dark alley"]).code,"UNGROUNDED_REFERENCE")})
-test("rejects provider prose, malformed metadata, unknown primitives, and generated state",()=>{assert.equal(validateCreatorReplyCandidate("I invent prose.",{version:2,segments:[{kind:"speech",value:"greeting"}]},[]).code,"VISIBLE_CONTENT_FORBIDDEN");assert.equal(validateCreatorReplyCandidate("",{version:1,segments:[]},[]).code,"MALFORMED_METADATA");assert.equal(valid([{kind:"speech",value:"invented"}]).code,"INVALID_SEGMENT");assert.equal(validateCreatorReplyCandidate("",{version:2,segments:[{kind:"speech",value:"greeting"}],state:{}},[]).code,"MALFORMED_METADATA")})
+import type { CreatorReplyAuthoritySource } from "../../../lib/sirens-mind/creator-reply"
+
+const sources: CreatorReplyAuthoritySource[] = [
+  { id: "profile.key_notes", kind: "key_notes", text: "35, Denver" },
+  { id: "current.inbound", kind: "current_inbound", text: "We are in a dark alley. I kneel after you tell me to." },
+]
+const valid = (text: string, claims: unknown[] = [], authority = sources) =>
+  validateCreatorReplyCandidate(text, { version: 3, claims }, authority)
+
+test("accepts natural varied creator-owned prose and strong commands", () => {
+  for (const text of [
+    "Come closer.",
+    "Answer me. I want to hear you say it plainly.",
+    "I grin and take one slow step closer to you. Your move.",
+    "Careful. I might decide I like testing you.",
+  ]) assert.equal(valid(text).ok, true)
+})
+
+test("distinguishes creator commands from invented subscriber compliance anywhere in the reply", () => {
+  assert.equal(valid("Come closer.").ok, true)
+  assert.equal(valid("I grin as you kneel in front of me.").code, "SUBSCRIBER_PUPPETING")
+  assert.equal(valid("I wait, watching while you come closer.").code, "SUBSCRIBER_PUPPETING")
+  assert.equal(valid("Your hands shake.").code, "SUBSCRIBER_PUPPETING")
+})
+
+test("allows subscriber action only when the exact visible claim is tied to authorized evidence", () => {
+  const result = valid("I grin as you kneel in front of me.", [
+    { claim: "you kneel", source_id: "current.inbound", evidence: "I kneel" },
+  ])
+  assert.equal(result.ok, true)
+})
+
+test("natural paraphrase is allowed while evidence remains exact source text", () => {
+  const result = valid("You told me you're in Denver, and I remember.", [
+    { claim: "you're in Denver", source_id: "profile.key_notes", evidence: "Denver" },
+  ])
+  assert.equal(result.ok, true)
+})
+
+test("rejects unknown sources, invented evidence, claims absent from visible prose, and extra metadata", () => {
+  assert.equal(valid("I remember Denver.", [{ claim: "Denver", source_id: "missing", evidence: "Denver" }]).code, "UNKNOWN_SOURCE")
+  assert.equal(valid("I remember Denver.", [{ claim: "Denver", source_id: "profile.key_notes", evidence: "Boston" }]).code, "UNGROUNDED_EVIDENCE")
+  assert.equal(valid("I remember Denver.", [{ claim: "Boston", source_id: "profile.key_notes", evidence: "Denver" }]).code, "CLAIM_NOT_VISIBLE")
+  assert.equal(validateCreatorReplyCandidate("Hello.", { version: 3, claims: [], state: {} }, sources).code, "MALFORMED_METADATA")
+})
+
+test("rejects malformed protocol, hidden leakage, role inversion, and unsupported obvious world props", () => {
+  assert.equal(validateCreatorReplyCandidate("Hello.", { version: 2, claims: [] }, sources).code, "MALFORMED_METADATA")
+  assert.equal(validateCreatorReplyCandidate("<<<SIRENS_FORGE_INTERNAL_META_V1>>>", { version: 3, claims: [] }, sources).code, "SENTINEL_LEAK")
+  assert.equal(valid("The creator steps closer.").code, "ROLE_INVERSION")
+  assert.equal(valid("I lean against the dumpster and wait.").code, "UNSUPPORTED_WORLD_REFERENCE")
+})
+
+test("does not treat creator intent involving the subscriber as invented subscriber state", () => {
+  for (const text of ["I want your hands on me.", "I step closer to you.", "When you come closer, I'll decide what happens next."])
+    assert.equal(valid(text).ok, true)
+})
