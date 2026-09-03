@@ -199,6 +199,10 @@ try {
   assert.match(directionMessages, /CREATOR DIRECTION REWRITE TASK/)
   assert.match(directionMessages, /mandatory rewrite instruction/)
   assert.match(directionMessages, /Make it more dominant, but not mean\./)
+  assert.match(directionMessages, /CREATOR_DIRECTION \(EXECUTE THIS\)/)
+  assert.match(directionMessages, /DRAFT_TO_REVISE \(REFERENCE TEXT ONLY/)
+  assert.match(directionMessages, /very short or fragmentary creator_direction as a complete instruction/)
+  assert.match(directionMessages, /measurable creator constraints/)
   assert.match(directionMessages, /draft_to_revise/)
   assert.match(directionMessages, /What exactly is distracting you\?/)
   assert.ok(!providerRequest.messages.some((message: any) => message.role === "assistant" && String(message.content).includes("What exactly is distracting you?")))
@@ -206,6 +210,22 @@ try {
   assert.doesNotMatch(directionAuthority, /Make it more dominant, but not mean\./)
   assert.doesNotMatch(directionAuthority, /current\.inbound/)
   assert.match(directionAuthority, /I can't stop thinking about you tonight\./)
+
+  // Terse measurable directions remain mandatory and explicit in provider construction.
+  providerVisible = "Two short lines.\nStill concise."
+  providerMetadata = { version: 3, claims: [] }
+  providerCalls = 0
+  saved = null
+  response = await invokeDirection({ message: "2-3 lines max." })
+  events = await response.text()
+  assert.equal(providerCalls, 1)
+  assert.ok(saved)
+  const terseDirectionMessages = JSON.stringify(providerRequest.messages)
+  assert.match(terseDirectionMessages, /2-3 lines max\./)
+  assert.match(terseDirectionMessages, /Brevity never makes the direction optional or lower priority/)
+  assert.match(terseDirectionMessages, /satisfy the constraint literally/)
+  assert.match(terseDirectionMessages, /visible reply itself to fit within that line limit/)
+  assert.match(events, /event: delta/)
 
   // A Creator Direction completion that repeats the draft verbatim is a failed rewrite and must not be displayed or saved.
   const mommyDraft = "Oh, my sweet boy, tell Mommy exactly what you were imagining."
