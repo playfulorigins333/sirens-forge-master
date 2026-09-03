@@ -12,8 +12,9 @@ let providerRequest: any
 let saved: any
 let saveFailure = ""
 let providerVisible = "It’s good to hear from you."
-let providerMetadata: any = { version: 3, claims: [] }
+let providerMetadata: any = { version: 4, claims: [] }
 let recentTurns: Array<{ role: "subscriber" | "creator"; text: string }> = [{ role: "subscriber", text: "Prior subscriber fact" }, { role: "creator", text: "You city types" }]
+let keyNotes = "35, Denver"
 const state = {
   version: 1 as const,
   creator_persona: "",
@@ -31,7 +32,7 @@ mock.module(new URL("../../../lib/sirens-mind/creator-reply-service.ts", import.
     if (s !== SUBSCRIBER || c !== CONVERSATION) throw new Error("NOT_FOUND")
     return {
       workspaceId: "w",
-      subscriber: { id: s, display_name: "Mike", platform: "OnlyFans", platform_handle: "mike", key_notes: "35, Denver" },
+      subscriber: { id: s, display_name: "Mike", platform: "OnlyFans", platform_handle: "mike", key_notes: keyNotes },
       conversation: { id: c, thread_id: "db-thread", revision: 4 },
       checkpoint: { version: 1, label: "Lodge", continuity: state, recent_turns: recentTurns },
     }
@@ -91,7 +92,7 @@ try {
   assert.match(system, /STRICT SUBSCRIBER GROUNDING/)
   assert.match(system, /STRICT SCENARIO FIDELITY/)
   assert.match(system, /natural ready-to-send creator reply/)
-  assert.match(system, /"version":3,"claims"/)
+  assert.match(system, /"version":4,"claims"/)
   for (const genericBaseConcept of ["You are a PROMPT ENGINE", "creative director", "infer safely whenever quality will remain high", "CAPABILITY DEPTH TIERS", "lighting / environment"])
     assert.doesNotMatch(system, new RegExp(genericBaseConcept, "i"))
   assert.equal(providerRequest.model, "nousresearch/hermes-4-405b")
@@ -132,7 +133,7 @@ try {
   delete process.env.SIRENS_MIND_CREATOR_REPLY_ULTRA_MODEL
 
   providerVisible = "I grin as you kneel in front of me."
-  providerMetadata = { version: 3, claims: [] }
+  providerMetadata = { version: 4, claims: [] }
   providerCalls = 0
   saved = null
   response = await invoke()
@@ -143,7 +144,7 @@ try {
   assert.match(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
 
   providerVisible = "You reminded me about that old lodge fact."
-  providerMetadata = { version: 3, claims: [{ claim: "old lodge fact", source_id: "continuity.subscriber.0", evidence: "Old lodge fact" }] }
+  providerMetadata = { version: 4, claims: [{ claim: "old lodge fact", source_id: "continuity.subscriber.0" }] }
   providerCalls = 0
   saved = null
   response = await invoke()
@@ -153,7 +154,7 @@ try {
   assert.match(events, /event: delta/)
 
   providerVisible = "It’s good to hear from you."
-  providerMetadata = { version: 3, claims: [] }
+  providerMetadata = { version: 4, claims: [] }
   saveFailure = "CHECKPOINT_CONFLICT"
   providerCalls = 0
   response = await invoke()
@@ -180,7 +181,7 @@ try {
   // Creator Direction revises the latest creator draft without adding a subscriber turn or changing continuity.
   recentTurns = [{ role: "subscriber", text: "I can't stop thinking about you tonight." }, { role: "creator", text: "What exactly is distracting you?" }]
   providerVisible = "Tell me exactly what has you so distracted. I want the honest answer."
-  providerMetadata = { version: 3, claims: [] }
+  providerMetadata = { version: 4, claims: [] }
   providerCalls = 0
   saveFailure = ""
   saved = null
@@ -213,7 +214,7 @@ try {
 
   // Terse measurable directions remain mandatory and explicit in provider construction.
   providerVisible = "Two short lines.\nStill concise."
-  providerMetadata = { version: 3, claims: [] }
+  providerMetadata = { version: 4, claims: [] }
   providerCalls = 0
   saved = null
   response = await invokeDirection({ message: "2-3 lines max." })
@@ -229,9 +230,10 @@ try {
 
   // Exact hard-switch canary uses one call, keeps raw direction at user level, validates, and replaces the checkpoint draft.
   const canary = "Switch the creator to a male Brat Tamer. Confident, amused, teasing, and firmly in control. Make the Brat Tamer dynamic recognizable through challenge, correction, playful consequences, and handling defiance. Drop the Mommy Domme, Goddess, and Findomme dynamics unless the subscriber actually established one of them. Do not invent any subscriber action, feeling, preference, role, or prior behavior."
+  keyNotes = "Subscriber is female. Pronouns: she/her."
   recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: "Send your Goddess a tribute." }]
-  providerVisible = "Look at me and listen to Sir. Think you can test my patience? Try, and I'll choose a playful consequence."
-  providerMetadata = { version: 3, claims: [] }
+  providerVisible = "Good girl. Look at me and listen to Sir. Think you can test my patience? Try, and I'll choose a playful consequence. Tell me what you're trying to do."
+  providerMetadata = { version: 4, claims: [{ claim: "Good girl", source_id: "profile.key_notes" }] }
   providerCalls = 0
   saved = null
   response = await invokeDirection({ message: canary })
@@ -241,12 +243,14 @@ try {
   assert.equal(saved.value.recent_turns.at(-1).text, providerVisible)
   assert.doesNotMatch(providerVisible, /Mommy|Goddess|Findom|tribute|payment/i)
   assert.match(providerVisible, /Sir|test|playful consequence/i)
+  assert.match(providerVisible, /Good girl/)
   assert.match(events, /"saved":true/)
   assert.equal(providerRequest.messages.filter((message: any) => message.role === "system").length, 1)
   assert.doesNotMatch(providerRequest.messages[0].content, /Switch the creator to a male Brat Tamer/)
   assert.equal(providerRequest.messages.at(-1).role, "user")
   assert.match(providerRequest.messages.at(-1).content, /Switch the creator to a male Brat Tamer/)
   assert.doesNotMatch(JSON.stringify(providerRequest.messages), /Send your Goddess a tribute/)
+  assert.match(JSON.stringify(providerRequest.messages), /Subscriber is female\. Pronouns: she\/her\./)
 
   // Tone/continuation/intensity directions preserve the active role/style through the draft authority.
   for (const [direction, next] of [
@@ -256,6 +260,7 @@ try {
   ] as const) {
     recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: providerVisible }]
     providerVisible = next
+    providerMetadata = { version: 4, claims: [] }
     providerCalls = 0
     saved = null
     response = await invokeDirection({ message: direction })
@@ -269,10 +274,10 @@ try {
   }
 
   // A Creator Direction completion that repeats the draft verbatim is a failed rewrite and must not be displayed or saved.
-  const mommyDraft = "Oh, my sweet boy, tell Mommy exactly what you were imagining."
+  const mommyDraft = "Oh, my sweet thing, tell Mommy exactly what you were imagining."
   recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: mommyDraft }]
   providerVisible = mommyDraft
-  providerMetadata = { version: 3, claims: [] }
+  providerMetadata = { version: 4, claims: [] }
   providerCalls = 0
   saved = null
   response = await invokeDirection({ message: "Rewrite this with confident Findomme energy." })
@@ -294,7 +299,7 @@ try {
   // Direction grounding rejection is fail-closed: one provider call, no delta, no checkpoint save.
   recentTurns = [{ role: "subscriber", text: "I'm listening." }, { role: "creator", text: "Good." }]
   providerVisible = "I grin as you kneel in front of me."
-  providerMetadata = { version: 3, claims: [] }
+  providerMetadata = { version: 4, claims: [] }
   providerCalls = 0
   saved = null
   response = await invokeDirection({ message: "Make it stronger." })
@@ -306,7 +311,7 @@ try {
 
   // Direction checkpoint conflicts never trigger a hidden retry or second provider request.
   providerVisible = "Answer me clearly."
-  providerMetadata = { version: 3, claims: [] }
+  providerMetadata = { version: 4, claims: [] }
   providerCalls = 0
   saved = null
   saveFailure = "CHECKPOINT_CONFLICT"

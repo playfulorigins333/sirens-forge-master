@@ -8,7 +8,7 @@ const sources: CreatorReplyAuthoritySource[] = [
   { id: "current.inbound", kind: "current_inbound", text: "We are in a dark alley. I kneel after you tell me to." },
 ]
 const valid = (text: string, claims: unknown[] = [], authority = sources) =>
-  validateCreatorReplyCandidate(text, { version: 3, claims }, authority)
+  validateCreatorReplyCandidate(text, { version: 4, claims }, authority)
 
 test("accepts natural varied creator-owned prose and strong commands", () => {
   for (const text of [
@@ -51,62 +51,43 @@ test("still rejects declarative invented subscriber actions, preferences, and st
   ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
 })
 
-test("allows subscriber action only when the exact visible claim is tied to authorized evidence", () => {
+test("allows subscriber action only when the exact visible claim selects an authoritative source", () => {
   const result = valid("I grin as you kneel in front of me.", [
-    { claim: "you kneel", source_id: "current.inbound", evidence: "I kneel" },
+    { claim: "you kneel", source_id: "current.inbound" },
   ])
   assert.equal(result.ok, true)
 })
 
-test("natural paraphrase is allowed while evidence remains exact source text", () => {
+test("natural paraphrase is allowed through a stable server-built authority reference", () => {
   const result = valid("You told me you're in Denver, and I remember.", [
-    { claim: "you're in Denver", source_id: "profile.key_notes", evidence: "Denver" },
+    { claim: "you're in Denver", source_id: "profile.key_notes" },
   ])
   assert.equal(result.ok, true)
 })
 
 test("mechanical punctuation, quote, case, and whitespace differences do not reject an otherwise visible claim", () => {
   const result = valid("You told me you’re in Denver — and I remember.", [
-    { claim: "YOU TOLD ME YOU'RE IN DENVER, AND I REMEMBER", source_id: "profile.key_notes", evidence: "Denver" },
+    { claim: "YOU TOLD ME YOU'RE IN DENVER, AND I REMEMBER", source_id: "profile.key_notes" },
   ])
   assert.equal(result.ok, true)
 })
 
-test("mechanical punctuation quote case and whitespace differences are also allowed in source evidence", () => {
-  const authority: CreatorReplyAuthoritySource[] = [
-    { id: "current.inbound", kind: "current_inbound", text: "You said, “I’m ready — tell me what you want.”" },
-  ]
-  const result = valid("You said you're ready.", [
-    { claim: "you're ready", source_id: "current.inbound", evidence: "YOU SAID \"I'M READY, TELL ME WHAT YOU WANT\"" },
-  ], authority)
-  assert.equal(result.ok, true)
-})
-
-test("normalized evidence matching remains lexical rather than semantic", () => {
-  const authority: CreatorReplyAuthoritySource[] = [
-    { id: "current.inbound", kind: "current_inbound", text: "You said, “I’m ready — tell me what you want.”" },
-  ]
-  assert.equal(valid("You said you're ready.", [
-    { claim: "you're ready", source_id: "current.inbound", evidence: "I am eager to please you" },
-  ], authority).code, "UNGROUNDED_EVIDENCE")
-})
-
 test("normalized claim matching remains lexical rather than semantic", () => {
   assert.equal(valid("You told me you're in Denver.", [
-    { claim: "You said you live in Colorado", source_id: "profile.key_notes", evidence: "Denver" },
+    { claim: "You said you live in Colorado", source_id: "profile.key_notes" },
   ]).code, "CLAIM_NOT_VISIBLE")
 })
 
-test("rejects unknown sources, invented evidence, claims absent from visible prose, and extra metadata", () => {
-  assert.equal(valid("I remember Denver.", [{ claim: "Denver", source_id: "missing", evidence: "Denver" }]).code, "UNKNOWN_SOURCE")
-  assert.equal(valid("I remember Denver.", [{ claim: "Denver", source_id: "profile.key_notes", evidence: "Boston" }]).code, "UNGROUNDED_EVIDENCE")
-  assert.equal(valid("I remember Denver.", [{ claim: "Boston", source_id: "profile.key_notes", evidence: "Denver" }]).code, "CLAIM_NOT_VISIBLE")
-  assert.equal(validateCreatorReplyCandidate("Hello.", { version: 3, claims: [], state: {} }, sources).code, "MALFORMED_METADATA")
+test("rejects unknown sources, legacy evidence fields, claims absent from visible prose, and extra metadata", () => {
+  assert.equal(valid("I remember Denver.", [{ claim: "Denver", source_id: "missing" }]).code, "UNKNOWN_SOURCE")
+  assert.equal(valid("I remember Denver.", [{ claim: "Denver", source_id: "profile.key_notes", evidence: "Denver" }]).code, "INVALID_CLAIM")
+  assert.equal(valid("I remember Denver.", [{ claim: "Boston", source_id: "profile.key_notes" }]).code, "CLAIM_NOT_VISIBLE")
+  assert.equal(validateCreatorReplyCandidate("Hello.", { version: 4, claims: [], state: {} }, sources).code, "MALFORMED_METADATA")
 })
 
 test("rejects malformed protocol, hidden leakage, role inversion, and unsupported obvious world props", () => {
   assert.equal(validateCreatorReplyCandidate("Hello.", { version: 2, claims: [] }, sources).code, "MALFORMED_METADATA")
-  assert.equal(validateCreatorReplyCandidate("<<<SIRENS_FORGE_INTERNAL_META_V1>>>", { version: 3, claims: [] }, sources).code, "SENTINEL_LEAK")
+  assert.equal(validateCreatorReplyCandidate("<<<SIRENS_FORGE_INTERNAL_META_V1>>>", { version: 4, claims: [] }, sources).code, "SENTINEL_LEAK")
   assert.equal(valid("The creator steps closer.").code, "ROLE_INVERSION")
   assert.equal(valid("I lean against the dumpster and wait.").code, "UNSUPPORTED_WORLD_REFERENCE")
 })
@@ -114,4 +95,38 @@ test("rejects malformed protocol, hidden leakage, role inversion, and unsupporte
 test("does not treat creator intent involving the subscriber as invented subscriber state", () => {
   for (const text of ["I want your hands on me.", "I step closer to you.", "When you come closer, I'll decide what happens next."])
     assert.equal(valid(text).ok, true)
+})
+
+test("rejects unsupported declarative subscriber motives while allowing questions, speculation, and conditions", () => {
+  for (const text of [
+    "I see you're trying to be a good boy for me tonight.",
+    "You're trying to impress me.",
+    "You hope I'll go easy on you.",
+    "You plan to behave.",
+    "You are hoping to win me over.",
+    "You intend to test me.",
+    "You're intending to distract me.",
+    "You're planning to behave.",
+    "You mean to provoke me.",
+    "You want to impress me.",
+  ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
+
+  for (const text of [
+    "Are you trying to distract me?",
+    "Maybe you're trying to distract me.",
+    "I wonder if you're trying to test me.",
+    "If you're trying to test me, keep going.",
+    "Tell me what you're trying to do.",
+    "Should you decide to test me, you'll find out what happens.",
+  ]) assert.equal(valid(text).ok, true, text)
+})
+
+test("requires subscriber authority for factual gendered labels", () => {
+  for (const text of ["Good boy.", "Good girl.", "You're a man.", "You're a woman.", "My princess."])
+    assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
+
+  const femaleNotes: CreatorReplyAuthoritySource[] = [
+    { id: "profile.key_notes", kind: "key_notes", text: "Subscriber is female. Pronouns: she/her." },
+  ]
+  assert.equal(valid("Good girl.", [{ claim: "Good girl", source_id: "profile.key_notes" }], femaleNotes).ok, true)
 })

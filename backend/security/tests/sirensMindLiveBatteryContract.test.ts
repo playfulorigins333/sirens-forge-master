@@ -110,7 +110,7 @@ test("Creator Direction manifest discipline keeps creator-owned role style comma
   const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
   assert.match(prompt, /CREATOR DIRECTION MANIFEST DISCIPLINE/)
   assert.match(prompt, /MUST NOT appear in the hidden claims array/)
-  assert.match(prompt, /output exactly `\{\"version\":3,\"claims\":\[\]\}`/)
+  assert.match(prompt, /output exactly `\{\"version\":4,\"claims\":\[\]\}`/)
   assert.match(prompt, /Do not invent, paraphrase, or manufacture evidence to justify creator-owned language/)
   assert.match(prompt, /You resisted me earlier.*requires a valid claim/)
 })
