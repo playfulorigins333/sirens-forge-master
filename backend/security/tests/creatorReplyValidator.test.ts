@@ -26,6 +26,31 @@ test("distinguishes creator commands from invented subscriber compliance anywher
   assert.equal(valid("Your hands shake.").code, "SUBSCRIBER_PUPPETING")
 })
 
+test("allows conversational questions and requests without treating them as subscriber puppeting", () => {
+  for (const text of [
+    "You want to know what I want? Good. Listen carefully.",
+    "What do you want from me? Say it plainly.",
+    "Tell me what you want, and I'll decide what happens next.",
+    "Do you feel nervous? Tell me why.",
+    "Tell me how you feel before I decide.",
+    "I want to know what you want before I choose the next move.",
+    "Are you kneeling? Answer me.",
+    "Are your hands shaking?",
+  ]) assert.equal(valid(text).ok, true, text)
+})
+
+test("still rejects declarative invented subscriber actions, preferences, and states", () => {
+  for (const text of [
+    "You want this.",
+    "You think I'm going to make this easy.",
+    "You feel nervous.",
+    "You decide to stay.",
+    "You kneel in front of me.",
+    "You're nervous.",
+    "Your hands are shaking.",
+  ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
+})
+
 test("allows subscriber action only when the exact visible claim is tied to authorized evidence", () => {
   const result = valid("I grin as you kneel in front of me.", [
     { claim: "you kneel", source_id: "current.inbound", evidence: "I kneel" },
