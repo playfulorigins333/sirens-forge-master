@@ -4,7 +4,6 @@ import type { CreatorReplyAuthoritySource } from "./creator-reply"
 export const CREATOR_REPLY_MAX_VISIBLE_CHARS = 12_000
 const CREATOR_REPLY_MAX_CLAIMS = 32
 const CREATOR_REPLY_MAX_CLAIM_CHARS = 1_500
-const CREATOR_REPLY_MAX_EVIDENCE_CHARS = 1_500
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/
 
 export type CreatorReplyViolation =
@@ -24,13 +23,14 @@ export type CreatorReplyViolation =
 export type CreatorReplyClaim = {
   claim: string
   source_id: string
-  evidence: string
 }
 
 type GroundedRange = { start: number; end: number }
 
 const SUBSCRIBER_ACTION_OR_STATE = /\byou\s+(?:kneel(?:ed|s|ing)?|came|come(?:s|ing)?|moved?|moves|moving|walk(?:ed|s|ing)?|step(?:ped|s|ping)?|stand(?:s|ing)?|stood|sit(?:s|ting)?|sat|lean(?:ed|s|ing)?|press(?:ed|es|ing)?|reach(?:ed|es|ing)?|turn(?:ed|s|ing)?|freeze|froze|freezes|freezing|flinch(?:ed|es|ing)?|trembl(?:e|ed|es|ing)|shiver(?:ed|s|ing)?|gasp(?:ed|s|ing)?|moan(?:ed|s|ing)?|smil(?:e|ed|es|ing)|grin(?:ned|s|ning)?|nod(?:ded|s|ding)?|shake|shakes|shook|shaking|stare(?:d|s|ing)?|watch(?:ed|es|ing)?|wait(?:ed|s|ing)?|stay(?:ed|s|ing)?|look(?:ed|s|ing)?|feel(?:s|ing|t)?|think(?:s|ing)?|want(?:ed|s|ing)?|decid(?:e|ed|es|ing))\b/gi
 const SUBSCRIBER_PROGRESSIVE_STATE = /\byou(?:'re|\s+are|\s+were)\s+(?:standing|sitting|kneeling|walking|moving|wearing|shivering|trembling|gasping|smiling|grinning|waiting|staying|leaning|pressed|nervous|afraid|angry|excited|aroused|drunk|intoxicated|cold|warm|wet|hurt|injured)\b/gi
+const SUBSCRIBER_MOTIVE_OR_INTENT = /\byou(?:'re|\s+are)\s+(?:trying|hoping|intending|planning)\s+to\b|\byou\s+(?:intend|plan|mean|want)\s+to\b|\byou\s+hope\b/gi
+const SUBSCRIBER_GENDERED_IDENTITY = /\b(?:you(?:'re|\s+are)\s+(?:a\s+)?(?:boy|girl|man|woman|princess)|(?:good|bad|naughty)\s+(?:boy|girl)|(?:my|little)\s+(?:boy|girl|man|woman|princess))\b/gi
 const SUBSCRIBER_POSSESSIVE_STATE = /\byour\s+(?:body|hands?|arms?|legs?|eyes?|face|hair|mouth|lips?|clothes?|clothing|coat|shirt|pants|dress|skirt|heels?|shoes?|boots?|posture|expression|breathing|breath|voice)\s+(?:is|are|was|were|look(?:s|ed)?|feel(?:s|t)?|move(?:s|d)?|shake(?:s|n)?|shiver(?:s|ed)?|tremble(?:s|d)?|glisten(?:s|ed)?|drip(?:s|ped)?|press(?:es|ed)?|tighten(?:s|ed)?|relax(?:es|ed)?|strike(?:s)?|hit(?:s)?|click(?:s|ed)?)\b|\byour\s+(?:wet|cold|warm|shaking|shivering|trembling|flushed|pale|bare|naked|dressed)\s+(?:body|hands?|arms?|legs?|eyes?|face|hair|mouth|lips?|clothes?|clothing|coat|shirt|pants|dress|skirt|heels?|shoes?|boots?)\b/gi
 const THIRD_PERSON_SUBSCRIBER = /\bthe subscriber\s+(?:kneels?|moves?|walks?|stands?|sits?|leans?|reaches?|turns?|shivers?|gasps?|smiles?|grins?|nods?|waits?|stays?|looks?|feels?|thinks?|wants?|decides?)\b/gi
 const THIRD_PERSON_CREATOR = /\b(?:the creator|creator)\s+(?:smiles?|grins?|steps?|walks?|moves?|leans?|reaches?|turns?|waits?|speaks?|says?|looks?|watches?|approaches?|emerges?)\b/gi
@@ -74,22 +74,6 @@ function claimRanges(visible: string, claim: string): GroundedRange[] {
   return ranges
 }
 
-/**
- * Evidence is also instructed to copy source text. Apply the same narrow lexical
- * normalization used for visible claims so harmless provider changes to quote style,
- * punctuation, case, or whitespace do not fail a grounded reply. This intentionally
- * does not allow synonyms, reordered words, omitted lexical content, or semantic fuzzy
- * matching: the same evidence words must appear in the same order in the authority source.
- */
-function sourceContainsEvidence(sourceText: string, evidence: string) {
-  if (sourceText.includes(evidence)) return true
-  const words = evidence.match(/[\p{L}\p{N}]+/gu) ?? []
-  if (!words.length) return false
-  const separator = "[\\s\\p{P}\\p{S}]+"
-  const pattern = new RegExp(words.map(escapeRegex).join(separator), "iu")
-  return pattern.test(sourceText)
-}
-
 function collectGroundedRanges(visible: string, claims: CreatorReplyClaim[]): GroundedRange[] {
   return claims.flatMap(({ claim }) => claimRanges(visible, claim))
 }
@@ -99,8 +83,9 @@ function rangeIsGrounded(start: number, end: number, grounded: GroundedRange[]) 
 }
 
 function looksConditionalPrefix(visible: string, start: number) {
-  const prefix = visible.slice(Math.max(0, start - 18), start).toLowerCase()
-  return /\b(?:if|when|once|unless|until|should)\s*$/.test(prefix)
+  const prefix = visible.slice(Math.max(0, start - 40), start).toLowerCase()
+  return /\b(?:if|when|once|unless|until|should|maybe|perhaps)\s*$/.test(prefix)
+    || /\bi\s+(?:wonder|suspect)\s+(?:whether|if)\s*$/.test(prefix)
 }
 
 function looksInterrogativeContext(visible: string, start: number, end: number) {
@@ -144,7 +129,7 @@ export function validateCreatorReplyCandidate(
 
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
   const raw = metadata as Record<string, unknown>
-  if (raw.version !== 3 || !exactKeys(raw, ["version", "claims"]) || !Array.isArray(raw.claims) || raw.claims.length > CREATOR_REPLY_MAX_CLAIMS) {
+  if (raw.version !== 4 || !exactKeys(raw, ["version", "claims"]) || !Array.isArray(raw.claims) || raw.claims.length > CREATOR_REPLY_MAX_CLAIMS) {
     return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
   }
 
@@ -156,27 +141,26 @@ export function validateCreatorReplyCandidate(
   for (const item of raw.claims) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     const claimRaw = item as Record<string, unknown>
-    if (!exactKeys(claimRaw, ["claim", "source_id", "evidence"])) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
+    if (!exactKeys(claimRaw, ["claim", "source_id"])) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     const claim = typeof claimRaw.claim === "string" ? claimRaw.claim.trim() : ""
     const sourceId = typeof claimRaw.source_id === "string" ? claimRaw.source_id.trim() : ""
-    const evidence = typeof claimRaw.evidence === "string" ? claimRaw.evidence.trim() : ""
-    if (!claim || !sourceId || !evidence || claim.length > CREATOR_REPLY_MAX_CLAIM_CHARS || evidence.length > CREATOR_REPLY_MAX_EVIDENCE_CHARS || CONTROL.test(claim) || CONTROL.test(sourceId) || CONTROL.test(evidence)) {
+    if (!claim || !sourceId || claim.length > CREATOR_REPLY_MAX_CLAIM_CHARS || CONTROL.test(claim) || CONTROL.test(sourceId)) {
       return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     }
     if (!claimRanges(text, claim).length) return { ok: false as const, code: "CLAIM_NOT_VISIBLE" as CreatorReplyViolation }
-    const source = sourceById.get(sourceId)
-    if (!source) return { ok: false as const, code: "UNKNOWN_SOURCE" as CreatorReplyViolation }
-    if (!sourceContainsEvidence(source.text, evidence)) return { ok: false as const, code: "UNGROUNDED_EVIDENCE" as CreatorReplyViolation }
-    const identity = `${claim}\u0000${sourceId}\u0000${evidence}`
+    if (!sourceById.has(sourceId)) return { ok: false as const, code: "UNKNOWN_SOURCE" as CreatorReplyViolation }
+    const identity = `${claim}\u0000${sourceId}`
     if (seenClaims.has(identity)) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     seenClaims.add(identity)
-    claims.push({ claim, source_id: sourceId, evidence })
+    claims.push({ claim, source_id: sourceId })
   }
 
   const grounded = collectGroundedRanges(text, claims)
   if (
     firstUngroundedMatch(text, SUBSCRIBER_ACTION_OR_STATE, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_PROGRESSIVE_STATE, grounded, true, true) ||
+    firstUngroundedMatch(text, SUBSCRIBER_MOTIVE_OR_INTENT, grounded, true, true) ||
+    firstUngroundedMatch(text, SUBSCRIBER_GENDERED_IDENTITY, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_POSSESSIVE_STATE, grounded, false, true) ||
     firstUngroundedMatch(text, THIRD_PERSON_SUBSCRIBER, grounded)
   ) {

@@ -1,0 +1,32 @@
+name: Phase 6F Creator Reply
+
+on:
+  pull_request:
+    paths:
+      - "app/api/sirens-mind/**"
+      - "components/chat/**"
+      - "lib/sirens-mind/**"
+      - "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"
+      - "backend/security/tests/*CreatorReply*"
+      - "backend/security/tests/creatorReply*"
+      - "package.json"
+      - ".github/workflows/phase6f-creator-reply.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  creator-reply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test:phase6f-creator-reply
+      - run: npm run test:phase6f2-creator-reply-subscribers
+      - run: npx tsc --noEmit
+      - run: npm run build
