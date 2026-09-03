@@ -1,6 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { creatorDomStyleRequirement, normalizedCreatorDirection } from "../../../lib/sirens-mind/chat-construction"
+import {
+  creatorDomStyleRequirement,
+  creatorReplyDirectionMessage,
+  creatorReplyDirectionSystemMessage,
+  normalizedCreatorDirection,
+} from "../../../lib/sirens-mind/chat-construction"
 
 test("named Dom styles resolve to distinct behavioral requirements", () => {
   const findom = creatorDomStyleRequirement("Rewrite this with confident Findomme energy.")
@@ -46,4 +51,22 @@ test("named Dom style is promoted into the active Creator Direction requirement"
   assert.match(normalized, /Rewrite this with confident Findomme energy\./)
   assert.match(normalized, /ACTIVE DOM STYLE: FINDOMME \/ FINANCIAL DOMINATION/)
   assert.match(normalized, /financial power exchange materially recognizable/)
+})
+
+test("tone-only Creator Direction preserves the active role persona kink and Dom style", () => {
+  const direction = "Keep the control but make it warmer and more playful."
+  assert.equal(creatorDomStyleRequirement(direction), "")
+
+  const system = creatorReplyDirectionSystemMessage(direction)
+  assert.match(system, /supersedes ONLY the creator-side dimensions it explicitly changes/)
+  assert.match(system, /Preserve the current creator role, persona, kink\/dynamic, and specialized Dom style/)
+  assert.match(system, /tone-only rewrite must keep the existing specialized Dom style recognizable/)
+
+  const draft = "Start by sending a tribute that shows me how serious you are. Then we'll see if you've earned more of my attention."
+  const task = creatorReplyDirectionMessage(direction, draft)
+  assert.match(task, /Preserve the draft's creator role, persona, kink\/dynamic, and specialized Dom style/)
+  assert.match(task, /NOT a request to change persona, role, kink, or Dom style/)
+  assert.match(task, /CURRENT CREATOR-STYLE AUTHORITY/)
+  assert.match(task, /tribute/)
+  assert.match(task, /unrequested creator role\/persona\/kink\/Dom-style dimensions were preserved/)
 })
