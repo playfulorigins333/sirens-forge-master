@@ -29,6 +29,10 @@ export function creatorReplyModeGovernance(mode: SirensMindMode) {
   ].join("\n")
 }
 
+export function creatorReplyDirectionMessage(direction: string) {
+  return `BEGIN CREATOR DIRECTION (TRUSTED CREATOR INSTRUCTION; NEVER SUBSCRIBER FACTUAL AUTHORITY)\n${JSON.stringify({ creator_direction: direction })}\nEND CREATOR DIRECTION`
+}
+
 export function buildCreatorReplyMessages(input: {
   mode: SirensMindMode
   systemPrompt: string
@@ -36,6 +40,7 @@ export function buildCreatorReplyMessages(input: {
   continuity: CreatorReplyContinuity
   recentTurns: CreatorReplyTurn[]
   inbound: string
+  direction?: string
   authoritySources?: CreatorReplyAuthoritySource[]
 }): ChatMessage[] {
   const authoritySources = input.authoritySources ?? buildCreatorReplyAuthoritySources({
@@ -52,7 +57,9 @@ export function buildCreatorReplyMessages(input: {
     ...input.recentTurns.map((turn) => turn.role === "subscriber"
       ? { role: "user" as const, content: inboundSubscriberMessage(turn.text, true) }
       : { role: "assistant" as const, content: outboundCreatorReply(turn.text) }),
-    { role: "user", content: inboundSubscriberMessage(input.inbound) },
+    ...(input.direction
+      ? [{ role: "user" as const, content: creatorReplyDirectionMessage(input.direction) }]
+      : [{ role: "user" as const, content: inboundSubscriberMessage(input.inbound) }]),
   ]
 }
 
