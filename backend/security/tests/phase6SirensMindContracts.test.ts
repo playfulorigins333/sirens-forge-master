@@ -117,7 +117,8 @@ try {
   const [chat, input, generator, page] = await Promise.all([
     readFile("components/chat/ChatUI.tsx", "utf8"), readFile("components/chat/ChatInput.tsx", "utf8"), readFile("app/generate/page.tsx", "utf8"), readFile("app/sirens-mind/page.tsx", "utf8"),
   ])
-  assert.match(chat, /fetch\("\/api\/sirens-mind\/chat"/); assert.doesNotMatch(chat, /\/api\/nsfw-gpt\/headless/)
+  assert.match(chat, /const endpoint = creatorDirection \? "\/api\/sirens-mind\/creator-reply-direction" : "\/api\/sirens-mind\/chat"/)
+  assert.match(chat, /fetch\(endpoint/); assert.doesNotMatch(chat, /\/api\/nsfw-gpt\/headless/)
   for (const dead of ["TARGET_SELECTION_PROMPT", "awaitingGenerationTarget", "pendingDescription", "pendingHistoryBase", "parseGenerationTarget", "targetToLabel"]) assert.ok(!chat.includes(dead))
   assert.match(chat, /message: trimmed/); assert.match(input, /await onSend\(trimmed, localMode\)/); assert.doesNotMatch(input, /setTimeout/)
   assert.match(chat, /content: data\.reply/); assert.match(chat, /prompt: handoff\.prompt/); assert.match(chat, /canUseInGenerator: true/)
