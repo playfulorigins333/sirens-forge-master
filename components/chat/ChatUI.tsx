@@ -196,6 +196,9 @@ export default function ChatUI({
       try {
         while (true) { const { done, value } = await reader.read(); buffer += decoder.decode(value, { stream: !done }); let match: RegExpExecArray | null; while ((match = /\r?\n\r?\n/.exec(buffer))) { applyEvent(buffer.slice(0, match.index)); buffer = buffer.slice(match.index + match[0].length) } if (done) break }
         if (buffer.trim()) applyEvent(buffer)
+      } catch (error) {
+        setMessages((items) => items.filter((item) => item.id !== assistantId))
+        throw error
       } finally {
         batcher.flush(); batcher.dispose()
         if (activeStreamBatcherRef.current === batcher) activeStreamBatcherRef.current = null

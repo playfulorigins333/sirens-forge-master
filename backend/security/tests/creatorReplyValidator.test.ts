@@ -1,36 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { validateCreatorReplyCandidate } from "../../../lib/sirens-mind/creator-reply-validator"
-
-const validate = (text: string, segments: unknown[], sources = ["Mike, 35, Denver", "quiet mountain lodge", "snowstorm"]) =>
-  validateCreatorReplyCandidate(text, { version: 1, segments }, sources)
-
-test("accepts creator-led dialogue, questions, and first-person action", () => {
-  for (const text of ["Come closer.", "Are you going to answer me?", "I fold my arms and wait."])
-    assert.equal(validate(text, [{ kind: text.startsWith("I ") ? "creator_action" : "dialogue", text }]).ok, true)
-})
-
-test("distinguishes a command from narrated subscriber compliance", () => {
-  assert.equal(validate("Kneel for me.", [{ kind: "dialogue", text: "Kneel for me." }]).ok, true)
-  assert.equal(validate("You kneel for me.", [{ kind: "dialogue", text: "You kneel for me." }]).code, "SECOND_PERSON_NARRATION")
-  assert.equal(validate("The subscriber kneels.", [{ kind: "dialogue", text: "The subscriber kneels." }]).code, "SUBSCRIBER_PUPPETING")
-})
-
-test("rejects narrator POV, invented physical state, props, occupancy/history, and malformed metadata", () => {
-  for (const text of ["You walk toward the door.", "Your heels strike the floor.", "You shiver in your coat."])
-    assert.equal(validate(text, [{ kind: "dialogue", text }]).code, "SECOND_PERSON_NARRATION")
-  assert.equal(validate("fireplace", [{ kind: "grounded_reference", text: "fireplace", evidence: "fireplace" }]).code, "UNGROUNDED_REFERENCE")
-  assert.equal(validate("empty lodge", [{ kind: "grounded_reference", text: "empty lodge", evidence: "empty lodge" }]).code, "UNGROUNDED_REFERENCE")
-  assert.equal(validateCreatorReplyCandidate("hello", { state: {} }, []).code, "MALFORMED_METADATA")
-})
-
-test("accepts exact grounded Key Notes and environment evidence", () => {
-  assert.equal(validate("Mike, 35, Denver", [{ kind: "grounded_reference", text: "Mike, 35, Denver", evidence: "Mike, 35, Denver" }]).ok, true)
-  assert.equal(validate("quiet mountain lodge", [{ kind: "grounded_reference", text: "quiet mountain lodge", evidence: "quiet mountain lodge" }]).ok, true)
-})
-
-test("rejects hidden leaks, visible mismatch, and provider-authored continuity fields", () => {
-  assert.equal(validateCreatorReplyCandidate("<<<SIRENS_FORGE_INTERNAL_META_V1>>>", { version: 1, segments: [{ kind: "dialogue", text: "x" }] }, []).code, "SENTINEL_LEAK")
-  assert.equal(validate("hello", [{ kind: "dialogue", text: "different" }]).code, "VISIBLE_MISMATCH")
-  assert.equal(validateCreatorReplyCandidate("hello", { version: 1, segments: [{ kind: "dialogue", text: "hello" }], state: { subscriber_persona: "hallucinated" } }, []).code, "MALFORMED_METADATA")
-})
+const valid=(segments:unknown[],sources:string[]=[])=>validateCreatorReplyCandidate("",{version:2,segments},sources)
+test("renders leading commands, questions, challenges, creator actions, and thoughts",()=>{for(const value of ["command_come_closer","command_answer","challenge_continue","ask_intent"])assert.equal(valid([{kind:"speech",value}]).ok,true);for(const [kind,value] of [["action","grin"],["thought","curious"]])assert.equal(valid([{kind,value}]).ok,true)})
+test("closed primitives cannot encode command compliance or mid-sentence subscriber action",()=>{assert.equal(valid([{kind:"speech",value:"command_come_closer"}]).text,"Come closer.");for(const text of ["You kneel for me.","I grin as you kneel in front of me."])assert.equal(valid([{kind:"action",value:"grin",text}]).code,"INVALID_SEGMENT")})
+test("creator action cannot smuggle environmental props",()=>{assert.equal(valid([{kind:"action",value:"wait",text:"I lean against the dumpster and wait."}]).code,"INVALID_SEGMENT")})
+test("free-form dialogue cannot smuggle world state, subscriber action, or motive",()=>{assert.equal(valid([{kind:"speech",value:"cautious",text:"The alley is empty, and I know you came here for me."}]).code,"INVALID_SEGMENT")})
+test("grounded evidence must equal one complete authoritative source and renders exactly",()=>{assert.equal(valid([{kind:"grounded",evidence:"dark alley"}],["dark alley"]).text,"dark alley");assert.equal(valid([{kind:"grounded",evidence:"dark alley",text:"A dumpster sits in the dark alley."}],["dark alley"]).code,"UNGROUNDED_REFERENCE");assert.equal(valid([{kind:"grounded",evidence:"dark alley"}],["We meet in a dark alley"]).code,"UNGROUNDED_REFERENCE")})
+test("rejects provider prose, malformed metadata, unknown primitives, and generated state",()=>{assert.equal(validateCreatorReplyCandidate("I invent prose.",{version:2,segments:[{kind:"speech",value:"greeting"}]},[]).code,"VISIBLE_CONTENT_FORBIDDEN");assert.equal(validateCreatorReplyCandidate("",{version:1,segments:[]},[]).code,"MALFORMED_METADATA");assert.equal(valid([{kind:"speech",value:"invented"}]).code,"INVALID_SEGMENT");assert.equal(validateCreatorReplyCandidate("",{version:2,segments:[{kind:"speech",value:"greeting"}],state:{}},[]).code,"MALFORMED_METADATA")})
