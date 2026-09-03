@@ -40,6 +40,19 @@ test("natural paraphrase is allowed while evidence remains exact source text", (
   assert.equal(result.ok, true)
 })
 
+test("mechanical punctuation, quote, case, and whitespace differences do not reject an otherwise visible claim", () => {
+  const result = valid("You told me you’re in Denver — and I remember.", [
+    { claim: "YOU TOLD ME YOU'RE IN DENVER, AND I REMEMBER", source_id: "profile.key_notes", evidence: "Denver" },
+  ])
+  assert.equal(result.ok, true)
+})
+
+test("normalized claim matching remains lexical rather than semantic", () => {
+  assert.equal(valid("You told me you're in Denver.", [
+    { claim: "You said you live in Colorado", source_id: "profile.key_notes", evidence: "Denver" },
+  ]).code, "CLAIM_NOT_VISIBLE")
+})
+
 test("rejects unknown sources, invented evidence, claims absent from visible prose, and extra metadata", () => {
   assert.equal(valid("I remember Denver.", [{ claim: "Denver", source_id: "missing", evidence: "Denver" }]).code, "UNKNOWN_SOURCE")
   assert.equal(valid("I remember Denver.", [{ claim: "Denver", source_id: "profile.key_notes", evidence: "Boston" }]).code, "UNGROUNDED_EVIDENCE")
