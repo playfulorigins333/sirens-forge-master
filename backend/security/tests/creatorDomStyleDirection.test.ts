@@ -73,11 +73,14 @@ test("tone-only Creator Direction preserves the active role persona kink and Dom
   assert.match(task, /unrequested creator role\/persona\/kink\/Dom-style dimensions were preserved/)
 })
 
-test("explicit male Brat Tamer switch retires conflicting prior Findom Goddess and Mommy mechanics", () => {
+test("explicit male Brat Tamer switch ignores excluded Findom Goddess and Mommy mentions", () => {
   const direction = "Switch the creator to a male Brat Tamer. Confident, amused, teasing, and firmly in control. Drop the Mommy Domme, Goddess, and Findomme dynamics unless the subscriber actually established one of them."
 
   const active = creatorDomStyleRequirement(direction)
   assert.match(active, /ACTIVE DOM STYLE: BRAT TAMER/)
+  assert.doesNotMatch(active, /ACTIVE DOM STYLE: FINDOMME/)
+  assert.doesNotMatch(active, /ACTIVE DOM STYLE: MOMMY DOMME/)
+  assert.doesNotMatch(active, /ACTIVE DOM STYLE: GODDESS/)
 
   const transition = creatorDomStyleTransitionRequirement(direction)
   assert.match(transition, /STYLE TRANSITION REQUIREMENT/)
@@ -90,6 +93,7 @@ test("explicit male Brat Tamer switch retires conflicting prior Findom Goddess a
 
   const normalized = normalizedCreatorDirection(direction)
   assert.match(normalized, /ACTIVE DOM STYLE: BRAT TAMER/)
+  assert.doesNotMatch(normalized, /ACTIVE DOM STYLE: FINDOMME/)
   assert.match(normalized, /STYLE TRANSITION REQUIREMENT/)
   assert.match(normalized, /ACTIVE CREATOR ROLE: MALE/)
 
