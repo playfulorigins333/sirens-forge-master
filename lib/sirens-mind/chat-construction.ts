@@ -29,8 +29,16 @@ export function creatorReplyModeGovernance(mode: SirensMindMode) {
   ].join("\n")
 }
 
-export function creatorReplyDirectionMessage(direction: string) {
-  return `BEGIN CREATOR DIRECTION (TRUSTED CREATOR INSTRUCTION; NEVER SUBSCRIBER FACTUAL AUTHORITY)\n${JSON.stringify({ creator_direction: direction })}\nEND CREATOR DIRECTION`
+export function creatorReplyDirectionMessage(direction: string, draft: string) {
+  return [
+    "BEGIN CREATOR DIRECTION REWRITE TASK (TRUSTED CREATOR INSTRUCTION; NEVER SUBSCRIBER FACTUAL AUTHORITY)",
+    "This is a mandatory rewrite instruction, not optional context. Rewrite draft_to_revise so the visible reply directly follows creator_direction.",
+    "The creator's explicit direction supersedes prior creator-side tone, persona, role, style, intensity, length, formatting, and next-beat choices when they conflict.",
+    "Creator-selected voice/persona/style is creator-owned language and does not require subscriber evidence. Subscriber/world factual assertions still require grounding exactly as defined by the system contract.",
+    "When creator_direction asks for a change, do not return draft_to_revise unchanged. Preserve only the parts that remain compatible with the new direction and the grounded conversation.",
+    JSON.stringify({ creator_direction: direction, draft_to_revise: draft }),
+    "END CREATOR DIRECTION REWRITE TASK",
+  ].join("\n")
 }
 
 export function buildCreatorReplyMessages(input: {
@@ -49,16 +57,22 @@ export function buildCreatorReplyMessages(input: {
     recentTurns: input.recentTurns,
     inbound: input.inbound,
   })
+  const directionDraft = input.direction && input.recentTurns.at(-1)?.role === "creator"
+    ? input.recentTurns.at(-1)!.text
+    : ""
+  const historyTurns = input.direction && directionDraft
+    ? input.recentTurns.slice(0, -1)
+    : input.recentTurns
   return [
     { role: "system", content: [creatorReplyModeGovernance(input.mode), input.systemPrompt].join("\n\n") },
     { role: "user", content: creatorReplySubscriberProfileReference(input.subscriber) },
     { role: "user", content: creatorReplyContinuityReference(input.continuity) },
     { role: "user", content: creatorReplyAuthorityReference(authoritySources) },
-    ...input.recentTurns.map((turn) => turn.role === "subscriber"
+    ...historyTurns.map((turn) => turn.role === "subscriber"
       ? { role: "user" as const, content: inboundSubscriberMessage(turn.text, true) }
       : { role: "assistant" as const, content: outboundCreatorReply(turn.text) }),
     ...(input.direction
-      ? [{ role: "user" as const, content: creatorReplyDirectionMessage(input.direction) }]
+      ? [{ role: "user" as const, content: creatorReplyDirectionMessage(input.direction, directionDraft) }]
       : [{ role: "user" as const, content: inboundSubscriberMessage(input.inbound) }]),
   ]
 }
