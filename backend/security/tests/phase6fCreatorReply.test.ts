@@ -106,6 +106,15 @@ test("production prompt strictly grounds subscriber facts while preserving natur
   assert.doesNotMatch(prompt, /closed set of safe creator-owned primitives|Write no visible prose/)
 })
 
+test("production prompt separates creator directions from subscriber authority", () => {
+  const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
+  assert.match(prompt, /TWO different user-side input types/)
+  assert.match(prompt, /CREATOR DIRECTION/)
+  assert.match(prompt, /NEVER subscriber-authored content/)
+  assert.match(prompt, /revise the latest creator reply for the same most-recent subscriber message/)
+  assert.match(prompt, /Creator Direction is also never factual evidence about the subscriber/)
+})
+
 test("production prompt preserves subscriber-supplied scenario world-state", () => {
   const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
   assert.match(prompt, /STRICT SCENARIO FIDELITY/)
@@ -129,7 +138,18 @@ test("Creator Reply uses a dedicated system stack while general Siren's Mind ret
   assert.match(route, /buildGeneralSystemPrompt\(promptFile\("nsfw_gpt\.system\.base\.txt"\)/)
 })
 
-test("workspace is hidden and configured without generator or billing UX", () => {
+test("Creator Direction uses an isolated route and cannot enter subscriber continuity", () => {
+  const route = fs.readFileSync(path.join(process.cwd(), "app/api/sirens-mind/creator-reply-direction/route.ts"), "utf8")
+  assert.match(route, /interactionClass: "creator_reply_direction"/)
+  assert.match(route, /source\.id !== "current\.inbound"/)
+  assert.match(route, /direction,/)
+  assert.match(route, /continuity: authority\.checkpoint\.continuity/)
+  assert.match(route, /revisedTurns\[revisedTurns\.length - 1\] = \{ role: "creator", text: visible \}/)
+  assert.doesNotMatch(route, /deriveCreatorReplyContinuity/)
+  assert.doesNotMatch(route, /role: "subscriber" as const, text: direction/)
+})
+
+test("workspace explicitly distinguishes subscriber messages from creator directions", () => {
   const ui = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatUI.tsx"), "utf8")
   const message = fs.readFileSync(path.join(process.cwd(), "components/chat/ChatMessage.tsx"), "utf8")
   const page = fs.readFileSync(path.join(process.cwd(), "app/sirens-mind/replies/page.tsx"), "utf8")
@@ -142,12 +162,17 @@ test("workspace is hidden and configured without generator or billing UX", () =>
   assert.match(page, /min-height: 0 !important/)
   assert.match(ui, /experience="creator_reply"|experience === "creator_reply"/)
   assert.match(ui, /Paste subscriber message\.\.\./)
+  assert.match(ui, /Subscriber Message/)
+  assert.match(ui, /Creator Direction/)
+  assert.match(ui, /creator-reply-direction/)
+  assert.match(ui, /Tell Siren's Mind how to revise the current reply\.\.\./)
   assert.match(workspace, /New Subscriber/)
   assert.match(workspace, /disabled=\{formSaving\}/)
-  assert.match(ui, /subscriber_id: subscriberId, conversation_id: conversationId/)
+  assert.match(ui, /subscriber_id: subscriberId/)
+  assert.match(ui, /conversation_id: conversationId/)
   assert.match(ui, /completed: true/)
   assert.match(ui, /msg\.completed === true/)
-  assert.match(ui, /userLabel=\{creatorReply \? "Subscriber" : "You"\}/)
+  assert.match(ui, /msg\.source === "creator_direction" \? "Creator Direction" : "Subscriber"/)
   assert.match(ui, /min-h-0 flex-1 overflow-y-auto/)
   assert.match(ui, /shrink-0 border-t border-white\/10/)
   assert.match(ui, /items\.filter\(\(item\) => item\.id !== assistantId\)/)
