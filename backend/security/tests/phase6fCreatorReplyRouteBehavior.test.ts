@@ -196,12 +196,30 @@ try {
   assert.match(events, /event: delta/)
   assert.match(events, /"saved":true/)
   const directionMessages = JSON.stringify(providerRequest.messages)
-  assert.match(directionMessages, /CREATOR DIRECTION/)
+  assert.match(directionMessages, /CREATOR DIRECTION REWRITE TASK/)
+  assert.match(directionMessages, /mandatory rewrite instruction/)
   assert.match(directionMessages, /Make it more dominant, but not mean\./)
+  assert.match(directionMessages, /draft_to_revise/)
+  assert.match(directionMessages, /What exactly is distracting you\?/)
+  assert.ok(!providerRequest.messages.some((message: any) => message.role === "assistant" && String(message.content).includes("What exactly is distracting you?")))
   const directionAuthority = providerRequest.messages.find((message: any) => String(message.content).includes("BEGIN CREATOR REPLY GROUNDING AUTHORITY INDEX"))?.content || ""
   assert.doesNotMatch(directionAuthority, /Make it more dominant, but not mean\./)
   assert.doesNotMatch(directionAuthority, /current\.inbound/)
   assert.match(directionAuthority, /I can't stop thinking about you tonight\./)
+
+  // A Creator Direction completion that repeats the draft verbatim is a failed rewrite and must not be displayed or saved.
+  const mommyDraft = "Oh, my sweet boy, tell Mommy exactly what you were imagining."
+  recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: mommyDraft }]
+  providerVisible = mommyDraft
+  providerMetadata = { version: 3, claims: [] }
+  providerCalls = 0
+  saved = null
+  response = await invokeDirection({ message: "Rewrite this with confident Findomme energy." })
+  events = await response.text()
+  assert.equal(providerCalls, 1)
+  assert.equal(saved, null)
+  assert.doesNotMatch(events, /event: delta/)
+  assert.match(events, /CREATOR_REPLY_DIRECTION_UNCHANGED/)
 
   // Direction requires an existing creator draft and makes no provider call otherwise.
   recentTurns = [{ role: "subscriber", text: "Just arrived." }]
