@@ -2,8 +2,10 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   creatorDomStyleRequirement,
+  creatorDomStyleTransitionRequirement,
   creatorReplyDirectionMessage,
   creatorReplyDirectionSystemMessage,
+  creatorRoleTransitionRequirement,
   normalizedCreatorDirection,
 } from "../../../lib/sirens-mind/chat-construction"
 
@@ -69,4 +71,34 @@ test("tone-only Creator Direction preserves the active role persona kink and Dom
   assert.match(task, /CURRENT CREATOR-STYLE AUTHORITY/)
   assert.match(task, /tribute/)
   assert.match(task, /unrequested creator role\/persona\/kink\/Dom-style dimensions were preserved/)
+})
+
+test("explicit male Brat Tamer switch retires conflicting prior Findom Goddess and Mommy mechanics", () => {
+  const direction = "Switch the creator to a male Brat Tamer. Confident, amused, teasing, and firmly in control. Drop the Mommy Domme, Goddess, and Findomme dynamics unless the subscriber actually established one of them."
+
+  const active = creatorDomStyleRequirement(direction)
+  assert.match(active, /ACTIVE DOM STYLE: BRAT TAMER/)
+
+  const transition = creatorDomStyleTransitionRequirement(direction)
+  assert.match(transition, /STYLE TRANSITION REQUIREMENT/)
+  assert.match(transition, /replaces conflicting prior creator Dom styles\/dynamics/)
+  assert.match(transition, /Do not carry over Findom tribute\/payment\/access-gating, Mommy framing, Goddess framing/)
+
+  const role = creatorRoleTransitionRequirement(direction)
+  assert.match(role, /ACTIVE CREATOR ROLE: MALE/)
+  assert.match(role, /Retire conflicting prior female-coded creator titles\/personas such as Mommy, Goddess, or Domme/)
+
+  const normalized = normalizedCreatorDirection(direction)
+  assert.match(normalized, /ACTIVE DOM STYLE: BRAT TAMER/)
+  assert.match(normalized, /STYLE TRANSITION REQUIREMENT/)
+  assert.match(normalized, /ACTIVE CREATOR ROLE: MALE/)
+
+  const system = creatorReplyDirectionSystemMessage(direction)
+  assert.match(system, /newly named choice becomes authoritative and conflicting prior creator-side choices are retired/)
+
+  const draft = "Serve your Goddess with a generous tribute first. Then we'll see if you've earned more attention."
+  const task = creatorReplyDirectionMessage(direction, draft)
+  assert.match(task, /retire incompatible prior creator-side role\/persona\/style markers and mechanics/)
+  assert.match(task, /explicitly replaced creator-side dimensions no longer leak from the prior draft/)
+  assert.match(task, /tribute/)
 })
