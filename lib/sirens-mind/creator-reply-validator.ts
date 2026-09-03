@@ -74,6 +74,22 @@ function claimRanges(visible: string, claim: string): GroundedRange[] {
   return ranges
 }
 
+/**
+ * Evidence is also instructed to copy source text. Apply the same narrow lexical
+ * normalization used for visible claims so harmless provider changes to quote style,
+ * punctuation, case, or whitespace do not fail a grounded reply. This intentionally
+ * does not allow synonyms, reordered words, omitted lexical content, or semantic fuzzy
+ * matching: the same evidence words must appear in the same order in the authority source.
+ */
+function sourceContainsEvidence(sourceText: string, evidence: string) {
+  if (sourceText.includes(evidence)) return true
+  const words = evidence.match(/[\p{L}\p{N}]+/gu) ?? []
+  if (!words.length) return false
+  const separator = "[\\s\\p{P}\\p{S}]+"
+  const pattern = new RegExp(words.map(escapeRegex).join(separator), "iu")
+  return pattern.test(sourceText)
+}
+
 function collectGroundedRanges(visible: string, claims: CreatorReplyClaim[]): GroundedRange[] {
   return claims.flatMap(({ claim }) => claimRanges(visible, claim))
 }
@@ -150,7 +166,7 @@ export function validateCreatorReplyCandidate(
     if (!claimRanges(text, claim).length) return { ok: false as const, code: "CLAIM_NOT_VISIBLE" as CreatorReplyViolation }
     const source = sourceById.get(sourceId)
     if (!source) return { ok: false as const, code: "UNKNOWN_SOURCE" as CreatorReplyViolation }
-    if (!source.text.includes(evidence)) return { ok: false as const, code: "UNGROUNDED_EVIDENCE" as CreatorReplyViolation }
+    if (!sourceContainsEvidence(source.text, evidence)) return { ok: false as const, code: "UNGROUNDED_EVIDENCE" as CreatorReplyViolation }
     const identity = `${claim}\u0000${sourceId}\u0000${evidence}`
     if (seenClaims.has(identity)) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     seenClaims.add(identity)
