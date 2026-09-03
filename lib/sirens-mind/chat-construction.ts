@@ -29,20 +29,49 @@ export function creatorReplyModeGovernance(mode: SirensMindMode) {
   ].join("\n")
 }
 
+export function creatorDomStyleRequirement(direction: string) {
+  const compact = direction.trim()
+  if (/\b(findom(?:me)?|financial\s+dom(?:ination|me)?)\b/i.test(compact)) {
+    return "ACTIVE DOM STYLE: FINDOMME / FINANCIAL DOMINATION. Make financial power exchange materially recognizable through creator-owned prospective language such as tribute, tipping, paid privilege/access, gifts, reimbursement, spending, or earning attention through payment. Do not flatten this into generic bossiness, luxury language, or 'good boy' phrasing. Do not invent subscriber wealth, income, balances, prior payments, spending history, debt, or an existing financial arrangement."
+  }
+  if (/\b(mommy\s+(?:domme?|dominant)|mommy\s+domme?|mommy)\b/i.test(compact)) {
+    return "ACTIVE DOM STYLE: MOMMY DOMME. Use nurturing/caretaking authority: praise, correction, permission, expectations, discipline, controlled affection, reassurance, or reward. Do not reduce the style to generic dominance plus 'good boy'; the relational Mommy dynamic should be recognizable. Do not turn it into Findom unless money/tribute is separately requested or established."
+  }
+  if (/\b(soft\s+domme?|gentle\s+domme?|soft\s+dominant|gentle\s+dominant)\b/i.test(compact)) {
+    return "ACTIVE DOM STYLE: SOFT DOMME. Keep authority unmistakable but warm, playful, reassuring, patient, or affectionate rather than harsh. Use permission, guidance, teasing, praise, standards, and controlled affection. Do not turn it into Mommy Domme or Findom unless those are separately requested or established."
+  }
+  if (/\b(goddess|goddess\s+domme?)\b/i.test(compact)) {
+    return "ACTIVE DOM STYLE: GODDESS. Center worship, reverence, privilege, devotion, elevated creator status, and the subscriber earning or being granted attention. Do not automatically make Goddess financial; add tribute/payment only when Findom is separately requested or established."
+  }
+  if (/\b(brat\s+tamer|brat\s+taming)\b/i.test(compact)) {
+    return "ACTIVE DOM STYLE: BRAT TAMER. Use amused control, challenges, correction, consequences, teasing, and confident handling of defiance. Do not invent that the subscriber actually resisted or misbehaved unless grounded; creator-owned challenges and conditional consequences are allowed."
+  }
+  if (/\b(disciplinarian|strict\s+domme?|strict\s+dominant)\b/i.test(compact)) {
+    return "ACTIVE DOM STYLE: STRICT / DISCIPLINARIAN DOMME. Use clear standards, rules, correction, accountability, permission, consequences, and earned rewards. Keep it controlled rather than generically cruel, and do not invent subscriber misconduct unless grounded."
+  }
+  if (/\b(femdom|domme|female\s+dominant)\b/i.test(compact)) {
+    return "ACTIVE DOM STYLE: FEMDOM / DOMME. Use general female-led authority through commands, control, permission, reward/denial, teasing, standards, worship, service, or discipline as the conversation supports. Do not automatically convert generic Femdom into Findom, Mommy Domme, Goddess, or another specialized style unless the creator names it or the established scene/persona already supports it."
+  }
+  return ""
+}
+
 export function normalizedCreatorDirection(direction: string) {
   const compact = direction.trim()
+  const requirements: string[] = []
+  const domStyle = creatorDomStyleRequirement(compact)
+  if (domStyle) requirements.push(domStyle)
   const lineLimit = compact.match(/^(?:keep\s+(?:the\s+)?(?:revised\s+)?reply\s+to\s+)?(\d+)\s*[-–—]\s*(\d+)\s+lines?\s+max\.?$/i)
   if (lineLimit) {
     const min = Number(lineLimit[1])
     const max = Number(lineLimit[2])
     if (Number.isInteger(min) && Number.isInteger(max) && min > 0 && max >= min && max <= 20) {
-      return `${compact}\nNORMALIZED EXECUTION REQUIREMENT: Rewrite the current draft into ${min} to ${max} short, newline-separated visible lines. Materially shorten the draft. A single long paragraph does NOT satisfy this direction. Use actual newline breaks between visible lines. Hidden grounding metadata is excluded from the line count.`
+      requirements.push(`NORMALIZED EXECUTION REQUIREMENT: Rewrite the current draft into ${min} to ${max} short, newline-separated visible lines. Materially shorten the draft. A single long paragraph does NOT satisfy this direction. Use actual newline breaks between visible lines. Hidden grounding metadata is excluded from the line count.`)
     }
   }
   if (/^shorter\.?$/i.test(compact)) {
-    return `${compact}\nNORMALIZED EXECUTION REQUIREMENT: Materially shorten the current draft while preserving the grounded meaning and requested creator voice. Do not return the prior draft unchanged.`
+    requirements.push("NORMALIZED EXECUTION REQUIREMENT: Materially shorten the current draft while preserving the grounded meaning and requested creator voice. Do not return the prior draft unchanged.")
   }
-  return compact
+  return [compact, ...requirements].join("\n")
 }
 
 export function creatorReplyDirectionSystemMessage(direction: string) {
@@ -51,6 +80,7 @@ export function creatorReplyDirectionSystemMessage(direction: string) {
     "This instruction is trusted creator control, not subscriber content and never subscriber factual authority.",
     "You MUST rewrite the latest creator draft to satisfy it before producing the visible reply.",
     "It supersedes conflicting prior creator-side tone, persona, role, style, intensity, length, formatting, structure, and next-beat choices.",
+    "When the creator names a specialized Dom style, use that style's defining behavioral dynamic. Do not flatten specialized Dom styles into generic dominance, and do not introduce a specialized style when the creator only asked for generic dominance unless the established creator persona/scene already supports it.",
     "Do not treat the existing draft as an acceptable answer merely because it is grounded. The draft is reference text to revise.",
     normalizedCreatorDirection(direction),
   ].join("\n")
