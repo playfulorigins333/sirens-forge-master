@@ -7,11 +7,13 @@ import { buildBoundedChatHistory } from "../../lib/sirens-mind/chat-history"
 import { createTextBatcher } from "../../lib/sirens-mind/stream-batcher"
 
 type Role = "user" | "assistant"
+type CreatorReplyInputKind = "subscriber" | "creator_direction"
 
 type Message = {
   id: string
   role: Role
   content: string
+  source?: CreatorReplyInputKind
   isError?: boolean
   completed?: boolean
   meta?: {
@@ -82,6 +84,7 @@ export default function ChatUI({
   const [isTyping, setIsTyping] = useState(false)
   const [requestActive, setRequestActive] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">(creatorReply ? "ULTRA" : "SAFE")
+  const [creatorReplyInputKind, setCreatorReplyInputKind] = useState<CreatorReplyInputKind>("subscriber")
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const activeStreamBatcherRef = useRef<{ dispose: () => void } | null>(null)
   useEffect(() => () => { activeStreamBatcherRef.current?.dispose() }, [])
@@ -141,31 +144,45 @@ export default function ChatUI({
     message,
     historyItems,
     selectedMode,
+    inputKind,
   }: {
     message: string
     historyItems: Message[]
     selectedMode: "SAFE" | "NSFW" | "ULTRA"
+    inputKind: CreatorReplyInputKind
   }) => {
     let continuity: unknown
     const continuityKey = SIREN_MIND_CONTINUITY_STORAGE_KEY
     if (!creatorReply) try { const stored = window.sessionStorage.getItem(continuityKey); continuity = stored ? JSON.parse(stored) : undefined } catch { continuity = undefined }
-    const res = await fetch("/api/sirens-mind/chat", {
+
+    const creatorDirection = creatorReply && inputKind === "creator_direction"
+    const endpoint = creatorDirection ? "/api/sirens-mind/creator-reply-direction" : "/api/sirens-mind/chat"
+    const requestBody = creatorDirection
+      ? {
+          mode: selectedMode,
+          subscriber_id: subscriberId,
+          conversation_id: conversationId,
+          message,
+        }
+      : {
+          mode: selectedMode,
+          experience,
+          ...(creatorReply ? { subscriber_id: subscriberId, conversation_id: conversationId } : {}),
+          message,
+          history: creatorReply ? [] : buildBoundedChatHistory(historyItems),
+          context: {
+            ...(initialGenerationTarget ? { generation_target: initialGenerationTarget } : {}),
+            ...(initialPrompt ? { prompt: initialPrompt } : {}),
+            ...(initialNegativePrompt ? { negative_prompt: initialNegativePrompt } : {}),
+            ...(initialIdentity ? { identity_id: initialIdentity } : {}),
+          },
+          ...(!creatorReply && continuity ? { continuity } : {}),
+        }
+
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: selectedMode,
-        experience,
-        ...(creatorReply ? { subscriber_id: subscriberId, conversation_id: conversationId } : {}),
-        message,
-        history: creatorReply ? [] : buildBoundedChatHistory(historyItems),
-        context: {
-          ...(initialGenerationTarget ? { generation_target: initialGenerationTarget } : {}),
-          ...(initialPrompt ? { prompt: initialPrompt } : {}),
-          ...(initialNegativePrompt ? { negative_prompt: initialNegativePrompt } : {}),
-          ...(initialIdentity ? { identity_id: initialIdentity } : {}),
-        },
-        ...(!creatorReply && continuity ? { continuity } : {}),
-      }),
+      body: JSON.stringify(requestBody),
     })
     if (res.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
       if (!res.ok || !res.body) throw new Error("SIRENS_MIND_STREAM_UNAVAILABLE")
@@ -233,13 +250,14 @@ export default function ChatUI({
   const handleSend = async (userText: string, selectedMode: "SAFE" | "NSFW" | "ULTRA") => {
     const trimmed = userText.trim()
     if (!trimmed || (creatorReply && (!subscriberId || !conversationId))) return
-    const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: trimmed }
+    const inputKind = creatorReply ? creatorReplyInputKind : "subscriber"
+    const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: trimmed, ...(creatorReply ? { source: inputKind } : {}) }
     const baseMessages = [...messages, userMessage]
     setMessages(baseMessages)
     setIsTyping(true)
     if (creatorReply) setRequestActive(true)
     try {
-      await sendChatRequest({ message: trimmed, historyItems: messages, selectedMode })
+      await sendChatRequest({ message: trimmed, historyItems: messages, selectedMode, inputKind })
     } catch (err) {
       console.error("Chat error:", err)
       appendMessage({
@@ -251,6 +269,8 @@ export default function ChatUI({
       if (creatorReply) setRequestActive(false)
     }
   }
+
+  const hasCreatorDraft = creatorReply && messages.some((message) => message.role === "assistant" && message.completed === true && !message.isError)
 
   return (
     <div
@@ -346,7 +366,7 @@ export default function ChatUI({
                 isError={msg.isError}
                 showUsePrompt={Boolean(msg.meta?.canUseInGenerator)}
                 showCopyReply={creatorReply && msg.role === "assistant" && msg.completed === true && !msg.isError}
-                userLabel={creatorReply ? "Subscriber" : "You"}
+                userLabel={creatorReply ? (msg.source === "creator_direction" ? "Creator Direction" : "Subscriber") : "You"}
                 onUsePrompt={
                   msg.meta?.canUseInGenerator
                     ? () => handleUsePrompt(msg)
@@ -380,12 +400,32 @@ export default function ChatUI({
             </> : null}
           </div> : null}
 
+          {creatorReply ? <div className="mb-2 flex flex-wrap items-center gap-2 px-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Input from</span>
+            <button
+              type="button"
+              onClick={() => setCreatorReplyInputKind("subscriber")}
+              className={`rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition ${creatorReplyInputKind === "subscriber" ? "border-cyan-300/40 bg-cyan-500/15 text-cyan-100" : "border-white/10 bg-white/[0.03] text-zinc-400 hover:text-white"}`}
+            >
+              Subscriber Message
+            </button>
+            <button
+              type="button"
+              onClick={() => hasCreatorDraft && setCreatorReplyInputKind("creator_direction")}
+              disabled={!hasCreatorDraft || requestActive}
+              className={`rounded-full border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition ${creatorReplyInputKind === "creator_direction" ? "border-fuchsia-300/40 bg-fuchsia-500/15 text-fuchsia-100" : "border-white/10 bg-white/[0.03] text-zinc-400 hover:text-white"} disabled:cursor-not-allowed disabled:opacity-35`}
+              title={hasCreatorDraft ? "Refine the latest generated reply without changing subscriber memory" : "Generate a subscriber reply first"}
+            >
+              Creator Direction
+            </button>
+          </div> : null}
+
           <ChatInput
             mode={mode}
             onModeChange={setMode}
             onSend={handleSend}
             compact={messages.length > 0}
-            placeholder={creatorReply ? "Paste subscriber message..." : undefined}
+            placeholder={creatorReply ? (creatorReplyInputKind === "creator_direction" ? "Tell Siren's Mind how to revise the current reply..." : "Paste subscriber message...") : undefined}
           />
         </section>
       </main>
