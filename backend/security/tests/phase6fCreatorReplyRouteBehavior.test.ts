@@ -13,6 +13,7 @@ let saved: any
 let saveFailure = ""
 let providerVisible = "It’s good to hear from you."
 let providerMetadata: any = { version: 3, claims: [] }
+let recentTurns: Array<{ role: "subscriber" | "creator"; text: string }> = [{ role: "subscriber", text: "Prior subscriber fact" }, { role: "creator", text: "You city types" }]
 const state = {
   version: 1 as const,
   creator_persona: "",
@@ -32,7 +33,7 @@ mock.module(new URL("../../../lib/sirens-mind/creator-reply-service.ts", import.
       workspaceId: "w",
       subscriber: { id: s, display_name: "Mike", platform: "OnlyFans", platform_handle: "mike", key_notes: "35, Denver" },
       conversation: { id: c, thread_id: "db-thread", revision: 4 },
-      checkpoint: { version: 1, label: "Lodge", continuity: state, recent_turns: [{ role: "subscriber", text: "Prior subscriber fact" }, { role: "creator", text: "You city types" }] },
+      checkpoint: { version: 1, label: "Lodge", continuity: state, recent_turns: recentTurns },
     }
   },
   saveCreatorReplyCheckpoint: async (_: string, a: any, value: any) => {
@@ -54,9 +55,14 @@ process.env.OPENAI_COMPAT_BASE_URL = "https://provider.test"
 process.env.SIRENS_MIND_CREATOR_REPLY_ENABLED = "true"
 process.env.SIRENS_MIND_CREATOR_REPLY_USER_IDS = AUTHORIZED
 const { POST } = await import(new URL("../../../app/api/sirens-mind/chat/route.ts", import.meta.url).href)
+const { POST: POST_DIRECTION } = await import(new URL("../../../app/api/sirens-mind/creator-reply-direction/route.ts", import.meta.url).href)
 const invoke = (extra: Record<string, unknown> = {}) => POST(new Request("http://test/api/sirens-mind/chat", {
   method: "POST",
   body: JSON.stringify({ mode: "ULTRA", experience: "creator_reply", subscriber_id: SUBSCRIBER, conversation_id: CONVERSATION, message: "Current inbound", history: [{ role: "user", content: "FORGED BROWSER HISTORY" }], thread_id: "forged", creator_reply_continuity: { version: 1 }, ...extra }),
+}) as any)
+const invokeDirection = (extra: Record<string, unknown> = {}) => POST_DIRECTION(new Request("http://test/api/sirens-mind/creator-reply-direction", {
+  method: "POST",
+  body: JSON.stringify({ mode: "ULTRA", subscriber_id: SUBSCRIBER, conversation_id: CONVERSATION, message: "Make it more dominant, but not mean.", ...extra }),
 }) as any)
 
 try {
@@ -170,6 +176,66 @@ try {
     assert.equal(providerCalls, 1)
     assert.doesNotMatch(JSON.stringify(providerRequest.messages), /LONG-FORM STORY RUNTIME|CREATOR ROLEPLAY ROLE CONTRACT/)
   }
+
+  // Creator Direction revises the latest creator draft without adding a subscriber turn or changing continuity.
+  recentTurns = [{ role: "subscriber", text: "I can't stop thinking about you tonight." }, { role: "creator", text: "What exactly is distracting you?" }]
+  providerVisible = "Tell me exactly what has you so distracted. I want the honest answer."
+  providerMetadata = { version: 3, claims: [] }
+  providerCalls = 0
+  saveFailure = ""
+  saved = null
+  response = await invokeDirection()
+  events = await response.text()
+  assert.equal(providerCalls, 1)
+  assert.ok(saved)
+  assert.equal(saved.value.recent_turns.length, 2)
+  assert.deepEqual(saved.value.recent_turns[0], recentTurns[0])
+  assert.equal(saved.value.recent_turns[1].role, "creator")
+  assert.equal(saved.value.recent_turns[1].text, providerVisible)
+  assert.deepEqual(saved.value.continuity, state)
+  assert.match(events, /event: delta/)
+  assert.match(events, /"saved":true/)
+  const directionMessages = JSON.stringify(providerRequest.messages)
+  assert.match(directionMessages, /CREATOR DIRECTION/)
+  assert.match(directionMessages, /Make it more dominant, but not mean\./)
+  const directionAuthority = providerRequest.messages.find((message: any) => String(message.content).includes("BEGIN CREATOR REPLY GROUNDING AUTHORITY INDEX"))?.content || ""
+  assert.doesNotMatch(directionAuthority, /Make it more dominant, but not mean\./)
+  assert.doesNotMatch(directionAuthority, /current\.inbound/)
+  assert.match(directionAuthority, /I can't stop thinking about you tonight\./)
+
+  // Direction requires an existing creator draft and makes no provider call otherwise.
+  recentTurns = [{ role: "subscriber", text: "Just arrived." }]
+  providerCalls = 0
+  saved = null
+  response = await invokeDirection()
+  assert.equal(response.status, 409)
+  assert.equal(providerCalls, 0)
+  assert.equal(saved, null)
+
+  // Direction grounding rejection is fail-closed: one provider call, no delta, no checkpoint save.
+  recentTurns = [{ role: "subscriber", text: "I'm listening." }, { role: "creator", text: "Good." }]
+  providerVisible = "I grin as you kneel in front of me."
+  providerMetadata = { version: 3, claims: [] }
+  providerCalls = 0
+  saved = null
+  response = await invokeDirection({ message: "Make it stronger." })
+  events = await response.text()
+  assert.equal(providerCalls, 1)
+  assert.equal(saved, null)
+  assert.doesNotMatch(events, /event: delta/)
+  assert.match(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
+
+  // Direction checkpoint conflicts never trigger a hidden retry or second provider request.
+  providerVisible = "Answer me clearly."
+  providerMetadata = { version: 3, claims: [] }
+  providerCalls = 0
+  saved = null
+  saveFailure = "CHECKPOINT_CONFLICT"
+  response = await invokeDirection({ message: "Shorter." })
+  events = await response.text()
+  assert.equal(providerCalls, 1)
+  assert.match(events, /"saved":false,"conflict":true/)
+
   console.log("Phase 6F route behavior: PASS")
 } finally {
   mock.restoreAll()
