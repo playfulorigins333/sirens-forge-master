@@ -29,27 +29,67 @@ export function creatorReplyModeGovernance(mode: SirensMindMode) {
   ].join("\n")
 }
 
-export function creatorDomStyleRequirement(direction: string) {
+type CreatorDomStyle = "findom" | "mommy" | "soft" | "goddess" | "brat_tamer" | "strict" | "femdom"
+
+const creatorDomStyleMatchers: Array<{ style: CreatorDomStyle; pattern: RegExp }> = [
+  { style: "findom", pattern: /\b(findom(?:me)?|financial\s+dom(?:ination|me)?)\b/i },
+  { style: "mommy", pattern: /\b(mommy\s+(?:domme?|dominant)|mommy\s+domme?|mommy)\b/i },
+  { style: "soft", pattern: /\b(soft\s+domme?|gentle\s+domme?|soft\s+dominant|gentle\s+dominant)\b/i },
+  { style: "goddess", pattern: /\b(goddess|goddess\s+domme?)\b/i },
+  { style: "brat_tamer", pattern: /\b(brat\s+tamer|brat\s+taming)\b/i },
+  { style: "strict", pattern: /\b(disciplinarian|strict\s+domme?|strict\s+dominant)\b/i },
+  { style: "femdom", pattern: /\b(femdom|domme|female\s+dominant)\b/i },
+]
+
+function creatorDirectionMentionExcluded(text: string, index: number) {
+  const boundary = Math.max(
+    text.lastIndexOf(".", index - 1),
+    text.lastIndexOf(";", index - 1),
+    text.lastIndexOf("\n", index - 1),
+    text.lastIndexOf("!", index - 1),
+    text.lastIndexOf("?", index - 1),
+  )
+  const prefix = text.slice(boundary + 1, index)
+  return /\b(?:drop|remove|avoid|without|exclude|retire|stop|never|not|do\s+not|don't)\b/i.test(prefix)
+}
+
+function creatorDomStyleTarget(direction: string): CreatorDomStyle | null {
   const compact = direction.trim()
-  if (/\b(findom(?:me)?|financial\s+dom(?:ination|me)?)\b/i.test(compact)) {
+  const candidates: Array<{ style: CreatorDomStyle; index: number }> = []
+  for (const matcher of creatorDomStyleMatchers) {
+    const flags = matcher.pattern.flags.includes("g") ? matcher.pattern.flags : `${matcher.pattern.flags}g`
+    const regex = new RegExp(matcher.pattern.source, flags)
+    for (const match of compact.matchAll(regex)) {
+      const index = match.index ?? -1
+      if (index < 0 || creatorDirectionMentionExcluded(compact, index)) continue
+      candidates.push({ style: matcher.style, index })
+    }
+  }
+  candidates.sort((a, b) => a.index - b.index)
+  return candidates[0]?.style ?? null
+}
+
+export function creatorDomStyleRequirement(direction: string) {
+  const target = creatorDomStyleTarget(direction)
+  if (target === "findom") {
     return "ACTIVE DOM STYLE: FINDOMME / FINANCIAL DOMINATION. Make financial power exchange materially recognizable through creator-owned prospective language such as tribute, tipping, paid privilege/access, gifts, reimbursement, spending, or earning attention through payment. Do not flatten this into generic bossiness, luxury language, or 'good boy' phrasing. Do not invent subscriber wealth, income, balances, prior payments, spending history, debt, or an existing financial arrangement."
   }
-  if (/\b(mommy\s+(?:domme?|dominant)|mommy\s+domme?|mommy)\b/i.test(compact)) {
+  if (target === "mommy") {
     return "ACTIVE DOM STYLE: MOMMY DOMME. Use nurturing/caretaking authority: praise, correction, permission, expectations, discipline, controlled affection, reassurance, or reward. Do not reduce the style to generic dominance plus 'good boy'; the relational Mommy dynamic should be recognizable. Do not turn it into Findom unless money/tribute is separately requested or established."
   }
-  if (/\b(soft\s+domme?|gentle\s+domme?|soft\s+dominant|gentle\s+dominant)\b/i.test(compact)) {
+  if (target === "soft") {
     return "ACTIVE DOM STYLE: SOFT DOMME. Keep authority unmistakable but warm, playful, reassuring, patient, or affectionate rather than harsh. Use permission, guidance, teasing, praise, standards, and controlled affection. Do not turn it into Mommy Domme or Findom unless those are separately requested or established."
   }
-  if (/\b(goddess|goddess\s+domme?)\b/i.test(compact)) {
+  if (target === "goddess") {
     return "ACTIVE DOM STYLE: GODDESS. Center worship, reverence, privilege, devotion, elevated creator status, and the subscriber earning or being granted attention. Do not automatically make Goddess financial; add tribute/payment only when Findom is separately requested or established."
   }
-  if (/\b(brat\s+tamer|brat\s+taming)\b/i.test(compact)) {
+  if (target === "brat_tamer") {
     return "ACTIVE DOM STYLE: BRAT TAMER. Use amused control, challenges, correction, consequences, teasing, and confident handling of defiance. Do not invent that the subscriber actually resisted or misbehaved unless grounded; creator-owned challenges and conditional consequences are allowed."
   }
-  if (/\b(disciplinarian|strict\s+domme?|strict\s+dominant)\b/i.test(compact)) {
+  if (target === "strict") {
     return "ACTIVE DOM STYLE: STRICT / DISCIPLINARIAN DOMME. Use clear standards, rules, correction, accountability, permission, consequences, and earned rewards. Keep it controlled rather than generically cruel, and do not invent subscriber misconduct unless grounded."
   }
-  if (/\b(femdom|domme|female\s+dominant)\b/i.test(compact)) {
+  if (target === "femdom") {
     return "ACTIVE DOM STYLE: FEMDOM / DOMME. Use general female-led authority through commands, control, permission, reward/denial, teasing, standards, worship, service, or discipline as the conversation supports. Do not automatically convert generic Femdom into Findom, Mommy Domme, Goddess, or another specialized style unless the creator names it or the established scene/persona already supports it."
   }
   return ""
@@ -65,13 +105,29 @@ export function creatorDomStyleTransitionRequirement(direction: string) {
   return "STYLE TRANSITION REQUIREMENT: The explicitly named ACTIVE DOM STYLE replaces conflicting prior creator Dom styles/dynamics from draft_to_revise unless the creator explicitly asks to combine them. Retire prior style-specific mechanisms, titles, and framing that belong only to the replaced style. Do not carry over Findom tribute/payment/access-gating, Mommy framing, Goddess framing, or another replaced specialized style merely because it appeared in the prior draft. Preserve such material only when the current Creator Direction explicitly retains/combines it or current subscriber-authored evidence independently establishes it. Build the rewrite around the new active style's defining mechanism."
 }
 
+function creatorRoleTarget(direction: string): "male" | "female" | null {
+  const compact = direction.trim()
+  const candidates: Array<{ role: "male" | "female"; index: number }> = []
+  for (const role of ["male", "female"] as const) {
+    const regex = new RegExp(`\\b${role}\\b`, "ig")
+    for (const match of compact.matchAll(regex)) {
+      const index = match.index ?? -1
+      if (index < 0 || creatorDirectionMentionExcluded(compact, index)) continue
+      candidates.push({ role, index })
+    }
+  }
+  candidates.sort((a, b) => a.index - b.index)
+  return candidates[0]?.role ?? null
+}
+
 export function creatorRoleTransitionRequirement(direction: string) {
   const compact = direction.trim()
   if (!/\b(switch|change|replace|new\s+(?:role|persona)|to\s+(?:a|an|the))\b/i.test(compact)) return ""
-  if (/\bmale\b/i.test(compact)) {
+  const role = creatorRoleTarget(compact)
+  if (role === "male") {
     return "ACTIVE CREATOR ROLE: MALE. Use male creator self-presentation and male-compatible titles when relevant. Retire conflicting prior female-coded creator titles/personas such as Mommy, Goddess, or Domme unless the Creator Direction explicitly retains them as part of a combined persona."
   }
-  if (/\bfemale\b/i.test(compact)) {
+  if (role === "female") {
     return "ACTIVE CREATOR ROLE: FEMALE. Use female creator self-presentation and female-compatible titles when relevant. Retire conflicting prior male-coded creator titles/personas such as Sir unless the Creator Direction explicitly retains them as part of a combined persona."
   }
   return ""
