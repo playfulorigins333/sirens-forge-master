@@ -1,36 +1,136 @@
+import { RP_META_SENTINEL } from "./admin-rp"
+import type { CreatorReplyAuthoritySource } from "./creator-reply"
+
 export const CREATOR_REPLY_MAX_VISIBLE_CHARS = 12_000
-export type CreatorReplyViolation = "MALFORMED_METADATA" | "INVALID_SEGMENT" | "UNGROUNDED_REFERENCE" | "VISIBLE_CONTENT_FORBIDDEN" | "VISIBLE_TOO_LONG"
+const CREATOR_REPLY_MAX_CLAIMS = 32
+const CREATOR_REPLY_MAX_CLAIM_CHARS = 1_500
+const CREATOR_REPLY_MAX_EVIDENCE_CHARS = 1_500
+const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/
 
-const SPEECH = {
-  greeting: "Hey—you have my attention.", warm_ack: "I’m glad you told me.", invite_more: "Tell me more.",
-  ask_intent: "What do you want from me?", ask_detail: "What happens next?", ask_feeling: "How does that feel to you?",
-  flirt_interest: "Now you have me curious.", tease_prove_it: "Then prove it.", challenge_continue: "Go on—show me what you’ve got.",
-  command_come_closer: "Come closer.", command_answer: "Answer me.", command_wait: "Wait for me.", command_continue: "Keep going.",
-  playful_threat: "Careful—I might hold you to that.", creator_intent_lead: "I’ll decide where we go next.", creator_intent_continue: "I want to keep this going.",
-  consent_check: "Tell me if you want to continue.", safeword_ack: "Say red and I stop.", appreciation: "I like that.", anticipation: "I can’t wait.",
-  cautious: "I’m not ready to trust you yet.", boundary: "I’ll set the pace.", friendly_reply: "It’s good to hear from you.",
-} as const
-const ACTION = { smile: "I smile.", grin: "I grin.", pause: "I pause.", wait: "I wait.", step_closer: "I step closer.", fold_arms: "I fold my arms.", tilt_head: "I tilt my head.", raise_eyebrow: "I raise an eyebrow." } as const
-const THOUGHT = { curious: "I’m curious.", intrigued: "I’m intrigued.", cautious: "I stay cautious.", pleased: "I’m pleased.", considering: "I consider my next move." } as const
-type Segment = { kind:"speech"; value:keyof typeof SPEECH }|{kind:"action";value:keyof typeof ACTION}|{kind:"thought";value:keyof typeof THOUGHT}|{kind:"grounded";evidence:string}
+export type CreatorReplyViolation =
+  | "EMPTY_VISIBLE"
+  | "VISIBLE_TOO_LONG"
+  | "CONTROL_CHARACTERS"
+  | "SENTINEL_LEAK"
+  | "MALFORMED_METADATA"
+  | "INVALID_CLAIM"
+  | "UNKNOWN_SOURCE"
+  | "UNGROUNDED_EVIDENCE"
+  | "CLAIM_NOT_VISIBLE"
+  | "SUBSCRIBER_PUPPETING"
+  | "ROLE_INVERSION"
+  | "UNSUPPORTED_WORLD_REFERENCE"
 
-export function renderCreatorReplyMetadata(metadata:unknown, authoritativeSources:string[]) {
-  if(!metadata||typeof metadata!=="object"||Array.isArray(metadata))return{ok:false as const,code:"MALFORMED_METADATA" as CreatorReplyViolation}
-  const raw=metadata as Record<string,unknown>
-  if(raw.version!==2||Object.keys(raw).some(k=>!["version","segments"].includes(k))||!Array.isArray(raw.segments)||!raw.segments.length||raw.segments.length>16)return{ok:false as const,code:"MALFORMED_METADATA" as CreatorReplyViolation}
-  const authority=new Set(authoritativeSources.map(v=>v.trim()).filter(Boolean));const rendered:string[]=[]
-  for(const item of raw.segments){if(!item||typeof item!=="object"||Array.isArray(item))return{ok:false as const,code:"INVALID_SEGMENT" as CreatorReplyViolation};const s=item as Record<string,unknown>
-    if(s.kind==="speech"&&Object.keys(s).every(k=>["kind","value"].includes(k))&&typeof s.value==="string"&&s.value in SPEECH)rendered.push(SPEECH[s.value as keyof typeof SPEECH])
-    else if(s.kind==="action"&&Object.keys(s).every(k=>["kind","value"].includes(k))&&typeof s.value==="string"&&s.value in ACTION)rendered.push(ACTION[s.value as keyof typeof ACTION])
-    else if(s.kind==="thought"&&Object.keys(s).every(k=>["kind","value"].includes(k))&&typeof s.value==="string"&&s.value in THOUGHT)rendered.push(THOUGHT[s.value as keyof typeof THOUGHT])
-    else if(s.kind==="grounded"&&Object.keys(s).every(k=>["kind","evidence"].includes(k))&&typeof s.evidence==="string"&&authority.has(s.evidence.trim()))rendered.push(s.evidence.trim())
-    else return{ok:false as const,code:s.kind==="grounded"?"UNGROUNDED_REFERENCE":"INVALID_SEGMENT" as CreatorReplyViolation}
-  }
-  const text=rendered.join(" ").trim();if(!text||text.length>CREATOR_REPLY_MAX_VISIBLE_CHARS)return{ok:false as const,code:"VISIBLE_TOO_LONG" as CreatorReplyViolation};return{ok:true as const,code:"OK" as const,text}
+export type CreatorReplyClaim = {
+  claim: string
+  source_id: string
+  evidence: string
 }
 
-/** Provider prose is never rendered; only locally rendered closed-schema primitives are visible. */
-export function validateCreatorReplyCandidate(providerVisible:string,metadata:unknown,authoritativeSources:string[]){
-  if(providerVisible.trim())return{ok:false as const,code:"VISIBLE_CONTENT_FORBIDDEN" as CreatorReplyViolation}
-  return renderCreatorReplyMetadata(metadata,authoritativeSources)
+type GroundedRange = { start: number; end: number }
+
+const SUBSCRIBER_ACTION_OR_STATE = /\byou\s+(?:kneel(?:ed|s|ing)?|came|come(?:s|ing)?|moved?|moves|moving|walk(?:ed|s|ing)?|step(?:ped|s|ping)?|stand(?:s|ing)?|stood|sit(?:s|ting)?|sat|lean(?:ed|s|ing)?|press(?:ed|es|ing)?|reach(?:ed|es|ing)?|turn(?:ed|s|ing)?|freeze|froze|freezes|freezing|flinch(?:ed|es|ing)?|trembl(?:e|ed|es|ing)|shiver(?:ed|s|ing)?|gasp(?:ed|s|ing)?|moan(?:ed|s|ing)?|smil(?:e|ed|es|ing)|grin(?:ned|s|ning)?|nod(?:ded|s|ding)?|shake|shakes|shook|shaking|stare(?:d|s|ing)?|watch(?:ed|es|ing)?|wait(?:ed|s|ing)?|stay(?:ed|s|ing)?|look(?:ed|s|ing)?|feel(?:s|ing|t)?|think(?:s|ing)?|want(?:ed|s|ing)?|decid(?:e|ed|es|ing))\b/gi
+const SUBSCRIBER_PROGRESSIVE_STATE = /\byou(?:'re|\s+are|\s+were)\s+(?:standing|sitting|kneeling|walking|moving|wearing|shivering|trembling|gasping|smiling|grinning|waiting|staying|leaning|pressed|nervous|afraid|angry|excited|aroused|drunk|intoxicated|cold|warm|wet|hurt|injured)\b/gi
+const SUBSCRIBER_POSSESSIVE_STATE = /\byour\s+(?:body|hands?|arms?|legs?|eyes?|face|hair|mouth|lips?|clothes?|clothing|coat|shirt|pants|dress|skirt|heels?|shoes?|boots?|posture|expression|breathing|breath|voice)\s+(?:is|are|was|were|look(?:s|ed)?|feel(?:s|t)?|move(?:s|d)?|shake(?:s|n)?|shiver(?:s|ed)?|tremble(?:s|d)?|glisten(?:s|ed)?|drip(?:s|ped)?|press(?:es|ed)?|tighten(?:s|ed)?|relax(?:es|ed)?|strike(?:s)?|hit(?:s)?|click(?:s|ed)?)\b|\byour\s+(?:wet|cold|warm|shaking|shivering|trembling|flushed|pale|bare|naked|dressed)\s+(?:body|hands?|arms?|legs?|eyes?|face|hair|mouth|lips?|clothes?|clothing|coat|shirt|pants|dress|skirt|heels?|shoes?|boots?)\b/gi
+const THIRD_PERSON_SUBSCRIBER = /\bthe subscriber\s+(?:kneels?|moves?|walks?|stands?|sits?|leans?|reaches?|turns?|shivers?|gasps?|smiles?|grins?|nods?|waits?|stays?|looks?|feels?|thinks?|wants?|decides?)\b/gi
+const THIRD_PERSON_CREATOR = /\b(?:the creator|creator)\s+(?:smiles?|grins?|steps?|walks?|moves?|leans?|reaches?|turns?|waits?|speaks?|says?|looks?|watches?|approaches?|emerges?)\b/gi
+const OBVIOUS_WORLD_REFERENCE = /\b(?:the|a|an)\s+(?:door|doorway|dumpster|fireplace|hearth|bell|sign|shotgun|lantern|weapon|barstool|stool|table|chair|couch|sofa|bed|window|curtain|crowd|guest|guests|patron|patrons|bouncer|guard)\b/gi
+
+function exactKeys(raw: Record<string, unknown>, allowed: string[]) {
+  const keys = Object.keys(raw)
+  return keys.length === allowed.length && keys.every((key) => allowed.includes(key))
+}
+
+function collectGroundedRanges(visible: string, claims: CreatorReplyClaim[]): GroundedRange[] {
+  const ranges: GroundedRange[] = []
+  for (const { claim } of claims) {
+    let from = 0
+    while (from <= visible.length - claim.length) {
+      const at = visible.indexOf(claim, from)
+      if (at < 0) break
+      ranges.push({ start: at, end: at + claim.length })
+      from = at + Math.max(1, claim.length)
+    }
+  }
+  return ranges
+}
+
+function rangeIsGrounded(start: number, end: number, grounded: GroundedRange[]) {
+  return grounded.some((range) => start >= range.start && end <= range.end)
+}
+
+function looksConditionalPrefix(visible: string, start: number) {
+  const prefix = visible.slice(Math.max(0, start - 18), start).toLowerCase()
+  return /\b(?:if|when|once|unless|until|should)\s*$/.test(prefix)
+}
+
+function firstUngroundedMatch(visible: string, pattern: RegExp, grounded: GroundedRange[], allowConditional = false) {
+  pattern.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(visible))) {
+    if (allowConditional && looksConditionalPrefix(visible, match.index)) continue
+    if (!rangeIsGrounded(match.index, match.index + match[0].length, grounded)) return match[0]
+  }
+  return null
+}
+
+export function validateCreatorReplyCandidate(
+  providerVisible: string,
+  metadata: unknown,
+  authoritativeSources: CreatorReplyAuthoritySource[],
+) {
+  const text = providerVisible.trim()
+  if (!text) return { ok: false as const, code: "EMPTY_VISIBLE" as CreatorReplyViolation }
+  if (text.length > CREATOR_REPLY_MAX_VISIBLE_CHARS) return { ok: false as const, code: "VISIBLE_TOO_LONG" as CreatorReplyViolation }
+  if (CONTROL.test(text)) return { ok: false as const, code: "CONTROL_CHARACTERS" as CreatorReplyViolation }
+  if (text.includes(RP_META_SENTINEL)) return { ok: false as const, code: "SENTINEL_LEAK" as CreatorReplyViolation }
+
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
+  const raw = metadata as Record<string, unknown>
+  if (raw.version !== 3 || !exactKeys(raw, ["version", "claims"]) || !Array.isArray(raw.claims) || raw.claims.length > CREATOR_REPLY_MAX_CLAIMS) {
+    return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
+  }
+
+  const sourceById = new Map(authoritativeSources.map((source) => [source.id, source]))
+  if (sourceById.size !== authoritativeSources.length) return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
+
+  const claims: CreatorReplyClaim[] = []
+  const seenClaims = new Set<string>()
+  for (const item of raw.claims) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
+    const claimRaw = item as Record<string, unknown>
+    if (!exactKeys(claimRaw, ["claim", "source_id", "evidence"])) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
+    const claim = typeof claimRaw.claim === "string" ? claimRaw.claim.trim() : ""
+    const sourceId = typeof claimRaw.source_id === "string" ? claimRaw.source_id.trim() : ""
+    const evidence = typeof claimRaw.evidence === "string" ? claimRaw.evidence.trim() : ""
+    if (!claim || !sourceId || !evidence || claim.length > CREATOR_REPLY_MAX_CLAIM_CHARS || evidence.length > CREATOR_REPLY_MAX_EVIDENCE_CHARS || CONTROL.test(claim) || CONTROL.test(sourceId) || CONTROL.test(evidence)) {
+      return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
+    }
+    if (!text.includes(claim)) return { ok: false as const, code: "CLAIM_NOT_VISIBLE" as CreatorReplyViolation }
+    const source = sourceById.get(sourceId)
+    if (!source) return { ok: false as const, code: "UNKNOWN_SOURCE" as CreatorReplyViolation }
+    if (!source.text.includes(evidence)) return { ok: false as const, code: "UNGROUNDED_EVIDENCE" as CreatorReplyViolation }
+    const identity = `${claim}\u0000${sourceId}\u0000${evidence}`
+    if (seenClaims.has(identity)) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
+    seenClaims.add(identity)
+    claims.push({ claim, source_id: sourceId, evidence })
+  }
+
+  const grounded = collectGroundedRanges(text, claims)
+  if (
+    firstUngroundedMatch(text, SUBSCRIBER_ACTION_OR_STATE, grounded, true) ||
+    firstUngroundedMatch(text, SUBSCRIBER_PROGRESSIVE_STATE, grounded, true) ||
+    firstUngroundedMatch(text, SUBSCRIBER_POSSESSIVE_STATE, grounded) ||
+    firstUngroundedMatch(text, THIRD_PERSON_SUBSCRIBER, grounded)
+  ) {
+    return { ok: false as const, code: "SUBSCRIBER_PUPPETING" as CreatorReplyViolation }
+  }
+  if (firstUngroundedMatch(text, THIRD_PERSON_CREATOR, [])) {
+    return { ok: false as const, code: "ROLE_INVERSION" as CreatorReplyViolation }
+  }
+  if (firstUngroundedMatch(text, OBVIOUS_WORLD_REFERENCE, grounded)) {
+    return { ok: false as const, code: "UNSUPPORTED_WORLD_REFERENCE" as CreatorReplyViolation }
+  }
+
+  return { ok: true as const, code: "OK" as const, text, claims }
 }
