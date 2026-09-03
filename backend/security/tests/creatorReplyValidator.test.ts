@@ -72,6 +72,25 @@ test("mechanical punctuation, quote, case, and whitespace differences do not rej
   assert.equal(result.ok, true)
 })
 
+test("mechanical punctuation quote case and whitespace differences are also allowed in source evidence", () => {
+  const authority: CreatorReplyAuthoritySource[] = [
+    { id: "current.inbound", kind: "current_inbound", text: "You said, “I’m ready — tell me what you want.”" },
+  ]
+  const result = valid("You said you're ready.", [
+    { claim: "you're ready", source_id: "current.inbound", evidence: "YOU SAID \"I'M READY, TELL ME WHAT YOU WANT\"" },
+  ], authority)
+  assert.equal(result.ok, true)
+})
+
+test("normalized evidence matching remains lexical rather than semantic", () => {
+  const authority: CreatorReplyAuthoritySource[] = [
+    { id: "current.inbound", kind: "current_inbound", text: "You said, “I’m ready — tell me what you want.”" },
+  ]
+  assert.equal(valid("You said you're ready.", [
+    { claim: "you're ready", source_id: "current.inbound", evidence: "I am eager to please you" },
+  ], authority).code, "UNGROUNDED_EVIDENCE")
+})
+
 test("normalized claim matching remains lexical rather than semantic", () => {
   assert.equal(valid("You told me you're in Denver.", [
     { claim: "You said you live in Colorado", source_id: "profile.key_notes", evidence: "Denver" },
