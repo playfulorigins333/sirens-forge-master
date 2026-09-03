@@ -106,6 +106,24 @@ test("production prompt strictly grounds subscriber facts while preserving natur
   assert.doesNotMatch(prompt, /closed set of safe creator-owned primitives|Write no visible prose/)
 })
 
+test("production prompt defines paid kink semantics instead of flattening them into generic dominance", () => {
+  const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
+  assert.match(prompt, /CREATOR KINK SEMANTICS/)
+  assert.match(prompt, /FINDOM \/ FINDOMME \/ FINANCIAL DOMINATION/)
+  assert.match(prompt, /Money, tribute, tipping, payment, gifts, reimbursement, spending, or paid access is part of the power exchange itself/)
+  assert.match(prompt, /Do NOT reduce Findom to generic dominance/)
+  assert.match(prompt, /tip for my attention/)
+  assert.match(prompt, /Do NOT invent that the subscriber is wealthy, has paid before, has a spending history/)
+  assert.match(prompt, /FEMDOM \/ DOMME \/ GODDESS/)
+  assert.match(prompt, /Do not automatically turn ordinary Femdom into Findom/)
+  assert.match(prompt, /JOI \/ INSTRUCTION PLAY/)
+  assert.match(prompt, /EDGING \/ ORGASM CONTROL \/ DENIAL \/ CHASTITY/)
+  assert.match(prompt, /HUMILIATION \/ DEGRADATION \/ SPH/)
+  assert.match(prompt, /CUCKOLD \/ CUCK \/ JEALOUSY FANTASY/)
+  assert.match(prompt, /MOMMY \/ SOFT DOMME \/ CAREGIVER DOMINANCE/)
+  assert.match(prompt, /When multiple kinks are requested together, combine their defining mechanisms/)
+})
+
 test("production prompt separates creator directions from subscriber authority", () => {
   const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
   assert.match(prompt, /TWO different user-side input types/)
