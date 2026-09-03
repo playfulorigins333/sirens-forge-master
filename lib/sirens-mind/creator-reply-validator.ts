@@ -41,18 +41,41 @@ function exactKeys(raw: Record<string, unknown>, allowed: string[]) {
   return keys.length === allowed.length && keys.every((key) => allowed.includes(key))
 }
 
-function collectGroundedRanges(visible: string, claims: CreatorReplyClaim[]): GroundedRange[] {
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+/**
+ * Claims are instructed to copy an exact visible substring. In practice some providers
+ * normalize curly quotes, punctuation, case, or whitespace between visible prose and
+ * hidden metadata. Tolerate only those mechanical differences; never synonyms,
+ * reordered words, or semantic fuzzy matching.
+ */
+function claimRanges(visible: string, claim: string): GroundedRange[] {
   const ranges: GroundedRange[] = []
-  for (const { claim } of claims) {
-    let from = 0
-    while (from <= visible.length - claim.length) {
-      const at = visible.indexOf(claim, from)
-      if (at < 0) break
-      ranges.push({ start: at, end: at + claim.length })
-      from = at + Math.max(1, claim.length)
-    }
+  let from = 0
+  while (from <= visible.length - claim.length) {
+    const at = visible.indexOf(claim, from)
+    if (at < 0) break
+    ranges.push({ start: at, end: at + claim.length })
+    from = at + Math.max(1, claim.length)
+  }
+  if (ranges.length) return ranges
+
+  const words = claim.match(/[\p{L}\p{N}]+/gu) ?? []
+  if (!words.length) return ranges
+  const separator = "[\\s\\p{P}\\p{S}]+"
+  const pattern = new RegExp(words.map(escapeRegex).join(separator), "giu")
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(visible))) {
+    ranges.push({ start: match.index, end: match.index + match[0].length })
+    if (!match[0].length) pattern.lastIndex++
   }
   return ranges
+}
+
+function collectGroundedRanges(visible: string, claims: CreatorReplyClaim[]): GroundedRange[] {
+  return claims.flatMap(({ claim }) => claimRanges(visible, claim))
 }
 
 function rangeIsGrounded(start: number, end: number, grounded: GroundedRange[]) {
@@ -106,7 +129,7 @@ export function validateCreatorReplyCandidate(
     if (!claim || !sourceId || !evidence || claim.length > CREATOR_REPLY_MAX_CLAIM_CHARS || evidence.length > CREATOR_REPLY_MAX_EVIDENCE_CHARS || CONTROL.test(claim) || CONTROL.test(sourceId) || CONTROL.test(evidence)) {
       return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     }
-    if (!text.includes(claim)) return { ok: false as const, code: "CLAIM_NOT_VISIBLE" as CreatorReplyViolation }
+    if (!claimRanges(text, claim).length) return { ok: false as const, code: "CLAIM_NOT_VISIBLE" as CreatorReplyViolation }
     const source = sourceById.get(sourceId)
     if (!source) return { ok: false as const, code: "UNKNOWN_SOURCE" as CreatorReplyViolation }
     if (!source.text.includes(evidence)) return { ok: false as const, code: "UNGROUNDED_EVIDENCE" as CreatorReplyViolation }
