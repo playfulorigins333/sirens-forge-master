@@ -87,11 +87,29 @@ function looksConditionalPrefix(visible: string, start: number) {
   return /\b(?:if|when|once|unless|until|should)\s*$/.test(prefix)
 }
 
-function firstUngroundedMatch(visible: string, pattern: RegExp, grounded: GroundedRange[], allowConditional = false) {
+function looksInterrogativeContext(visible: string, start: number, end: number) {
+  const prefix = visible.slice(Math.max(0, start - 72), start).toLowerCase()
+  if (/\b(?:do|does|did|can|could|would|will|won't|should|are|were|have|has|had)\s*$/.test(prefix)) return true
+  if (/\b(?:tell|show|ask|say|explain)\s+(?:me\s+)?(?:what|whether|if|how)\s*$/.test(prefix)) return true
+  if (/\b(?:want|need|like)\s+to\s+(?:know|hear)\s+(?:what|whether|if|how)\s*$/.test(prefix)) return true
+
+  const tail = visible.slice(end, Math.min(visible.length, end + 240))
+  const punctuation = tail.match(/[.!?]/)
+  return punctuation?.[0] === "?"
+}
+
+function firstUngroundedMatch(
+  visible: string,
+  pattern: RegExp,
+  grounded: GroundedRange[],
+  allowConditional = false,
+  allowInterrogative = false,
+) {
   pattern.lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = pattern.exec(visible))) {
     if (allowConditional && looksConditionalPrefix(visible, match.index)) continue
+    if (allowInterrogative && looksInterrogativeContext(visible, match.index, match.index + match[0].length)) continue
     if (!rangeIsGrounded(match.index, match.index + match[0].length, grounded)) return match[0]
   }
   return null
@@ -141,9 +159,9 @@ export function validateCreatorReplyCandidate(
 
   const grounded = collectGroundedRanges(text, claims)
   if (
-    firstUngroundedMatch(text, SUBSCRIBER_ACTION_OR_STATE, grounded, true) ||
-    firstUngroundedMatch(text, SUBSCRIBER_PROGRESSIVE_STATE, grounded, true) ||
-    firstUngroundedMatch(text, SUBSCRIBER_POSSESSIVE_STATE, grounded) ||
+    firstUngroundedMatch(text, SUBSCRIBER_ACTION_OR_STATE, grounded, true, true) ||
+    firstUngroundedMatch(text, SUBSCRIBER_PROGRESSIVE_STATE, grounded, true, true) ||
+    firstUngroundedMatch(text, SUBSCRIBER_POSSESSIVE_STATE, grounded, false, true) ||
     firstUngroundedMatch(text, THIRD_PERSON_SUBSCRIBER, grounded)
   ) {
     return { ok: false as const, code: "SUBSCRIBER_PUPPETING" as CreatorReplyViolation }
