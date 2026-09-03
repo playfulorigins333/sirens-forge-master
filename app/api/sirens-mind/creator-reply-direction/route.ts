@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
   if (turns.length < 2 || turns.at(-1)?.role !== "creator") {
     return NextResponse.json({ error: "CREATOR_REPLY_DIRECTION_REQUIRES_DRAFT" }, { status: 409 })
   }
+  const priorDraft = turns.at(-1)!.text.trim()
   const latestSubscriber = [...turns].reverse().find((turn) => turn.role === "subscriber")
   if (!latestSubscriber) return NextResponse.json({ error: "CREATOR_REPLY_DIRECTION_REQUIRES_DRAFT" }, { status: 409 })
 
@@ -127,6 +128,12 @@ export async function POST(req: NextRequest) {
           return
         }
         visible = validation.text
+        if (visible === priorDraft) {
+          code = "CREATOR_REPLY_DIRECTION_UNCHANGED"
+          validationOutcome = "DIRECTION_NOOP"
+          target.enqueue(encoder.encode(sse("error", { error: code })))
+          return
+        }
         const revisedTurns = [...turns]
         revisedTurns[revisedTurns.length - 1] = { role: "creator", text: visible }
         const updated = {
