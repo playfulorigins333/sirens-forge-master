@@ -102,7 +102,7 @@ export function creatorDomStyleTransitionRequirement(direction: string) {
   const explicitSwitch = /\b(switch|change|replace|drop|instead|new\s+(?:role|persona|style)|switching)\b/i.test(compact)
     || /\bto\s+(?:a|an|the)\s+(?:male\s+|female\s+)?(?:findom(?:me)?|mommy\s+domme?|soft\s+domme?|gentle\s+domme?|goddess|brat\s+tamer|disciplinarian|strict\s+domme?|femdom|domme)\b/i.test(compact)
   if (!explicitSwitch) return ""
-  return "STYLE TRANSITION REQUIREMENT: The explicitly named ACTIVE DOM STYLE replaces conflicting prior creator Dom styles/dynamics from draft_to_revise unless the creator explicitly asks to combine them. Retire prior style-specific mechanisms, titles, and framing that belong only to the replaced style. Do not carry over Findom tribute/payment/access-gating, Mommy framing, Goddess framing, or another replaced specialized style merely because it appeared in the prior draft. Preserve such material only when the current Creator Direction explicitly retains/combines it or current subscriber-authored evidence independently establishes it. Build the rewrite around the new active style's defining mechanism."
+  return "STYLE TRANSITION REQUIREMENT: The explicitly named ACTIVE DOM STYLE replaces conflicting prior creator Dom styles/dynamics unless the creator explicitly asks to combine them. Retire prior style-specific mechanisms, titles, and framing that belong only to the replaced style. Do not carry over Findom tribute/payment/access-gating, Mommy framing, Goddess framing, or another replaced specialized style merely because it appeared in prior creator output. Preserve such material only when the current Creator Direction explicitly retains/combines it or current subscriber-authored evidence independently establishes it. Build the new reply around the new active style's defining mechanism."
 }
 
 function creatorRoleTarget(direction: string): "male" | "female" | null {
@@ -133,6 +133,13 @@ export function creatorRoleTransitionRequirement(direction: string) {
   return ""
 }
 
+export function creatorDirectionRequiresFreshGeneration(direction: string) {
+  const compact = direction.trim()
+  if (creatorDomStyleTransitionRequirement(compact) || creatorRoleTransitionRequirement(compact)) return true
+  return /\b(?:switch|change|replace)\b[\s\S]{0,100}\b(?:creator\s+)?(?:role|persona|kink|dynamic|style)\b/i.test(compact)
+    || /\b(?:switch|change|replace)\s+(?:the\s+)?creator\s+to\b/i.test(compact)
+}
+
 export function normalizedCreatorDirection(direction: string) {
   const compact = direction.trim()
   const requirements: string[] = []
@@ -157,35 +164,54 @@ export function normalizedCreatorDirection(direction: string) {
 }
 
 export function creatorReplyDirectionSystemMessage(direction: string) {
+  const freshGeneration = creatorDirectionRequiresFreshGeneration(direction)
   return [
     "# ACTIVE CREATOR DIRECTION — HIGHEST-PRIORITY CREATOR-SIDE REWRITE REQUIREMENT",
     "This instruction is trusted creator control, not subscriber content and never subscriber factual authority.",
-    "You MUST rewrite the latest creator draft to satisfy it before producing the visible reply.",
+    freshGeneration
+      ? "HARD CREATOR TRANSITION: The creator explicitly replaced a role, persona, kink/dynamic, or specialized style. Generate a fresh creator reply for the same subscriber conversation under the newly selected creator configuration. Prior creator wording is not authoritative for the replaced dimensions and must not be reconstructed."
+      : "You MUST rewrite the latest creator draft to satisfy the direction before producing the visible reply.",
     "The direction supersedes ONLY the creator-side dimensions it explicitly changes. Preserve the current creator role, persona, kink/dynamic, and specialized Dom style unless the creator explicitly asks to change that dimension.",
     "When Creator Direction explicitly changes role, persona, kink, or Dom style, the newly named choice becomes authoritative and conflicting prior creator-side choices are retired unless the creator explicitly combines them.",
     "Tone, warmth, playfulness, intensity, length, formatting, structure, or next-beat changes do NOT by themselves authorize a role/persona/kink/Dom-style change. A tone-only rewrite must keep the existing specialized Dom style recognizable.",
     "When the creator names a specialized Dom style, use that style's defining behavioral dynamic. Do not flatten specialized Dom styles into generic dominance, and do not introduce a specialized style when the creator only asked for generic dominance unless the established creator persona/scene already supports it.",
-    "Do not treat the existing draft as an acceptable answer merely because it is grounded. The draft is reference text to revise, and its established creator role/persona/kink/style remains authoritative only for dimensions the Creator Direction did not explicitly replace.",
+    freshGeneration
+      ? "For a hard creator transition, rely on subscriber-authored conversation, subscriber profile/key notes, source-aware continuity, and the current Creator Direction. Do not use prior creator-authored wording as a template or source of replaced style mechanics."
+      : "Do not treat the existing draft as an acceptable answer merely because it is grounded. The draft is reference text to revise, and its established creator role/persona/kink/style remains authoritative only for dimensions the Creator Direction did not explicitly replace.",
     normalizedCreatorDirection(direction),
   ].join("\n")
 }
 
 export function creatorReplyDirectionMessage(direction: string, draft: string) {
+  const normalized = normalizedCreatorDirection(direction)
+  if (creatorDirectionRequiresFreshGeneration(direction)) {
+    return [
+      "BEGIN CREATOR DIRECTION FRESH GENERATION TASK (TRUSTED CREATOR INSTRUCTION; NEVER SUBSCRIBER FACTUAL AUTHORITY)",
+      "This Creator Direction explicitly replaces a creator role, persona, kink/dynamic, or specialized style. Generate a NEW ready-to-send creator reply for the same latest subscriber message and grounded conversation.",
+      "The previous creator draft is intentionally withheld. Do not reconstruct, imitate, or preserve its wording or its replaced creator-side mechanics.",
+      "Use subscriber-authored conversation and allowed grounding sources for subscriber/world facts. Use creator_direction as the authority for creator-owned role, persona, voice, kink/dynamic, style, tone, and behavioral mechanism.",
+      "Retire incompatible prior creator-side titles, framing, commercial mechanics, role markers, and specialized-style behavior unless creator_direction explicitly combines them or subscriber-authored evidence independently establishes a relevant world fact.",
+      "Creator-selected voice/persona/style, creator commands, questions, challenges, hypothetical framing, and conditional consequences remain creator-owned language and do not require subscriber evidence unless they also assert a subscriber/world fact.",
+      "CREATOR_DIRECTION (EXECUTE THIS):",
+      JSON.stringify({ creator_direction: normalized }),
+      "Before output, verify the visible reply materially reflects the newly selected creator role/style and contains no incompatible carryover from the replaced creator configuration.",
+      "END CREATOR DIRECTION FRESH GENERATION TASK",
+    ].join("\n")
+  }
   return [
     "BEGIN CREATOR DIRECTION REWRITE TASK (TRUSTED CREATOR INSTRUCTION; NEVER SUBSCRIBER FACTUAL AUTHORITY)",
     "This is a mandatory rewrite instruction, not optional context. Rewrite draft_to_revise so the visible reply directly follows creator_direction.",
     "Treat even a very short or fragmentary creator_direction as a complete instruction. Brevity never makes the direction optional or lower priority.",
     "Apply only the dimensions the creator actually changed. Preserve the draft's creator role, persona, kink/dynamic, and specialized Dom style unless creator_direction explicitly changes them.",
-    "If creator_direction explicitly changes a role, persona, kink, or Dom style, retire incompatible prior creator-side role/persona/style markers and mechanics from draft_to_revise unless creator_direction explicitly combines them or subscriber-authored evidence independently establishes them.",
     "A request to change tone, warmth, playfulness, intensity, length, formatting, structure, or next beat is NOT a request to change persona, role, kink, or Dom style. If creator_direction says to keep control/style/persona while changing tone, preserve that control/style/persona visibly in the rewrite.",
     "For measurable creator constraints such as line count, word count, maximum length, formatting, or requested structure, satisfy the constraint literally in the creator-visible reply.",
     "Creator-selected voice/persona/style is creator-owned language and does not require subscriber evidence. Subscriber/world factual assertions still require grounding exactly as defined by the system contract.",
     "CREATOR_DIRECTION (EXECUTE THIS):",
-    JSON.stringify({ creator_direction: normalizedCreatorDirection(direction) }),
-    "DRAFT_TO_REVISE (REFERENCE TEXT AND CURRENT CREATOR-STYLE AUTHORITY ONLY FOR DIMENSIONS NOT REPLACED BY CREATOR_DIRECTION):",
+    JSON.stringify({ creator_direction: normalized }),
+    "DRAFT_TO_REVISE (REFERENCE TEXT AND CURRENT CREATOR-STYLE AUTHORITY):",
     JSON.stringify({ draft_to_revise: draft }),
-    "Before output, check the creator-visible reply against creator_direction. Verify that requested changes were made, explicitly replaced creator-side dimensions no longer leak from the prior draft, and unrequested creator role/persona/kink/Dom-style dimensions were preserved.",
-    "When creator_direction asks for a change, do not return draft_to_revise unchanged. Preserve only the parts that remain compatible with the new direction and the grounded conversation.",
+    "Before output, check the creator-visible reply against creator_direction. Verify that requested changes were made and unrequested creator role/persona/kink/Dom-style dimensions were preserved.",
+    "When creator_direction asks for a change, do not return draft_to_revise unchanged.",
     "END CREATOR DIRECTION REWRITE TASK",
   ].join("\n")
 }
@@ -209,8 +235,11 @@ export function buildCreatorReplyMessages(input: {
   const directionDraft = input.direction && input.recentTurns.at(-1)?.role === "creator"
     ? input.recentTurns.at(-1)!.text
     : ""
+  const freshGeneration = Boolean(input.direction && creatorDirectionRequiresFreshGeneration(input.direction))
   const historyTurns = input.direction && directionDraft
-    ? input.recentTurns.slice(0, -1)
+    ? (freshGeneration
+      ? input.recentTurns.slice(0, -1).filter((turn) => turn.role === "subscriber")
+      : input.recentTurns.slice(0, -1))
     : input.recentTurns
   return [
     { role: "system", content: [creatorReplyModeGovernance(input.mode), input.systemPrompt].join("\n\n") },
