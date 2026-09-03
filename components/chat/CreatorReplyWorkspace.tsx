@@ -996,7 +996,7 @@ export default function CreatorReplyWorkspace() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="subscriber-form-title"
-            className="relative max-h-[90dvh] w-full max-w-2xl overflow-y-auto rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,15,21,0.98),rgba(8,9,13,0.98))] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.60)] sm:p-7"
+            className="relative max-h-[90dvh] w-full max-w-2xl overflow-x-hidden overflow-y-auto rounded-[28px] border border-white/10 bg-[linear-gradient(180deg,rgba(15,15,21,0.98),rgba(8,9,13,0.98))] p-5 shadow-[0_30px_100px_rgba(0,0,0,0.60)] sm:p-7"
           >
             <div className="pointer-events-none absolute -right-16 -top-20 h-44 w-44 rounded-full bg-fuchsia-500/10 blur-3xl" />
             <div className="relative">

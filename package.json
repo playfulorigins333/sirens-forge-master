@@ -86,7 +86,8 @@
     "test:phase6b-sirens-mind": "tsx --test backend/security/tests/phase6bSirensMindContracts.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6bSirensMindBehavior.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6bHeadlessCapabilityBehavior.test.ts",
     "test:phase6c-sirens-mind": "tsx --test backend/security/tests/phase6cSirensMind.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6cSirensMindRouteBehavior.test.ts",
     "test:phase6d-sirens-mind": "tsx --test backend/security/tests/phase6dSirensMind.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6dSirensMindRouteBehavior.test.ts",
-    "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6fCreatorReplyRouteBehavior.test.ts",
+    "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts backend/security/tests/creatorReplyValidator.test.ts backend/security/tests/sirensMindLiveBatteryContract.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6fCreatorReplyRouteBehavior.test.ts",
+    "test:sirens-mind-live": "tsx tools/sirens-mind-live-battery.ts",
     "test:phase6f2-creator-reply-subscribers": "node --conditions=react-server --import tsx --test backend/security/tests/phase6f2CreatorReplySubscribers.test.ts",
     "test:phase6f2-creator-reply-postgres": "node backend/security/tests/runPhase6f2CreatorReplyPostgres.mjs"
   },

@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import fs from "node:fs"
 import path from "node:path"
-import { creatorReplyAuthorized, fallbackCreatorReplyContinuity, inboundSubscriberMessage, outboundCreatorReply, parseCreatorReplyContinuity, validCreatorReplyThreadId, CREATOR_REPLY_CONTINUITY_PREFIX, CREATOR_REPLY_THREAD_KEY } from "../../../lib/sirens-mind/creator-reply"
+import { buildCreatorReplyAuthoritySources, creatorReplyAuthorized, deriveCreatorReplyContinuity, fallbackCreatorReplyContinuity, inboundSubscriberMessage, outboundCreatorReply, parseCreatorReplyContinuity, validCreatorReplyThreadId, CREATOR_REPLY_CONTINUITY_PREFIX, CREATOR_REPLY_THREAD_KEY } from "../../../lib/sirens-mind/creator-reply"
 
 test("authorization is explicit, enabled, UUID validated, and allowlisted", () => {
   const id = "123e4567-e89b-42d3-a456-426614174000"
@@ -45,6 +45,33 @@ test("fallback labels ownership correctly", () => {
   assert.doesNotMatch(state.summary, /Creator: I enter\./)
 })
 
+test("source-aware continuity durably rolls authoritative inbound facts beyond three exchanges", () => {
+  const profile = { display_name: "Mike", platform: "Synthetic", platform_handle: null, key_notes: "35, Denver" }
+  let state = null as any
+  for (let i = 0; i < 8; i++) state = deriveCreatorReplyContinuity(state, profile, `subscriber fact ${i}`)
+  assert.match(state.subscriber_persona, /35, Denver/)
+  assert.match(state.summary, /subscriber fact 0/)
+  assert.match(state.summary, /subscriber fact 7/)
+  assert.doesNotMatch(state.summary, /creator speculation/)
+  const sources = buildCreatorReplyAuthoritySources({ subscriber: profile, continuity: state, recentTurns: [], inbound: "current fact" })
+  assert.ok(sources.some((source) => source.kind === "continuity_subscriber" && source.text === "subscriber fact 0"))
+  assert.ok(sources.some((source) => source.id === "profile.key_notes" && source.text === "35, Denver"))
+  assert.ok(sources.some((source) => source.id === "current.inbound" && source.text === "current fact"))
+  const replaced = deriveCreatorReplyContinuity({ version: 1, creator_persona: "invented", subscriber_persona: "invented", relationship: "invented", scene: "invented", summary: "provider hallucination" }, profile, "authoritative")
+  assert.doesNotMatch(JSON.stringify(replaced), /provider hallucination|invented/)
+})
+
+test("authority index excludes creator-authored recent replies", () => {
+  const sources = buildCreatorReplyAuthoritySources({
+    subscriber: { display_name: "Mike", platform: "Synthetic", platform_handle: null, key_notes: "Denver" },
+    continuity: { version: 1, creator_persona: "", subscriber_persona: "", relationship: "", scene: "", summary: "" },
+    recentTurns: [{ role: "subscriber", text: "I like the lodge." }, { role: "creator", text: "You are wearing boots." }],
+    inbound: "Hello",
+  })
+  assert.ok(sources.some((source) => source.text === "I like the lodge."))
+  assert.ok(!sources.some((source) => source.text.includes("wearing boots")))
+})
+
 test("thread IDs and storage namespace are isolated", () => {
   assert.equal(validCreatorReplyThreadId(crypto.randomUUID()), true)
   assert.notEqual(crypto.randomUUID(), crypto.randomUUID())
@@ -64,25 +91,22 @@ test("production prompt defines both pronoun directions and agency", () => {
   assert.match(prompt, /Do not invent new subscriber dialogue/)
 })
 
-test("production prompt strictly grounds subscriber facts, agency, and continuity", () => {
+test("production prompt strictly grounds subscriber facts while preserving natural creator language", () => {
   const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
   assert.match(prompt, /Every subscriber-specific claim must come from the current subscriber-authored message/)
   assert.match(prompt, /Prior creator outbound replies are scene\/dialogue history, never factual evidence/)
   assert.match(prompt, /Subscriber Profile \/ Key Notes reference data/)
-  for (const prohibition of [
-    "subscriber appearance", "body type or other physical traits", "posture or physical position",
-    "background", "occupation", "motives or intentions", "emotional state", "next actions",
-    "next dialogue", "descriptive states as well as voluntary actions", "physical effects on the subscriber",
-  ]) assert.match(prompt, new RegExp(prohibition))
-  assert.match(prompt, /omit it rather than filling it in/)
-  assert.match(prompt, /progressing through creator actions or dialogue/)
-  assert.match(prompt, /rather than puppeting the subscriber or expanding the environment/)
-  assert.match(prompt, /power dynamics do not waive subscriber agency/)
-  assert.match(prompt, /subscriber_persona` may contain only subscriber facts explicitly grounded in subscriber-authored messages/)
-  assert.match(prompt, /never convert them into authoritative subscriber facts/)
+  assert.match(prompt, /free-form language/)
+  assert.match(prompt, /do not restrict it to canned phrases or fixed primitives/)
+  assert.match(prompt, /Commands are not subscriber compliance/)
+  assert.match(prompt, /GROUNDING AUTHORITY INDEX/)
+  assert.match(prompt, /"version":3,"claims"/)
+  assert.match(prompt, /visible creator wording does NOT need to copy the source verbatim/)
+  assert.match(prompt, /source-aware continuity/)
+  assert.doesNotMatch(prompt, /closed set of safe creator-owned primitives|Write no visible prose/)
 })
 
-test("production prompt preserves subscriber-supplied scenario world-state without negative-example priming", () => {
+test("production prompt preserves subscriber-supplied scenario world-state", () => {
   const prompt = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.creator_reply.system.txt"), "utf8")
   assert.match(prompt, /STRICT SCENARIO FIDELITY/)
   assert.match(prompt, /subscriber-supplied scene setup, timing, roles, events, environmental facts, and already-stated subscriber actions as authoritative current world-state/)
@@ -91,26 +115,18 @@ test("production prompt preserves subscriber-supplied scenario world-state witho
   assert.match(prompt, /Keep venue or business status consistent with the supplied timeline/)
   assert.match(prompt, /Environmental narration may only restate or stylistically rephrase environmental facts already supplied/)
   assert.match(prompt, /may not introduce new props, furnishings, occupants, operational conditions, prior events, policies, signage, objects, timing, rules, history, or other world-state/)
-  assert.match(prompt, /may not add a physical consequence, reaction, follow-on movement, or new state for the subscriber unless that consequence or state was explicitly supplied/)
   assert.match(prompt, /GROUNDING CHECK BEFORE OUTPUT/)
   assert.match(prompt, /every factual claim about the subscriber or established world-state must be supported by an allowed grounding source/)
   assert.match(prompt, /Favor omission over invention and continuation over reinterpretation/)
-  for (const primingLiteral of [
-    "You don't move", "the door you're still blocking", "You city types",
-    "tall, built like someone who spends more time outdoors than in",
-    "closed hours ago", "sign saying the location is closed", "standing in the doorway",
-  ]) assert.doesNotMatch(prompt, new RegExp(primingLiteral.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"))
 })
 
 test("Creator Reply uses a dedicated system stack while general Siren's Mind retains the generic base", () => {
   const route = fs.readFileSync(path.join(process.cwd(), "app/api/sirens-mind/chat/route.ts"), "utf8")
   const creatorBranch = route.slice(route.indexOf("if (creatorReplyRequested) {", route.indexOf("const model =")), route.indexOf("const continuity =", route.indexOf("const model =")))
-  assert.match(creatorBranch, /creatorReplyModeGovernance\(mode\)/)
+  assert.match(creatorBranch, /buildCreatorReplyMessages/)
   assert.match(creatorBranch, /promptFile\("nsfw_gpt\.creator_reply\.system\.txt"\)/)
   assert.doesNotMatch(creatorBranch, /promptFile\("nsfw_gpt\.system\.base\.txt"\)/)
-
-  const generalAssembly = route.slice(route.indexOf("const runtimeContract ="))
-  assert.match(generalAssembly, /const systemPrompt = \[promptFile\("nsfw_gpt\.system\.base\.txt"\)/)
+  assert.match(route, /buildGeneralSystemPrompt\(promptFile\("nsfw_gpt\.system\.base\.txt"\)/)
 })
 
 test("workspace is hidden and configured without generator or billing UX", () => {
@@ -134,6 +150,7 @@ test("workspace is hidden and configured without generator or billing UX", () =>
   assert.match(ui, /userLabel=\{creatorReply \? "Subscriber" : "You"\}/)
   assert.match(ui, /min-h-0 flex-1 overflow-y-auto/)
   assert.match(ui, /shrink-0 border-t border-white\/10/)
+  assert.match(ui, /items\.filter\(\(item\) => item\.id !== assistantId\)/)
   assert.doesNotMatch(ui, /setThreadId|creator_reply_continuity/)
   assert.match(message, /Copy Reply/)
   assert.doesNotMatch(page, /billing|upgrade|entitlement/i)
