@@ -1,5 +1,5 @@
 import { RP_META_SENTINEL } from "./admin-rp"
-import type { CreatorReplyAuthoritySource } from "./creator-reply"
+import { buildCreatorReplyAuthorityUnits, type CreatorReplyAuthoritySource, type CreatorReplyAuthorityUnit } from "./creator-reply"
 
 export const CREATOR_REPLY_MAX_VISIBLE_CHARS = 12_000
 const CREATOR_REPLY_MAX_CLAIMS = 32
@@ -22,14 +22,15 @@ export type CreatorReplyViolation =
 
 export type CreatorReplyClaim = {
   claim: string
-  source_id: string
+  authority_id: string
 }
 
 type GroundedRange = { start: number; end: number }
 
 const SUBSCRIBER_ACTION_OR_STATE = /\byou\s+(?:kneel(?:ed|s|ing)?|came|come(?:s|ing)?|moved?|moves|moving|walk(?:ed|s|ing)?|step(?:ped|s|ping)?|stand(?:s|ing)?|stood|sit(?:s|ting)?|sat|lean(?:ed|s|ing)?|press(?:ed|es|ing)?|reach(?:ed|es|ing)?|turn(?:ed|s|ing)?|freeze|froze|freezes|freezing|flinch(?:ed|es|ing)?|trembl(?:e|ed|es|ing)|shiver(?:ed|s|ing)?|gasp(?:ed|s|ing)?|moan(?:ed|s|ing)?|smil(?:e|ed|es|ing)|grin(?:ned|s|ning)?|nod(?:ded|s|ding)?|shake|shakes|shook|shaking|stare(?:d|s|ing)?|watch(?:ed|es|ing)?|wait(?:ed|s|ing)?|stay(?:ed|s|ing)?|look(?:ed|s|ing)?|feel(?:s|ing|t)?|think(?:s|ing)?|want(?:ed|s|ing)?|decid(?:e|ed|es|ing))\b/gi
-const SUBSCRIBER_PROGRESSIVE_STATE = /\byou(?:'re|\s+are|\s+were)\s+(?:standing|sitting|kneeling|walking|moving|wearing|shivering|trembling|gasping|smiling|grinning|waiting|staying|leaning|pressed|nervous|afraid|angry|excited|aroused|drunk|intoxicated|cold|warm|wet|hurt|injured)\b/gi
-const SUBSCRIBER_MOTIVE_OR_INTENT = /\byou(?:'re|\s+are)\s+(?:trying|hoping|intending|planning)\s+to\b|\byou\s+(?:intend|plan|mean|want)\s+to\b|\byou\s+hope\b/gi
+const SUBSCRIBER_PROGRESSIVE_STATE = /\b(?:look\s+who(?:'s|\s+is)\s+|you(?:'re|\s+are|\s+were)\s+|you\s+seem\s+)(?:standing|sitting|kneeling|walking|moving|wearing|shivering|trembling|gasping|smiling|grinning|waiting|staying|leaning|pressed|eager|nervous|afraid|angry|excited|aroused|drunk|intoxicated|cold|warm|wet|hurt|injured|wealthy)\b/gi
+const SUBSCRIBER_MOTIVE_OR_INTENT = /\byou(?:(?:'re|\s+are)\s+|\s+)(?:trying|hoping|intending|planning|wanting)\s+(?:to|i(?:'ll|\s+will))\b|\byou\s+(?:intend|plan|mean|want)\s+to\b|\byou\s+hope\b/gi
+const SUBSCRIBER_GENERAL_FACT = /\byou(?:'re|\s+are)\s+(?:eager|wealthy)\b|\byou\s+(?:love|loved)\s+this\b|\byou(?:'ve|\s+have)\s+paid\s+before\b/gi
 const SUBSCRIBER_GENDERED_IDENTITY = /\b(?:you(?:'re|\s+are)\s+(?:a\s+)?(?:boy|girl|man|woman|princess)|(?:good|bad|naughty)\s+(?:boy|girl)|(?:my|little)\s+(?:boy|girl|man|woman|princess))\b/gi
 const SUBSCRIBER_POSSESSIVE_STATE = /\byour\s+(?:body|hands?|arms?|legs?|eyes?|face|hair|mouth|lips?|clothes?|clothing|coat|shirt|pants|dress|skirt|heels?|shoes?|boots?|posture|expression|breathing|breath|voice)\s+(?:is|are|was|were|look(?:s|ed)?|feel(?:s|t)?|move(?:s|d)?|shake(?:s|n)?|shiver(?:s|ed)?|tremble(?:s|d)?|glisten(?:s|ed)?|drip(?:s|ped)?|press(?:es|ed)?|tighten(?:s|ed)?|relax(?:es|ed)?|strike(?:s)?|hit(?:s)?|click(?:s|ed)?)\b|\byour\s+(?:wet|cold|warm|shaking|shivering|trembling|flushed|pale|bare|naked|dressed)\s+(?:body|hands?|arms?|legs?|eyes?|face|hair|mouth|lips?|clothes?|clothing|coat|shirt|pants|dress|skirt|heels?|shoes?|boots?)\b/gi
 const THIRD_PERSON_SUBSCRIBER = /\bthe subscriber\s+(?:kneels?|moves?|walks?|stands?|sits?|leans?|reaches?|turns?|shivers?|gasps?|smiles?|grins?|nods?|waits?|stays?|looks?|feels?|thinks?|wants?|decides?)\b/gi
@@ -76,6 +77,26 @@ function claimRanges(visible: string, claim: string): GroundedRange[] {
 
 function collectGroundedRanges(visible: string, claims: CreatorReplyClaim[]): GroundedRange[] {
   return claims.flatMap(({ claim }) => claimRanges(visible, claim))
+}
+
+const SUPPORT_STOP_WORDS = new Set(["a", "an", "and", "are", "as", "at", "be", "before", "for", "from", "good", "i", "in", "is", "it", "me", "my", "of", "on", "subscriber", "that", "the", "this", "to", "was", "were", "when", "who", "you", "your"])
+function supportTokens(value: string) {
+  return (value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map((token) => {
+    if (["female", "girl", "woman", "she", "her"].includes(token)) return "female"
+    if (["male", "boy", "man", "he", "him"].includes(token)) return "male"
+    if (token.endsWith("ied")) return `${token.slice(0, -3)}y`
+    if (token.endsWith("ing") && token.length > 5) return token.slice(0, -3)
+    if (token.endsWith("ed") && token.length > 4) return token.slice(0, -2)
+    if (token.endsWith("s") && token.length > 4) return token.slice(0, -1)
+    return token
+  }).filter((token) => !SUPPORT_STOP_WORDS.has(token))
+}
+
+/** Fail-closed lexical entailment: every factual claim token must occur in one selected atomic unit. */
+function authoritySupportsClaim(unit: CreatorReplyAuthorityUnit, claim: string) {
+  const claimTokens = [...new Set(supportTokens(claim))]
+  const authorityTokens = new Set(supportTokens(unit.text))
+  return claimTokens.length > 0 && claimTokens.every((token) => authorityTokens.has(token))
 }
 
 function rangeIsGrounded(start: number, end: number, grounded: GroundedRange[]) {
@@ -129,30 +150,33 @@ export function validateCreatorReplyCandidate(
 
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
   const raw = metadata as Record<string, unknown>
-  if (raw.version !== 4 || !exactKeys(raw, ["version", "claims"]) || !Array.isArray(raw.claims) || raw.claims.length > CREATOR_REPLY_MAX_CLAIMS) {
+  if (raw.version !== 5 || !exactKeys(raw, ["version", "claims"]) || !Array.isArray(raw.claims) || raw.claims.length > CREATOR_REPLY_MAX_CLAIMS) {
     return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
   }
 
-  const sourceById = new Map(authoritativeSources.map((source) => [source.id, source]))
-  if (sourceById.size !== authoritativeSources.length) return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
+  const authorityUnits = buildCreatorReplyAuthorityUnits(authoritativeSources)
+  const authorityById = new Map(authorityUnits.map((unit) => [unit.id, unit]))
+  if (authorityById.size !== authorityUnits.length) return { ok: false as const, code: "MALFORMED_METADATA" as CreatorReplyViolation }
 
   const claims: CreatorReplyClaim[] = []
   const seenClaims = new Set<string>()
   for (const item of raw.claims) {
     if (!item || typeof item !== "object" || Array.isArray(item)) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     const claimRaw = item as Record<string, unknown>
-    if (!exactKeys(claimRaw, ["claim", "source_id"])) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
+    if (!exactKeys(claimRaw, ["claim", "authority_id"])) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     const claim = typeof claimRaw.claim === "string" ? claimRaw.claim.trim() : ""
-    const sourceId = typeof claimRaw.source_id === "string" ? claimRaw.source_id.trim() : ""
-    if (!claim || !sourceId || claim.length > CREATOR_REPLY_MAX_CLAIM_CHARS || CONTROL.test(claim) || CONTROL.test(sourceId)) {
+    const authorityId = typeof claimRaw.authority_id === "string" ? claimRaw.authority_id.trim() : ""
+    if (!claim || !authorityId || claim.length > CREATOR_REPLY_MAX_CLAIM_CHARS || CONTROL.test(claim) || CONTROL.test(authorityId)) {
       return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     }
     if (!claimRanges(text, claim).length) return { ok: false as const, code: "CLAIM_NOT_VISIBLE" as CreatorReplyViolation }
-    if (!sourceById.has(sourceId)) return { ok: false as const, code: "UNKNOWN_SOURCE" as CreatorReplyViolation }
-    const identity = `${claim}\u0000${sourceId}`
+    const authority = authorityById.get(authorityId)
+    if (!authority) return { ok: false as const, code: "UNKNOWN_SOURCE" as CreatorReplyViolation }
+    if (!authoritySupportsClaim(authority, claim)) return { ok: false as const, code: "UNGROUNDED_EVIDENCE" as CreatorReplyViolation }
+    const identity = `${claim}\u0000${authorityId}`
     if (seenClaims.has(identity)) return { ok: false as const, code: "INVALID_CLAIM" as CreatorReplyViolation }
     seenClaims.add(identity)
-    claims.push({ claim, source_id: sourceId })
+    claims.push({ claim, authority_id: authorityId })
   }
 
   const grounded = collectGroundedRanges(text, claims)
@@ -160,6 +184,7 @@ export function validateCreatorReplyCandidate(
     firstUngroundedMatch(text, SUBSCRIBER_ACTION_OR_STATE, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_PROGRESSIVE_STATE, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_MOTIVE_OR_INTENT, grounded, true, true) ||
+    firstUngroundedMatch(text, SUBSCRIBER_GENERAL_FACT, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_GENDERED_IDENTITY, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_POSSESSIVE_STATE, grounded, false, true) ||
     firstUngroundedMatch(text, THIRD_PERSON_SUBSCRIBER, grounded)
