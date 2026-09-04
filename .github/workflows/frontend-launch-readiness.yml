@@ -14,7 +14,60 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm audit --omit=dev --audit-level=high
+      - name: Install current npm audit client
+        run: npm install --global npm@11.19.1
+      - name: Production dependency audit
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        shell: bash
+        run: |
+          set +e
+          timeout 90s npm audit --omit=dev --audit-level=high --json > "$RUNNER_TEMP/npm-audit.json" 2> "$RUNNER_TEMP/npm-audit.err"
+          audit_status=$?
+          set -e
+
+          set +e
+          node - "$RUNNER_TEMP/npm-audit.json" <<'NODE'
+          const fs = require('node:fs')
+          const path = process.argv[2]
+          try {
+            const report = JSON.parse(fs.readFileSync(path, 'utf8'))
+            const vulnerabilities = report?.metadata?.vulnerabilities
+            if (!vulnerabilities || typeof vulnerabilities !== 'object') process.exit(20)
+            const high = Number(vulnerabilities.high || 0)
+            const critical = Number(vulnerabilities.critical || 0)
+            if (high > 0 || critical > 0) {
+              console.error(`npm audit found ${high} high and ${critical} critical production vulnerabilities`)
+              process.exit(10)
+            }
+            console.log(`npm audit passed: ${high} high, ${critical} critical production vulnerabilities`)
+            process.exit(0)
+          } catch {
+            process.exit(20)
+          }
+          NODE
+          report_status=$?
+          set -e
+
+          if [ "$report_status" -eq 0 ]; then
+            exit 0
+          fi
+
+          if [ "$report_status" -eq 10 ]; then
+            cat "$RUNNER_TEMP/npm-audit.json"
+            exit 1
+          fi
+
+          echo "::warning::npm audit service unavailable or returned no valid report (command status $audit_status)."
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          if git diff --quiet "origin/$BASE_REF" HEAD -- package.json package-lock.json; then
+            echo "Dependency manifests are unchanged from $BASE_REF; continuing without weakening dependency-changing PRs."
+            exit 0
+          fi
+
+          echo "::error::npm audit is unavailable and dependency manifests changed from $BASE_REF; failing closed."
+          cat "$RUNNER_TEMP/npm-audit.err"
+          exit 1
       - run: npm run test:frontend-launch-readiness
       - run: npm run test:generator-creation-loop
       - run: npm run test:private-creator-media
