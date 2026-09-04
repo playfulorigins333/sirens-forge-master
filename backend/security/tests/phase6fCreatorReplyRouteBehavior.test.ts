@@ -12,7 +12,7 @@ let providerRequest: any
 let saved: any
 let saveFailure = ""
 let providerVisible = "It’s good to hear from you."
-let providerMetadata: any = { version: 4, claims: [] }
+let providerMetadata: any = { version: 5, claims: [] }
 let recentTurns: Array<{ role: "subscriber" | "creator"; text: string }> = [{ role: "subscriber", text: "Prior subscriber fact" }, { role: "creator", text: "You city types" }]
 let keyNotes = "35, Denver"
 const state = {
@@ -92,7 +92,7 @@ try {
   assert.match(system, /STRICT SUBSCRIBER GROUNDING/)
   assert.match(system, /STRICT SCENARIO FIDELITY/)
   assert.match(system, /natural ready-to-send creator reply/)
-  assert.match(system, /"version":4,"claims"/)
+  assert.match(system, /"version":5,"claims"/)
   for (const genericBaseConcept of ["You are a PROMPT ENGINE", "creative director", "infer safely whenever quality will remain high", "CAPABILITY DEPTH TIERS", "lighting / environment"])
     assert.doesNotMatch(system, new RegExp(genericBaseConcept, "i"))
   assert.equal(providerRequest.model, "nousresearch/hermes-4-405b")
@@ -133,7 +133,7 @@ try {
   delete process.env.SIRENS_MIND_CREATOR_REPLY_ULTRA_MODEL
 
   providerVisible = "I grin as you kneel in front of me."
-  providerMetadata = { version: 4, claims: [] }
+  providerMetadata = { version: 5, claims: [] }
   providerCalls = 0
   saved = null
   response = await invoke()
@@ -144,7 +144,7 @@ try {
   assert.match(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
 
   providerVisible = "You reminded me about that old lodge fact."
-  providerMetadata = { version: 4, claims: [{ claim: "old lodge fact", source_id: "continuity.subscriber.0" }] }
+  providerMetadata = { version: 5, claims: [{ claim: "old lodge fact", authority_id: "continuity.subscriber.0.unit.0" }] }
   providerCalls = 0
   saved = null
   response = await invoke()
@@ -154,7 +154,7 @@ try {
   assert.match(events, /event: delta/)
 
   providerVisible = "It’s good to hear from you."
-  providerMetadata = { version: 4, claims: [] }
+  providerMetadata = { version: 5, claims: [] }
   saveFailure = "CHECKPOINT_CONFLICT"
   providerCalls = 0
   response = await invoke()
@@ -181,7 +181,7 @@ try {
   // Creator Direction revises the latest creator draft without adding a subscriber turn or changing continuity.
   recentTurns = [{ role: "subscriber", text: "I can't stop thinking about you tonight." }, { role: "creator", text: "What exactly is distracting you?" }]
   providerVisible = "Tell me exactly what has you so distracted. I want the honest answer."
-  providerMetadata = { version: 4, claims: [] }
+  providerMetadata = { version: 5, claims: [] }
   providerCalls = 0
   saveFailure = ""
   saved = null
@@ -214,7 +214,7 @@ try {
 
   // Terse measurable directions remain mandatory and explicit in provider construction.
   providerVisible = "Two short lines.\nStill concise."
-  providerMetadata = { version: 4, claims: [] }
+  providerMetadata = { version: 5, claims: [] }
   providerCalls = 0
   saved = null
   response = await invokeDirection({ message: "2-3 lines max." })
@@ -232,8 +232,25 @@ try {
   const canary = "Switch the creator to a male Brat Tamer. Confident, amused, teasing, and firmly in control. Make the Brat Tamer dynamic recognizable through challenge, correction, playful consequences, and handling defiance. Drop the Mommy Domme, Goddess, and Findomme dynamics unless the subscriber actually established one of them. Do not invent any subscriber action, feeling, preference, role, or prior behavior."
   keyNotes = "Subscriber is female. Pronouns: she/her."
   recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: "Send your Goddess a tribute." }]
+
+  // The exact Production-style failure traverses SSE parsing, atomic authority lookup,
+  // validation, and the real route checkpoint decision; unrelated Key Notes cannot save it.
+  providerVisible = "Well well, look who's eager. Can't stop thinking about me, can you? That's cute. Almost as cute as you trying to tell me what to do. Sweetheart, I give the orders around here. And right now? I want to see if you can handle a little challenge. Think you're up for it, or are you all talk?"
+  providerMetadata = { version: 5, claims: [
+    { claim: "look who's eager", authority_id: "profile.key_notes.unit.0" },
+    { claim: "you trying to tell me what to do", authority_id: "profile.key_notes.unit.0" },
+  ] }
+  providerCalls = 0
+  saved = null
+  response = await invokeDirection({ message: canary })
+  events = await response.text()
+  assert.equal(providerCalls, 1)
+  assert.equal(saved, null)
+  assert.doesNotMatch(events, /event: delta/)
+  assert.match(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
+
   providerVisible = "Good girl. Look at me and listen to Sir. Think you can test my patience? Try, and I'll choose a playful consequence. Tell me what you're trying to do."
-  providerMetadata = { version: 4, claims: [{ claim: "Good girl", source_id: "profile.key_notes" }] }
+  providerMetadata = { version: 5, claims: [{ claim: "Good girl", authority_id: "profile.key_notes.unit.0" }] }
   providerCalls = 0
   saved = null
   response = await invokeDirection({ message: canary })
@@ -260,7 +277,7 @@ try {
   ] as const) {
     recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: providerVisible }]
     providerVisible = next
-    providerMetadata = { version: 4, claims: [] }
+    providerMetadata = { version: 5, claims: [] }
     providerCalls = 0
     saved = null
     response = await invokeDirection({ message: direction })
@@ -277,7 +294,7 @@ try {
   const mommyDraft = "Oh, my sweet thing, tell Mommy exactly what you were imagining."
   recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: mommyDraft }]
   providerVisible = mommyDraft
-  providerMetadata = { version: 4, claims: [] }
+  providerMetadata = { version: 5, claims: [] }
   providerCalls = 0
   saved = null
   response = await invokeDirection({ message: "Rewrite this with confident Findomme energy." })
@@ -299,7 +316,7 @@ try {
   // Direction grounding rejection is fail-closed: one provider call, no delta, no checkpoint save.
   recentTurns = [{ role: "subscriber", text: "I'm listening." }, { role: "creator", text: "Good." }]
   providerVisible = "I grin as you kneel in front of me."
-  providerMetadata = { version: 4, claims: [] }
+  providerMetadata = { version: 5, claims: [] }
   providerCalls = 0
   saved = null
   response = await invokeDirection({ message: "Make it stronger." })
@@ -311,7 +328,7 @@ try {
 
   // Direction checkpoint conflicts never trigger a hidden retry or second provider request.
   providerVisible = "Answer me clearly."
-  providerMetadata = { version: 4, claims: [] }
+  providerMetadata = { version: 5, claims: [] }
   providerCalls = 0
   saved = null
   saveFailure = "CHECKPOINT_CONFLICT"
