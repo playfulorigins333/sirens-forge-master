@@ -32,6 +32,24 @@ function invalidText(value: unknown) {
   return typeof value !== "string" || !value.trim() || value.length > MAX_MESSAGE_CHARS || CONTROL_CHARACTERS.test(value)
 }
 
+function salvageFactFreeHardTransition(
+  providerVisible: string,
+  authoritativeSources: Parameters<typeof validateCreatorReplyCandidate>[2],
+) {
+  const pieces = providerVisible.match(/[^.!?\n]+(?:[.!?]+|$)/g) ?? []
+  const safe: string[] = []
+  for (const piece of pieces) {
+    const candidate = piece.trim()
+    if (!candidate) continue
+    const validation = validateCreatorReplyCandidate(candidate, { version: 5, claims: [] }, authoritativeSources)
+    if (validation.ok) safe.push(validation.text)
+  }
+  if (!safe.length) return null
+  const combined = safe.join(" ").trim()
+  const finalValidation = validateCreatorReplyCandidate(combined, { version: 5, claims: [] }, authoritativeSources)
+  return finalValidation.ok ? finalValidation.text : null
+}
+
 export async function POST(req: NextRequest) {
   const auth = await ensureActiveSubscription()
   if (!auth.ok) return NextResponse.json({ error: auth.error ?? "INTERNAL_ERROR", message: auth.message }, { status: auth.status ?? 500 })
@@ -125,8 +143,16 @@ export async function POST(req: NextRequest) {
         // against the same local agency/world guards without making success depend on provider-
         // authored grounding bookkeeping that this operation does not need.
         const validationMetadata = hardTransition ? { version: 5, claims: [] } : result.metadata
-        const validation = validateCreatorReplyCandidate(visible, validationMetadata, authoritativeSources)
+        let validation = validateCreatorReplyCandidate(visible, validationMetadata, authoritativeSources)
         validationOutcome = validation.code
+        if (!validation.ok && hardTransition) {
+          const salvaged = salvageFactFreeHardTransition(visible, authoritativeSources)
+          if (salvaged) {
+            visible = salvaged
+            validation = validateCreatorReplyCandidate(visible, { version: 5, claims: [] }, authoritativeSources)
+            validationOutcome = validation.ok ? "SAFE_SENTENCE_SALVAGE" : validation.code
+          }
+        }
         if (!validation.ok) {
           code = "CREATOR_REPLY_GROUNDING_REJECTED"
           target.enqueue(encoder.encode(sse("error", { error: code })))
