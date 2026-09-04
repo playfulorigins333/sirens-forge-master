@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { loadCreatorApprovalDetail } from "@/lib/creator-publishing-queue/ui/loaders"
+import { loadCreatorApprovalDetail } from "@/lib/creator-publishing-queue/ui/phase7LifecycleLoaders"
 import { ApprovalDecisionForm } from "../ApprovalDecisionForm"
 import { GeneratedMediaSelectionPanel } from "./GeneratedMediaSelectionPanel"
 import { ComplianceEvaluationPanel } from "./ComplianceEvaluationPanel"
