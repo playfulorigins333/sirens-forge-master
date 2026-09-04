@@ -68,7 +68,10 @@ export default function RecentlyDeletedClient({ items }: { items: DeletedAsset[]
           <p className="mt-2 max-w-3xl text-sm text-gray-300">
             Deleted media stays recoverable for 30 days. Restore it here, or permanently delete it now. The automatic day-30 purge scheduler is a Phase 8 responsibility and is not claimed complete here.
           </p>
-          <Link className="mt-4 inline-block text-sm text-purple-200 underline" href="/library">Back to Creation Loop</Link>
+          <div className="mt-4 flex flex-wrap gap-4 text-sm">
+            <Link className="text-purple-200 underline" href="/library">Back to Creation Loop</Link>
+            <Link className="text-purple-200 underline" href="/library/recently-deleted/twins">Recently Deleted AI Twins</Link>
+          </div>
         </header>
 
         {error ? <div className="rounded-xl border border-red-700 bg-red-950/50 p-3 text-sm text-red-200">{error}</div> : null}
