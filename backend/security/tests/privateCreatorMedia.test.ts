@@ -59,7 +59,7 @@ test("generate response and browser parser preserve asset-level private outputs"
 });
 
 test("schema-absent reads are gated and preview refresh is bounded",()=>{
-  const library=readFileSync("app/library/page.tsx","utf8"), loaders=readFileSync("lib/creator-publishing-queue/ui/loaders.ts","utf8"), fanvue=readFileSync("lib/creator-publishing-queue/fanvue/packageMedia.ts","utf8"), client=readFileSync("app/library/LibraryClient.tsx","utf8");
+  const library=readFileSync("app/library/ActiveLibraryPage.tsx","utf8"), loaders=readFileSync("lib/creator-publishing-queue/ui/loaders.ts","utf8"), fanvue=readFileSync("lib/creator-publishing-queue/fanvue/packageMedia.ts","utf8"), client=readFileSync("app/library/LibraryClient.tsx","utf8");
   for(const source of [library,loaders,fanvue]) assert.match(source,/isPrivateCreatorMediaEnabled/);
   assert.match(client,/automaticRefreshes >= 1/); assert.match(client,/Retry preview/); assert.doesNotMatch(client,/onError=\{\(\) => \{ void getPrivateAssetUrl/);
 });
@@ -76,6 +76,38 @@ test("always-on CI executes source and disposable PostgreSQL coverage",()=>{
 });
 
 test("private library rows never use legacy image_url fallback", () => {
-  const page = readFileSync("app/library/page.tsx", "utf8");
-  assert.match(page, /privateGenerationIds/); assert.match(page, /!privateGenerationIds\.has\(row\.id\)/); assert.match(page, /url: null,[\s\S]*previewUrl: null,[\s\S]*privateAsset: true/);
+  const page = readFileSync("app/library/ActiveLibraryPage.tsx", "utf8");
+  assert.match(page, /privateGenerationIds/); assert.match(page, /!privateGenerationIds\.has\(row\.id\)/); assert.match(page, /url: null, previewUrl: null, privateAsset: true/);
+});
+
+test("Phase 7 application lifecycle fails closed across Library, publishing, video, and purge", () => {
+  const activeLibrary = readFileSync("app/library/ActiveLibraryPage.tsx", "utf8");
+  const signed = readFileSync("app/api/library/assets/[assetId]/signed-url/route.ts", "utf8");
+  const lifecycle = readFileSync("lib/private-creator-media/lifecycle.ts", "utf8");
+  const lifecycleRoute = readFileSync("app/api/library/assets/[assetId]/lifecycleRoute.ts", "utf8");
+  const publishing = readFileSync("lib/creator-publishing-queue/media/generatedMediaCore.ts", "utf8");
+  const publishingFilter = readFileSync("lib/creator-publishing-queue/ui/phase7LifecycleLoaders.ts", "utf8");
+  const fanvueFilter = readFileSync("lib/creator-publishing-queue/fanvue/phase7PackageMedia.ts", "utf8");
+  const video = readFileSync("lib/video/submission.ts", "utf8");
+  const recent = readFileSync("app/library/recently-deleted/RecentlyDeletedClient.tsx", "utf8");
+  const manage = readFileSync("app/library/manage/ManagePrivateMediaClient.tsx", "utf8");
+
+  assert.match(activeLibrary, /\.eq\("lifecycle_state", "active"\)/);
+  assert.match(signed, /\.in\("lifecycle_state", \["active", "trashed"\]\)/);
+  assert.match(lifecycle, /claim_private_generation_asset_purge/);
+  assert.match(lifecycle, /sirensApiFetch\("\/internal\/private-media\/purge"/);
+  assert.match(lifecycle, /finalize_private_generation_asset_purge/);
+  assert.doesNotMatch(lifecycle, /DeleteObjectCommand|CREATOR_GENERATION_R2_SECRET_ACCESS_KEY/);
+  assert.match(lifecycleRoute, /ensureActiveSubscription/);
+  assert.match(lifecycleRoute, /trashPrivateGenerationAsset/);
+  assert.match(lifecycleRoute, /restorePrivateGenerationAsset/);
+  assert.match(lifecycleRoute, /purgePrivateGenerationAsset/);
+  assert.match(publishing, /lifecycle_state/);
+  assert.match(publishing, /lifecycle_state!=="active"/);
+  assert.match(publishingFilter, /\.eq\("lifecycle_state", "active"\)/);
+  assert.match(fanvueFilter, /\.eq\("lifecycle_state", "active"\)/);
+  assert.match(video, /source\.data\.lifecycle_state !== "active"/);
+  assert.match(recent, /Retry permanent delete/);
+  assert.match(recent, /not claimed complete here/);
+  assert.match(manage, /Move to Trash/);
 });
