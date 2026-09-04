@@ -8,7 +8,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
 
 export async function GET() {
   const auth = await ensureAuthenticatedProfile();
-  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: NO_STORE });
+  if (auth.ok === false) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: NO_STORE });
   try {
     const deletion = await getVoluntaryDeletionState(auth.user.id, auth.profile.id);
     return NextResponse.json({ deletion }, { headers: NO_STORE });
