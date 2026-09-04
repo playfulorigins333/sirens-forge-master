@@ -12,6 +12,8 @@ export type AccountAccessResult =
         badge: string | null;
         seat_number: number | null;
         stripe_customer_id: string | null;
+        account_lifecycle_state: string;
+        account_lifecycle_updated_at: string | null;
       };
       status: 200;
     }
@@ -35,7 +37,7 @@ export async function ensureAuthenticatedProfile(): Promise<AccountAccessResult>
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("id, user_id, email, badge, seat_number, stripe_customer_id")
+      .select("id, user_id, email, badge, seat_number, stripe_customer_id, account_lifecycle_state, account_lifecycle_updated_at")
       .eq("user_id", user.id)
       .maybeSingle();
 
@@ -56,6 +58,8 @@ export async function ensureAuthenticatedProfile(): Promise<AccountAccessResult>
         badge: profile.badge ?? null,
         seat_number: profile.seat_number ?? null,
         stripe_customer_id: profile.stripe_customer_id ?? null,
+        account_lifecycle_state: profile.account_lifecycle_state ?? "active",
+        account_lifecycle_updated_at: profile.account_lifecycle_updated_at ?? null,
       },
       status: 200,
     };
