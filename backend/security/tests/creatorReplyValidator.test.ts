@@ -51,6 +51,39 @@ test("still rejects declarative invented subscriber actions, preferences, and st
   ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
 })
 
+test("structural declarative backstop rejects paraphrased subscriber facts and the production canary", () => {
+  for (const text of [
+    "You seem uneasy.",
+    "You're obviously thrilled.",
+    "Look who's confident now.",
+    "I can tell you're desperate.",
+    "You keep attempting to impress me.",
+    "You're becoming impatient.",
+    "You're already writhing.",
+    "I know you need this.",
+    "You adore it when I do that.",
+    "You paid me last Tuesday.",
+    "You're my submissive now.",
+    "Well well, look who's feeling bold tonight. You think you can handle what I want? Let's see how long that confidence lasts when I start pushing your buttons. I do love watching brats squirm when they realize they've bitten off more than they can chew.",
+  ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
+})
+
+test("structural backstop preserves commands, questions, challenges, speculation, and conditional language", () => {
+  for (const text of [
+    "Think you can handle a challenge?",
+    "Tell me what you want.",
+    "Try me.",
+    "If you test me, I'll decide what happens next.",
+    "Maybe you can earn an answer.",
+    "Show me whether you can follow one simple instruction.",
+    "I set the rules here.",
+    "I'll decide what you get next.",
+    "Want to see what happens if you push your luck?",
+    "Perhaps you're nervous.",
+    "I wonder if you're impatient.",
+  ]) assert.equal(valid(text).ok, true, text)
+})
+
 test("allows subscriber action only when the exact visible claim selects an authoritative source", () => {
   const result = valid("I grin as you kneel in front of me.", [
     { claim: "you kneel", authority_id: "current.inbound.unit.1" },

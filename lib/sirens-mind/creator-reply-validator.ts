@@ -36,6 +36,16 @@ const SUBSCRIBER_POSSESSIVE_STATE = /\byour\s+(?:body|hands?|arms?|legs?|eyes?|f
 const THIRD_PERSON_SUBSCRIBER = /\bthe subscriber\s+(?:kneels?|moves?|walks?|stands?|sits?|leans?|reaches?|turns?|shivers?|gasps?|smiles?|grins?|nods?|waits?|stays?|looks?|feels?|thinks?|wants?|decides?)\b/gi
 const THIRD_PERSON_CREATOR = /\b(?:the creator|creator)\s+(?:smiles?|grins?|steps?|walks?|moves?|leans?|reaches?|turns?|waits?|speaks?|says?|looks?|watches?|approaches?|emerges?)\b/gi
 const OBVIOUS_WORLD_REFERENCE = /\b(?:the|a|an)\s+(?:door|doorway|dumpster|fireplace|hearth|bell|sign|shotgun|lantern|weapon|barstool|stool|table|chair|couch|sofa|bed|window|curtain|crowd|guest|guests|patron|patrons|bouncer|guard)\b/gi
+/**
+ * Structural backstop for the provider-authored manifest. Any finite declarative
+ * predicate owned by "you" is a subscriber claim, regardless of its particular
+ * adjective or verb. This deliberately avoids an emotion/action blacklist: new
+ * paraphrases fail closed unless their visible span is tied to server authority.
+ */
+const SECOND_PERSON_DECLARATIVE = /\byou(?:'re|'ve|'d|\s+(?:are|were|seem|seemed|appear|appeared|look|looked|feel|felt|think|thought|know|knew|want|wanted|need|needed|love|loved|adore|adored|enjoy|enjoyed|prefer|preferred|crave|craved|like|liked|hate|hated|keep|kept|try|tried|hope|hoped|plan|planned|intend|intended|mean|meant|paid|pay|did|do|have|had))\b/gi
+const EMBEDDED_SUBSCRIBER_INFERENCE = /\bi\s+(?:can\s+)?(?:tell|see|know|sense|notice|bet)\s+(?:that\s+)?you(?:'re|'ve|'d|\s+(?:are|were|have|had|want|wanted|feel|felt|think|thought|love|loved|need|needed))\b/gi
+const LOOK_WHO_ASSERTION = /\blook\s+who(?:'s|\s+is|\s+was)\b/gi
+const ANAPHORIC_SUBSCRIBER_STATE = /\b(?:that|your)\s+(?:confidence|desperation|excitement|nervousness|impatience|eagerness|arousal|fear|anger|jealousy|desire|need|motive|intention|obedience|compliance|submission)\b/gi
 
 function exactKeys(raw: Record<string, unknown>, allowed: string[]) {
   const keys = Object.keys(raw)
@@ -143,16 +153,29 @@ function rangeIsGrounded(start: number, end: number, grounded: GroundedRange[]) 
   return grounded.some((range) => start >= range.start && end <= range.end)
 }
 
+function predicateComplementIsGrounded(visible: string, end: number, grounded: GroundedRange[]) {
+  const boundary = visible.slice(end).search(/[.!?;\n]|\b(?:and|but|while|although)\b/i)
+  const clauseEnd = boundary < 0 ? visible.length : end + boundary
+  return grounded.some((range) => range.start >= end && range.start < clauseEnd)
+}
+
 function looksConditionalPrefix(visible: string, start: number) {
   const prefix = visible.slice(Math.max(0, start - 40), start).toLowerCase()
   return /\b(?:if|when|once|unless|until|should|maybe|perhaps)\s*$/.test(prefix)
     || /\bi\s+(?:wonder|suspect)\s+(?:whether|if)\s*$/.test(prefix)
 }
 
+function looksSpeculativeContext(visible: string, start: number) {
+  const prefix = visible.slice(Math.max(0, start - 80), start).toLowerCase()
+  return /\b(?:maybe|perhaps|possibly|probably)\s*$/.test(prefix)
+    || /\b(?:i\s+)?(?:wonder|suspect|guess|imagine)\s+(?:that\s+|whether\s+|if\s+)?$/.test(prefix)
+}
+
 function looksInterrogativeContext(visible: string, start: number, end: number) {
   const prefix = visible.slice(Math.max(0, start - 72), start).toLowerCase()
   if (/\b(?:do|does|did|can|could|would|will|won't|should|are|were|have|has|had)\s*$/.test(prefix)) return true
   if (/\b(?:tell|show|ask|say|explain)\s+(?:me\s+)?(?:what|whether|if|how)\s*$/.test(prefix)) return true
+  if (/\b(?:tell|show|ask)\b[^.!?;\n]{0,48}\b(?:what|whether|if|how)\s*$/.test(prefix)) return true
   if (/\b(?:want|need|like)\s+to\s+(?:know|hear)\s+(?:what|whether|if|how)\s*$/.test(prefix)) return true
 
   const tail = visible.slice(end, Math.min(visible.length, end + 240))
@@ -166,13 +189,16 @@ function firstUngroundedMatch(
   grounded: GroundedRange[],
   allowConditional = false,
   allowInterrogative = false,
+  allowGroundedComplement = false,
 ) {
   pattern.lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = pattern.exec(visible))) {
     if (allowConditional && looksConditionalPrefix(visible, match.index)) continue
     if (allowInterrogative && looksInterrogativeContext(visible, match.index, match.index + match[0].length)) continue
-    if (!rangeIsGrounded(match.index, match.index + match[0].length, grounded)) return match[0]
+    if (allowConditional && looksSpeculativeContext(visible, match.index)) continue
+    if (!rangeIsGrounded(match.index, match.index + match[0].length, grounded)
+      && !(allowGroundedComplement && predicateComplementIsGrounded(visible, match.index + match[0].length, grounded))) return match[0]
   }
   return null
 }
@@ -227,7 +253,11 @@ export function validateCreatorReplyCandidate(
     firstUngroundedMatch(text, SUBSCRIBER_GENERAL_FACT, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_GENDERED_IDENTITY, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_POSSESSIVE_STATE, grounded, false, true) ||
-    firstUngroundedMatch(text, THIRD_PERSON_SUBSCRIBER, grounded)
+    firstUngroundedMatch(text, THIRD_PERSON_SUBSCRIBER, grounded) ||
+    firstUngroundedMatch(text, SECOND_PERSON_DECLARATIVE, grounded, true, true, true) ||
+    firstUngroundedMatch(text, EMBEDDED_SUBSCRIBER_INFERENCE, grounded, true, true, true) ||
+    firstUngroundedMatch(text, LOOK_WHO_ASSERTION, grounded) ||
+    firstUngroundedMatch(text, ANAPHORIC_SUBSCRIBER_STATE, grounded, true, true)
   ) {
     return { ok: false as const, code: "SUBSCRIBER_PUPPETING" as CreatorReplyViolation }
   }

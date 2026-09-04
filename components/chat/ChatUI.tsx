@@ -85,9 +85,39 @@ export default function ChatUI({
   const [requestActive, setRequestActive] = useState(false)
   const [mode, setMode] = useState<"SAFE" | "NSFW" | "ULTRA">(creatorReply ? "ULTRA" : "SAFE")
   const [creatorReplyInputKind, setCreatorReplyInputKind] = useState<CreatorReplyInputKind>("subscriber")
+  const [creatorReplyHydrating, setCreatorReplyHydrating] = useState(creatorReply)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const activeStreamBatcherRef = useRef<{ dispose: () => void } | null>(null)
   useEffect(() => () => { activeStreamBatcherRef.current?.dispose() }, [])
+  useEffect(() => {
+    if (!creatorReply || !subscriberId || !conversationId) {
+      setCreatorReplyHydrating(false)
+      return
+    }
+    const controller = new AbortController()
+    setCreatorReplyHydrating(true)
+    setMessages([])
+    void fetch(`/api/sirens-mind/creator-reply/conversations/${conversationId}`, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("CREATOR_REPLY_HISTORY_UNAVAILABLE")
+        const payload = await response.json()
+        if (payload?.conversation?.subscriber_id !== subscriberId || !Array.isArray(payload?.conversation?.recent_turns)) {
+          throw new Error("CREATOR_REPLY_HISTORY_MISMATCH")
+        }
+        setMessages(payload.conversation.recent_turns.map((turn: { role: "subscriber" | "creator"; text: string }, index: number) => ({
+          id: `durable-${conversationId}-${index}`,
+          role: turn.role === "subscriber" ? "user" as const : "assistant" as const,
+          content: turn.text,
+          ...(turn.role === "subscriber" ? { source: "subscriber" as const } : { completed: true }),
+        })))
+      })
+      .catch((error) => {
+        if (error instanceof Error && error.name === "AbortError") return
+        setMessages([{ id: `history-error-${conversationId}`, role: "assistant", content: "This conversation's saved history could not be loaded. Please reselect it before continuing.", isError: true }])
+      })
+      .finally(() => { if (!controller.signal.aborted) setCreatorReplyHydrating(false) })
+    return () => controller.abort()
+  }, [creatorReply, subscriberId, conversationId])
   useEffect(() => {
     if (messages.length === 0 && !isTyping) return
 
@@ -249,7 +279,7 @@ export default function ChatUI({
 
   const handleSend = async (userText: string, selectedMode: "SAFE" | "NSFW" | "ULTRA") => {
     const trimmed = userText.trim()
-    if (!trimmed || (creatorReply && (!subscriberId || !conversationId))) return
+    if (!trimmed || (creatorReply && (!subscriberId || !conversationId || creatorReplyHydrating))) return
     const inputKind = creatorReply ? creatorReplyInputKind : "subscriber"
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", content: trimmed, ...(creatorReply ? { source: inputKind } : {}) }
     const baseMessages = [...messages, userMessage]
@@ -270,7 +300,7 @@ export default function ChatUI({
     }
   }
 
-  const hasCreatorDraft = creatorReply && messages.some((message) => message.role === "assistant" && message.completed === true && !message.isError)
+  const hasCreatorDraft = creatorReply && !creatorReplyHydrating && messages.some((message) => message.role === "assistant" && message.completed === true && !message.isError)
 
   return (
     <div

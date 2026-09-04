@@ -46,6 +46,15 @@ export async function loadCreatorReplyAuthority(userId:string,subscriberId:strin
  let notes="";if(subscriber.notes_ciphertext){assertCreatorReplyKeyVersion(subscriber.notes_key_version);notes=decryptCreatorReplyData(subscriber.notes_ciphertext,subscriberNotesAad(w,subscriberId))}
  return {workspaceId:w,subscriber:{id:subscriber.id,display_name:subscriber.display_name,platform:subscriber.platform,platform_handle:subscriber.platform_handle,key_notes:notes},conversation:{id:conversation.id,thread_id:conversation.thread_id,revision:Number(conversation.checkpoint_revision)},checkpoint:parsed}
 }
+export async function loadCreatorReplyConversation(userId:string,conversationId:string){
+ const w=await resolveCreatorReplyWorkspace(userId),db=getSupabaseAdmin()
+ const {data,error}=await db.from("sirens_mind_creator_reply_conversations").select("id,subscriber_id,status,checkpoint_ciphertext,checkpoint_key_version").eq("workspace_id",w).eq("id",conversationId).maybeSingle()
+ if(error)throw error;if(!data)throw new Error("NOT_FOUND")
+ assertCreatorReplyKeyVersion(data.checkpoint_key_version)
+ const parsed=parseCreatorReplyCheckpoint(JSON.parse(decryptCreatorReplyData(data.checkpoint_ciphertext,conversationCheckpointAad(w,conversationId))))
+ if(!parsed)throw new Error("CHECKPOINT_INVALID")
+ return {id:data.id,subscriber_id:data.subscriber_id,status:data.status,label:parsed.label,recent_turns:parsed.recent_turns}
+}
 export async function saveCreatorReplyCheckpoint(userId:string,authority:Awaited<ReturnType<typeof loadCreatorReplyAuthority>>,value:CreatorReplyCheckpoint){
  const w=await resolveCreatorReplyWorkspace(userId);if(w!==authority.workspaceId)throw new Error("NOT_FOUND");const db=getSupabaseAdmin(),now=new Date().toISOString(),v=creatorReplyDataKeyVersion()
  const {data,error}=await db.rpc("creator_reply_save_checkpoint",{p_workspace_id:w,p_subscriber_id:authority.subscriber.id,p_conversation_id:authority.conversation.id,p_expected_revision:authority.conversation.revision,p_ciphertext:checkpoint(w,authority.conversation.id,value),p_key_version:v})
