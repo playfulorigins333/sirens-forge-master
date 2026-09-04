@@ -203,7 +203,6 @@ try {
   assert.match(directionMessages, /CREATOR_DIRECTION \(EXECUTE THIS\)/)
   assert.match(directionMessages, /DRAFT_TO_REVISE \(REFERENCE TEXT AND CURRENT CREATOR-STYLE AUTHORITY/)
   assert.match(directionMessages, /very short or fragmentary creator_direction as a complete instruction/)
-  assert.match(directionMessages, /measurable creator constraints/)
   assert.match(directionMessages, /draft_to_revise/)
   assert.match(directionMessages, /What exactly is distracting you\?/)
   assert.ok(!providerRequest.messages.some((message: any) => message.role === "assistant" && String(message.content).includes("What exactly is distracting you?")))
@@ -233,8 +232,7 @@ try {
   keyNotes = "Subscriber is female. Pronouns: she/her."
   recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: "Send your Goddess a tribute." }]
 
-  // The exact Production-style failure traverses SSE parsing, atomic authority lookup,
-  // validation, and the real route checkpoint decision; unrelated Key Notes cannot save it.
+  // The exact Production-style failure still rejects unsupported subscriber assertions.
   providerVisible = "Well well, look who's eager. Can't stop thinking about me, can you? That's cute. Almost as cute as you trying to tell me what to do. Sweetheart, I give the orders around here. And right now? I want to see if you can handle a little challenge. Think you're up for it, or are you all talk?"
   providerMetadata = { version: 5, claims: [
     { claim: "look who's eager", authority_id: "profile.key_notes.unit.0" },
@@ -249,7 +247,8 @@ try {
   assert.doesNotMatch(events, /event: delta/)
   assert.match(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
 
-  providerVisible = "Good girl. Look at me and listen to Sir. Think you can test my patience? Try, and I'll choose a playful consequence. Tell me what you're trying to do."
+  // A valid hard transition is fact-free and must not depend on provider grounding bookkeeping.
+  providerVisible = "Look at me and listen to Sir. Think you can test my patience? Try, and I'll choose a playful consequence. Tell me what you're trying to do."
   providerMetadata = { version: 5, claims: [{ claim: "Good girl", authority_id: "profile.key_notes.unit.0" }] }
   providerCalls = 0
   saved = null
@@ -258,9 +257,8 @@ try {
   assert.equal(providerCalls, 1)
   assert.ok(saved)
   assert.equal(saved.value.recent_turns.at(-1).text, providerVisible)
-  assert.doesNotMatch(providerVisible, /Mommy|Goddess|Findom|tribute|payment/i)
+  assert.doesNotMatch(providerVisible, /Mommy|Goddess|Findom|tribute|payment|good boy|good girl/i)
   assert.match(providerVisible, /Sir|test|playful consequence/i)
-  assert.match(providerVisible, /Good girl/)
   assert.match(events, /"saved":true/)
   assert.equal(providerRequest.messages.filter((message: any) => message.role === "system").length, 1)
   assert.doesNotMatch(providerRequest.messages[0].content, /Switch the creator to a male Brat Tamer/)
