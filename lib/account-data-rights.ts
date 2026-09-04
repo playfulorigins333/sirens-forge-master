@@ -45,6 +45,18 @@ function mapDbError(message?: string | null): AccountDataRightsError {
   return new AccountDataRightsError("ACCOUNT_DATA_RIGHTS_UNAVAILABLE", 503);
 }
 
+async function markExportDownloadedOrExpired(exportId: string, authUserId: string) {
+  const admin = getSupabaseAdmin();
+  const { data, error } = await admin.rpc("mark_creator_data_export_downloaded", {
+    p_export_id: exportId,
+    p_auth_user_id: authUserId,
+  });
+  if (error) throw mapDbError(error.message);
+  const row = firstRow<any>(data);
+  if (!row?.export_status) throw new AccountDataRightsError("ACCOUNT_DATA_RIGHTS_UNAVAILABLE", 503);
+  return row.export_status as ExportStatus;
+}
+
 export async function requestCreatorDataExport(authUserId: string, profileId: string) {
   const admin = getSupabaseAdmin();
   const { data, error } = await admin.rpc("request_creator_data_export", {
@@ -76,7 +88,18 @@ export async function listCreatorDataExports(authUserId: string) {
     .order("requested_at", { ascending: false })
     .limit(10);
   if (error) throw new AccountDataRightsError("ACCOUNT_DATA_RIGHTS_UNAVAILABLE", 503);
-  return (data ?? []).map((row: any) => ({
+
+  const rows = data ?? [];
+  for (const row of rows as any[]) {
+    if (!["completed", "downloaded"].includes(String(row.status)) || !row.expires_at) continue;
+    const expires = new Date(row.expires_at);
+    if (!Number.isNaN(expires.getTime()) && expires.getTime() <= Date.now()) {
+      const status = await markExportDownloadedOrExpired(row.id, authUserId);
+      if (status === "expired") row.status = "expired";
+    }
+  }
+
+  return rows.map((row: any) => ({
     id: row.id,
     status: row.status as ExportStatus,
     requestedAt: row.requested_at,
@@ -100,9 +123,18 @@ export async function signCreatorDataExportDownload(exportId: string, authUserId
     .eq("auth_user_id", authUserId)
     .maybeSingle();
   if (error || !row) throw new AccountDataRightsError("EXPORT_NOT_AVAILABLE", 404);
-  if (!["completed", "downloaded"].includes(String(row.status))) throw new AccountDataRightsError("EXPORT_NOT_READY", 409);
+  if (!["completed", "downloaded"].includes(String(row.status))) {
+    if (String(row.status) === "expired") throw new AccountDataRightsError("EXPORT_EXPIRED", 410);
+    throw new AccountDataRightsError("EXPORT_NOT_READY", 409);
+  }
+
   const expires = row.expires_at ? new Date(row.expires_at) : null;
-  if (!expires || Number.isNaN(expires.getTime()) || expires.getTime() <= Date.now()) throw new AccountDataRightsError("EXPORT_EXPIRED", 410);
+  if (!expires || Number.isNaN(expires.getTime())) throw new AccountDataRightsError("EXPORT_DOWNLOAD_UNAVAILABLE", 503);
+  if (expires.getTime() <= Date.now()) {
+    const status = await markExportDownloadedOrExpired(exportId, authUserId);
+    if (status === "expired") throw new AccountDataRightsError("EXPORT_EXPIRED", 410);
+    throw new AccountDataRightsError("EXPORT_DOWNLOAD_UNAVAILABLE", 503);
+  }
 
   const privateConfig = resolvePrivateR2Config(process.env);
   const canonicalKey = `creator-exports/${authUserId}/${exportId}.zip`;
@@ -117,11 +149,8 @@ export async function signCreatorDataExportDownload(exportId: string, authUserId
   }).catch(() => null);
   if (!url) throw new AccountDataRightsError("EXPORT_DOWNLOAD_UNAVAILABLE", 503);
 
-  const { error: markError } = await admin.rpc("mark_creator_data_export_downloaded", {
-    p_export_id: exportId,
-    p_auth_user_id: authUserId,
-  });
-  if (markError) throw mapDbError(markError.message);
+  const status = await markExportDownloadedOrExpired(exportId, authUserId);
+  if (status === "expired") throw new AccountDataRightsError("EXPORT_EXPIRED", 410);
   return { url, expiresInSeconds: DATA_EXPORT_DOWNLOAD_TTL_SECONDS };
 }
 
