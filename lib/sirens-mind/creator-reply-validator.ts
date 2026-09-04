@@ -79,24 +79,64 @@ function collectGroundedRanges(visible: string, claims: CreatorReplyClaim[]): Gr
   return claims.flatMap(({ claim }) => claimRanges(visible, claim))
 }
 
-const SUPPORT_STOP_WORDS = new Set(["a", "an", "and", "are", "as", "at", "be", "before", "for", "from", "good", "i", "in", "is", "it", "me", "my", "of", "on", "subscriber", "that", "the", "this", "to", "was", "were", "when", "who", "you", "your"])
-function supportTokens(value: string) {
-  return (value.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map((token) => {
-    if (["female", "girl", "woman", "she", "her"].includes(token)) return "female"
-    if (["male", "boy", "man", "he", "him"].includes(token)) return "male"
-    if (token.endsWith("ied")) return `${token.slice(0, -3)}y`
-    if (token.endsWith("ing") && token.length > 5) return token.slice(0, -3)
-    if (token.endsWith("ed") && token.length > 4) return token.slice(0, -2)
-    if (token.endsWith("s") && token.length > 4) return token.slice(0, -1)
-    return token
-  }).filter((token) => !SUPPORT_STOP_WORDS.has(token))
+const SUPPORT_STOP_WORDS = new Set(["a", "an", "and", "are", "as", "at", "be", "before", "do", "does", "did", "for", "from", "good", "have", "has", "had", "in", "is", "it", "of", "on", "that", "the", "this", "to", "was", "were", "when", "who"])
+const NEGATION = new Set(["not", "never", "no", "cannot"])
+type Perspective = "subscriber_source" | "profile_source" | "creator_claim"
+
+function expandContractions(value: string) {
+  return value.normalize("NFKC").replace(/[’‘]/g, "'").toLowerCase()
+    .replace(/\b(i|you|we|they|he|she|it)'m\b/g, "$1 am")
+    .replace(/\b(i|you|we|they|he|she|it)'re\b/g, "$1 are")
+    .replace(/\b(i|you|we|they|he|she|it)'ve\b/g, "$1 have")
+    .replace(/\b(i|you|we|they|he|she|it)'ll\b/g, "$1 will")
+    .replace(/\b(i|you|we|they|he|she|it)'d\b/g, "$1 would")
+    .replace(/\b(can)'t\b/g, "cannot")
+    .replace(/\b(won)'t\b/g, "will not")
+    .replace(/\b(ain|aren|isn|wasn|weren|don|doesn|didn|haven|hasn|hadn|couldn|wouldn|shouldn|mustn|needn)'t\b/g, (_, stem: string) => ({ ain: "is not", aren: "are not", isn: "is not", wasn: "was not", weren: "were not", don: "do not", doesn: "does not", didn: "did not", haven: "have not", hasn: "has not", hadn: "had not", couldn: "could not", wouldn: "would not", shouldn: "should not", mustn: "must not", needn: "need not" })[stem]!)
 }
 
-/** Fail-closed lexical entailment: every factual claim token must occur in one selected atomic unit. */
+function stemSupportToken(token: string) {
+  if (token.endsWith("ied")) return `${token.slice(0, -3)}y`
+  if (token.endsWith("ing") && token.length > 5) return token.slice(0, -3)
+  if (token.endsWith("ed") && token.length > 4) return token.slice(0, -2)
+  if (token.endsWith("s") && token.length > 4) return token.slice(0, -1)
+  return token
+}
+
+/** Canonicalize speaker-relative wording without discarding role, order, or polarity. */
+function canonicalFact(value: string, perspective: Perspective) {
+  const normalized = expandContractions(value)
+  const explicitProfilePronouns = perspective === "profile_source" && /\bpronouns?\b/.test(normalized)
+  const raw = normalized.match(/[\p{L}\p{N}]+/gu) ?? []
+  const tokens = raw.flatMap((token) => {
+    if (["i", "me", "my", "mine"].includes(token)) return [perspective === "subscriber_source" ? "SUBSCRIBER" : "CREATOR"]
+    if (["you", "your", "yours"].includes(token)) return [perspective === "subscriber_source" ? "CREATOR" : "SUBSCRIBER"]
+    if (token === "subscriber") return ["SUBSCRIBER"]
+    if (["female", "girl", "woman"].includes(token)) return ["FEMALE"]
+    if (["male", "boy", "man"].includes(token)) return ["MALE"]
+    if (["she", "her"].includes(token)) return explicitProfilePronouns ? ["SUBSCRIBER", "FEMALE"] : ["THIRD_PARTY"]
+    if (["he", "him"].includes(token)) return explicitProfilePronouns ? ["SUBSCRIBER", "MALE"] : ["THIRD_PARTY"]
+    if (SUPPORT_STOP_WORDS.has(token)) return []
+    return [stemSupportToken(token)]
+  })
+  if (!tokens.includes("SUBSCRIBER") && !tokens.includes("CREATOR")) tokens.unshift("SUBSCRIBER")
+  return { tokens, negative: tokens.some((token) => NEGATION.has(token)) }
+}
+
+function orderedSubsequence(needle: string[], haystack: string[]) {
+  let index = 0
+  for (const token of haystack) if (token === needle[index]) index++
+  return index === needle.length
+}
+
+/** Fail closed unless one unit preserves the claim's roles, predicate order, and polarity. */
 function authoritySupportsClaim(unit: CreatorReplyAuthorityUnit, claim: string) {
-  const claimTokens = [...new Set(supportTokens(claim))]
-  const authorityTokens = new Set(supportTokens(unit.text))
-  return claimTokens.length > 0 && claimTokens.every((token) => authorityTokens.has(token))
+  const perspective: Perspective = ["current_inbound", "recent_subscriber", "continuity_subscriber"].includes(unit.kind)
+    ? "subscriber_source"
+    : "profile_source"
+  const authority = canonicalFact(unit.text, perspective)
+  const visible = canonicalFact(claim, "creator_claim")
+  return visible.tokens.length > 1 && authority.negative === visible.negative && orderedSubsequence(visible.tokens, authority.tokens)
 }
 
 function rangeIsGrounded(start: number, end: number, grounded: GroundedRange[]) {
