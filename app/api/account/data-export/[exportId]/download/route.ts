@@ -8,7 +8,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
 
 export async function GET(_request: Request, context: { params: Promise<{ exportId: string }> }) {
   const auth = await ensureAuthenticatedProfile();
-  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: NO_STORE });
+  if (auth.ok === false) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: NO_STORE });
   const { exportId } = await context.params;
   try {
     const result = await signCreatorDataExportDownload(exportId, auth.user.id);
