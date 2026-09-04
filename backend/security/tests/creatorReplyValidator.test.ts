@@ -147,3 +147,45 @@ test("covers omitted-auxiliary motives without rejecting questions, speculation,
   for (const text of ["Are you eager?", "Maybe you're eager.", "I wonder if you're eager.", "Are you trying to tell me what to do?", "Maybe you're trying to tell me what to do.", "If you're trying to test me, keep going.", "Can't stop thinking about me, can you?", "Think you're up for it?", "Tell me what you're trying to do."])
     assert.equal(valid(text).ok, true, text)
 })
+
+test("preserves subscriber and creator roles instead of grounding reversed relationships", () => {
+  const source = (text: string): CreatorReplyAuthoritySource[] => [{ id: "current.inbound", kind: "current_inbound", text }]
+  const claim = [{ claim: "You want me", authority_id: "current.inbound.unit.0" }]
+  assert.equal(valid("You want me.", claim, source("Tell me what you want from me.")).code, "UNGROUNDED_EVIDENCE")
+  assert.equal(valid("You want me.", claim, source("I want you.")).ok, true)
+})
+
+test("preserves polarity for states and subject-object facts", () => {
+  const source = (text: string): CreatorReplyAuthoritySource[] => [{ id: "current.inbound", kind: "current_inbound", text }]
+  assert.equal(valid("You are wealthy.", [{ claim: "You are wealthy", authority_id: "current.inbound.unit.0" }], source("I am not wealthy.")).code, "UNGROUNDED_EVIDENCE")
+  assert.equal(valid("You are not wealthy.", [{ claim: "You are not wealthy", authority_id: "current.inbound.unit.0" }], source("I am not wealthy.")).ok, true)
+  assert.equal(valid("You want this.", [{ claim: "You want this", authority_id: "current.inbound.unit.0" }], source("I do not want this.")).code, "UNGROUNDED_EVIDENCE")
+  assert.equal(valid("You do not want this.", [{ claim: "You do not want this", authority_id: "current.inbound.unit.0" }], source("I do not want this.")).ok, true)
+})
+
+test("does not turn incidental third-party pronouns into subscriber identity", () => {
+  const thirdParty: CreatorReplyAuthoritySource[] = [{ id: "current.inbound", kind: "current_inbound", text: "I bought her a gift." }]
+  assert.equal(valid("Good girl.", [{ claim: "Good girl", authority_id: "current.inbound.unit.0" }], thirdParty).code, "UNGROUNDED_EVIDENCE")
+})
+
+test("normalizes straight and curly contractions while retaining negation", () => {
+  const source = (text: string): CreatorReplyAuthoritySource[] => [{ id: "current.inbound", kind: "current_inbound", text }]
+  for (const [inbound, outbound, expected] of [
+    ["I'm nervous.", "You're nervous.", true],
+    ["I’m nervous.", "You’re nervous.", true],
+    ["I'm not nervous.", "You're nervous.", false],
+    ["I’m not nervous.", "You’re nervous.", false],
+    ["I'm not nervous.", "You're not nervous.", true],
+    ["I’m not nervous.", "You’re not nervous.", true],
+    ["I've paid before.", "You've paid before.", true],
+    ["I’ve paid before.", "You’ve paid before.", true],
+    ["I can't wait.", "You can't wait.", true],
+    ["I can’t wait.", "You can’t wait.", true],
+    ["I won't wait.", "You will wait.", false],
+    ["I won’t wait.", "You won’t wait.", true],
+  ] as const) {
+    const result = valid(outbound, [{ claim: outbound.slice(0, -1), authority_id: "current.inbound.unit.0" }], source(inbound))
+    assert.equal(result.ok, expected, `${inbound} -> ${outbound}`)
+    if (!expected) assert.equal(result.code, "UNGROUNDED_EVIDENCE")
+  }
+})
