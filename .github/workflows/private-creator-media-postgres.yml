@@ -41,6 +41,8 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_twin_training_test'
       - name: Private creator media source contracts
         run: npm run test:private-creator-media
+      - name: Phase 7 Twin and training-data source contracts
+        run: npx tsx --test backend/security/tests/phase7TwinTrainingLifecycleSource.test.ts
       - name: Private creator media PostgreSQL behavior
         run: npm run test:private-creator-media-postgres
       - name: Phase 7 private media lifecycle PostgreSQL behavior
