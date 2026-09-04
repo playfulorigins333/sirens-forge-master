@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { GeneratedMediaSelectionPanel } from "../../../../[contentPackageId]/GeneratedMediaSelectionPanel"
-import { loadCreatorFanvuePackageMedia } from "@/lib/creator-publishing-queue/fanvue/packageMedia"
+import { loadCreatorFanvuePackageMedia } from "@/lib/creator-publishing-queue/fanvue/phase7PackageMedia"
 
 export const metadata = { title: "Fanvue package media — Sirens Forge" }
 
