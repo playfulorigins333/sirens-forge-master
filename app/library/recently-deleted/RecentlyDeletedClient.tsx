@@ -66,7 +66,7 @@ export default function RecentlyDeletedClient({ items }: { items: DeletedAsset[]
           <p className="text-sm uppercase tracking-[0.2em] text-purple-300">Private Library</p>
           <h1 className="mt-2 text-3xl font-bold">Recently Deleted</h1>
           <p className="mt-2 max-w-3xl text-sm text-gray-300">
-            Deleted media stays recoverable for 30 days. Restore it here, or permanently delete it now. Automatic day-30 purge is enforced by the Phase 8 retention scheduler.
+            Deleted media stays recoverable for 30 days. Restore it here, or permanently delete it now. The automatic day-30 purge scheduler is a Phase 8 responsibility and is not claimed complete here.
           </p>
           <Link className="mt-4 inline-block text-sm text-purple-200 underline" href="/library">Back to Creation Loop</Link>
         </header>
@@ -94,7 +94,7 @@ export default function RecentlyDeletedClient({ items }: { items: DeletedAsset[]
                     <p className="line-clamp-2 text-sm text-gray-100">{item.prompt || "(No prompt saved)"}</p>
                     <div className="text-xs text-gray-400">
                       <div>Deleted: {formatDate(item.trashedAt)}</div>
-                      <div>{pending ? "Deletion pending" : `Scheduled purge: ${formatDate(item.purgeAfter)}`}</div>
+                      <div>{pending ? "Deletion pending" : `Purge eligible after: ${formatDate(item.purgeAfter)}`}</div>
                     </div>
                     <div className="flex flex-wrap gap-2">
                       {!pending ? (
