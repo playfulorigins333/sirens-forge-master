@@ -232,7 +232,7 @@ try {
   keyNotes = "Subscriber is female. Pronouns: she/her."
   recentTurns = [{ role: "subscriber", text: "Tell me what you want from me." }, { role: "creator", text: "Send your Goddess a tribute." }]
 
-  // The exact Production-style failure still rejects unsupported subscriber assertions.
+  // Mixed safe/unsafe hard-transition prose must salvage only independently safe sentences.
   providerVisible = "Well well, look who's eager. Can't stop thinking about me, can you? That's cute. Almost as cute as you trying to tell me what to do. Sweetheart, I give the orders around here. And right now? I want to see if you can handle a little challenge. Think you're up for it, or are you all talk?"
   providerMetadata = { version: 5, claims: [
     { claim: "look who's eager", authority_id: "profile.key_notes.unit.0" },
@@ -243,9 +243,13 @@ try {
   response = await invokeDirection({ message: canary })
   events = await response.text()
   assert.equal(providerCalls, 1)
-  assert.equal(saved, null)
-  assert.doesNotMatch(events, /event: delta/)
-  assert.match(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
+  assert.ok(saved)
+  const salvagedText = saved.value.recent_turns.at(-1).text
+  assert.doesNotMatch(salvagedText, /look who's eager/i)
+  assert.doesNotMatch(salvagedText, /you trying to tell me what to do/i)
+  assert.match(salvagedText, /Sweetheart, I give the orders around here/i)
+  assert.match(events, /event: delta/)
+  assert.doesNotMatch(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
 
   // A valid hard transition is fact-free and must not depend on provider grounding bookkeeping.
   providerVisible = "Look at me and listen to Sir. Think you can test my patience? Try, and I'll choose a playful consequence. Tell me what you're trying to do."
