@@ -8,7 +8,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
 
 export async function POST(request: Request) {
   const auth = await ensureAuthenticatedProfile();
-  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: NO_STORE });
+  if (auth.ok === false) return NextResponse.json({ error: auth.error }, { status: auth.status, headers: NO_STORE });
   let body: unknown;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "INVALID_REQUEST" }, { status: 400, headers: NO_STORE }); }
   if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).length !== 0) {
