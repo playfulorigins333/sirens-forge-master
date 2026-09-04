@@ -99,10 +99,15 @@ test("explicit male Brat Tamer switch ignores excluded Findom Goddess and Mommy 
 
   const system = creatorReplyDirectionSystemMessage()
   assert.match(system, /newly named choice becomes authoritative and conflicting prior creator-side choices are retired/)
+  assert.match(system, /hard creator transition, the visible reply must be subscriber\/world-fact-free/i)
+  assert.match(system, /"version":5,"claims":\[\]/)
 
   const draft = "Serve your Goddess with a generous tribute first. Then we'll see if you've earned more attention."
   const task = creatorReplyDirectionMessage(direction, draft)
   assert.match(task, /Retire incompatible prior creator-side titles, framing, commercial mechanics, role markers, and specialized-style behavior/)
   assert.match(task, /contains no incompatible carryover from the replaced creator configuration/)
+  assert.match(task, /HARD TRANSITION FACT-FREE CONTRACT/)
+  assert.match(task, /Do not use gendered subscriber labels such as good boy\/good girl/)
+  assert.match(task, /hidden manifest MUST be exactly \{"version":5,"claims":\[\]\}/)
   assert.match(task, /tribute/)
 })

@@ -7,7 +7,7 @@ import { buildCreatorReplyAuthoritySources, creatorReplyAccessAllowed, resolveCr
 import { loadCreatorReplyAuthority, saveCreatorReplyCheckpoint } from "../../../../lib/sirens-mind/creator-reply-service"
 import { trimCreatorReplyTurns } from "../../../../lib/sirens-mind/creator-reply-checkpoint"
 import { validateCreatorReplyCandidate } from "../../../../lib/sirens-mind/creator-reply-validator"
-import { buildCreatorReplyMessages, CREATOR_REPLY_TEMPERATURE } from "../../../../lib/sirens-mind/chat-construction"
+import { buildCreatorReplyMessages, creatorDirectionRequiresFreshGeneration, CREATOR_REPLY_TEMPERATURE } from "../../../../lib/sirens-mind/chat-construction"
 
 export const runtime = "nodejs"
 export const maxDuration = 300
@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
   if (!apiKey || !baseUrl) return NextResponse.json({ error: "PROMPT_ENGINE_UNAVAILABLE" }, { status: 503 })
 
   const direction = (body.message as string).trim()
+  const hardTransition = creatorDirectionRequiresFreshGeneration(direction)
   const generalModel = process.env[`SIRENS_MIND_${mode}_MODEL`] || DEFAULT_MODELS[mode]
   const model = resolveCreatorReplyModel(mode, generalModel)
   const authoritativeSources = buildCreatorReplyAuthoritySources({
@@ -120,7 +121,11 @@ export async function POST(req: NextRequest) {
           visible += text
         })
         usage = result.usage
-        const validation = validateCreatorReplyCandidate(visible, result.metadata, authoritativeSources)
+        // Hard role/style transitions are intentionally fact-free. Validate their visible prose
+        // against the same local agency/world guards without making success depend on provider-
+        // authored grounding bookkeeping that this operation does not need.
+        const validationMetadata = hardTransition ? { version: 5, claims: [] } : result.metadata
+        const validation = validateCreatorReplyCandidate(visible, validationMetadata, authoritativeSources)
         validationOutcome = validation.code
         if (!validation.ok) {
           code = "CREATOR_REPLY_GROUNDING_REJECTED"
