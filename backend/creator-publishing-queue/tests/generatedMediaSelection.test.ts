@@ -44,15 +44,31 @@ test('generated-assets POST preserves legacy input and accepts only an opaque pr
 test('canonical private assets use only the private reader and verify exact metadata', async()=>{
   const assetId='123e4567-e89b-42d3-a456-426614174444';
   const stored={bucket:'private-generations',object_key:'creator/output-1.png',mime_type:'image/png',size_bytes:bytes.length,sha256:sha};
-  const a=admin({generationAsset:{id:assetId,generation_id:gen,owner_id:creator,ordinal:1,kind:'image',private_storage_objects:stored}});
+  const a=admin({generationAsset:{id:assetId,generation_id:gen,owner_id:creator,ordinal:1,kind:'image',lifecycle_state:'active',private_storage_objects:stored}});
   let legacyCalls=0, privateCalls=0;
   const result=await attachGeneratedMediaToCreatorPackage({contentPackageId:pkg,generationId:gen,generationAssetId:assetId},{admin:a.api,getCreatorIdentity:async()=>({authUserId:creator,profileId:profile}),legacyR2Get:async()=>{legacyCalls++; throw new Error('legacy must not run')},privateR2Get:async(bucket,key)=>{privateCalls++; assert.equal(bucket,stored.bucket); assert.equal(key,stored.object_key); return {body:bytes,contentType:'image/png',contentLength:bytes.length}}});
   assert.equal(result.ok,true); assert.equal(privateCalls,1); assert.equal(legacyCalls,0); assert.equal(a.calls.rpc.at(-1).args.p_generation_asset_id,assetId); assert.equal(a.calls.rpc.at(-1).args.p_generation_ordinal,1);
 
   for (const conflict of [{...stored,bucket:'wrong-private-bucket'}, {...stored,sha256:'0'.repeat(64)}]) {
-    const mismatch=admin({generationAsset:{id:assetId,generation_id:gen,owner_id:creator,ordinal:1,kind:'image',private_storage_objects:conflict}}); let fallback=0;
+    const mismatch=admin({generationAsset:{id:assetId,generation_id:gen,owner_id:creator,ordinal:1,kind:'image',lifecycle_state:'active',private_storage_objects:conflict}}); let fallback=0;
     await assert.rejects(()=>attachGeneratedMediaToCreatorPackage({contentPackageId:pkg,generationId:gen,generationAssetId:assetId},{admin:mismatch.api,getCreatorIdentity:async()=>({authUserId:creator,profileId:profile}),legacyR2Get:async()=>{fallback++; return {body:bytes,contentType:'image/png'}},privateR2Get:async(bucket)=>{if(bucket!==stored.bucket) throw new Error('bucket rejected'); return {body:bytes,contentType:'image/png',contentLength:bytes.length}}}));
     assert.equal(fallback,0);
+  }
+});
+
+test('private generation attachment requires active lifecycle before reading R2', async()=>{
+  const assetId='123e4567-e89b-42d3-a456-426614174444';
+  const stored={bucket:'private-generations',object_key:'creator/output-1.png',mime_type:'image/png',size_bytes:bytes.length,sha256:sha};
+  for (const lifecycle_state of ['trashed','purge_pending','purged']) {
+    const a=admin({generationAsset:{id:assetId,generation_id:gen,owner_id:creator,ordinal:1,kind:'image',lifecycle_state,private_storage_objects:stored}});
+    let privateCalls=0;
+    await assert.rejects(
+      ()=>attachGeneratedMediaToCreatorPackage({contentPackageId:pkg,generationId:gen,generationAssetId:assetId},{admin:a.api,getCreatorIdentity:async()=>({authUserId:creator,profileId:profile}),privateR2Get:async()=>{privateCalls++; return {body:bytes,contentType:'image/png',contentLength:bytes.length}}}),
+      (error:any)=>{ assert.equal(error?.code,'INELIGIBLE_GENERATION'); return true },
+    );
+    assert.equal(privateCalls,0);
+    assert.equal(a.calls.uploads.length,0);
+    assert.equal(a.calls.rpc.length,0);
   }
 });
 
