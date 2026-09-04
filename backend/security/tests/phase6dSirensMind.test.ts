@@ -10,8 +10,17 @@ test("long-form story activation is explicit and conservative", () => {
   for (const message of ["Write me a 2,000-word story about adults.", "Write a complete short story.", "Write this as a full story.", "Write me a 2–3 page story.", "Write Chapter 2.", "Continue the story.", "Continue this chapter.", "Turn this into a complete prose story."]) assert.equal(shouldActivateLongformStory(message), true, message)
   for (const message of ["How do I write a story?", "Help me brainstorm a story.", "Give me story ideas.", "What makes a good erotic story?", "Can we discuss the plot?", "Hello"]) assert.equal(shouldActivateLongformStory(message), false, message)
   for (const message of ["Write a story outline.", "Create a story prompt.", "Give me chapter titles.", "Write a story summary."]) assert.equal(shouldActivateLongformStory(message), false, message)
+  for (const message of ["Let's roleplay this scene.", "Stay in character and continue.", "Can we talk about writing erotic stories?"]) assert.equal(shouldActivateLongformStory(message), false, message)
   assert.equal(shouldActivateLongformStory("Give me a story outline, then write the complete prose story."), true)
   assert.equal(shouldActivateLongformStory("Give me story ideas, then write the complete prose story."), true)
+})
+
+test("story and RP prompts pin narrative and interactive-lane behavior", () => {
+  const story = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.longform_story.system.txt"), "utf8")
+  const rp = fs.readFileSync(path.join(process.cwd(), "prompts/nsfw_gpt/nsfw_gpt.admin_rp.system.txt"), "utf8")
+  for (const phrase of ["finished narrative prose", "relationships, setting, point of view, tense, tone, and premise", "substantial, complete short-form narrative", "Output only creator-facing story prose"]) assert.match(story, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")))
+  assert.match(story, /Do not provide an outline[\s\S]*Generator handoff/)
+  for (const phrase of ["default character actions and dialogue to first person", "address the creator as \"you\"", "do not swap or invert them", "meaningful forward movement", "do not recycle hesitation", "newest explicit creator role reassignment"]) assert.match(rp, new RegExp(phrase))
 })
 
 test("rapid stream deltas are coalesced in exact order and final text flushes", () => {

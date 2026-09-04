@@ -51,6 +51,72 @@ test("still rejects declarative invented subscriber actions, preferences, and st
   ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
 })
 
+test("structural declarative backstop rejects paraphrased subscriber facts and the production canary", () => {
+  for (const text of [
+    "You seem uneasy.",
+    "You're obviously thrilled.",
+    "Look who's confident now.",
+    "I can tell you're desperate.",
+    "You keep attempting to impress me.",
+    "You're becoming impatient.",
+    "You're already writhing.",
+    "I know you need this.",
+    "You adore it when I do that.",
+    "You paid me last Tuesday.",
+    "You're my submissive now.",
+    "Well well, look who's feeling bold tonight. You think you can handle what I want? Let's see how long that confidence lasts when I start pushing your buttons. I do love watching brats squirm when they realize they've bitten off more than they can chew.",
+  ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
+})
+
+test("intervening adverbs, habitual markers, and factual modals cannot bypass grounding", () => {
+  for (const text of [
+    "You obviously want this.", "You clearly want this.", "You definitely need this.",
+    "You always obey me.", "You usually give in.", "You must be desperate.",
+    "You must really want this.", "You clearly belong to me now.",
+    "You obviously remember what happened.", "You probably paid before.",
+    "You never resist me.", "You already know the rules.", "Your devotion is obvious.",
+  ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
+})
+
+test("a grounded trailing fact cannot launder an earlier unsupported fact", () => {
+  const femaleNotes: CreatorReplyAuthoritySource[] = [
+    { id: "profile.key_notes", kind: "key_notes", text: "Subscriber is female. Pronouns: she/her." },
+  ]
+  for (const adjective of ["tall", "wealthy", "nervous", "obedient", "from Denver"]) {
+    const text = `You're ${adjective}, female.`
+    assert.equal(valid(text, [{ claim: "female", authority_id: "profile.key_notes.unit.0" }], femaleNotes).code, "SUBSCRIBER_PUPPETING", text)
+  }
+})
+
+test("each subscriber fact in a compound declaration requires matching authority", () => {
+  const compoundAuthority: CreatorReplyAuthoritySource[] = [
+    { id: "profile.key_notes", kind: "key_notes", text: "Subscriber is tall and female." },
+  ]
+  assert.equal(valid("You're tall and female.", [
+    { claim: "tall", authority_id: "profile.key_notes.unit.0" },
+  ], compoundAuthority).code, "SUBSCRIBER_PUPPETING")
+  assert.equal(valid("You're tall and female.", [
+    { claim: "tall", authority_id: "profile.key_notes.unit.0" },
+    { claim: "female", authority_id: "profile.key_notes.unit.0" },
+  ], compoundAuthority).ok, true)
+})
+
+test("structural backstop preserves commands, questions, challenges, speculation, and conditional language", () => {
+  for (const text of [
+    "Think you can handle a challenge?",
+    "Tell me what you want.",
+    "Try me.",
+    "If you test me, I'll decide what happens next.",
+    "Maybe you can earn an answer.",
+    "Show me whether you can follow one simple instruction.",
+    "I set the rules here.",
+    "I'll decide what you get next.",
+    "Want to see what happens if you push your luck?",
+    "Perhaps you're nervous.",
+    "I wonder if you're impatient.",
+  ]) assert.equal(valid(text).ok, true, text)
+})
+
 test("allows subscriber action only when the exact visible claim selects an authoritative source", () => {
   const result = valid("I grin as you kneel in front of me.", [
     { claim: "you kneel", authority_id: "current.inbound.unit.1" },
@@ -59,14 +125,14 @@ test("allows subscriber action only when the exact visible claim selects an auth
 })
 
 test("natural paraphrase is allowed through a stable server-built authority reference", () => {
-  const result = valid("You told me you're in Denver, and I remember.", [
+  const result = valid("You're in Denver.", [
     { claim: "in Denver", authority_id: "profile.key_notes.unit.0" },
   ])
   assert.equal(result.ok, true)
 })
 
 test("mechanical punctuation, quote, case, and whitespace differences do not reject an otherwise visible claim", () => {
-  const result = valid("You told me you’re in Denver — and I remember.", [
+  const result = valid("You’re in Denver.", [
     { claim: "IN DENVER", authority_id: "profile.key_notes.unit.0" },
   ])
   assert.equal(result.ok, true)

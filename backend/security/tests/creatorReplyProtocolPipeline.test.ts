@@ -50,7 +50,7 @@ test("streamed pipeline accepts an exact anchored grounded subscriber assertion"
 })
 
 test("streamed pipeline tolerates only mechanical visible-anchor normalization", async () => {
-  const visible = "You said you’re in Denver — I remember."
+  const visible = "You’re in Denver — I remember."
   const result = await parseAndValidate(visible, { version: 5, claims: [
     { claim: "IN DENVER", authority_id: "current.inbound.unit.0" },
   ] })
