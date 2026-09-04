@@ -15,5 +15,6 @@ psql(["-f", "backend/security/tests/phase7TwinTrainingPostgresPrelude.sql"]);
 psql(["-f", "backend/security/tests/phase7TwinTrainingPostgresSetup.sql"]);
 psql(["-f", "supabase/migrations/20260904223000_phase7_twin_training_lifecycle.sql"]);
 psql(["-f", "supabase/migrations/20260904223100_phase7_twin_training_lifecycle_race_hardening.sql"]);
+psql(["-f", "supabase/migrations/20260904223200_phase7_twin_active_read_boundary.sql"]);
 psql(["-f", "backend/security/tests/phase7TwinTrainingLifecyclePostgresIntegration.sql"]);
 console.log("Phase 7 Twin and training-data lifecycle PostgreSQL integration passed.");
