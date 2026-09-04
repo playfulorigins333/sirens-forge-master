@@ -17,8 +17,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ assetId
 
   const admin = getSupabaseAdmin();
   const { data, error } = await admin.from("generation_assets")
-    .select("id,generation_id,ordinal,kind,private_storage_objects!inner(bucket,object_key,mime_type)")
-    .eq("id", assetId).eq("owner_id", auth.user.id).maybeSingle();
+    .select("id,generation_id,ordinal,kind,lifecycle_state,private_storage_objects!inner(bucket,object_key,mime_type)")
+    .eq("id", assetId).eq("owner_id", auth.user.id).in("lifecycle_state", ["active", "trashed"]).maybeSingle();
   if (error) return NextResponse.json({ error: "PRIVATE_MEDIA_NOT_READY" }, { status: 503, headers: { "Cache-Control": "no-store" } });
   if (!data) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404, headers: { "Cache-Control": "no-store" } });
   const object = Array.isArray(data.private_storage_objects) ? data.private_storage_objects[0] : data.private_storage_objects;
