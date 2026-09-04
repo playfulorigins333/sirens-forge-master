@@ -143,7 +143,7 @@ try {
   assert.doesNotMatch(events, /event: delta/)
   assert.match(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
 
-  providerVisible = "You reminded me about that old lodge fact."
+  providerVisible = "I remember that old lodge fact."
   providerMetadata = { version: 5, claims: [{ claim: "old lodge fact", authority_id: "continuity.subscriber.0.unit.0" }] }
   providerCalls = 0
   saved = null

@@ -68,6 +68,39 @@ test("structural declarative backstop rejects paraphrased subscriber facts and t
   ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
 })
 
+test("intervening adverbs, habitual markers, and factual modals cannot bypass grounding", () => {
+  for (const text of [
+    "You obviously want this.", "You clearly want this.", "You definitely need this.",
+    "You always obey me.", "You usually give in.", "You must be desperate.",
+    "You must really want this.", "You clearly belong to me now.",
+    "You obviously remember what happened.", "You probably paid before.",
+    "You never resist me.", "You already know the rules.", "Your devotion is obvious.",
+  ]) assert.equal(valid(text).code, "SUBSCRIBER_PUPPETING", text)
+})
+
+test("a grounded trailing fact cannot launder an earlier unsupported fact", () => {
+  const femaleNotes: CreatorReplyAuthoritySource[] = [
+    { id: "profile.key_notes", kind: "key_notes", text: "Subscriber is female. Pronouns: she/her." },
+  ]
+  for (const adjective of ["tall", "wealthy", "nervous", "obedient", "from Denver"]) {
+    const text = `You're ${adjective}, female.`
+    assert.equal(valid(text, [{ claim: "female", authority_id: "profile.key_notes.unit.0" }], femaleNotes).code, "SUBSCRIBER_PUPPETING", text)
+  }
+})
+
+test("each subscriber fact in a compound declaration requires matching authority", () => {
+  const compoundAuthority: CreatorReplyAuthoritySource[] = [
+    { id: "profile.key_notes", kind: "key_notes", text: "Subscriber is tall and female." },
+  ]
+  assert.equal(valid("You're tall and female.", [
+    { claim: "tall", authority_id: "profile.key_notes.unit.0" },
+  ], compoundAuthority).code, "SUBSCRIBER_PUPPETING")
+  assert.equal(valid("You're tall and female.", [
+    { claim: "tall", authority_id: "profile.key_notes.unit.0" },
+    { claim: "female", authority_id: "profile.key_notes.unit.0" },
+  ], compoundAuthority).ok, true)
+})
+
 test("structural backstop preserves commands, questions, challenges, speculation, and conditional language", () => {
   for (const text of [
     "Think you can handle a challenge?",
@@ -92,14 +125,14 @@ test("allows subscriber action only when the exact visible claim selects an auth
 })
 
 test("natural paraphrase is allowed through a stable server-built authority reference", () => {
-  const result = valid("You told me you're in Denver, and I remember.", [
+  const result = valid("You're in Denver.", [
     { claim: "in Denver", authority_id: "profile.key_notes.unit.0" },
   ])
   assert.equal(result.ok, true)
 })
 
 test("mechanical punctuation, quote, case, and whitespace differences do not reject an otherwise visible claim", () => {
-  const result = valid("You told me you’re in Denver — and I remember.", [
+  const result = valid("You’re in Denver.", [
     { claim: "IN DENVER", authority_id: "profile.key_notes.unit.0" },
   ])
   assert.equal(result.ok, true)

@@ -42,10 +42,11 @@ const OBVIOUS_WORLD_REFERENCE = /\b(?:the|a|an)\s+(?:door|doorway|dumpster|firep
  * adjective or verb. This deliberately avoids an emotion/action blacklist: new
  * paraphrases fail closed unless their visible span is tied to server authority.
  */
-const SECOND_PERSON_DECLARATIVE = /\byou(?:'re|'ve|'d|\s+(?:are|were|seem|seemed|appear|appeared|look|looked|feel|felt|think|thought|know|knew|want|wanted|need|needed|love|loved|adore|adored|enjoy|enjoyed|prefer|preferred|crave|craved|like|liked|hate|hated|keep|kept|try|tried|hope|hoped|plan|planned|intend|intended|mean|meant|paid|pay|did|do|have|had))\b/gi
+const SECOND_PERSON_MODIFIER = "(?:obviously|clearly|definitely|always|usually|often|sometimes|never|already|still|really|just|must)"
+const SECOND_PERSON_DECLARATIVE = new RegExp(`\\byou(?:(?:'re|'ve|'d|’re|’ve|’d)(?:\\s+${SECOND_PERSON_MODIFIER}){0,4}\\s+[\\p{L}][\\p{L}'’-]*|\\s+(?:${SECOND_PERSON_MODIFIER}\\s+){0,4}[\\p{L}][\\p{L}'’-]*)\\b`, "giu")
 const EMBEDDED_SUBSCRIBER_INFERENCE = /\bi\s+(?:can\s+)?(?:tell|see|know|sense|notice|bet)\s+(?:that\s+)?you(?:'re|'ve|'d|\s+(?:are|were|have|had|want|wanted|feel|felt|think|thought|love|loved|need|needed))\b/gi
 const LOOK_WHO_ASSERTION = /\blook\s+who(?:'s|\s+is|\s+was)\b/gi
-const ANAPHORIC_SUBSCRIBER_STATE = /\b(?:that|your)\s+(?:confidence|desperation|excitement|nervousness|impatience|eagerness|arousal|fear|anger|jealousy|desire|need|motive|intention|obedience|compliance|submission)\b/gi
+const ANAPHORIC_SUBSCRIBER_STATE = /\b(?:that|your)\s+(?:confidence|desperation|excitement|nervousness|impatience|eagerness|arousal|fear|anger|jealousy|desire|need|motive|intention|obedience|compliance|submission|devotion|loyalty|allegiance|role|status)\b/gi
 
 function exactKeys(raw: Record<string, unknown>, allowed: string[]) {
   const keys = Object.keys(raw)
@@ -153,12 +154,6 @@ function rangeIsGrounded(start: number, end: number, grounded: GroundedRange[]) 
   return grounded.some((range) => start >= range.start && end <= range.end)
 }
 
-function predicateComplementIsGrounded(visible: string, end: number, grounded: GroundedRange[]) {
-  const boundary = visible.slice(end).search(/[.!?;\n]|\b(?:and|but|while|although)\b/i)
-  const clauseEnd = boundary < 0 ? visible.length : end + boundary
-  return grounded.some((range) => range.start >= end && range.start < clauseEnd)
-}
-
 function looksConditionalPrefix(visible: string, start: number) {
   const prefix = visible.slice(Math.max(0, start - 40), start).toLowerCase()
   return /\b(?:if|when|once|unless|until|should|maybe|perhaps)\s*$/.test(prefix)
@@ -167,8 +162,46 @@ function looksConditionalPrefix(visible: string, start: number) {
 
 function looksSpeculativeContext(visible: string, start: number) {
   const prefix = visible.slice(Math.max(0, start - 80), start).toLowerCase()
-  return /\b(?:maybe|perhaps|possibly|probably)\s*$/.test(prefix)
+  return /\b(?:maybe|perhaps|possibly)\s*$/.test(prefix)
     || /\b(?:i\s+)?(?:wonder|suspect|guess|imagine)\s+(?:that\s+|whether\s+|if\s+)?$/.test(prefix)
+}
+
+function declarativeIsExplicitlySpeculative(match: string) {
+  return /^you\s+(?:maybe|perhaps|possibly)\b/i.test(match)
+}
+
+function declarativeIsProspectiveChallenge(match: string) {
+  return /^you\s+(?:can|could|may|might|will|would|should)\b/i.test(match)
+}
+
+function isClauseSubject(visible: string, start: number) {
+  const sentenceStart = Math.max(visible.lastIndexOf(".", start - 1), visible.lastIndexOf("!", start - 1), visible.lastIndexOf("?", start - 1), visible.lastIndexOf(";", start - 1), visible.lastIndexOf("\n", start - 1))
+  const prefix = visible.slice(sentenceStart + 1, start).trim()
+  return !prefix || /\b(?:and|but|yet|so)\s*$/i.test(prefix)
+}
+
+function groundedRangeOverlaps(start: number, end: number, grounded: GroundedRange[]) {
+  return grounded.some((range) => range.start < end && range.end > start)
+}
+
+/** Every comma/coordinator-separated fact in a declarative subscriber clause needs its own visible authority anchor. */
+function secondPersonDeclarationIsGrounded(visible: string, match: RegExpExecArray, grounded: GroundedRange[]) {
+  const sentenceTail = visible.slice(match.index)
+  const sentenceBoundary = sentenceTail.search(/[.!?;\n]/)
+  const end = sentenceBoundary < 0 ? visible.length : match.index + sentenceBoundary
+  const clause = visible.slice(match.index, end)
+  const segments: GroundedRange[] = []
+  const separator = /\s*(?:,|\b(?:and|but|while|although)\b)\s*/gi
+  let cursor = 0
+  let split: RegExpExecArray | null
+  while ((split = separator.exec(clause))) {
+    if (split.index > cursor) segments.push({ start: match.index + cursor, end: match.index + split.index })
+    cursor = split.index + split[0].length
+  }
+  if (cursor < clause.length) segments.push({ start: match.index + cursor, end })
+  return groundedRangeOverlaps(match.index, match.index + match[0].length, grounded)
+    && segments.length > 0
+    && segments.every((segment) => groundedRangeOverlaps(segment.start, segment.end, grounded))
 }
 
 function looksInterrogativeContext(visible: string, start: number, end: number) {
@@ -189,7 +222,6 @@ function firstUngroundedMatch(
   grounded: GroundedRange[],
   allowConditional = false,
   allowInterrogative = false,
-  allowGroundedComplement = false,
 ) {
   pattern.lastIndex = 0
   let match: RegExpExecArray | null
@@ -197,8 +229,20 @@ function firstUngroundedMatch(
     if (allowConditional && looksConditionalPrefix(visible, match.index)) continue
     if (allowInterrogative && looksInterrogativeContext(visible, match.index, match.index + match[0].length)) continue
     if (allowConditional && looksSpeculativeContext(visible, match.index)) continue
-    if (!rangeIsGrounded(match.index, match.index + match[0].length, grounded)
-      && !(allowGroundedComplement && predicateComplementIsGrounded(visible, match.index + match[0].length, grounded))) return match[0]
+    if (!rangeIsGrounded(match.index, match.index + match[0].length, grounded)) return match[0]
+  }
+  return null
+}
+
+function firstUngroundedSecondPersonDeclaration(visible: string, grounded: GroundedRange[]) {
+  SECOND_PERSON_DECLARATIVE.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = SECOND_PERSON_DECLARATIVE.exec(visible))) {
+    if (!isClauseSubject(visible, match.index)) continue
+    if (looksConditionalPrefix(visible, match.index) || looksSpeculativeContext(visible, match.index)) continue
+    if (looksInterrogativeContext(visible, match.index, match.index + match[0].length)) continue
+    if (declarativeIsExplicitlySpeculative(match[0]) || declarativeIsProspectiveChallenge(match[0])) continue
+    if (!secondPersonDeclarationIsGrounded(visible, match, grounded)) return match[0]
   }
   return null
 }
@@ -254,8 +298,8 @@ export function validateCreatorReplyCandidate(
     firstUngroundedMatch(text, SUBSCRIBER_GENDERED_IDENTITY, grounded, true, true) ||
     firstUngroundedMatch(text, SUBSCRIBER_POSSESSIVE_STATE, grounded, false, true) ||
     firstUngroundedMatch(text, THIRD_PERSON_SUBSCRIBER, grounded) ||
-    firstUngroundedMatch(text, SECOND_PERSON_DECLARATIVE, grounded, true, true, true) ||
-    firstUngroundedMatch(text, EMBEDDED_SUBSCRIBER_INFERENCE, grounded, true, true, true) ||
+    firstUngroundedSecondPersonDeclaration(text, grounded) ||
+    firstUngroundedMatch(text, EMBEDDED_SUBSCRIBER_INFERENCE, grounded, true, true) ||
     firstUngroundedMatch(text, LOOK_WHO_ASSERTION, grounded) ||
     firstUngroundedMatch(text, ANAPHORIC_SUBSCRIBER_STATE, grounded, true, true)
   ) {
