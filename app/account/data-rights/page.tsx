@@ -9,7 +9,7 @@ export const metadata = { title: "Privacy & data controls — Sirens Forge" };
 
 export default async function AccountDataRightsPage() {
   const auth = await ensureAuthenticatedProfile();
-  if (!auth.ok) {
+  if (auth.ok === false) {
     if (auth.error === "UNAUTHENTICATED") redirect("/login");
     throw new Error(auth.message);
   }
