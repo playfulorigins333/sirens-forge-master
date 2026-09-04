@@ -170,14 +170,19 @@ function declarativeIsExplicitlySpeculative(match: string) {
   return /^you\s+(?:maybe|perhaps|possibly)\b/i.test(match)
 }
 
-function declarativeIsProspectiveChallenge(match: string) {
-  return /^you\s+(?:can|could|may|might|will|would|should)\b/i.test(match)
+function declarativeIsProspectiveChallenge(visible: string, match: RegExpExecArray) {
+  const tail = visible.slice(match.index)
+  const boundary = tail.search(/[.!?;\n]/)
+  const clause = boundary < 0 ? tail : tail.slice(0, boundary)
+  return /^you\s+(?:can|could|may)\s+(?:just\s+)?(?:try|ask)\b/i.test(clause)
 }
 
 function isClauseSubject(visible: string, start: number) {
   const sentenceStart = Math.max(visible.lastIndexOf(".", start - 1), visible.lastIndexOf("!", start - 1), visible.lastIndexOf("?", start - 1), visible.lastIndexOf(";", start - 1), visible.lastIndexOf("\n", start - 1))
   const prefix = visible.slice(sentenceStart + 1, start).trim()
-  return !prefix || /\b(?:and|but|yet|so)\s*$/i.test(prefix)
+  if (!prefix || /\b(?:and|but|yet|so)\s*$/i.test(prefix)) return true
+  if (/,[\s"“”'‘’]*$/u.test(prefix)) return true
+  return /(?:^|\s)(?:it(?:'s|\s+is)\s+(?:[\p{L}'’-]+\s*){1,4}|the\s+(?:[\p{L}'’-]+\s+){1,3}is)$/iu.test(prefix)
 }
 
 function groundedRangeOverlaps(start: number, end: number, grounded: GroundedRange[]) {
@@ -241,7 +246,7 @@ function firstUngroundedSecondPersonDeclaration(visible: string, grounded: Groun
     if (!isClauseSubject(visible, match.index)) continue
     if (looksConditionalPrefix(visible, match.index) || looksSpeculativeContext(visible, match.index)) continue
     if (looksInterrogativeContext(visible, match.index, match.index + match[0].length)) continue
-    if (declarativeIsExplicitlySpeculative(match[0]) || declarativeIsProspectiveChallenge(match[0])) continue
+    if (declarativeIsExplicitlySpeculative(match[0]) || declarativeIsProspectiveChallenge(visible, match)) continue
     if (!secondPersonDeclarationIsGrounded(visible, match, grounded)) return match[0]
   }
   return null
