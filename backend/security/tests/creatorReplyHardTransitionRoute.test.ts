@@ -85,8 +85,23 @@ try {
   assert.match(events, /"saved":true/)
   assert.doesNotMatch(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
 
-  // Ignoring hard-transition metadata must NOT weaken visible subscriber-agency guards.
-  providerVisible = "Well, look who's eager. Try me."
+  // A mixed hard-transition output keeps only independently safe provider sentences.
+  providerVisible = "Well, look who's eager. Try me. Sir decides what happens next."
+  providerMetadata = { version: 5, claims: [] }
+  providerCalls = 0
+  saved = null
+  response = await invoke()
+  events = await response.text()
+  assert.equal(providerCalls, 1)
+  assert.ok(saved)
+  assert.match(events, /event: delta/)
+  assert.match(events, /Try me\./)
+  assert.match(events, /Sir decides what happens next\./)
+  assert.doesNotMatch(events, /look who's eager/i)
+  assert.doesNotMatch(events, /CREATOR_REPLY_GROUNDING_REJECTED/)
+
+  // Salvage must remain fail-closed when every provider sentence is unsafe.
+  providerVisible = "Well, look who's eager. You're obviously desperate."
   providerMetadata = { version: 5, claims: [] }
   providerCalls = 0
   saved = null
