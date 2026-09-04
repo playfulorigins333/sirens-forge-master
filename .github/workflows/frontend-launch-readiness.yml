@@ -13,6 +13,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm install --global npm@11.19.1
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run test:frontend-launch-readiness
