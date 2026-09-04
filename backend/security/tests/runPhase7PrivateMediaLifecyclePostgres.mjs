@@ -11,7 +11,7 @@ const psql = (args) => {
   if (result.status !== 0) process.exit(result.status ?? 1);
 };
 
-psql(["-f", "backend/security/tests/privateCreatorMediaPostgresSetup.sql"]);
+psql(["-f", "backend/security/tests/phase7PrivateMediaPostgresSetup.sql"]);
 psql(["-f", "supabase/migrations/20260824090000_private_creator_generation_media.sql"]);
 
 // Reproduce the currently deployed generation Data API surface so the Phase 7
