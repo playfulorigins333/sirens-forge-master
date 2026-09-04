@@ -26,6 +26,7 @@ jobs:
     env:
       PRIVATE_CREATOR_MEDIA_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/private_creator_media_test
       PHASE7_PRIVATE_MEDIA_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_private_media_test
+      PHASE7_TWIN_TRAINING_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_twin_training_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -37,9 +38,14 @@ jobs:
         run: |
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database private_creator_media_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_private_media_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_twin_training_test'
       - name: Private creator media source contracts
         run: npm run test:private-creator-media
+      - name: Phase 7 Twin and training-data source contracts
+        run: npx tsx --test backend/security/tests/phase7TwinTrainingLifecycleSource.test.ts
       - name: Private creator media PostgreSQL behavior
         run: npm run test:private-creator-media-postgres
       - name: Phase 7 private media lifecycle PostgreSQL behavior
         run: node backend/security/tests/runPhase7PrivateMediaLifecyclePostgres.mjs
+      - name: Phase 7 Twin and training-data lifecycle PostgreSQL behavior
+        run: node backend/security/tests/runPhase7TwinTrainingLifecyclePostgres.mjs

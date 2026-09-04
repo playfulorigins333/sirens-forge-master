@@ -57,7 +57,10 @@ export default function ManagePrivateMediaClient({ items }: { items: ManagedAsse
           <p className="text-sm uppercase tracking-[0.2em] text-purple-300">Private Library</p>
           <h1 className="mt-2 text-3xl font-bold">Manage private media</h1>
           <p className="mt-2 max-w-3xl text-sm text-gray-300">Move generated private images or videos into Recently Deleted. Trashed media stays recoverable for 30 days unless you permanently delete it sooner.</p>
-          <Link className="mt-4 inline-block text-sm text-purple-200 underline" href="/library">Back to Creation Loop</Link>
+          <div className="mt-4 flex flex-wrap gap-4 text-sm">
+            <Link className="text-purple-200 underline" href="/library">Back to Creation Loop</Link>
+            <Link className="text-purple-200 underline" href="/library/manage/twins">Manage AI Twins</Link>
+          </div>
         </header>
 
         {error ? <div className="rounded-xl border border-red-700 bg-red-950/50 p-3 text-sm text-red-200">{error}</div> : null}
