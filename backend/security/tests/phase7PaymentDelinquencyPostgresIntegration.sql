@@ -23,10 +23,11 @@ do $$ begin if not exists(select 1 from public.subscription_payment_delinquencie
 -- Same/latest April cycle recovers and preserves history/deadline.
 select public.payment_v2_recover_subscription_payment_delinquency('30000000-0000-4000-8000-000000000001','sub_early','cus_early','price_early','in_apr','2026-04-01Z','2026-05-01Z','2026-04-04Z');
 do $$ begin if not exists(select 1 from public.subscription_payment_delinquencies where state='recovered' and retention_until=(select retention_until from deadline_snapshot) and recovery_invoice_id='in_apr' and recovery_billing_period_start='2026-04-01Z' and recovery_billing_period_end='2026-05-01Z') then raise exception 'latest_recovery_failed'; end if; end $$;
--- Previously unseen March and same-as-recovery April failures cannot open a new episode.
-do $$ begin
-  if public.payment_v2_record_subscription_payment_failure('30000000-0000-4000-8000-000000000001','sub_early','cus_early','price_early','in_mar_late','evt_mar_late','2026-05-02Z','2026-03-01Z','2026-04-01Z') <> 'stale_failure_ignored' then raise exception 'cross_episode_stale_failure_not_ignored'; end if;
-  if public.payment_v2_record_subscription_payment_failure('30000000-0000-4000-8000-000000000001','sub_early','cus_early','price_early','in_apr_late','evt_apr_late','2026-05-02Z','2026-04-01Z','2026-05-01Z') <> 'stale_failure_ignored' then raise exception 'recovery_cycle_failure_not_ignored'; end if;
+-- A truly unseen older cycle remains stale after recovery. A cycle already recorded in the recovered episode is an idempotent no-op.
+do $$ declare v_result text; begin
+  if public.payment_v2_record_subscription_payment_failure('30000000-0000-4000-8000-000000000001','sub_early','cus_early','price_early','in_jan_after_recovery','evt_jan_after_recovery','2026-05-02Z','2026-01-01Z','2026-02-01Z') <> 'stale_failure_ignored' then raise exception 'cross_episode_stale_failure_not_ignored'; end if;
+  v_result := public.payment_v2_record_subscription_payment_failure('30000000-0000-4000-8000-000000000001','sub_early','cus_early','price_early','in_apr_late','evt_apr_late','2026-05-02Z','2026-04-01Z','2026-05-01Z');
+  if v_result <> 'already_recorded_cycle' then raise exception 'recovery_cycle_duplicate_not_idempotent'; end if;
   if exists(select 1 from public.subscription_payment_delinquencies where state in ('first_miss_frozen','retention_countdown')) then raise exception 'stale_failure_opened_episode'; end if;
 end $$;
 -- The adjacent May cycle is truly later and starts a fresh miss-one episode.
@@ -35,6 +36,11 @@ do $$ begin if (select count(*) from public.subscription_payment_delinquencies) 
 -- Current subscription-cycle evidence without an invoice id also persists period recovery.
 select public.payment_v2_recover_subscription_payment_delinquency('30000000-0000-4000-8000-000000000001','sub_early','cus_early','price_early',null,'2026-06-01Z','2026-07-01Z','2026-06-02Z');
 do $$ begin if not exists(select 1 from public.subscription_payment_delinquencies where first_missed_invoice_id='in_may' and state='recovered' and recovery_invoice_id is null and recovery_billing_period_start='2026-06-01Z' and recovery_billing_period_end='2026-07-01Z') then raise exception 'subscription_period_recovery_failed'; end if; end $$;
+-- A failure for that persisted recovery cycle was never previously recorded and must still be rejected as stale.
+do $$ begin
+  if public.payment_v2_record_subscription_payment_failure('30000000-0000-4000-8000-000000000001','sub_early','cus_early','price_early','in_june_late','evt_june_late','2026-07-02Z','2026-06-01Z','2026-07-01Z') <> 'stale_failure_ignored' then raise exception 'persisted_recovery_cycle_failure_not_ignored'; end if;
+  if exists(select 1 from public.subscription_payment_delinquencies where state in ('first_miss_frozen','retention_countdown')) then raise exception 'recovery_cycle_failure_opened_episode'; end if;
+end $$;
 -- Semantic OG/lifetime chain and cancellation retention remain untouched.
 do $$ begin
   begin perform public.payment_v2_record_subscription_payment_failure('30000000-0000-4000-8000-000000000002','sub_og','cus_og','price_og','in_og','evt_og',now(),now()-interval '1 month',now()); raise exception 'og_was_accepted'; exception when others then if sqlerrm='og_was_accepted' then raise; end if; end;
