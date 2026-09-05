@@ -92,6 +92,8 @@
     "test:phase6f2-creator-reply-postgres": "node backend/security/tests/runPhase6f2CreatorReplyPostgres.mjs"
     ,"test:phase7-subscription-retention": "tsx --test backend/security/tests/phase7SubscriptionCancellationSource.test.ts"
     ,"test:phase7-subscription-retention-postgres": "node backend/security/tests/runPhase7SubscriptionCancellationPostgres.mjs"
+    ,"test:profile-lifecycle-grants": "tsx --test backend/security/tests/profileLifecycleColumnGrantsSource.test.ts"
+    ,"test:profile-lifecycle-grants-postgres": "node backend/security/tests/runProfileLifecycleColumnGrantsPostgres.mjs"
   },
   "repository": {
     "type": "git",
