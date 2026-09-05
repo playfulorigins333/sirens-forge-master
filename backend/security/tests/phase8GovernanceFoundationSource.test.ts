@@ -43,15 +43,21 @@ test("governance internals are not browser callable", () => {
   assert.doesNotMatch(migration, /grant select on table public\.governance_audit_events to service_role/i)
 })
 
-test("Founder/Admin legal holds are finite, scoped, and fresh-auth protected", () => {
+test("Founder/Admin legal holds use the current authority bridge only", () => {
   assert.match(migration, /governance_actor_is_founder_admin/)
   assert.match(migration, /sole_production_admin_guard/)
+  assert.doesNotMatch(migration, /p\.role|profiles\s+p[\s\S]{0,200}role/i)
   assert.match(migration, /GOVERNANCE_LEGAL_HOLD_ADMIN_REQUIRED/)
   assert.match(migration, /p_fresh_auth_method<>'totp'/)
   assert.match(migration, /interval '10 minutes'/)
   assert.match(migration, /review_due_at > opened_at and expires_at >= review_due_at/)
   assert.match(migration, /t\.subject_user_id=p_subject_user_id/)
   assert.match(migration, /h\.expires_at>statement_timestamp\(\)/)
+})
+
+test("legal-hold target identity includes subject to avoid cross-user collisions", () => {
+  assert.match(migration, /unique\(hold_id,target_type,target_id,subject_user_id,preservation_scope\)/)
+  assert.match(migration, /governance_legal_hold_targets_lookup_idx[\s\S]*target_type,target_id,subject_user_id/)
 })
 
 test("action receipts enforce creator ownership and admin-only private access", () => {
