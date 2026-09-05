@@ -58,7 +58,7 @@ test("Creator Reply export handoff keeps decryption in Vercel and is doubly boun
   assert.match(route, /x-sirens-api-internal-secret/);
   assert.match(route, /SIRENS_API_INTERNAL_SECRET/);
   assert.match(route, /timingSafeEqual/);
-  assert.match(route, /Object\.keys\(body\)\.sort\(\)/);
+  assert.match(route, /Object\.keys\(record\)\.sort\(\)/);
   assert.match(route, /export_id/);
   assert.match(route, /auth_user_id/);
   assert.match(route, /Cache-Control/);
