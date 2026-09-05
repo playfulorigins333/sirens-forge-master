@@ -1,0 +1,10 @@
+# API authorization inventory — Phase 8D extension
+
+This file is an additive extension to the existing API authorization inventory for the Phase 8D canceled-account retention runner.
+
+**Inventory extension:** 1 route file / 1 route-method entry
+**Combined inventory:** 122 route files / 144 route-method entries
+
+| Route path | Source file | Method | Caller class | Authorization class | Authentication mechanism | Ownership boundary | Entitlement boundary | Admin/operator boundary | External signature/secret boundary | Privileged client/service-role usage | Validation/safe-error notes | Reviewed status | Evidence/test reference |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `/api/internal/retention/phase8d/run` | `app/api/internal/retention/phase8d/run/route.ts` | `GET` | Scheduled internal retention caller | SCHEDULER_SECRET + INTERNAL_CONTROLLED | Shared `authenticateSchedulerRequest()` validates `CRON_SECRET` or `VERCEL_CRON_SECRET` via timing-safe comparison before retention work | Caller supplies no creator/account selector; eligible cancellation records are selected only by the server/database retention contract and every asset/Twin operation remains owner-bound | Not entitlement-gated because this is a system retention/compliance operation; creator read access already expires at `retention_until` | No browser/admin surface; scheduled internal control only | Bearer or Vercel cron secret; missing, malformed, or invalid secret fails closed before privileged work | Server-only service uses the Supabase admin client only after scheduler authentication; database claims are bounded and existing private-media/Twin purge authorities remain responsible for physical deletion | GET has no body or caller-selected IDs; response is bounded and `no-store`; legal holds block destructive work without extending creator read access; Auth, billing evidence, delinquency, voluntary-deletion purge, and Phase 9 delivery are outside this route | PASS | `app/api/internal/retention/phase8d/run/route.ts`; `lib/retention/phase8d.ts`; `backend/security/tests/phase8dCanceledAccountEnforcementSource.test.ts`; inventory contract test |
