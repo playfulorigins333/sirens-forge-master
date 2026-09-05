@@ -17,6 +17,7 @@ create table public.payment_v2_holds(id uuid primary key, tier text not null, st
 create table public.payment_v2_purchases(id uuid primary key, hold_id uuid not null, tier text not null, state text not null, stripe_subscription_id text, stripe_customer_id text, stripe_price_id text, claimed_profile_id uuid);
 create table public.payment_v2_allocations(purchase_id uuid not null, profile_id uuid not null, entitlement_id uuid not null);
 create table public.subscription_cancellation_retentions(id uuid primary key default gen_random_uuid(), subscription_id uuid);
+grant select on public.subscription_cancellation_retentions to service_role;
 insert into auth.users values ('20000000-0000-4000-8000-000000000001'),('20000000-0000-4000-8000-000000000002');
 insert into profiles values ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001'),('10000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000002');
 insert into user_subscriptions values ('50000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','early_bird','sub_early','cus_early','past_due'),('50000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','og_throne',null,'cus_og','active');
