@@ -9,6 +9,7 @@ if (!url) {
 for (const file of [
   "backend/security/tests/phase8eSubscriptionDelinquencyPostgresSetup.sql",
   "supabase/migrations/20260905100000_phase8_subscription_delinquency_enforcement.sql",
+  "supabase/migrations/20260905100100_phase8e_remove_purge_reason_normalizers.sql",
   "backend/security/tests/phase8eSubscriptionDelinquencyPostgresIntegration.sql",
 ]) {
   const result = spawnSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-f", file], { stdio: "inherit" });
