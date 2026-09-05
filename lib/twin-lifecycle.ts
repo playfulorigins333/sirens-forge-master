@@ -15,6 +15,7 @@ export type TwinLifecycleErrorCode =
   | "PURGE_ALREADY_CLAIMED"
   | "PURGE_UNAVAILABLE"
   | "LIFECYCLE_UNAVAILABLE";
+export type TwinPurgeReason = "creator_permanent_delete" | "retention_expired";
 
 export class TwinLifecycleError extends Error {
   constructor(public readonly code: TwinLifecycleErrorCode, public readonly status: number) {
@@ -36,12 +37,8 @@ function mapRpcError(error: unknown): TwinLifecycleError {
   if (message.includes("TWIN_PURGE_BLOCKED_ACTIVE_COMPUTE")) return new TwinLifecycleError("ACTIVE_COMPUTE", 409);
   if (message.includes("TWIN_PURGE_BLOCKED_ACTIVE_TRAINER")) return new TwinLifecycleError("ACTIVE_TRAINER", 409);
   if (message.includes("TWIN_PURGE_BLOCKED_UPLOAD_WINDOW")) return new TwinLifecycleError("UPLOAD_WINDOW_ACTIVE", 409);
-  if (message.includes("TWIN_PURGE_ALREADY_CLAIMED") || message.includes("TWIN_TRAINING_DATA_PURGE_ALREADY_CLAIMED")) {
-    return new TwinLifecycleError("PURGE_ALREADY_CLAIMED", 409);
-  }
-  if (message.includes("TWIN_STATE_CONFLICT") || message.includes("TWIN_NOT_ACTIVE") || message.includes("TWIN_TRAINING_DATA_NOT_ACTIVE") || message.includes("TWIN_PURGE_NOT_DUE") || message.includes("TWIN_PURGE_CLAIM_INVALID")) {
-    return new TwinLifecycleError("STATE_CONFLICT", 409);
-  }
+  if (message.includes("TWIN_PURGE_ALREADY_CLAIMED") || message.includes("TWIN_TRAINING_DATA_PURGE_ALREADY_CLAIMED")) return new TwinLifecycleError("PURGE_ALREADY_CLAIMED", 409);
+  if (message.includes("TWIN_STATE_CONFLICT") || message.includes("TWIN_NOT_ACTIVE") || message.includes("TWIN_TRAINING_DATA_NOT_ACTIVE") || message.includes("TWIN_PURGE_NOT_DUE") || message.includes("TWIN_PURGE_CLAIM_INVALID")) return new TwinLifecycleError("STATE_CONFLICT", 409);
   return new TwinLifecycleError("LIFECYCLE_UNAVAILABLE", 503);
 }
 
@@ -69,12 +66,7 @@ export async function restoreTwin(twinId: string, ownerId: string) {
 async function callStoragePurge(twinId: string, scope: "training_data" | "twin") {
   let response: Response;
   try {
-    response = await sirensApiFetch("/internal/twin-storage/purge", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ twin_id: twinId, scope }),
-      cache: "no-store",
-    });
+    response = await sirensApiFetch("/internal/twin-storage/purge", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ twin_id: twinId, scope }), cache: "no-store" });
   } catch {
     throw new TwinLifecycleError("PURGE_UNAVAILABLE", 502);
   }
@@ -89,7 +81,6 @@ export async function purgeTwinTrainingData(twinId: string, ownerId: string) {
   if (lookup.data.training_data_state === "purged") return { twinId, trainingDataState: "purged" as const, idempotent: true };
   const token = lookup.data.training_data_state === "purge_pending" ? lookup.data.training_data_purge_claim_token : randomUUID();
   if (!token) throw new TwinLifecycleError("LIFECYCLE_UNAVAILABLE", 503);
-
   const claim = await admin.rpc("claim_user_lora_training_data_purge", { p_lora_id: twinId, p_owner_id: ownerId, p_claim_token: token });
   if (claim.error) throw mapRpcError(claim.error);
   await callStoragePurge(twinId, "training_data");
@@ -108,7 +99,7 @@ export async function reactivateTwinTrainingData(twinId: string, ownerId: string
   return row;
 }
 
-export async function purgeTwin(twinId: string, ownerId: string) {
+export async function purgeTwin(twinId: string, ownerId: string, requestedReason: TwinPurgeReason = "creator_permanent_delete") {
   const admin = getSupabaseAdmin();
   const lookup = await admin.from("user_loras").select("id,lifecycle_state,purge_claim_token,purge_reason").eq("id", twinId).eq("user_id", ownerId).maybeSingle();
   if (lookup.error) throw new TwinLifecycleError("LIFECYCLE_UNAVAILABLE", 503);
@@ -117,8 +108,8 @@ export async function purgeTwin(twinId: string, ownerId: string) {
   if (lookup.data.lifecycle_state === "active") throw new TwinLifecycleError("STATE_CONFLICT", 409);
   const token = lookup.data.lifecycle_state === "purge_pending" ? lookup.data.purge_claim_token : randomUUID();
   if (!token) throw new TwinLifecycleError("LIFECYCLE_UNAVAILABLE", 503);
-  const reason = lookup.data.lifecycle_state === "purge_pending" ? lookup.data.purge_reason ?? "creator_permanent_delete" : "creator_permanent_delete";
-
+  const reason = lookup.data.lifecycle_state === "purge_pending" ? lookup.data.purge_reason ?? requestedReason : requestedReason;
+  if (reason !== requestedReason) throw new TwinLifecycleError("STATE_CONFLICT", 409);
   const claim = await admin.rpc("claim_user_lora_purge", { p_lora_id: twinId, p_owner_id: ownerId, p_claim_token: token, p_reason: reason, p_allow_early: true });
   if (claim.error) throw mapRpcError(claim.error);
   await callStoragePurge(twinId, "twin");
