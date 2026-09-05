@@ -21,7 +21,7 @@ test("background provider dispatch rechecks Phase 7 lifecycle state", () => {
   assert.match(publishing, /first_miss_frozen/)
   assert.match(publishing, /retention_countdown/)
   assert.match(publishing, /v_tier_name = 'og_throne' and v_stripe_subscription_id is null/)
-  assert.match(publishing, /v_current_period_end <= clock_timestamp\(\)/)
+  assert.match(publishing, /v_current_period_end <= now\(\)/)
   assert.match(publishing, /autopost_begin_x_dispatch/)
   assert.match(publishing, /creator_publishing_claim_scheduled_fanvue_jobs/)
   assert.match(publishing, /creator_publishing_mark_fanvue_create_dispatched/)
@@ -45,6 +45,11 @@ test("legacy Autopost creator mutations use the canonical active-subscription ga
   ]) {
     assert.match(read(path), /ensureActiveSubscription/)
   }
+
+  const start = read("app/api/autopost/connect/x/start/route.ts")
+  assert.match(start, /requireFreshTotpResponse/)
+  assert.match(start, /const mfa = await requireFreshTotpResponse\(\)[\s\S]*ensureActiveSubscription\(\)/)
+  assert.match(start, /entitlement\.user\?\.id !== mfa\.userId/)
 
   const callback = read("app/api/autopost/connect/x/callback/route.ts")
   assert.match(callback, /statePayload\.flow === "reauthorize"[\s\S]*completeXReauthorization/)
