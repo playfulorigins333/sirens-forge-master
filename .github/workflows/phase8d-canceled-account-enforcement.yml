@@ -1,0 +1,24 @@
+name: Phase 8D Canceled Account Enforcement
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  phase8d-canceled-account-enforcement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Phase 8D source and boundary contracts
+        run: npx tsx --test backend/security/tests/phase8dCanceledAccountEnforcementSource.test.ts
+      - name: API authorization inventory contract
+        run: npx tsx backend/security/tests/apiAuthorizationInventory.test.ts
