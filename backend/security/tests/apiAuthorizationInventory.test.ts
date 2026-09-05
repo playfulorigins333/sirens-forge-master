@@ -7,6 +7,7 @@ const apiRoot = path.join(root, "app/api")
 const inventoryPaths = [
   path.join(root, "docs/security/api-authorization-inventory.md"),
   path.join(root, "docs/security/api-authorization-inventory-phase8c.md"),
+  path.join(root, "docs/security/api-authorization-inventory-phase8d.md"),
 ]
 const methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] as const
 const allowedTaxonomy = new Set(["PUBLIC", "AUTHENTICATED", "FRESH_TOTP", "OWNER", "ENTITLED", "ADMIN", "SCHEDULER_SECRET", "WEBHOOK_SIGNATURE", "OAUTH_CALLBACK", "INTERNAL_CONTROLLED"])
@@ -152,6 +153,14 @@ assert.ok(phase8cRetentionClasses.has("INTERNAL_CONTROLLED"), "Phase 8C retentio
 assert.ok(!phase8cRetentionClasses.has("PUBLIC"), "Phase 8C retention runner must not be public")
 assert.match(phase8cRetentionGet[5], /authenticateSchedulerRequest\(\).+CRON_SECRET.+VERCEL_CRON_SECRET/i)
 assert.match(phase8cRetentionGet[10], /Supabase admin.+after scheduler authentication/i)
+
+const phase8dRetentionGet = inventoryRow("/api/internal/retention/phase8d/run", "GET")
+const phase8dRetentionClasses = authorizationClasses(phase8dRetentionGet)
+assert.ok(phase8dRetentionClasses.has("SCHEDULER_SECRET"), "Phase 8D retention runner must record scheduler-secret authentication")
+assert.ok(phase8dRetentionClasses.has("INTERNAL_CONTROLLED"), "Phase 8D retention runner must remain internal-only")
+assert.ok(!phase8dRetentionClasses.has("PUBLIC"), "Phase 8D retention runner must not be public")
+assert.match(phase8dRetentionGet[5], /authenticateSchedulerRequest\(\).+CRON_SECRET.+VERCEL_CRON_SECRET/i)
+assert.match(phase8dRetentionGet[10], /Supabase admin.+after scheduler authentication/i)
 
 assert.match(markdown, new RegExp(`\\*\\*Combined inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries|\\*\\*Inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries`))
 console.log(`API authorization inventory contract passed (${actualFiles.length} files, ${expectedEntries.length} route-method entries).`)

@@ -8,6 +8,7 @@ export type TwinLifecycleErrorCode =
   | "NOT_FOUND"
   | "STATE_CONFLICT"
   | "RESTORE_WINDOW_EXPIRED"
+  | "LEGAL_HOLD"
   | "ACTIVE_COMPUTE"
   | "ACTIVE_TRAINER"
   | "UPLOAD_WINDOW_ACTIVE"
@@ -31,6 +32,7 @@ function mapRpcError(error: unknown): TwinLifecycleError {
   const message = rpcMessage(error);
   if (message.includes("TWIN_NOT_FOUND")) return new TwinLifecycleError("NOT_FOUND", 404);
   if (message.includes("TWIN_RESTORE_WINDOW_EXPIRED")) return new TwinLifecycleError("RESTORE_WINDOW_EXPIRED", 409);
+  if (message.includes("TWIN_LEGAL_HOLD")) return new TwinLifecycleError("LEGAL_HOLD", 409);
   if (message.includes("TWIN_PURGE_BLOCKED_ACTIVE_COMPUTE")) return new TwinLifecycleError("ACTIVE_COMPUTE", 409);
   if (message.includes("TWIN_PURGE_BLOCKED_ACTIVE_TRAINER")) return new TwinLifecycleError("ACTIVE_TRAINER", 409);
   if (message.includes("TWIN_PURGE_BLOCKED_UPLOAD_WINDOW")) return new TwinLifecycleError("UPLOAD_WINDOW_ACTIVE", 409);
