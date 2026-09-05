@@ -13,6 +13,7 @@ import {
 import { ensureAuthenticatedProfile } from "@/lib/account-access"
 import { supabaseServer } from "@/lib/supabaseServer"
 import { ManageBillingPortalButton } from "./ManageBillingPortalButton"
+import { getSubscriptionRetentionSummary } from "@/lib/subscription-retention"
 
 export const dynamic = "force-dynamic";
 
@@ -144,6 +145,9 @@ export default async function BillingPage() {
   const hasActivePlan = activeSubscription !== null
   const currentTier = displaySubscription ? prettify(displaySubscription.tier_name) : "No active plan"
   const currentStatus = displaySubscription ? prettify(displaySubscription.status) : "No subscription history"
+  const retention = await getSubscriptionRetentionSummary(auth.user.id, profileId).catch(() => null)
+  const retainedReadOnly = retention && new Date(retention.paidAccessEndedAt).getTime() <= Date.now() && new Date(retention.retentionUntil).getTime() > Date.now() && !hasActivePlan
+  const scheduledCancellation = activeSubscription?.tier_name !== "og_throne" && activeSubscription?.cancel_at_period_end && activeSubscription.current_period_end
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -173,6 +177,9 @@ export default async function BillingPage() {
             Billing account: <span className="text-gray-200">{profile?.email || authEmail || "—"}</span>
           </p>
         </div>
+
+        {scheduledCancellation ? <section className="mb-6 rounded-[28px] border border-amber-500/30 bg-amber-500/10 p-6 text-amber-50"><strong>Cancels at period end.</strong> Your normal paid access continues through {formatDate(activeSubscription.current_period_end)}.</section> : null}
+        {retainedReadOnly ? <section className="mb-6 rounded-[28px] border border-cyan-500/30 bg-cyan-500/10 p-6 text-cyan-50"><strong>Read-only creator data access.</strong> Paid access ended {formatDate(retention.paidAccessEndedAt)} and retained access remains available through {formatDate(retention.retentionUntil)}. You can <Link className="underline" href="/library">download eligible media</Link>, <Link className="underline" href="/account/data-rights">export your data</Link>, or reactivate with the billing controls below.</section> : null}
 
         {!hasActivePlan ? (
           <section className="mb-10 rounded-[28px] border border-amber-500/30 bg-amber-500/10 p-6 backdrop-blur-xl">

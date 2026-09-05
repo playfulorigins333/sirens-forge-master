@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Sparkles,
@@ -67,6 +67,7 @@ export type LibraryItem = {
 type FilterMode = "all" | "images" | "videos" | "identities";
 type SortMode = "newest" | "oldest";
 type ViewMode = "all" | "identity";
+const ReadOnlyContext = createContext(false);
 
 type IdentityGroup = {
   key: string;
@@ -212,6 +213,7 @@ function getGroupSortTime(group: IdentityGroup) {
 }
 
 function LibraryHeader() {
+  const readOnly = useContext(ReadOnlyContext);
   return (
     <header className="sticky top-0 z-40 border-b border-gray-800 bg-gray-950/70 backdrop-blur">
       <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
@@ -225,7 +227,7 @@ function LibraryHeader() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-          <Link href="/dashboard">
+          {!readOnly ? <Link href="/dashboard">
             <Button
               variant="outline"
               className="h-9 border-gray-700 bg-gray-900/70 px-4 text-xs font-bold text-gray-100 hover:bg-gray-800 hover:text-white"
@@ -233,14 +235,14 @@ function LibraryHeader() {
               <LayoutDashboard className="mr-2 h-4 w-4" />
               Dashboard
             </Button>
-          </Link>
+          </Link> : null}
 
-          <Link href="/generate">
+          {!readOnly ? <Link href="/generate">
             <Button className="h-9 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 px-4 text-xs font-bold text-white shadow-[0_0_22px_rgba(168,85,247,0.30)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
               <Wand2 className="mr-2 h-4 w-4" />
               Create New Content
             </Button>
-          </Link>
+          </Link> : null}
 
           <div className="hidden items-center gap-2 rounded-full bg-gradient-to-r from-purple-500 via-pink-500 to-cyan-500 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_20px_rgba(168,85,247,0.35)] lg:flex">
             <Shield className="h-3 w-3" />
@@ -248,7 +250,7 @@ function LibraryHeader() {
           </div>
 
           <div className="rounded-full border border-emerald-500/30 bg-emerald-500/20 px-3 py-1.5 text-xs font-semibold text-emerald-400">
-            ✅ Active Subscription
+            {readOnly ? "Read-only retention" : "✅ Active Subscription"}
           </div>
 
           <div className="flex items-center gap-3">
@@ -340,6 +342,8 @@ function LibraryStats({ items }: { items: LibraryItem[] }) {
 }
 
 function VaultIntentBanner() {
+  const readOnly = useContext(ReadOnlyContext);
+  if (readOnly) return null;
   return (
     <Card className="overflow-hidden border-purple-900/40 bg-gray-900/80">
       <div className="relative">
@@ -381,6 +385,7 @@ function VaultIntentBanner() {
 }
 
 function EmptyState() {
+  const readOnly = useContext(ReadOnlyContext);
   return (
     <Card className="border-gray-800 bg-gray-900/80">
       <CardContent className="py-16">
@@ -398,7 +403,7 @@ function EmptyState() {
             </p>
           </div>
 
-          <div className="flex flex-wrap justify-center gap-2 pt-2">
+          {!readOnly ? <div className="flex flex-wrap justify-center gap-2 pt-2">
             <Link href="/generate">
               <Button className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white shadow-[0_0_24px_rgba(168,85,247,0.35)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500">
                 <Sparkles className="mr-2 h-4 w-4" />
@@ -411,7 +416,7 @@ function EmptyState() {
                 Train AI Twin
               </Button>
             </Link>
-          </div>
+          </div> : null}
         </div>
       </CardContent>
     </Card>
@@ -547,6 +552,7 @@ function AssetCard(props: {
   onReuse: (item: LibraryItem) => void;
 }) {
   const { item, index, onOpen, onReuse } = props;
+  const readOnly = useContext(ReadOnlyContext);
   const isIdentity = item.isIdentitySeed || item.kind === "identity";
   const displayUrl = getDisplayUrl(item);
 
@@ -654,14 +660,14 @@ function AssetCard(props: {
       </div>
 
       <div className="space-y-2 border-t border-gray-800 bg-gray-950/80 p-3">
-        <Button
+        {!readOnly ? <Button
           type="button"
           onClick={() => onReuse(item)}
           className="h-10 w-full bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-xs font-bold text-white shadow-[0_0_18px_rgba(168,85,247,0.24)] hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
         >
           <Wand2 className="mr-2 h-4 w-4" />
           Generate From This
-        </Button>
+        </Button> : null}
         <Button
           type="button"
           variant="outline"
@@ -696,6 +702,7 @@ function IdentityGroupCard(props: {
   onReuse: (item: LibraryItem) => void;
 }) {
   const { group, onOpen, onReuse } = props;
+  const readOnly = useContext(ReadOnlyContext);
   const previewItems = group.items.slice(0, 4);
   const hero = group.heroItem;
   const heroUrl = hero ? getDisplayUrl(hero) : null;
@@ -804,7 +811,7 @@ function IdentityGroupCard(props: {
             </div>
           ) : null}
 
-          <div className="flex flex-wrap gap-2 pt-1">
+          {!readOnly ? <div className="flex flex-wrap gap-2 pt-1">
             <Button
               type="button"
               onClick={() => {
@@ -838,7 +845,7 @@ function IdentityGroupCard(props: {
                 </Button>
               </Link>
             )}
-          </div>
+          </div> : null}
         </CardContent>
       </div>
     </Card>
@@ -889,6 +896,7 @@ function VaultModal(props: {
   onClose: () => void;
   onReuse: (item: LibraryItem) => void;
 }) {
+  const readOnly = useContext(ReadOnlyContext);
   if (!props.item) return null;
 
   const item = props.item;
@@ -1034,7 +1042,7 @@ function VaultModal(props: {
                   </Button>
                 ) : null}
 
-                {item.identityLora ? (
+                {!readOnly && item.identityLora ? (
                   <Link href={`/identities/${item.identityLora}`}>
                     <Button
                       type="button"
@@ -1047,14 +1055,14 @@ function VaultModal(props: {
                   </Link>
                 ) : null}
 
-                <Button
+                {!readOnly ? <Button
                   type="button"
                   onClick={() => props.onReuse(item)}
                   className="bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 text-white hover:from-purple-500 hover:via-pink-500 hover:to-cyan-500"
                 >
                   <Sparkles className="mr-2 h-4 w-4" />
                   Generate From This
-                </Button>
+                </Button> : null}
 
                 <Button
                   type="button"
@@ -1073,7 +1081,13 @@ function VaultModal(props: {
   );
 }
 
-export default function LibraryClient({ items }: { items: LibraryItem[] }) {
+export default function LibraryClient({ items, accessMode, paidAccessEndedAt, retentionUntil }: {
+  items: LibraryItem[];
+  accessMode: "active" | "cancellation_retained";
+  paidAccessEndedAt: string | null;
+  retentionUntil: string | null;
+}) {
+  const readOnly = accessMode === "cancellation_retained";
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterMode>("all");
   const [sort, setSort] = useState<SortMode>("newest");
@@ -1081,6 +1095,7 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
   const [selected, setSelected] = useState<LibraryItem | null>(null);
 
   const reuseIdentity = (item: LibraryItem) => {
+    if (readOnly) return;
     const payload = buildCreationLoopHandoff(item);
 
     try {
@@ -1190,10 +1205,18 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
   }, [filtered, sort]);
 
   return (
-    <div className="min-h-screen bg-black text-gray-100">
+    <ReadOnlyContext.Provider value={readOnly}><div className="min-h-screen bg-black text-gray-100">
       <LibraryHeader />
 
       <main className="mx-auto max-w-[1600px] space-y-6 px-4 py-6 md:px-6">
+        {readOnly ? (
+          <section className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-5 text-sm text-cyan-50">
+            <h2 className="text-lg font-bold">Paid access has ended</h2>
+            <p className="mt-1">Your creator data is retained in read-only mode through {retentionUntil ? formatDate(retentionUntil) : "the displayed retention deadline"}. You can view and download eligible existing media.</p>
+            <p className="mt-1 text-cyan-100/80">Paid access ended {paidAccessEndedAt ? formatDate(paidAccessEndedAt) : "before retention began"}. No automatic purge or notification delivery is represented here.</p>
+            <div className="mt-3 flex flex-wrap gap-3 font-semibold underline"><Link href="/billing">Reactivate through Billing</Link><Link href="/account/data-rights">Export your data</Link></div>
+          </section>
+        ) : null}
         <VaultIntentBanner />
         <LibraryStats items={items} />
 
@@ -1242,6 +1265,6 @@ export default function LibraryClient({ items }: { items: LibraryItem[] }) {
         onClose={() => setSelected(null)}
         onReuse={reuseIdentity}
       />
-    </div>
+    </div></ReadOnlyContext.Provider>
   );
 }

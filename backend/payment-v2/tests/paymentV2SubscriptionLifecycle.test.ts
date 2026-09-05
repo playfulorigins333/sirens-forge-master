@@ -49,8 +49,8 @@ for(const [label,current] of [["wrong price",{...subscription(),items:{data:[{qu
 
 const baseline="eff1aa6e96c21dfd2b17f59b292476da164f0073";
 // Durable mainline baseline: the merge commit for approved material-policy PR #273.
-// Keep the authorized PR #274 MFA-only subscription-checker delta exact while continuing
-// to reject any future drift in the protected Payment V2 surface.
+// Keep the authorized MFA plus Phase 7 stale recurring-expiry hardening exact while
+// continuing to reject any future drift in the protected Payment V2 surface.
 const postPr273Baseline="15e0ce3e3e7be77fa6847aa3544a06b446773c5b";
 const protectedSurfaceBaselines:Record<string,string>={
   "app/api/checkout/subscription-v2/route.ts":postPr273Baseline,
@@ -59,7 +59,7 @@ const protectedSurfaceBaselines:Record<string,string>={
 };
 for(const [path,pathBaseline] of Object.entries(protectedSurfaceBaselines)){execFileSync("git",["diff","--quiet",pathBaseline,"--",path]);assertions++;}
 const approvedMfaSubscriptionCheckerDiff=execFileSync("git",["diff",postPr273Baseline,"--","lib/subscription-checker.ts"],{encoding:"utf8"});
-equal(createHash("sha256").update(approvedMfaSubscriptionCheckerDiff).digest("hex"),"7a4c7a47d609570b1f2ebfaeeb908a543a0b3cd328c4ceb497e8097801cd90f2","subscription checker differs from PR #273 only by the approved PR #274 MFA gate");
+equal(createHash("sha256").update(approvedMfaSubscriptionCheckerDiff).digest("hex"),"9f76fc3cb0412b56ec2f3a0c46ec99d30c58183681bbc15600e6a0751a19e146","subscription checker differs from PR #273 only by approved MFA and Phase 7 recurring-expiry gates");
 const historicalMigrationMutations=(statusLines:string[])=>statusLines.filter(line=>line.length>0&&!line.startsWith("A\t"));
 const migrationChanges=execFileSync("git",["diff","--name-status",baseline,"--","supabase/migrations"],{encoding:"utf8"}).trim().split(/\r?\n/).filter(Boolean);
 equal(historicalMigrationMutations(migrationChanges),[],"historical migrations remain immutable while later forward-only additions are allowed");

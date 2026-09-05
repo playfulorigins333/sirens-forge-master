@@ -28,6 +28,7 @@ jobs:
       PHASE7_PRIVATE_MEDIA_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_private_media_test
       PHASE7_TWIN_TRAINING_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_twin_training_test
       PHASE7_DATA_RIGHTS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_data_rights_test
+      PHASE7_SUBSCRIPTION_RETENTION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_subscription_retention_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,12 +42,15 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_private_media_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_twin_training_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_data_rights_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_subscription_retention_test'
       - name: Private creator media source contracts
         run: npm run test:private-creator-media
       - name: Phase 7 Twin and training-data source contracts
         run: npx tsx --test backend/security/tests/phase7TwinTrainingLifecycleSource.test.ts
       - name: Phase 7 data rights source contracts
         run: npx tsx --test backend/security/tests/phase7DataRightsSource.test.ts
+      - name: Phase 7 subscription cancellation source contracts
+        run: npm run test:phase7-subscription-retention
       - name: Private creator media PostgreSQL behavior
         run: npm run test:private-creator-media-postgres
       - name: Phase 7 private media lifecycle PostgreSQL behavior
@@ -55,3 +59,5 @@ jobs:
         run: node backend/security/tests/runPhase7TwinTrainingLifecyclePostgres.mjs
       - name: Phase 7 data export and voluntary account deletion PostgreSQL behavior
         run: node backend/security/tests/runPhase7DataRightsPostgres.mjs
+      - name: Phase 7 subscription cancellation PostgreSQL 17 behavior
+        run: npm run test:phase7-subscription-retention-postgres
