@@ -24,9 +24,12 @@ export async function GET(request: Request) {
     if (key !== "status" && key !== "limit") return json({ ok: false, code: "LEGAL_HOLD_PARAMETERS_INVALID" }, 400)
   }
   const rawStatus = url.searchParams.get("status")
-  const status = rawStatus === null || rawStatus === "" ? null : rawStatus
-  if (status !== null && status !== "active" && status !== "released" && status !== "expired") {
-    return json({ ok: false, code: "LEGAL_HOLD_PARAMETERS_INVALID" }, 400)
+  let status: "active" | "released" | "expired" | null = null
+  if (rawStatus !== null && rawStatus !== "") {
+    if (rawStatus !== "active" && rawStatus !== "released" && rawStatus !== "expired") {
+      return json({ ok: false, code: "LEGAL_HOLD_PARAMETERS_INVALID" }, 400)
+    }
+    status = rawStatus
   }
   const rawLimit = url.searchParams.get("limit")
   const limit = rawLimit === null ? 50 : Number(rawLimit)
