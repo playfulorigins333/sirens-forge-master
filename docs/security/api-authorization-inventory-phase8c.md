@@ -1,0 +1,10 @@
+# API authorization inventory — Phase 8C extension
+
+This file is an additive extension to `docs/security/api-authorization-inventory.md` for the Phase 8C internal retention runner. The two files together remain the exact bidirectional route/method authorization inventory while this Phase 8C route is under review.
+
+**Inventory extension:** 1 route file / 1 route-method entry
+**Combined inventory:** 121 route files / 143 route-method entries
+
+| Route path | Source file | Method | Caller class | Authorization class | Authentication mechanism | Ownership boundary | Entitlement boundary | Admin/operator boundary | External signature/secret boundary | Privileged client/service-role usage | Validation/safe-error notes | Reviewed status | Evidence/test reference |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `/api/internal/retention/phase8c/run` | `app/api/internal/retention/phase8c/run/route.ts` | `GET` | Scheduled internal retention caller | SCHEDULER_SECRET + INTERNAL_CONTROLLED | Shared `authenticateSchedulerRequest()` validates `CRON_SECRET` or `VERCEL_CRON_SECRET` via timing-safe comparison before retention work | Caller supplies no creator, draft, asset, or owner selector; eligible subjects are selected only by server/database retention contracts | Not entitlement-gated because this is a system retention/compliance operation, not creator product access | No browser/admin surface; scheduled internal control only | Bearer or Vercel cron secret; missing, malformed, or invalid secret fails closed before privileged work | Server-only retention service uses the Supabase admin client only after scheduler authentication; draft purge RPC and due private-media purge calls remain owner/hold constrained by database/service contracts | GET has no body or caller-selected IDs; response is bounded and `no-store`; retention service is batch-limited; legal holds block destructive work; Phase 9 notifications are not invoked | PASS | `app/api/internal/retention/phase8c/run/route.ts`; `lib/retention/phase8c.ts`; `backend/security/tests/phase8cDraftMediaRetentionSource.test.ts`; Phase 8C PostgreSQL integration; inventory contract test |
