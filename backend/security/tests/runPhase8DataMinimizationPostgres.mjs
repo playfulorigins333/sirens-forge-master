@@ -27,5 +27,7 @@ const run = (args) => {
 run(["-f", "backend/security/tests/phase8DataMinimizationPostgresSetup.sql"]);
 run(["-f", "supabase/migrations/20260905060000_phase8_governance_foundation.sql"]);
 run(["-f", "supabase/migrations/20260905070000_phase8_generation_training_data_minimization.sql"]);
+run(["-f", "supabase/migrations/20260905070100_phase8_generation_hold_insert_guard.sql"]);
 run(["-f", "backend/security/tests/phase8DataMinimizationPostgresIntegration.sql"]);
+run(["-f", "backend/security/tests/phase8DataMinimizationHoldInsertIntegration.sql"]);
 console.log("Phase 8B generation/training data minimization PostgreSQL 17 integration passed.");
