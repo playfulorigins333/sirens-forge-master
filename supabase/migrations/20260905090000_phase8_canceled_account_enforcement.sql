@@ -9,6 +9,7 @@
 -- - newer billing lifecycles supersede older cancellation purge authority;
 -- - purge is bounded, claim-tokened, retryable, audited, and legal-hold aware;
 -- - destructive work is limited to creator working data created on/before that lifecycle's retention deadline;
+-- - nullable legacy creation timestamps fail closed as blockers rather than being guessed into purge scope;
 -- - creator Library/Twin working data is purged while Auth, billing, receipts, governance,
 --   and other compliance evidence remain intact;
 -- - legacy generation binaries without a managed generation_asset remain a blocker rather
@@ -136,9 +137,8 @@ as $$
 $$;
 revoke all on function public.phase8d_canceled_account_has_active_hold(uuid,uuid,uuid) from public,anon,authenticated,service_role;
 
--- An old cancellation lifecycle must never become purge authority over a newer billing lifecycle.
--- Current active/trialing and delinquent states are owned by current entitlement/Phase 8E, while a
--- later cancellation lifecycle carries its own later retention deadline.
+-- An old cancellation lifecycle must never become purge authority over a newer/current billing lifecycle.
+-- Delinquent states are deliberately treated as successors because Phase 8E owns their enforcement.
 create or replace function public.phase8d_canceled_retention_has_successor(
   p_retention_id uuid,
   p_profile_id uuid,
@@ -155,7 +155,10 @@ as $$
     from public.user_subscriptions s
     where s.user_id=p_profile_id
       and (
-        (s.id=p_subscription_id and lower(btrim(s.status)) in ('active','trialing') and not coalesce(s.cancel_at_period_end,false))
+        (s.id=p_subscription_id and (
+          (lower(btrim(s.status)) in ('active','trialing') and not coalesce(s.cancel_at_period_end,false))
+          or lower(btrim(s.status)) in ('past_due','unpaid')
+        ))
         or (
           s.id<>p_subscription_id
           and lower(btrim(s.status)) in ('active','trialing','past_due','unpaid')
@@ -282,9 +285,10 @@ declare
 begin
   if p_limit is null or p_limit<1 or p_limit>50 then raise exception 'PHASE8D_PURGE_LIMIT_INVALID'; end if;
   for r in
-    select * from public.subscription_cancellation_retentions
-    where retention_until<=statement_timestamp() and state in ('pending_paid_access_end','retained_read_only','expired','purge_pending')
-    order by retention_until,id for update skip locked limit p_limit
+    select scr.* from public.subscription_cancellation_retentions scr
+    where scr.retention_until<=statement_timestamp()
+      and scr.state in ('pending_paid_access_end','retained_read_only','expired','purge_pending')
+    order by scr.retention_until,scr.id for update skip locked limit p_limit
   loop
     if public.phase8d_supersede_canceled_retention(r.id,r.auth_user_id) then
       return query select r.id,r.auth_user_id,r.profile_id,r.subscription_id,null::uuid,'superseded'::text,r.retention_until;
@@ -386,16 +390,19 @@ begin
 
   delete from public.collections c
    where c.user_id=r.auth_user_id
+     and c.created_at is not null
      and c.created_at<=r.retention_until
      and not public.phase8d_canceled_resource_has_active_hold('collection',c.id::text,r.auth_user_id);
 
   -- Scrub database-resident generation content, but retain legacy binary pointers until a
-  -- physical storage authority has actually removed those bytes. Such rows remain blockers.
+  -- physical storage authority has actually removed those bytes. Unknown creation timestamps
+  -- are not guessed into the old lifecycle and remain blockers.
   update public.generations g
      set prompt=null,negative_prompt=null,lora_used=null,body_type=null,
          metadata=public.phase8_minimized_generation_metadata(coalesce(g.metadata,'{}'::jsonb)),
          runpod_job_id=null,error_message=null,updated_at=statement_timestamp()
    where g.user_id in (r.auth_user_id,r.profile_id)
+     and g.created_at is not null
      and g.created_at<=(r.retention_until at time zone 'UTC')
      and not public.phase8d_canceled_resource_has_active_hold('generation',g.id::text,r.auth_user_id);
 
@@ -404,16 +411,21 @@ begin
       where a.owner_id=r.auth_user_id and a.created_at<=r.retention_until and a.lifecycle_state<>'purged')
     +(select count(*) from public.user_loras l
       where l.user_id in (r.auth_user_id,r.profile_id)
-        and l.created_at<=(r.retention_until at time zone 'UTC') and l.lifecycle_state<>'purged')
+        and (l.created_at is null or (l.created_at<=(r.retention_until at time zone 'UTC') and l.lifecycle_state<>'purged')))
     +(select count(*) from public.content_posts p
       where p.user_id=r.auth_user_id and p.created_at<=r.retention_until)
     +(select count(*) from public.collections c
-      where c.user_id=r.auth_user_id and c.created_at<=r.retention_until)
+      where c.user_id=r.auth_user_id and (c.created_at is null or c.created_at<=r.retention_until))
     +(select count(*) from public.generations g
       where g.user_id in (r.auth_user_id,r.profile_id)
-        and g.created_at<=(r.retention_until at time zone 'UTC')
-        and (public.phase8d_canceled_resource_has_active_hold('generation',g.id::text,r.auth_user_id)
-             or g.r2_key is not null or g.image_url is not null))
+        and (
+          g.created_at is null
+          or (
+            g.created_at<=(r.retention_until at time zone 'UTC')
+            and (public.phase8d_canceled_resource_has_active_hold('generation',g.id::text,r.auth_user_id)
+                 or g.r2_key is not null or g.image_url is not null)
+          )
+        ))
   into v_blocked;
 
   if v_blocked>0 then return query select r.id,r.state,false,v_blocked; return; end if;
