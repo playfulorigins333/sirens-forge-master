@@ -9,6 +9,7 @@ do $$ begin
   if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated; end if;
   if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role bypassrls; end if;
 end $$;
+grant usage on schema public to anon, authenticated, service_role;
 create table auth.users(id uuid primary key);
 create table public.profiles(id uuid primary key, user_id uuid not null references auth.users(id));
 create table public.user_subscriptions(id uuid primary key, user_id uuid not null references public.profiles(id), tier_name text not null, stripe_subscription_id text, stripe_customer_id text, status text not null);
