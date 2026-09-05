@@ -16,6 +16,10 @@
     {
       "path": "/api/internal/retention/phase8d/run",
       "schedule": "37 5 * * *"
+    },
+    {
+      "path": "/api/internal/retention/phase8e/run",
+      "schedule": "57 5 * * *"
     }
   ]
 }
