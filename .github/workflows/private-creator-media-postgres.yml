@@ -29,6 +29,10 @@ jobs:
       PHASE7_TWIN_TRAINING_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_twin_training_test
       PHASE7_DATA_RIGHTS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_data_rights_test
       PHASE7_SUBSCRIPTION_RETENTION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_subscription_retention_test
+      PROFILE_LIFECYCLE_GRANTS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/profile_lifecycle_grants_test
+      LOCK05B_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lock05b_test
+      LOCK05C_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lock05c_test
+      FINAL_SUPABASE_LEAST_PRIVILEGE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/final_supabase_least_privilege_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,6 +47,10 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_twin_training_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_data_rights_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_subscription_retention_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database profile_lifecycle_grants_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database lock05b_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database lock05c_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database final_supabase_least_privilege_test'
       - name: Private creator media source contracts
         run: npm run test:private-creator-media
       - name: Phase 7 Twin and training-data source contracts
@@ -51,6 +59,8 @@ jobs:
         run: npx tsx --test backend/security/tests/phase7DataRightsSource.test.ts
       - name: Phase 7 subscription cancellation source contracts
         run: npm run test:phase7-subscription-retention
+      - name: Profile lifecycle column grant source contract
+        run: npm run test:profile-lifecycle-grants
       - name: Private creator media PostgreSQL behavior
         run: npm run test:private-creator-media-postgres
       - name: Phase 7 private media lifecycle PostgreSQL behavior
@@ -61,3 +71,11 @@ jobs:
         run: node backend/security/tests/runPhase7DataRightsPostgres.mjs
       - name: Phase 7 subscription cancellation PostgreSQL 17 behavior
         run: npm run test:phase7-subscription-retention-postgres
+      - name: Profile lifecycle column grant PostgreSQL 17 behavior
+        run: npm run test:profile-lifecycle-grants-postgres
+      - name: LOCK-05B profile credential containment PostgreSQL 17 behavior
+        run: node backend/security/tests/runLock05bPostgresIntegration.mjs
+      - name: LOCK-05C permanent token retirement PostgreSQL 17 behavior
+        run: node backend/security/tests/runLock05cPostgresIntegration.mjs
+      - name: Final Supabase least-privilege PostgreSQL 17 behavior
+        run: node backend/security/tests/runFinalSupabaseLeastPrivilegeHardeningPostgres.mjs
