@@ -51,6 +51,31 @@ test("export download authority is server-derived and private", () => {
   assert.match(service, /SIRENS_API_INTERNAL_SECRET|sirensApiFetch/);
 });
 
+test("Creator Reply export handoff keeps decryption in Vercel and is doubly bound", () => {
+  const route = read("app/api/internal/data-export/creator-reply/route.ts");
+  const service = read("lib/sirens-mind/creator-reply-export.ts");
+
+  assert.match(route, /x-sirens-api-internal-secret/);
+  assert.match(route, /SIRENS_API_INTERNAL_SECRET/);
+  assert.match(route, /timingSafeEqual/);
+  assert.match(route, /Object\.keys\(body\)\.sort\(\)/);
+  assert.match(route, /export_id/);
+  assert.match(route, /auth_user_id/);
+  assert.match(route, /Cache-Control/);
+  assert.match(route, /no-store/);
+
+  assert.match(service, /creator_data_exports/);
+  assert.match(service, /\.eq\("id", exportId\)/);
+  assert.match(service, /\.eq\("auth_user_id", authUserId\)/);
+  assert.match(service, /exportJob\.status !== "processing"/);
+  assert.match(service, /decryptCreatorReplyData/);
+  assert.match(service, /assertCreatorReplyKeyVersion/);
+  assert.match(service, /parseCreatorReplyCheckpoint/);
+
+  assert.doesNotMatch(route, /notes_ciphertext|checkpoint_ciphertext|DATA_ENCRYPTION_KEY/);
+  assert.doesNotMatch(service, /thread_id\s*:/);
+});
+
 test("account deletion UI requires strong confirmation and tells the truth about later phases", () => {
   const ui = read("app/account/data-rights/DataRightsClient.tsx");
   assert.match(ui, /DELETE MY ACCOUNT/);
