@@ -55,7 +55,7 @@ begin
     return v_status in ('active','trialing');
   end if;
 
-  if v_stripe_subscription_id is null or v_current_period_end is null or v_current_period_end <= clock_timestamp() then
+  if v_stripe_subscription_id is null or v_current_period_end is null or v_current_period_end <= now() then
     return false;
   end if;
 
