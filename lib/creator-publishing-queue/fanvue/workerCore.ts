@@ -17,7 +17,7 @@ export type FanvueWorkerStore = {
 export type FanvueWorkerSummary = { claimed: number; succeeded: number; retryScheduled: number; failed: number; reconnectRequired: number; uncertain: number }
 
 const reconnectCodes = new Set(["FANVUE_REFRESH_TOKEN_MISSING", "FANVUE_REFRESH_UNAUTHORIZED", "FANVUE_REFRESH_INVALID_GRANT_REAUTH_REQUIRED"])
-const retryablePreCreateCodes = new Set(["FANVUE_REFRESH_FAILED", "FANVUE_EXECUTION_CREATOR_IDENTITY_NETWORK_FAILED", "FANVUE_MEDIA_READY_TIMEOUT", "FANVUE_EXECUTION_MEDIA_NOT_READY"])
+const retryablePreCreateCodes = new Set(["FANVUE_REFRESH_FAILED", "FANVUE_EXECUTION_CREATOR_IDENTITY_NETWORK_FAILED", "FANVUE_MEDIA_READY_TIMEOUT", "FANVUE_EXECUTION_MEDIA_NOT_READY", "FANVUE_EXECUTION_CREATE_DISPATCH_MARKER_FAILED"])
 export function classifyFanvueExecutionOutcome(result: FanvueProviderPostResult): FanvueOutcomeClass {
   if (result.ok && result.provider_post_uuid_present) return "success"
   if (result.create_attempted && !result.provider_post_uuid_present) return "uncertain"
