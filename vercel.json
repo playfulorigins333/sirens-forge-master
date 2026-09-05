@@ -8,6 +8,10 @@
     {
       "path": "/api/admin/affiliate-payouts/execute",
       "schedule": "59 4 * * 0"
+    },
+    {
+      "path": "/api/internal/retention/phase8c/run",
+      "schedule": "17 5 * * *"
     }
   ]
 }
