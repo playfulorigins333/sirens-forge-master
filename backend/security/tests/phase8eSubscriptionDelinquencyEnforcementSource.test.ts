@@ -4,9 +4,12 @@ import test from "node:test";
 
 const read = (path: string) => readFileSync(path, "utf8");
 const migration = read("supabase/migrations/20260905100000_phase8_subscription_delinquency_enforcement.sql");
+const hardeningMigration = read("supabase/migrations/20260905100100_phase8e_remove_purge_reason_normalizers.sql");
 const runner = read("lib/retention/phase8e.ts");
+const phase8dRunner = read("lib/retention/phase8d.ts");
 const route = read("app/api/internal/retention/phase8e/run/route.ts");
 const workflow = read(".github/workflows/phase8e-subscription-delinquency-enforcement.yml");
+const postgresRunner = read("backend/security/tests/runPhase8eSubscriptionDelinquencyPostgres.mjs");
 const vercel = read("vercel.json");
 const inventory = read("docs/security/api-authorization-inventory-phase8d.md");
 const phase7 = read("supabase/migrations/20260905031500_phase7_subscription_payment_delinquency.sql");
@@ -66,12 +69,17 @@ test("legal holds block both account and resource destruction", () => {
   assert.match(migration, /phase8d_assert_twin_purge_allowed/);
 });
 
-test("retention physical purge evidence is normalized to retention_expired", () => {
-  assert.match(migration, /phase8_retention_purge_claim_active/);
-  assert.match(migration, /new\.purge_reason='creator_permanent_delete'/);
-  assert.match(migration, /new\.purge_reason:='retention_expired'/);
-  assert.match(migration, /phase8_retention_generation_asset_purge_reason/);
-  assert.match(migration, /phase8_retention_twin_purge_reason/);
+test("retention physical purge evidence is explicit and ambiguous normalizers are removed", () => {
+  assert.match(runner, /purgePrivateGenerationAsset\(asset\.id, authUserId, "retention_expired"\)/);
+  assert.match(runner, /purgeTwin\(twin\.id, twin\.user_id, "retention_expired"\)/);
+  assert.match(phase8dRunner, /purgePrivateGenerationAsset\(asset\.id, authUserId, "retention_expired"\)/);
+  assert.match(phase8dRunner, /purgeTwin\(twin\.id, twin\.user_id, "retention_expired"\)/);
+  assert.match(hardeningMigration, /drop trigger if exists phase8_retention_generation_asset_purge_reason/);
+  assert.match(hardeningMigration, /drop trigger if exists phase8_retention_twin_purge_reason/);
+  assert.match(hardeningMigration, /drop function if exists public\.phase8_retention_normalize_generation_asset_purge_reason\(\)/);
+  assert.match(hardeningMigration, /drop function if exists public\.phase8_retention_normalize_twin_purge_reason\(\)/);
+  assert.match(hardeningMigration, /drop function if exists public\.phase8_retention_purge_claim_active\(uuid\)/);
+  assert.match(postgresRunner, /20260905100000_phase8_subscription_delinquency_enforcement\.sql[\s\S]+20260905100100_phase8e_remove_purge_reason_normalizers\.sql/);
 });
 
 test("claim validation and finalization are service-role-only", () => {
