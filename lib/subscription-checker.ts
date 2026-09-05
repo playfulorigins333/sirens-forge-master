@@ -74,33 +74,14 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
       .from("user_subscriptions")
       .select("id,status,tier_name,stripe_subscription_id,current_period_start,current_period_end,cancel_at_period_end,canceled_at,trial_start,trial_end")
       .eq("user_id", profile.id)
-      .in("status", ["active", "trialing", "canceled"])
+      .in("status", ["active", "trialing", "past_due", "unpaid", "canceled"])
       .order("current_period_end", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (subscriptionError) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, error: "SUBSCRIPTION_LOOKUP_FAILED", message: subscriptionError.message ?? "Failed to load subscription.", status: 500 };
 
-    const boundary = subscription?.current_period_end ? new Date(subscription.current_period_end).getTime() : Number.NaN;
-    const canceledButPaidThroughBoundary = subscription?.status === "canceled"
-      && !!subscription.stripe_subscription_id
-      && Number.isFinite(boundary)
-      && boundary > Date.now();
-    const hasActiveSubscription = !!subscription
-      && (subscription.status === "active" || subscription.status === "trialing" || canceledButPaidThroughBoundary);
-    if (!hasActiveSubscription) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription: null, error: "NO_ACTIVE_SUBSCRIPTION", message: "An active subscription is required to access this area.", status: 402 };
-
-    const isLifetime = subscription.tier_name === "og_throne" && !subscription.stripe_subscription_id;
-    if (!isLifetime) {
-      if (!subscription.stripe_subscription_id || !subscription.current_period_end) {
-        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "MALFORMED_SUBSCRIPTION", message: "Subscription access could not be verified.", status: 503 };
-      }
-      const paidAccessEndsAt = new Date(subscription.current_period_end).getTime();
-      if (!Number.isFinite(paidAccessEndsAt)) {
-        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "MALFORMED_SUBSCRIPTION", message: "Subscription access could not be verified.", status: 503 };
-      }
-      if (paidAccessEndsAt <= Date.now()) {
-        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "NO_ACTIVE_SUBSCRIPTION", message: "Paid subscription access has ended.", status: 402 };
-      }
+    const isLifetime = subscription?.tier_name === "og_throne" && !subscription?.stripe_subscription_id;
+    if (subscription?.stripe_subscription_id && !isLifetime) {
       const { data: delinquency, error: delinquencyError } = await getSupabaseAdmin()
         .from("subscription_payment_delinquencies")
         .select("id")
@@ -115,6 +96,28 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
       }
       if (delinquency) {
         return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "PAYMENT_DELINQUENT", message: "Creator tools are temporarily frozen while payment recovery is required. Billing, account security, privacy, and data rights remain available.", status: 402 };
+      }
+    }
+
+    const boundary = subscription?.current_period_end ? new Date(subscription.current_period_end).getTime() : Number.NaN;
+    const canceledButPaidThroughBoundary = subscription?.status === "canceled"
+      && !!subscription.stripe_subscription_id
+      && Number.isFinite(boundary)
+      && boundary > Date.now();
+    const hasActiveSubscription = !!subscription
+      && (subscription.status === "active" || subscription.status === "trialing" || canceledButPaidThroughBoundary);
+    if (!hasActiveSubscription) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription: null, error: "NO_ACTIVE_SUBSCRIPTION", message: "An active subscription is required to access this area.", status: 402 };
+
+    if (!isLifetime) {
+      if (!subscription.stripe_subscription_id || !subscription.current_period_end) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "MALFORMED_SUBSCRIPTION", message: "Subscription access could not be verified.", status: 503 };
+      }
+      const paidAccessEndsAt = new Date(subscription.current_period_end).getTime();
+      if (!Number.isFinite(paidAccessEndsAt)) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "MALFORMED_SUBSCRIPTION", message: "Subscription access could not be verified.", status: 503 };
+      }
+      if (paidAccessEndsAt <= Date.now()) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "NO_ACTIVE_SUBSCRIPTION", message: "Paid subscription access has ended.", status: 402 };
       }
     }
 

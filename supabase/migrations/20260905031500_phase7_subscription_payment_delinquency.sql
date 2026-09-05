@@ -63,6 +63,7 @@ create table public.subscription_payment_delinquency_invoices (
   created_at timestamptz not null default now(),
   check (billing_period_end > billing_period_start),
   unique (stripe_subscription_id, provider_invoice_id),
+  unique (stripe_subscription_id, billing_period_start, billing_period_end),
   foreign key (delinquency_id, auth_user_id, profile_id, subscription_id, stripe_subscription_id)
     references public.subscription_payment_delinquencies(id, auth_user_id, profile_id, subscription_id, stripe_subscription_id) on delete restrict
 );
@@ -116,8 +117,21 @@ begin
     return 'already_recorded';
   end if;
 
+  if exists (select 1 from public.subscription_payment_delinquency_invoices
+             where stripe_subscription_id = p_subscription_id
+               and billing_period_start = p_billing_period_start and billing_period_end = p_billing_period_end) then
+    return 'already_recorded_cycle';
+  end if;
+
   select * into v_delinquency from public.subscription_payment_delinquencies
    where subscription_id = v_subscription.id and state in ('first_miss_frozen','retention_countdown') for update;
+  if found and exists (
+    select 1 from public.subscription_payment_delinquency_invoices i
+    where i.delinquency_id = v_delinquency.id
+      and (i.billing_period_start, i.billing_period_end) >= (p_billing_period_start, p_billing_period_end)
+  ) then
+    return 'stale_failure_ignored';
+  end if;
   if not found then
     insert into public.subscription_payment_delinquencies(
       auth_user_id, profile_id, subscription_id, stripe_subscription_id, state,
@@ -151,13 +165,16 @@ end $$;
 
 create function public.payment_v2_recover_subscription_payment_delinquency(
   p_hold_id uuid, p_subscription_id text, p_customer_id text, p_price_id text,
+  p_invoice_id text, p_billing_period_start timestamptz, p_billing_period_end timestamptz,
   p_recovered_at timestamptz
 ) returns text
 language plpgsql security definer set search_path = pg_catalog, public
 as $$
-declare v_entitlement_id uuid;
+declare v_entitlement_id uuid; v_delinquency_id uuid; v_latest_start timestamptz; v_latest_end timestamptz;
 begin
-  if p_hold_id is null or p_recovered_at is null then raise exception 'invalid_delinquency_recovery'; end if;
+  if p_hold_id is null or p_recovered_at is null or p_billing_period_start is null or p_billing_period_end <= p_billing_period_start
+     or (p_invoice_id is not null and (btrim(p_invoice_id) = '' or p_invoice_id <> btrim(p_invoice_id)))
+  then raise exception 'invalid_delinquency_recovery'; end if;
   perform pg_advisory_xact_lock(hashtextextended('payment_v2:delinquency:' || coalesce(p_subscription_id,''), 2800));
   select s.id into v_entitlement_id
   from public.payment_v2_purchases buy
@@ -169,16 +186,25 @@ begin
     and s.user_id = a.profile_id and s.tier_name = 'early_bird'
     and s.stripe_subscription_id = p_subscription_id and s.stripe_customer_id = p_customer_id;
   if not found then raise exception 'delinquency_identity_mismatch'; end if;
+  select id into v_delinquency_id from public.subscription_payment_delinquencies
+   where subscription_id = v_entitlement_id and state in ('first_miss_frozen','retention_countdown') for update;
+  if not found then return 'no_open_delinquency'; end if;
+  select billing_period_start, billing_period_end into strict v_latest_start, v_latest_end
+    from public.subscription_payment_delinquency_invoices where delinquency_id = v_delinquency_id
+    order by billing_period_start desc, billing_period_end desc limit 1;
+  if (p_billing_period_start, p_billing_period_end) < (v_latest_start, v_latest_end) then
+    return 'stale_recovery_ignored';
+  end if;
   update public.subscription_payment_delinquencies
      set state = 'recovered', recovered_at = p_recovered_at, updated_at = now()
-   where subscription_id = v_entitlement_id and state in ('first_miss_frozen','retention_countdown');
-  return case when found then 'recovered' else 'no_open_delinquency' end;
+   where id = v_delinquency_id;
+  return 'recovered';
 end $$;
 
 alter function public.payment_v2_record_subscription_payment_failure(uuid,text,text,text,text,text,timestamptz,timestamptz,timestamptz) owner to postgres;
-alter function public.payment_v2_recover_subscription_payment_delinquency(uuid,text,text,text,timestamptz) owner to postgres;
-revoke all on function public.payment_v2_record_subscription_payment_failure(uuid,text,text,text,text,text,timestamptz,timestamptz,timestamptz), public.payment_v2_recover_subscription_payment_delinquency(uuid,text,text,text,timestamptz) from public, anon, authenticated;
-grant execute on function public.payment_v2_record_subscription_payment_failure(uuid,text,text,text,text,text,timestamptz,timestamptz,timestamptz), public.payment_v2_recover_subscription_payment_delinquency(uuid,text,text,text,timestamptz) to service_role;
+alter function public.payment_v2_recover_subscription_payment_delinquency(uuid,text,text,text,text,timestamptz,timestamptz,timestamptz) owner to postgres;
+revoke all on function public.payment_v2_record_subscription_payment_failure(uuid,text,text,text,text,text,timestamptz,timestamptz,timestamptz), public.payment_v2_recover_subscription_payment_delinquency(uuid,text,text,text,text,timestamptz,timestamptz,timestamptz) from public, anon, authenticated;
+grant execute on function public.payment_v2_record_subscription_payment_failure(uuid,text,text,text,text,text,timestamptz,timestamptz,timestamptz), public.payment_v2_recover_subscription_payment_delinquency(uuid,text,text,text,text,timestamptz,timestamptz,timestamptz) to service_role;
 
 select pg_notify('pgrst', 'reload schema');
 commit;

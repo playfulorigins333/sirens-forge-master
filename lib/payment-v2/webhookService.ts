@@ -144,6 +144,22 @@ async function processA3(event: StripeEvent, provider: PaymentV2Provider, db: Pa
     const failureObservedAt = timestamp(event.created);
     const billingPeriodStart = timestamp(line?.period?.start ?? -1);
     const billingPeriodEnd = timestamp(line?.period?.end ?? -1);
+    const invoiceSatisfied = failedInvoice.status === "paid" || failedInvoice.status === "void" ||
+      (Number.isInteger(failedInvoice.amount_due) && Number.isInteger(failedInvoice.amount_paid) && failedInvoice.amount_paid! >= failedInvoice.amount_due!);
+    if (invoiceSatisfied || !["past_due", "unpaid"].includes(subscription.status)) {
+      if (invoiceSatisfied && ["active", "trialing"].includes(subscription.status) && failedInvoice.billing_reason === "subscription_cycle" &&
+          invoicePrice === priceId && line?.quantity === 1 && billingPeriodStart && billingPeriodEnd && db.recoverSubscriptionPaymentDelinquency) {
+        const recovery = await db.recoverSubscriptionPaymentDelinquency({
+          p_hold_id: discriminator.holdId, p_subscription_id: subscriptionId, p_customer_id: authoritativeCustomer,
+          p_price_id: priceId, p_invoice_id: failedInvoice.id, p_billing_period_start: billingPeriodStart,
+          p_billing_period_end: billingPeriodEnd, p_recovered_at: failureObservedAt,
+        });
+        if (!["recovered", "no_open_delinquency", "stale_recovery_ignored"].includes(recovery)) {
+          return { status: "FAILED_TERMINAL", error: "DELINQUENCY_RESULT_INVALID" };
+        }
+      }
+      return { status: "PROCESSED", error: null };
+    }
     if (failedInvoice.billing_reason !== "subscription_cycle" || invoicePrice !== priceId || line?.quantity !== 1 ||
         !failureObservedAt || !billingPeriodStart || !billingPeriodEnd || !db.recordSubscriptionPaymentFailure) {
       return { status: "FAILED_TERMINAL", error: "INVALID_RECURRING_INVOICE_EVIDENCE" };
@@ -153,16 +169,18 @@ async function processA3(event: StripeEvent, provider: PaymentV2Provider, db: Pa
       p_price_id: priceId, p_invoice_id: failedInvoice.id, p_provider_event_id: event.id,
       p_failure_observed_at: failureObservedAt, p_billing_period_start: billingPeriodStart, p_billing_period_end: billingPeriodEnd,
     });
-    if (!["first_miss_frozen", "retention_countdown", "already_recorded"].includes(delinquency)) {
+    if (!["first_miss_frozen", "retention_countdown", "already_recorded", "already_recorded_cycle", "stale_failure_ignored"].includes(delinquency)) {
       return { status: "FAILED_TERMINAL", error: "DELINQUENCY_RESULT_INVALID" };
     }
   } else if (result === "applied" && ["active", "trialing"].includes(subscription.status)) {
+    if (!periodStart || !periodEnd) return { status: "PROCESSED", error: null };
     if (!db.recoverSubscriptionPaymentDelinquency) return { status: "FAILED_TERMINAL", error: "DELINQUENCY_RECOVERY_UNAVAILABLE" };
     const recovered = await db.recoverSubscriptionPaymentDelinquency({
       p_hold_id: discriminator.holdId, p_subscription_id: subscriptionId, p_customer_id: authoritativeCustomer,
-      p_price_id: priceId, p_recovered_at: timestamp(event.created),
+      p_price_id: priceId, p_invoice_id: null, p_billing_period_start: periodStart,
+      p_billing_period_end: periodEnd, p_recovered_at: timestamp(event.created),
     });
-    if (!["recovered", "no_open_delinquency"].includes(recovered)) return { status: "FAILED_TERMINAL", error: "DELINQUENCY_RESULT_INVALID" };
+    if (!["recovered", "no_open_delinquency", "stale_recovery_ignored"].includes(recovered)) return { status: "FAILED_TERMINAL", error: "DELINQUENCY_RESULT_INVALID" };
   }
   if (["applied", "unclaimed", "terminal_noop"].includes(result)) return { status: "PROCESSED", error: null };
   return { status: "FAILED_TERMINAL", error: "LIFECYCLE_RESULT_INVALID" };
@@ -195,8 +213,9 @@ export async function recurringInvoice(event: StripeEvent, provider: PaymentV2Pr
   const recorded=await db.reconcilePaidInvoices({p_hold_id:md.holdId,p_subscription_id:subscriptionId,p_customer_id:customerId,p_price_id:items[0].price.id,p_provider_event_id:event.id,p_invoices:normalized});
   if(!["reconciled","no_attribution"].includes(recorded)) return failed();
   if(!db.recoverSubscriptionPaymentDelinquency) return received();
-  const recovery=await db.recoverSubscriptionPaymentDelinquency({p_hold_id:md.holdId,p_subscription_id:subscriptionId,p_customer_id:customerId,p_price_id:items[0].price.id,p_recovered_at:paidAt});
-  return ["recovered","no_open_delinquency"].includes(recovery)?received():failed();
+  const paidLine=invoice.lines?.data?.length===1?invoice.lines.data[0]:null;
+  const recovery=await db.recoverSubscriptionPaymentDelinquency({p_hold_id:md.holdId,p_subscription_id:subscriptionId,p_customer_id:customerId,p_price_id:items[0].price.id,p_invoice_id:invoice.id,p_billing_period_start:timestamp(paidLine?.period?.start??-1),p_billing_period_end:timestamp(paidLine?.period?.end??-1),p_recovered_at:paidAt});
+  return ["recovered","no_open_delinquency","stale_recovery_ignored"].includes(recovery)?received():failed();
 }
 
 function hashBytes(value: HoldRow["purchaser_credential_hash"]): Uint8Array | null {
