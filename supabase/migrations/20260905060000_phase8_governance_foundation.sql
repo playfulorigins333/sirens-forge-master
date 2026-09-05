@@ -90,8 +90,8 @@ $$;
 revoke all on function public.governance_reject_immutable_mutation() from public, anon, authenticated, service_role;
 
 -- Phase 8 requires Founder/Admin-only legal holds before Phase 10's broader admin
--- role system exists. Bridge the current protected sole-Production-admin record and
--- a future explicit profile role without hard-coding a user UUID or email.
+-- role system exists. Bridge only the current protected sole-Production-admin record;
+-- Phase 10 may replace this authority source without Phase 8 guessing a future schema.
 create or replace function public.governance_actor_is_founder_admin(p_actor_user_id uuid)
 returns boolean
 language sql
@@ -99,16 +99,9 @@ stable
 security definer
 set search_path = pg_catalog
 as $$
-  select p_actor_user_id is not null and (
-    exists(
-      select 1 from public.account_deletion_protected_subjects s
-      where s.auth_user_id=p_actor_user_id and s.reason='sole_production_admin_guard'
-    )
-    or exists(
-      select 1 from public.profiles p
-      where p.user_id=p_actor_user_id
-        and lower(coalesce(p.role,'')) in ('admin','founder','founder_admin')
-    )
+  select p_actor_user_id is not null and exists(
+    select 1 from public.account_deletion_protected_subjects s
+    where s.auth_user_id=p_actor_user_id and s.reason='sole_production_admin_guard'
   )
 $$;
 revoke all on function public.governance_actor_is_founder_admin(uuid) from public, anon, authenticated, service_role;
@@ -516,7 +509,7 @@ create table public.governance_legal_hold_targets (
   constraint governance_legal_hold_target_type_check check (target_type ~ '^[a-z0-9][a-z0-9_]{2,79}$'),
   constraint governance_legal_hold_target_id_check check (char_length(target_id) between 1 and 200 and target_id !~ '[[:cntrl:]]'),
   constraint governance_legal_hold_scope_check check (char_length(preservation_scope) between 3 and 200 and preservation_scope !~ '[[:cntrl:]]'),
-  unique(hold_id,target_type,target_id,preservation_scope)
+  unique(hold_id,target_type,target_id,subject_user_id,preservation_scope)
 );
 
 create index governance_legal_hold_targets_lookup_idx
