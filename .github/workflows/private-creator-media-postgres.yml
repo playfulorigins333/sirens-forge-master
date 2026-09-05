@@ -30,6 +30,7 @@ jobs:
       PHASE7_DATA_RIGHTS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_data_rights_test
       PHASE7_PAYMENT_DELINQUENCY_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_payment_delinquency_test
       PHASE7_SUBSCRIPTION_RETENTION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_subscription_retention_test
+      PHASE7_CLOSEOUT_PUBLISHING_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase7_closeout_publishing_test
       PROFILE_LIFECYCLE_GRANTS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/profile_lifecycle_grants_test
       LOCK05B_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lock05b_test
       LOCK05C_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/lock05c_test
@@ -49,6 +50,7 @@ jobs:
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_data_rights_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_subscription_retention_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_payment_delinquency_test'
+          psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase7_closeout_publishing_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database profile_lifecycle_grants_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database lock05b_test'
           psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database lock05c_test'
@@ -63,6 +65,8 @@ jobs:
         run: npm run test:phase7-subscription-retention
       - name: Phase 7 payment delinquency source contracts
         run: npm run test:phase7-payment-delinquency
+      - name: Phase 7 closeout source contracts
+        run: npx tsx --test backend/security/tests/phase7CloseoutSource.test.ts
       - name: Profile lifecycle column grant source contract
         run: npm run test:profile-lifecycle-grants
       - name: Private creator media PostgreSQL behavior
@@ -77,6 +81,8 @@ jobs:
         run: npm run test:phase7-subscription-retention-postgres
       - name: Phase 7 payment delinquency PostgreSQL 17 behavior
         run: npm run test:phase7-payment-delinquency-postgres
+      - name: Phase 7 closeout publishing PostgreSQL 17 behavior
+        run: node backend/security/tests/runPhase7CloseoutPublishingPostgres.mjs
       - name: Profile lifecycle column grant PostgreSQL 17 behavior
         run: npm run test:profile-lifecycle-grants-postgres
       - name: LOCK-05B profile credential containment PostgreSQL 17 behavior
