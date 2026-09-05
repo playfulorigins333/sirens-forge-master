@@ -12,7 +12,10 @@ const authorize = (key) => new Promise((resolve, reject) => {
   const child = spawn("psql", [url, "-v", "ON_ERROR_STOP=1", "-At", "-c", statement], { stdio: ["ignore", "pipe", "inherit"] });
   let output = "";
   child.stdout.on("data", (chunk) => output += chunk);
-  child.on("exit", (code) => code === 0 ? resolve(output.trim()) : reject(new Error(`concurrent authorization exit ${code}`)));
+  child.once("error", reject);
+  // Wait for stdio to close before reading the captured result. Node's `exit`
+  // event can fire while stdout is still open, which made the expected `f` flaky.
+  child.on("close", (code) => code === 0 ? resolve(output.trim()) : reject(new Error(`concurrent authorization exit ${code}`)));
 });
 const spendResults = await Promise.all([authorize("concurrent-spend-image"), authorize("concurrent-spend-trainer")]);
 if (spendResults.filter((value) => value === "t").length !== 1 || spendResults.filter((value) => value === "f").length !== 1) {

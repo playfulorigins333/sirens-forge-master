@@ -10,6 +10,8 @@ for (const file of [
   "backend/security/tests/phase8eSubscriptionDelinquencyPostgresSetup.sql",
   "supabase/migrations/20260905100000_phase8_subscription_delinquency_enforcement.sql",
   "backend/security/tests/phase8eSubscriptionDelinquencyPostgresIntegration.sql",
+  "supabase/migrations/20260905100100_phase8e_remove_purge_reason_normalizers.sql",
+  "backend/security/tests/phase8ePurgeReasonHardeningPostgresIntegration.sql",
 ]) {
   const result = spawnSync("psql", [url, "-v", "ON_ERROR_STOP=1", "-f", file], { stdio: "inherit" });
   if (result.status !== 0) process.exit(result.status ?? 1);
