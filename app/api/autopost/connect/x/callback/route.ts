@@ -1,6 +1,7 @@
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 import { requireUserId } from "@/lib/supabaseServer"
+import { ensureActiveSubscription } from "@/lib/subscription-checker"
 import {
   clearXOAuthCookie,
   getSafeAutopostRedirect,
@@ -76,6 +77,13 @@ export async function GET(req: Request) {
       return redirectWithClearedCookie({
         error: errorByCode[completion.safe_code] ?? "x_reauthorization_failed",
       })
+    }
+
+    // Initial connection is normal creator-product use. Re-check the paid/lifecycle
+    // boundary after signed OAuth-state validation and before exchanging/saving tokens.
+    const entitlement = await ensureActiveSubscription()
+    if (!entitlement.ok || entitlement.user?.id !== userId) {
+      return redirectWithClearedCookie({ error: "x_oauth_no_active_subscription" })
     }
 
     const completion = await completeInitialXOAuthConnection({

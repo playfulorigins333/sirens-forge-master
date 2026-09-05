@@ -20,6 +20,7 @@ create table public.user_subscriptions(
   user_id uuid not null references public.profiles(id),
   status text not null,
   tier_name text,
+  stripe_subscription_id text,
   current_period_start timestamptz,
   current_period_end timestamptz,
   cancel_at_period_end boolean,
@@ -37,5 +38,5 @@ insert into public.profiles(id,user_id,email) values
  ('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','one@example.invalid'),
  ('20000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','two@example.invalid'),
  ('20000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000003','three@example.invalid');
-insert into public.user_subscriptions(id,user_id,status,tier_name,current_period_end,cancel_at_period_end) values
- ('30000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','active','monthly',now()+interval '20 days',false);
+insert into public.user_subscriptions(id,user_id,status,tier_name,stripe_subscription_id,current_period_end,cancel_at_period_end) values
+ ('30000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','active','monthly','sub_phase7_data_rights_test',now()+interval '20 days',false);

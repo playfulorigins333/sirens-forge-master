@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { requireUserId } from "@/lib/supabaseServer"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
+import { ensureActiveSubscription } from "@/lib/subscription-checker"
 
 export async function POST(
   _req: Request,
@@ -9,10 +9,14 @@ export async function POST(
   try {
     const { rule_id } = await params
 
-    const userId = await requireUserId()
-    if (!userId) {
-      return NextResponse.json({ error: "UNAUTHENTICATED" }, { status: 401 })
+    const entitlement = await ensureActiveSubscription()
+    if (!entitlement.ok || !entitlement.user?.id) {
+      return NextResponse.json(
+        { error: entitlement.error ?? "NO_ACTIVE_SUBSCRIPTION" },
+        { status: entitlement.status ?? 402 }
+      )
     }
+    const userId = entitlement.user.id
 
     if (!rule_id) {
       return NextResponse.json(
