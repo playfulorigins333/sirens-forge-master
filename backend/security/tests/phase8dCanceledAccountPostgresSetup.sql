@@ -49,15 +49,26 @@ as $$declare v_id uuid:=gen_random_uuid(); begin insert into public.governance_a
 create or replace function public.phase8_minimized_generation_metadata(p_metadata jsonb)
 returns jsonb language sql immutable as $$select coalesce(p_metadata,'{}'::jsonb)-'prompt'-'negative_prompt'-'content'-'request'$$;
 
-create table public.content_posts(id uuid primary key default gen_random_uuid(),user_id uuid not null,status text not null default 'draft');
-create table public.collections(id uuid primary key default gen_random_uuid(),user_id uuid not null,name text not null);
+create table public.content_posts(
+  id uuid primary key default gen_random_uuid(),user_id uuid not null,status text not null default 'draft',
+  created_at timestamptz not null default now()
+);
+create table public.collections(
+  id uuid primary key default gen_random_uuid(),user_id uuid not null,name text not null,
+  created_at timestamptz default now()
+);
 create table public.generations(
   id uuid primary key default gen_random_uuid(),user_id uuid,prompt text,negative_prompt text,image_url text,lora_used text,
-  body_type text,metadata jsonb default '{}'::jsonb,r2_bucket text,r2_key text,runpod_job_id text,error_message text,updated_at timestamptz default now()
+  body_type text,metadata jsonb default '{}'::jsonb,r2_bucket text,r2_key text,runpod_job_id text,error_message text,
+  created_at timestamp without time zone default now(),updated_at timestamptz default now()
 );
-create table public.generation_assets(id uuid primary key default gen_random_uuid(),generation_id uuid not null,owner_id uuid not null,lifecycle_state text not null default 'active');
+create table public.generation_assets(
+  id uuid primary key default gen_random_uuid(),generation_id uuid not null,owner_id uuid not null,
+  lifecycle_state text not null default 'active',created_at timestamptz not null default clock_timestamp()
+);
 create table public.user_loras(
-  id uuid primary key default gen_random_uuid(),user_id uuid,lifecycle_state text not null default 'active',training_data_state text not null default 'active'
+  id uuid primary key default gen_random_uuid(),user_id uuid,lifecycle_state text not null default 'active',
+  training_data_state text not null default 'active',created_at timestamp without time zone default now()
 );
 
 grant usage on schema public to anon,authenticated,service_role;
