@@ -2,6 +2,7 @@
 import { supabaseServer } from "@/lib/supabaseServer";
 import { hasCurrentMaterialPolicyAcceptance, POLICY_ACCEPTANCE_REQUIRED } from "@/lib/material-policy/service";
 import { requireOptInMfaSatisfied } from "@/lib/security/mfa";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export type ActiveSubscriptionResult = {
   ok: boolean;
@@ -73,11 +74,30 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
       .from("user_subscriptions")
       .select("id,status,tier_name,stripe_subscription_id,current_period_start,current_period_end,cancel_at_period_end,canceled_at,trial_start,trial_end")
       .eq("user_id", profile.id)
-      .in("status", ["active", "trialing", "canceled"])
+      .in("status", ["active", "trialing", "past_due", "unpaid", "canceled"])
       .order("current_period_end", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (subscriptionError) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, error: "SUBSCRIPTION_LOOKUP_FAILED", message: subscriptionError.message ?? "Failed to load subscription.", status: 500 };
+
+    const isLifetime = subscription?.tier_name === "og_throne" && !subscription?.stripe_subscription_id;
+    if (subscription?.stripe_subscription_id && !isLifetime) {
+      const { data: delinquency, error: delinquencyError } = await getSupabaseAdmin()
+        .from("subscription_payment_delinquencies")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .eq("profile_id", profile.id)
+        .eq("subscription_id", subscription.id)
+        .in("state", ["first_miss_frozen", "retention_countdown"])
+        .limit(1)
+        .maybeSingle();
+      if (delinquencyError) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "DELINQUENCY_LOOKUP_FAILED", message: "Payment status could not be verified.", status: 503 };
+      }
+      if (delinquency) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "PAYMENT_DELINQUENT", message: "Creator tools are temporarily frozen while payment recovery is required. Billing, account security, privacy, and data rights remain available.", status: 402 };
+      }
+    }
 
     const boundary = subscription?.current_period_end ? new Date(subscription.current_period_end).getTime() : Number.NaN;
     const canceledButPaidThroughBoundary = subscription?.status === "canceled"
@@ -88,7 +108,6 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
       && (subscription.status === "active" || subscription.status === "trialing" || canceledButPaidThroughBoundary);
     if (!hasActiveSubscription) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription: null, error: "NO_ACTIVE_SUBSCRIPTION", message: "An active subscription is required to access this area.", status: 402 };
 
-    const isLifetime = subscription.tier_name === "og_throne" && !subscription.stripe_subscription_id;
     if (!isLifetime) {
       if (!subscription.stripe_subscription_id || !subscription.current_period_end) {
         return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "MALFORMED_SUBSCRIPTION", message: "Subscription access could not be verified.", status: 503 };

@@ -22,7 +22,8 @@ for (const status of ["canceled", "past_due", "unpaid", "paused", "incomplete", 
 }
 assert.equal(entitledStatuses.has("active"), true)
 assert.equal(entitledStatuses.has("trialing"), true)
-assert.match(subscriptionChecker, /\.in\("status", \["active", "trialing"\]\)/)
+assert.match(subscriptionChecker, /\.in\("status", \["active", "trialing", "past_due", "unpaid", "canceled"\]\)/)
+assert.match(subscriptionChecker, /PAYMENT_DELINQUENT/)
 assert.match(subscriptionChecker, /error: "UNAUTHENTICATED"[\s\S]*?status: 401/)
 assert.match(subscriptionChecker, /error: "NO_ACTIVE_SUBSCRIPTION"[\s\S]*?status: 402/)
 
@@ -55,10 +56,10 @@ assert.doesNotMatch(
 )
 
 assert.doesNotMatch(disconnect, /ensureActiveSubscription/)
-assert.match(disconnect, /requireUserId/)
-assert.match(disconnect, /\.eq\("user_id", userId\)[\s\S]*?\.eq\("platform", "fanvue"\)/)
-assert.match(disconnect, /encrypted_access_token: null/)
-assert.match(disconnect, /encrypted_refresh_token: null/)
+assert.match(disconnect, /requireFreshTotpResponse/)
+assert.match(disconnect, /disconnect_publishing_provider/)
+assert.match(disconnect, /p_user_id: userId[\s\S]*?p_provider: "fanvue"/)
+assert.doesNotMatch(disconnect, /encrypted_access_token|encrypted_refresh_token/)
 
 assert.doesNotMatch(platformStatus, /ensureActiveSubscription/)
 assert.match(platformStatus, /requireUserId/)
