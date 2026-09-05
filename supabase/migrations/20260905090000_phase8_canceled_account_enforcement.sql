@@ -9,7 +9,7 @@
 -- - newer billing lifecycles supersede older cancellation purge authority;
 -- - purge is bounded, claim-tokened, retryable, audited, and legal-hold aware;
 -- - destructive work is limited to creator working data created on/before that lifecycle's retention deadline;
--- - nullable legacy creation timestamps fail closed as blockers rather than being guessed into purge scope;
+-- - nullable or post-deadline working data fails closed as a blocker rather than being guessed into old purge scope;
 -- - creator Library/Twin working data is purged while Auth, billing, receipts, governance,
 --   and other compliance evidence remain intact;
 -- - legacy generation binaries without a managed generation_asset remain a blocker rather
@@ -395,8 +395,8 @@ begin
      and not public.phase8d_canceled_resource_has_active_hold('collection',c.id::text,r.auth_user_id);
 
   -- Scrub database-resident generation content, but retain legacy binary pointers until a
-  -- physical storage authority has actually removed those bytes. Unknown creation timestamps
-  -- are not guessed into the old lifecycle and remain blockers.
+  -- physical storage authority has actually removed those bytes. Unknown or post-deadline
+  -- creation timestamps are not guessed into the old lifecycle and remain blockers.
   update public.generations g
      set prompt=null,negative_prompt=null,lora_used=null,body_type=null,
          metadata=public.phase8_minimized_generation_metadata(coalesce(g.metadata,'{}'::jsonb)),
@@ -408,18 +408,16 @@ begin
 
   select
     (select count(*) from public.generation_assets a
-      where a.owner_id=r.auth_user_id and a.created_at<=r.retention_until and a.lifecycle_state<>'purged')
+      where a.owner_id=r.auth_user_id and a.lifecycle_state<>'purged')
     +(select count(*) from public.user_loras l
-      where l.user_id in (r.auth_user_id,r.profile_id)
-        and (l.created_at is null or (l.created_at<=(r.retention_until at time zone 'UTC') and l.lifecycle_state<>'purged')))
-    +(select count(*) from public.content_posts p
-      where p.user_id=r.auth_user_id and p.created_at<=r.retention_until)
-    +(select count(*) from public.collections c
-      where c.user_id=r.auth_user_id and (c.created_at is null or c.created_at<=r.retention_until))
+      where l.user_id in (r.auth_user_id,r.profile_id) and l.lifecycle_state<>'purged')
+    +(select count(*) from public.content_posts p where p.user_id=r.auth_user_id)
+    +(select count(*) from public.collections c where c.user_id=r.auth_user_id)
     +(select count(*) from public.generations g
       where g.user_id in (r.auth_user_id,r.profile_id)
         and (
           g.created_at is null
+          or g.created_at>(r.retention_until at time zone 'UTC')
           or (
             g.created_at<=(r.retention_until at time zone 'UTC')
             and (public.phase8d_canceled_resource_has_active_hold('generation',g.id::text,r.auth_user_id)
