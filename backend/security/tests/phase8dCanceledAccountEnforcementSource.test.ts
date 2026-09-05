@@ -24,7 +24,7 @@ test("legal holds preserve data but do not extend creator read access", () => {
   assert.match(migration, /governance_target_has_active_legal_hold\('account'/);
   assert.match(migration, /phase8d_twin_purge_hold_guard/);
   assert.match(migration, /phase8c_private_media_governance_hold/);
-  assert.match(readGate, /retentionUntil\.getTime\(\) <= now/);
+  assert.match(readGate, /\.gt\("retention_until", now\)/);
   assert.doesNotMatch(readGate, /legal.?hold/i);
 });
 
