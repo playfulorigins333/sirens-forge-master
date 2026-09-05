@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 
 export const LEGAL_HOLD_POLICY_VERSION = "legal-hold-v1"
@@ -34,6 +35,14 @@ function safeRpcCode(error: unknown, fallback: string) {
     "GOVERNANCE_LEGAL_HOLD_LIST_LIMIT_INVALID",
   ]
   return allowed.find((code) => message.includes(code)) ?? fallback
+}
+
+function deterministicCorrelationId(scope: string, actorUserId: string, idempotencyKey: string) {
+  const hex = createHash("sha256").update(`${scope}|${actorUserId}|${idempotencyKey}`).digest("hex").slice(0, 32).split("")
+  hex[12] = "4"
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16)
+  const value = hex.join("")
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`
 }
 
 function validDate(value: string) {
@@ -111,7 +120,7 @@ export async function openLegalHold(args: {
   idempotencyKey: string
   input: NonNullable<ReturnType<typeof validateOpenLegalHoldInput>>
 }) {
-  const correlationId = crypto.randomUUID()
+  const correlationId = deterministicCorrelationId("legal-hold-open", args.actorUserId, args.idempotencyKey)
   const { data, error } = await getSupabaseAdmin().rpc("open_governance_legal_hold", {
     p_actor_user_id: args.actorUserId,
     p_category: args.input.category,
@@ -137,7 +146,7 @@ export async function reviewLegalHold(args: {
   idempotencyKey: string
   input: NonNullable<ReturnType<typeof validateReviewLegalHoldInput>>
 }) {
-  const correlationId = crypto.randomUUID()
+  const correlationId = deterministicCorrelationId(`legal-hold-review:${args.holdId}`, args.actorUserId, args.idempotencyKey)
   const { data, error } = await getSupabaseAdmin().rpc("review_governance_legal_hold", {
     p_hold_id: args.holdId,
     p_actor_user_id: args.actorUserId,
@@ -161,7 +170,7 @@ export async function releaseLegalHold(args: {
   idempotencyKey: string
   input: NonNullable<ReturnType<typeof validateReleaseLegalHoldInput>>
 }) {
-  const correlationId = crypto.randomUUID()
+  const correlationId = deterministicCorrelationId(`legal-hold-release:${args.holdId}`, args.actorUserId, args.idempotencyKey)
   const { data, error } = await getSupabaseAdmin().rpc("release_governance_legal_hold", {
     p_hold_id: args.holdId,
     p_actor_user_id: args.actorUserId,
