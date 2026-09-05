@@ -48,7 +48,7 @@ do $$begin
   end if;
 end$$;
 
--- Active renewable billing must already be set to cancel before voluntary deletion.
+-- A recoverable recurring subscription must already be set to cancel before voluntary deletion.
 do $$begin
   begin
     perform * from public.request_voluntary_account_deletion(
@@ -56,6 +56,22 @@ do $$begin
       'export_before_deletion',(select id from public.creator_data_exports where auth_user_id='10000000-0000-4000-8000-000000000001'),
       'delete-my-account-v1','50000000-0000-4000-8000-000000000001');
     raise exception 'billing-active deletion unexpectedly succeeded';
+  exception when others then
+    if sqlerrm not like '%ACCOUNT_DELETION_BILLING_ACTIVE%' then raise; end if;
+  end;
+end$$;
+
+-- Past-due/unpaid recurring billing is still recoverable and cannot bypass cancellation.
+update public.user_subscriptions
+set status='past_due', cancel_at_period_end=false
+where id='30000000-0000-4000-8000-000000000001';
+do $$begin
+  begin
+    perform * from public.request_voluntary_account_deletion(
+      '10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001',
+      'export_before_deletion',(select id from public.creator_data_exports where auth_user_id='10000000-0000-4000-8000-000000000001'),
+      'delete-my-account-v1','50000000-0000-4000-8000-000000000004');
+    raise exception 'past-due recurring deletion unexpectedly succeeded';
   exception when others then
     if sqlerrm not like '%ACCOUNT_DELETION_BILLING_ACTIVE%' then raise; end if;
   end;
