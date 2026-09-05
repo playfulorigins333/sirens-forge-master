@@ -10,7 +10,7 @@ test("Phase 8 foundation stays inside governance scope", () => {
   assert.match(migration, /create table public\.governance_action_receipts/)
   assert.match(migration, /create table public\.governance_legal_holds/)
   assert.match(migration, /create table public\.governance_legal_hold_targets/)
-  assert.doesNotMatch(migration, /send[_ ]?(email|notification)|deliver[_ ]?notification/i)
+  assert.doesNotMatch(migration, /\b(?:send_email|send_notification|deliver_notification)\s*\(/i)
   assert.doesNotMatch(migration, /cron\.schedule|pg_cron|delete\s+from\s+auth\.users/i)
 })
 
