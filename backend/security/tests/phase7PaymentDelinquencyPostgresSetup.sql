@@ -1,0 +1,24 @@
+drop schema if exists public cascade;
+drop schema if exists auth cascade;
+create schema public;
+create schema auth;
+grant all on schema public to postgres;
+create extension if not exists pgcrypto with schema public;
+do $$ begin
+  if not exists(select 1 from pg_roles where rolname='anon') then create role anon; end if;
+  if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated; end if;
+  if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role bypassrls; end if;
+end $$;
+create table auth.users(id uuid primary key);
+create table public.profiles(id uuid primary key, user_id uuid not null references auth.users(id));
+create table public.user_subscriptions(id uuid primary key, user_id uuid not null references public.profiles(id), tier_name text not null, stripe_subscription_id text, stripe_customer_id text, status text not null);
+create table public.payment_v2_holds(id uuid primary key, tier text not null, state text not null);
+create table public.payment_v2_purchases(id uuid primary key, hold_id uuid not null, tier text not null, state text not null, stripe_subscription_id text, stripe_customer_id text, stripe_price_id text, claimed_profile_id uuid);
+create table public.payment_v2_allocations(purchase_id uuid not null, profile_id uuid not null, entitlement_id uuid not null);
+create table public.subscription_cancellation_retentions(id uuid primary key default gen_random_uuid(), subscription_id uuid);
+insert into auth.users values ('20000000-0000-4000-8000-000000000001'),('20000000-0000-4000-8000-000000000002');
+insert into profiles values ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001'),('10000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000002');
+insert into user_subscriptions values ('50000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','early_bird','sub_early','cus_early','past_due'),('50000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','og_throne',null,'cus_og','active');
+insert into payment_v2_holds values ('30000000-0000-4000-8000-000000000001','early_bird','CLAIMED'),('30000000-0000-4000-8000-000000000002','og_throne','CLAIMED');
+insert into payment_v2_purchases values ('40000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','early_bird','CLAIMED','sub_early','cus_early','price_early','10000000-0000-4000-8000-000000000001'),('40000000-0000-4000-8000-000000000002','30000000-0000-4000-8000-000000000002','og_throne','CLAIMED',null,'cus_og','price_og','10000000-0000-4000-8000-000000000002');
+insert into payment_v2_allocations values ('40000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001'),('40000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000002','50000000-0000-4000-8000-000000000002');

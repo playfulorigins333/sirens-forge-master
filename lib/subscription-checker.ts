@@ -2,6 +2,7 @@
 import { supabaseServer } from "@/lib/supabaseServer";
 import { hasCurrentMaterialPolicyAcceptance, POLICY_ACCEPTANCE_REQUIRED } from "@/lib/material-policy/service";
 import { requireOptInMfaSatisfied } from "@/lib/security/mfa";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 
 export type ActiveSubscriptionResult = {
   ok: boolean;
@@ -99,6 +100,21 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
       }
       if (paidAccessEndsAt <= Date.now()) {
         return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "NO_ACTIVE_SUBSCRIPTION", message: "Paid subscription access has ended.", status: 402 };
+      }
+      const { data: delinquency, error: delinquencyError } = await getSupabaseAdmin()
+        .from("subscription_payment_delinquencies")
+        .select("id")
+        .eq("auth_user_id", user.id)
+        .eq("profile_id", profile.id)
+        .eq("subscription_id", subscription.id)
+        .in("state", ["first_miss_frozen", "retention_countdown"])
+        .limit(1)
+        .maybeSingle();
+      if (delinquencyError) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "DELINQUENCY_LOOKUP_FAILED", message: "Payment status could not be verified.", status: 503 };
+      }
+      if (delinquency) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "PAYMENT_DELINQUENT", message: "Creator tools are temporarily frozen while payment recovery is required. Billing, account security, privacy, and data rights remain available.", status: 402 };
       }
     }
 

@@ -89,11 +89,13 @@
     "test:phase6f-creator-reply": "tsx --test backend/security/tests/phase6fCreatorReply.test.ts backend/security/tests/creatorReplyValidator.test.ts backend/security/tests/creatorDomStyleDirection.test.ts backend/security/tests/creatorReplyProtocolPipeline.test.ts backend/security/tests/sirensMindLiveBatteryContract.test.ts && node --conditions=react-server --experimental-test-module-mocks --import tsx backend/security/tests/phase6fCreatorReplyRouteBehavior.test.ts",
     "test:sirens-mind-live": "tsx tools/sirens-mind-live-battery.ts",
     "test:phase6f2-creator-reply-subscribers": "node --conditions=react-server --import tsx --test backend/security/tests/phase6f2CreatorReplySubscribers.test.ts",
-    "test:phase6f2-creator-reply-postgres": "node backend/security/tests/runPhase6f2CreatorReplyPostgres.mjs"
-    ,"test:phase7-subscription-retention": "tsx --test backend/security/tests/phase7SubscriptionCancellationSource.test.ts"
-    ,"test:phase7-subscription-retention-postgres": "node backend/security/tests/runPhase7SubscriptionCancellationPostgres.mjs"
-    ,"test:profile-lifecycle-grants": "tsx --test backend/security/tests/profileLifecycleColumnGrantsSource.test.ts"
-    ,"test:profile-lifecycle-grants-postgres": "node backend/security/tests/runProfileLifecycleColumnGrantsPostgres.mjs"
+    "test:phase6f2-creator-reply-postgres": "node backend/security/tests/runPhase6f2CreatorReplyPostgres.mjs",
+    "test:phase7-subscription-retention": "tsx --test backend/security/tests/phase7SubscriptionCancellationSource.test.ts",
+    "test:phase7-subscription-retention-postgres": "node backend/security/tests/runPhase7SubscriptionCancellationPostgres.mjs",
+    "test:profile-lifecycle-grants": "tsx --test backend/security/tests/profileLifecycleColumnGrantsSource.test.ts",
+    "test:profile-lifecycle-grants-postgres": "node backend/security/tests/runProfileLifecycleColumnGrantsPostgres.mjs",
+    "test:phase7-payment-delinquency": "tsx --test backend/security/tests/phase7PaymentDelinquencySource.test.ts",
+    "test:phase7-payment-delinquency-postgres": "node backend/security/tests/runPhase7PaymentDelinquencyPostgres.mjs"
   },
   "repository": {
     "type": "git",
