@@ -41,6 +41,8 @@ export async function POST(request: Request) {
         async recordTerminal(args) { const { data, error } = await db.rpc("payment_v2_record_session_unpaid_terminal", args); if (error) throw new Error(error.message.includes("paid_purchase_exists") ? "paid_purchase_exists" : "terminal recording failed"); return data; },
         async reconcilePaidInvoices(args) { const { data, error } = await db.rpc("payment_v2_reconcile_paid_invoices", args); if (error) throw new Error("recurring invoice reconciliation failed"); return data; },
         async applyEarlyBirdLifecycle(args) { const { data, error } = await db.rpc("payment_v2_apply_early_bird_subscription_lifecycle", args); if (error) throw new Error(error.message); return data; },
+        async recordSubscriptionPaymentFailure(args) { const { data, error } = await db.rpc("payment_v2_record_subscription_payment_failure", args); if (error) throw new Error(error.message); return data; },
+        async recoverSubscriptionPaymentDelinquency(args) { const { data, error } = await db.rpc("payment_v2_recover_subscription_payment_delinquency", args); if (error) throw new Error(error.message); return data; },
       };
     },
     createInboxDatabase(): PaymentV2InboxDatabase {

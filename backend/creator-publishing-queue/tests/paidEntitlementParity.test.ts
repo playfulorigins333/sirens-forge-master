@@ -6,14 +6,15 @@ const read = (path: string) => fs.readFileSync(path, "utf8")
 const helper = read("lib/subscription-checker.ts")
 const shared = read("lib/creator-publishing-queue/creatorEntitlement.ts")
 
-test("creator entitlement reuses the active/trialing subscription contract", () => {
+test("creator entitlement distinguishes active access from delinquency and cancellation lookup states", () => {
   assert.match(shared, /ensureActiveSubscription/)
   assert.match(shared, /auth\.user\.id/)
-  assert.match(helper, /\.in\("status", \["active", "trialing"\]\)/)
+  assert.match(helper, /\.in\("status", \["active", "trialing", "past_due", "unpaid", "canceled"\]\)/)
   assert.match(helper, /subscription\.status === "active" \|\| subscription\.status === "trialing"/)
-  for (const inactive of ["canceled", "past_due", "unpaid", "paused", "incomplete", "incomplete_expired"]) {
+  for (const inactive of ["past_due", "unpaid", "paused", "incomplete", "incomplete_expired"]) {
     assert.doesNotMatch(helper, new RegExp(`hasActiveSubscription[\\s\\S]{0,160}${inactive}`))
   }
+  assert.match(helper, /PAYMENT_DELINQUENT/)
   assert.match(helper, /UNAUTHENTICATED/)
   assert.match(helper, /NO_ACTIVE_SUBSCRIPTION/)
 })
