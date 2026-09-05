@@ -2,7 +2,6 @@ import "server-only"
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { decryptAutopostToken } from "@/lib/autopost/tokenCrypto"
 import { refreshXAccessToken } from "@/lib/autopost/xTokenRefresh"
-import { checkCreatorProductExecutionAccess } from "@/lib/creator-product-execution-access"
 
 type XAdapterRequestPayload = {
   text?: unknown
@@ -61,7 +60,6 @@ export type XAdapterDeps = {
   getApiBaseUrl?: () => string
   now?: () => Date
   beginDispatch?: (input: { userId: string; jobId: string; lockId: string }) => Promise<boolean>
-  checkProductAccess?: typeof checkCreatorProductExecutionAccess
 }
 
 export type XAdapterResponse =
@@ -296,20 +294,6 @@ export async function postXTextOnlyAutopost(
   const now = deps.now ?? (() => new Date())
 
   const userId = input.user_id.trim()
-  const checkProductAccess = deps.checkProductAccess ?? checkCreatorProductExecutionAccess
-  try {
-    const access = await checkProductAccess(userId)
-    if (!access.ok) {
-      return failure(
-        "FAILED",
-        "X_CREATOR_PRODUCT_ACCESS_FROZEN",
-        "Creator product access is not currently eligible for provider dispatch"
-      )
-    }
-  } catch {
-    return failure("FAILED", "X_CREATOR_PRODUCT_ACCESS_UNVERIFIED", "Creator product access could not be verified")
-  }
-
   let supabaseAdmin: ReturnType<typeof getSupabaseAdmin>
   try {
     supabaseAdmin = deps.supabaseAdmin ?? getSupabaseAdmin()
