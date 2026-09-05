@@ -6,7 +6,9 @@
 -- - central subscription-cancellation retention policy remains authoritative;
 -- - the locked cancellation window is never shorter than 60 days;
 -- - paid creator read access ends at retention_until even when a legal hold preserves data;
+-- - newer billing lifecycles supersede older cancellation purge authority;
 -- - purge is bounded, claim-tokened, retryable, audited, and legal-hold aware;
+-- - destructive work is limited to creator working data created on/before that lifecycle's retention deadline;
 -- - creator Library/Twin working data is purged while Auth, billing, receipts, governance,
 --   and other compliance evidence remain intact;
 -- - legacy generation binaries without a managed generation_asset remain a blocker rather
@@ -134,6 +136,80 @@ as $$
 $$;
 revoke all on function public.phase8d_canceled_account_has_active_hold(uuid,uuid,uuid) from public,anon,authenticated,service_role;
 
+-- An old cancellation lifecycle must never become purge authority over a newer billing lifecycle.
+-- Current active/trialing and delinquent states are owned by current entitlement/Phase 8E, while a
+-- later cancellation lifecycle carries its own later retention deadline.
+create or replace function public.phase8d_canceled_retention_has_successor(
+  p_retention_id uuid,
+  p_profile_id uuid,
+  p_subscription_id uuid,
+  p_paid_access_ends_at timestamptz
+) returns boolean
+language sql
+stable
+security definer
+set search_path=pg_catalog
+as $$
+  select exists(
+    select 1
+    from public.user_subscriptions s
+    where s.user_id=p_profile_id
+      and (
+        (s.id=p_subscription_id and lower(btrim(s.status)) in ('active','trialing') and not coalesce(s.cancel_at_period_end,false))
+        or (
+          s.id<>p_subscription_id
+          and lower(btrim(s.status)) in ('active','trialing','past_due','unpaid')
+        )
+      )
+  ) or exists(
+    select 1
+    from public.subscription_cancellation_retentions newer
+    where newer.profile_id=p_profile_id
+      and newer.id<>p_retention_id
+      and newer.paid_access_ends_at>p_paid_access_ends_at
+      and newer.state not in ('reactivated','superseded')
+  )
+$$;
+revoke all on function public.phase8d_canceled_retention_has_successor(uuid,uuid,uuid,timestamptz) from public,anon,authenticated,service_role;
+
+create or replace function public.phase8d_supersede_canceled_retention(p_retention_id uuid,p_auth_user_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path=pg_catalog,public,extensions
+as $$
+declare
+  r public.subscription_cancellation_retentions%rowtype;
+  v_prior_state text;
+  v_audit_id uuid;
+begin
+  select * into r
+  from public.subscription_cancellation_retentions
+  where id=p_retention_id and auth_user_id=p_auth_user_id
+  for update;
+  if not found or r.state in ('reactivated','superseded','purged') then return false; end if;
+
+  if not public.phase8d_canceled_retention_has_successor(r.id,r.profile_id,r.subscription_id,r.paid_access_ends_at) then
+    return false;
+  end if;
+
+  v_prior_state:=r.state;
+  update public.subscription_cancellation_retentions
+     set state='superseded',purge_claim_token=null,purge_completed_at=null,updated_at=statement_timestamp()
+   where id=r.id;
+
+  v_audit_id:=public.append_governance_audit_event(
+    null,'system','retention.subscription_cancellation_superseded','subscription_cancellation_retention',r.id::text,
+    'newer_billing_lifecycle','newer billing lifecycle owns current retention authority','superseded','subscription_cancellation:v1',
+    null,gen_random_uuid(),null,
+    jsonb_build_object('subscription_id',r.subscription_id,'retention_until',r.retention_until,'prior_state',v_prior_state),
+    '{}'::jsonb,null
+  );
+  return true;
+end;
+$$;
+revoke all on function public.phase8d_supersede_canceled_retention(uuid,uuid) from public,anon,authenticated,service_role;
+
 create or replace function public.phase8d_canceled_resource_has_active_hold(p_target_type text,p_target_id text,p_auth_user_id uuid)
 returns boolean
 language sql
@@ -187,7 +263,15 @@ before update of lifecycle_state,training_data_state on public.user_loras
 for each row execute function public.phase8d_assert_twin_purge_allowed();
 
 create or replace function public.phase8d_claim_expired_canceled_accounts(p_limit integer default 10)
-returns table(retention_id uuid,auth_user_id uuid,profile_id uuid,subscription_id uuid,claim_token uuid,claim_state text)
+returns table(
+  retention_id uuid,
+  auth_user_id uuid,
+  profile_id uuid,
+  subscription_id uuid,
+  claim_token uuid,
+  claim_state text,
+  retention_until timestamptz
+)
 language plpgsql
 security definer
 set search_path=pg_catalog,public,extensions
@@ -202,17 +286,22 @@ begin
     where retention_until<=statement_timestamp() and state in ('pending_paid_access_end','retained_read_only','expired','purge_pending')
     order by retention_until,id for update skip locked limit p_limit
   loop
+    if public.phase8d_supersede_canceled_retention(r.id,r.auth_user_id) then
+      return query select r.id,r.auth_user_id,r.profile_id,r.subscription_id,null::uuid,'superseded'::text,r.retention_until;
+      continue;
+    end if;
+
     if r.state in ('pending_paid_access_end','retained_read_only') then
       update public.subscription_cancellation_retentions set state='expired',updated_at=statement_timestamp() where id=r.id;
       r.state:='expired';
     end if;
     if public.phase8d_canceled_account_has_active_hold(r.id,r.subscription_id,r.auth_user_id) then
-      return query select r.id,r.auth_user_id,r.profile_id,r.subscription_id,null::uuid,'held'::text;
+      return query select r.id,r.auth_user_id,r.profile_id,r.subscription_id,null::uuid,'held'::text,r.retention_until;
       continue;
     end if;
     if r.state='purge_pending' then
       if r.purge_claim_token is null then raise exception 'PHASE8D_PURGE_CLAIM_CORRUPT'; end if;
-      return query select r.id,r.auth_user_id,r.profile_id,r.subscription_id,r.purge_claim_token,'claimed'::text;
+      return query select r.id,r.auth_user_id,r.profile_id,r.subscription_id,r.purge_claim_token,'claimed'::text,r.retention_until;
       continue;
     end if;
     v_token:=gen_random_uuid();
@@ -220,12 +309,47 @@ begin
        set state='purge_pending',purge_claimed_at=coalesce(purge_claimed_at,statement_timestamp()),
            purge_claim_token=v_token,purge_attempt_count=purge_attempt_count+1,updated_at=statement_timestamp()
      where id=r.id;
-    return query select r.id,r.auth_user_id,r.profile_id,r.subscription_id,v_token,'claimed'::text;
+    return query select r.id,r.auth_user_id,r.profile_id,r.subscription_id,v_token,'claimed'::text,r.retention_until;
   end loop;
 end;
 $$;
 revoke all on function public.phase8d_claim_expired_canceled_accounts(integer) from public,anon,authenticated;
 grant execute on function public.phase8d_claim_expired_canceled_accounts(integer) to service_role;
+
+create or replace function public.phase8d_validate_canceled_account_purge(
+  p_retention_id uuid,
+  p_auth_user_id uuid,
+  p_claim_token uuid
+) returns table(allowed boolean,retention_state text,retention_until timestamptz)
+language plpgsql
+security definer
+set search_path=pg_catalog,public
+as $$
+declare
+  r public.subscription_cancellation_retentions%rowtype;
+begin
+  if p_retention_id is null or p_auth_user_id is null or p_claim_token is null then raise exception 'PHASE8D_PURGE_CLAIM_INVALID'; end if;
+  select * into r
+  from public.subscription_cancellation_retentions
+  where id=p_retention_id and auth_user_id=p_auth_user_id
+  for update;
+  if not found then raise exception 'PHASE8D_RETENTION_NOT_FOUND'; end if;
+  if r.state='superseded' then return query select false,r.state,r.retention_until; return; end if;
+  if r.state<>'purge_pending' or r.purge_claim_token is distinct from p_claim_token then raise exception 'PHASE8D_PURGE_CLAIM_INVALID'; end if;
+
+  if public.phase8d_supersede_canceled_retention(r.id,r.auth_user_id) then
+    return query select false,'superseded'::text,r.retention_until;
+    return;
+  end if;
+  if public.phase8d_canceled_account_has_active_hold(r.id,r.subscription_id,r.auth_user_id) then
+    return query select false,'held'::text,r.retention_until;
+    return;
+  end if;
+  return query select true,r.state,r.retention_until;
+end;
+$$;
+revoke all on function public.phase8d_validate_canceled_account_purge(uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function public.phase8d_validate_canceled_account_purge(uuid,uuid,uuid) to service_role;
 
 create or replace function public.phase8d_finalize_canceled_account_purge(p_retention_id uuid,p_auth_user_id uuid,p_claim_token uuid)
 returns table(retention_id uuid,retention_state text,finalized boolean,blocked_count integer)
@@ -244,17 +368,25 @@ begin
    where id=p_retention_id and auth_user_id=p_auth_user_id for update;
   if not found then raise exception 'PHASE8D_RETENTION_NOT_FOUND'; end if;
   if r.state='purged' then return query select r.id,r.state,true,0; return; end if;
+  if r.state='superseded' then return query select r.id,r.state,false,0; return; end if;
   if r.state<>'purge_pending' or r.purge_claim_token is distinct from p_claim_token then raise exception 'PHASE8D_PURGE_CLAIM_INVALID'; end if;
+
+  if public.phase8d_supersede_canceled_retention(r.id,r.auth_user_id) then
+    return query select r.id,'superseded'::text,false,0;
+    return;
+  end if;
   if public.phase8d_canceled_account_has_active_hold(r.id,r.subscription_id,r.auth_user_id) then
     return query select r.id,r.state,false,1; return;
   end if;
 
   delete from public.content_posts p
    where p.user_id=r.auth_user_id
+     and p.created_at<=r.retention_until
      and not public.phase8d_canceled_resource_has_active_hold('content_post',p.id::text,r.auth_user_id);
 
   delete from public.collections c
    where c.user_id=r.auth_user_id
+     and c.created_at<=r.retention_until
      and not public.phase8d_canceled_resource_has_active_hold('collection',c.id::text,r.auth_user_id);
 
   -- Scrub database-resident generation content, but retain legacy binary pointers until a
@@ -264,16 +396,24 @@ begin
          metadata=public.phase8_minimized_generation_metadata(coalesce(g.metadata,'{}'::jsonb)),
          runpod_job_id=null,error_message=null,updated_at=statement_timestamp()
    where g.user_id in (r.auth_user_id,r.profile_id)
+     and g.created_at<=(r.retention_until at time zone 'UTC')
      and not public.phase8d_canceled_resource_has_active_hold('generation',g.id::text,r.auth_user_id);
 
   select
-    (select count(*) from public.generation_assets a where a.owner_id=r.auth_user_id and a.lifecycle_state<>'purged')
-    +(select count(*) from public.user_loras l where l.user_id in (r.auth_user_id,r.profile_id) and l.lifecycle_state<>'purged')
-    +(select count(*) from public.content_posts p where p.user_id=r.auth_user_id)
-    +(select count(*) from public.collections c where c.user_id=r.auth_user_id)
-    +(select count(*) from public.generations g where g.user_id in (r.auth_user_id,r.profile_id)
-       and (public.phase8d_canceled_resource_has_active_hold('generation',g.id::text,r.auth_user_id)
-            or g.r2_key is not null or g.image_url is not null))
+    (select count(*) from public.generation_assets a
+      where a.owner_id=r.auth_user_id and a.created_at<=r.retention_until and a.lifecycle_state<>'purged')
+    +(select count(*) from public.user_loras l
+      where l.user_id in (r.auth_user_id,r.profile_id)
+        and l.created_at<=(r.retention_until at time zone 'UTC') and l.lifecycle_state<>'purged')
+    +(select count(*) from public.content_posts p
+      where p.user_id=r.auth_user_id and p.created_at<=r.retention_until)
+    +(select count(*) from public.collections c
+      where c.user_id=r.auth_user_id and c.created_at<=r.retention_until)
+    +(select count(*) from public.generations g
+      where g.user_id in (r.auth_user_id,r.profile_id)
+        and g.created_at<=(r.retention_until at time zone 'UTC')
+        and (public.phase8d_canceled_resource_has_active_hold('generation',g.id::text,r.auth_user_id)
+             or g.r2_key is not null or g.image_url is not null))
   into v_blocked;
 
   if v_blocked>0 then return query select r.id,r.state,false,v_blocked; return; end if;
