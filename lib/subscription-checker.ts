@@ -5,16 +5,14 @@ import { requireOptInMfaSatisfied } from "@/lib/security/mfa";
 
 export type ActiveSubscriptionResult = {
   ok: boolean;
-  user?: {
-    id: string;
-    email?: string | null;
-  };
+  user?: { id: string; email?: string | null };
   profile?: {
     id: string;
     user_id?: string | null;
     email?: string | null;
     badge?: string | null;
     seat_number?: number | null;
+    account_lifecycle_state?: string;
   } | null;
   subscription?: {
     id: string;
@@ -35,156 +33,66 @@ export type ActiveSubscriptionResult = {
 export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResult> {
   try {
     const supabase = await supabaseServer();
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return {
-        ok: false,
-        error: "UNAUTHENTICATED",
-        message: "You must be logged in to access this area.",
-        status: 401,
-      };
-    }
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) return { ok: false, error: "UNAUTHENTICATED", message: "You must be logged in to access this area.", status: 401 };
 
     const mfa = await requireOptInMfaSatisfied(supabase);
     if (mfa.ok === false) return { ok: false, user: { id: user.id, email: user.email ?? null }, error: mfa.error, message: "Multi-factor authentication is required.", status: mfa.status };
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select(
-        `
-        id,
-        user_id,
-        email,
-        badge,
-        seat_number
-      `
-      )
+      .select("id,user_id,email,badge,seat_number,account_lifecycle_state")
       .eq("user_id", user.id)
       .maybeSingle();
+    if (profileError) return { ok: false, user: { id: user.id, email: user.email ?? null }, error: "PROFILE_LOOKUP_FAILED", message: profileError.message ?? "Failed to load profile.", status: 500 };
+    if (!profile) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: null, error: "NO_PROFILE", message: "No profile found for this account.", status: 403 };
 
-    if (profileError) {
+    const profileResult = {
+      id: profile.id,
+      user_id: profile.user_id ?? null,
+      email: profile.email ?? null,
+      badge: profile.badge ?? null,
+      seat_number: profile.seat_number ?? null,
+      account_lifecycle_state: profile.account_lifecycle_state ?? "active",
+    };
+
+    if (profileResult.account_lifecycle_state !== "active") {
       return {
         ok: false,
-        user: {
-          id: user.id,
-          email: user.email ?? null,
-        },
-        error: "PROFILE_LOOKUP_FAILED",
-        message: profileError.message ?? "Failed to load profile.",
-        status: 500,
-      };
-    }
-
-    if (!profile) {
-      return {
-        ok: false,
-        user: {
-          id: user.id,
-          email: user.email ?? null,
-        },
-        profile: null,
-        error: "NO_PROFILE",
-        message: "No profile found for this account.",
-        status: 403,
+        user: { id: user.id, email: user.email ?? null },
+        profile: profileResult,
+        subscription: null,
+        error: "ACCOUNT_DELETION_PENDING",
+        message: "This account is frozen during its voluntary deletion recovery period. Data rights, billing recovery, security, and reactivation remain available.",
+        status: 423,
       };
     }
 
     const { data: subscription, error: subscriptionError } = await supabase
       .from("user_subscriptions")
-      .select(
-        `
-        id,
-        status,
-        tier_name,
-        current_period_start,
-        current_period_end,
-        cancel_at_period_end,
-        canceled_at,
-        trial_start,
-        trial_end
-      `
-      )
+      .select("id,status,tier_name,current_period_start,current_period_end,cancel_at_period_end,canceled_at,trial_start,trial_end")
       .eq("user_id", profile.id)
       .in("status", ["active", "trialing"])
       .order("current_period_end", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (subscriptionError) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, error: "SUBSCRIPTION_LOOKUP_FAILED", message: subscriptionError.message ?? "Failed to load subscription.", status: 500 };
 
-    if (subscriptionError) {
-      return {
-        ok: false,
-        user: {
-          id: user.id,
-          email: user.email ?? null,
-        },
-        profile,
-        error: "SUBSCRIPTION_LOOKUP_FAILED",
-        message: subscriptionError.message ?? "Failed to load subscription.",
-        status: 500,
-      };
-    }
-
-    const hasActiveSubscription =
-      !!subscription &&
-      (subscription.status === "active" || subscription.status === "trialing");
-
-    if (!hasActiveSubscription) {
-      return {
-        ok: false,
-        user: {
-          id: user.id,
-          email: user.email ?? null,
-        },
-        profile,
-        subscription: null,
-        error: "NO_ACTIVE_SUBSCRIPTION",
-        message: "An active subscription is required to access this area.",
-        status: 402,
-      };
-    }
+    const hasActiveSubscription = !!subscription && (subscription.status === "active" || subscription.status === "trialing");
+    if (!hasActiveSubscription) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription: null, error: "NO_ACTIVE_SUBSCRIPTION", message: "An active subscription is required to access this area.", status: 402 };
 
     try {
       if (!(await hasCurrentMaterialPolicyAcceptance(user.id, profile.id))) {
-        return {
-          ok: false,
-          user: { id: user.id, email: user.email ?? null },
-          profile,
-          subscription,
-          error: POLICY_ACCEPTANCE_REQUIRED,
-          message: "Current material policy acceptance is required.",
-          status: 428,
-        };
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: POLICY_ACCEPTANCE_REQUIRED, message: "Current material policy acceptance is required.", status: 428 };
       }
     } catch {
-      return {
-        ok: false,
-        user: { id: user.id, email: user.email ?? null },
-        profile,
-        subscription,
-        error: "POLICY_ACCEPTANCE_LOOKUP_FAILED",
-        message: "Policy acceptance status is temporarily unavailable.",
-        status: 503,
-      };
+      return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "POLICY_ACCEPTANCE_LOOKUP_FAILED", message: "Policy acceptance status is temporarily unavailable.", status: 503 };
     }
 
     return {
       ok: true,
-      user: {
-        id: user.id,
-        email: user.email ?? null,
-      },
-      profile: {
-        id: profile.id,
-        user_id: profile.user_id ?? null,
-        email: profile.email ?? null,
-        badge: profile.badge ?? null,
-        seat_number: profile.seat_number ?? null,
-      },
+      user: { id: user.id, email: user.email ?? null },
+      profile: profileResult,
       subscription: {
         id: subscription.id,
         status: subscription.status,
@@ -199,24 +107,8 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
       status: 200,
     };
   } catch (err: any) {
-    const unauthorized =
-      err?.message === "Unauthorized" ||
-      err?.message === "Auth session missing!";
-
-    if (unauthorized) {
-      return {
-        ok: false,
-        error: "UNAUTHENTICATED",
-        message: "You must be logged in to access this area.",
-        status: 401,
-      };
-    }
-
-    return {
-      ok: false,
-      error: "INTERNAL_ERROR",
-      message: err?.message ?? "Unknown error",
-      status: 500,
-    };
+    const unauthorized = err?.message === "Unauthorized" || err?.message === "Auth session missing!";
+    if (unauthorized) return { ok: false, error: "UNAUTHENTICATED", message: "You must be logged in to access this area.", status: 401 };
+    return { ok: false, error: "INTERNAL_ERROR", message: err?.message ?? "Unknown error", status: 500 };
   }
 }
