@@ -8,6 +8,7 @@ const inventoryPaths = [
   path.join(root, "docs/security/api-authorization-inventory.md"),
   path.join(root, "docs/security/api-authorization-inventory-phase8c.md"),
   path.join(root, "docs/security/api-authorization-inventory-phase8d.md"),
+  path.join(root, "docs/security/api-authorization-inventory-phase8f.md"),
 ]
 const methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] as const
 const allowedTaxonomy = new Set(["PUBLIC", "AUTHENTICATED", "FRESH_TOTP", "OWNER", "ENTITLED", "ADMIN", "SCHEDULER_SECRET", "WEBHOOK_SIGNATURE", "OAUTH_CALLBACK", "INTERNAL_CONTROLLED"])
@@ -161,6 +162,25 @@ assert.ok(phase8dRetentionClasses.has("INTERNAL_CONTROLLED"), "Phase 8D retentio
 assert.ok(!phase8dRetentionClasses.has("PUBLIC"), "Phase 8D retention runner must not be public")
 assert.match(phase8dRetentionGet[5], /authenticateSchedulerRequest\(\).+CRON_SECRET.+VERCEL_CRON_SECRET/i)
 assert.match(phase8dRetentionGet[10], /Supabase admin.+after scheduler authentication/i)
+
+for (const [route, method] of [
+  ["/api/admin/governance/legal-holds", "GET"],
+  ["/api/admin/governance/legal-holds", "POST"],
+  ["/api/admin/governance/legal-holds/[holdId]/review", "POST"],
+  ["/api/admin/governance/legal-holds/[holdId]/release", "POST"],
+] as const) {
+  const classes = authorizationClasses(inventoryRow(route, method))
+  for (const required of ["AUTHENTICATED", "FRESH_TOTP", "ADMIN"]) assert.ok(classes.has(required), `${method} ${route} must record ${required}`)
+  assert.ok(!classes.has("PUBLIC"), `${method} ${route} must not be public`)
+}
+
+const phase8fExpiryGet = inventoryRow("/api/internal/governance/legal-holds/expire", "GET")
+const phase8fExpiryClasses = authorizationClasses(phase8fExpiryGet)
+assert.ok(phase8fExpiryClasses.has("SCHEDULER_SECRET"), "Phase 8F expiry runner must record scheduler-secret authentication")
+assert.ok(phase8fExpiryClasses.has("INTERNAL_CONTROLLED"), "Phase 8F expiry runner must remain internal-only")
+assert.ok(!phase8fExpiryClasses.has("PUBLIC"), "Phase 8F expiry runner must not be public")
+assert.match(phase8fExpiryGet[5], /authenticateSchedulerRequest\(\).+CRON_SECRET.+VERCEL_CRON_SECRET/i)
+assert.match(phase8fExpiryGet[10], /Supabase admin.+after scheduler authentication/i)
 
 assert.match(markdown, new RegExp(`\\*\\*Combined inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries|\\*\\*Inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries`))
 console.log(`API authorization inventory contract passed (${actualFiles.length} files, ${expectedEntries.length} route-method entries).`)

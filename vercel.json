@@ -20,6 +20,10 @@
     {
       "path": "/api/internal/retention/phase8e/run",
       "schedule": "57 5 * * *"
+    },
+    {
+      "path": "/api/internal/governance/legal-holds/expire",
+      "schedule": "7 6 * * *"
     }
   ]
 }
