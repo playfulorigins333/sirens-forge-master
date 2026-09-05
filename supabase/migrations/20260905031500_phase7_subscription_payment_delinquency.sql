@@ -19,6 +19,9 @@ create table public.subscription_payment_delinquencies (
   retention_started_at timestamptz,
   retention_until timestamptz,
   recovered_at timestamptz,
+  recovery_invoice_id text check (recovery_invoice_id is null or (btrim(recovery_invoice_id) = recovery_invoice_id and recovery_invoice_id <> '')),
+  recovery_billing_period_start timestamptz,
+  recovery_billing_period_end timestamptz,
   day_0_notification_due_at timestamptz,
   day_30_notification_due_at timestamptz,
   day_45_notification_due_at timestamptz,
@@ -36,7 +39,11 @@ create table public.subscription_payment_delinquencies (
   check (day_45_notification_due_at is null or day_45_notification_due_at = retention_started_at + interval '45 days'),
   check (day_55_notification_due_at is null or day_55_notification_due_at = retention_started_at + interval '55 days'),
   check ((state in ('retention_countdown','expired') or (state in ('recovered','superseded') and second_missed_at is not null)) = (retention_started_at is not null)),
-  check ((state = 'recovered') = (recovered_at is not null))
+  check ((recovery_billing_period_start is null) = (recovery_billing_period_end is null)),
+  check (recovery_billing_period_end is null or recovery_billing_period_end > recovery_billing_period_start),
+  check (state <> 'recovered' or (recovered_at is not null and recovery_billing_period_start is not null)),
+  check (state = 'recovered' or (recovered_at is null and recovery_invoice_id is null and recovery_billing_period_start is null)),
+  check (recovered_at is null or (recovered_at >= first_missed_at and (second_missed_at is null or recovered_at >= second_missed_at)))
 );
 
 create unique index subscription_payment_delinquency_one_open
@@ -128,11 +135,23 @@ begin
   if found and exists (
     select 1 from public.subscription_payment_delinquency_invoices i
     where i.delinquency_id = v_delinquency.id
-      and (i.billing_period_start, i.billing_period_end) >= (p_billing_period_start, p_billing_period_end)
+      and p_billing_period_start < i.billing_period_end
   ) then
     return 'stale_failure_ignored';
   end if;
   if not found then
+    if exists (
+      select 1 from public.subscription_payment_delinquencies d
+      where d.subscription_id = v_subscription.id and d.state = 'recovered'
+        and d.recovery_billing_period_end is not null
+        and p_billing_period_start < d.recovery_billing_period_end
+        and d.id = (select d2.id from public.subscription_payment_delinquencies d2
+                    where d2.subscription_id = v_subscription.id and d2.state = 'recovered'
+                      and d2.recovery_billing_period_end is not null
+                    order by d2.recovery_billing_period_end desc, d2.recovered_at desc limit 1)
+    ) then
+      return 'stale_failure_ignored';
+    end if;
     insert into public.subscription_payment_delinquencies(
       auth_user_id, profile_id, subscription_id, stripe_subscription_id, state,
       first_missed_invoice_id, first_missed_at, consecutive_missed_cycles
@@ -196,7 +215,11 @@ begin
     return 'stale_recovery_ignored';
   end if;
   update public.subscription_payment_delinquencies
-     set state = 'recovered', recovered_at = p_recovered_at, updated_at = now()
+     set state = 'recovered', recovered_at = p_recovered_at,
+         recovery_invoice_id = p_invoice_id,
+         recovery_billing_period_start = p_billing_period_start,
+         recovery_billing_period_end = p_billing_period_end,
+         updated_at = now()
    where id = v_delinquency_id;
   return 'recovered';
 end $$;

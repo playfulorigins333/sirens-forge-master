@@ -144,15 +144,16 @@ async function processA3(event: StripeEvent, provider: PaymentV2Provider, db: Pa
     const failureObservedAt = timestamp(event.created);
     const billingPeriodStart = timestamp(line?.period?.start ?? -1);
     const billingPeriodEnd = timestamp(line?.period?.end ?? -1);
+    const providerPaidAt = nullableTimestamp(failedInvoice.status_transitions?.paid_at);
     const invoiceSatisfied = failedInvoice.status === "paid" || failedInvoice.status === "void" ||
       (Number.isInteger(failedInvoice.amount_due) && Number.isInteger(failedInvoice.amount_paid) && failedInvoice.amount_paid! >= failedInvoice.amount_due!);
     if (invoiceSatisfied || !["past_due", "unpaid"].includes(subscription.status)) {
-      if (invoiceSatisfied && ["active", "trialing"].includes(subscription.status) && failedInvoice.billing_reason === "subscription_cycle" &&
+      if (providerPaidAt && ["active", "trialing"].includes(subscription.status) && failedInvoice.billing_reason === "subscription_cycle" &&
           invoicePrice === priceId && line?.quantity === 1 && billingPeriodStart && billingPeriodEnd && db.recoverSubscriptionPaymentDelinquency) {
         const recovery = await db.recoverSubscriptionPaymentDelinquency({
           p_hold_id: discriminator.holdId, p_subscription_id: subscriptionId, p_customer_id: authoritativeCustomer,
           p_price_id: priceId, p_invoice_id: failedInvoice.id, p_billing_period_start: billingPeriodStart,
-          p_billing_period_end: billingPeriodEnd, p_recovered_at: failureObservedAt,
+          p_billing_period_end: billingPeriodEnd, p_recovered_at: providerPaidAt,
         });
         if (!["recovered", "no_open_delinquency", "stale_recovery_ignored"].includes(recovery)) {
           return { status: "FAILED_TERMINAL", error: "DELINQUENCY_RESULT_INVALID" };

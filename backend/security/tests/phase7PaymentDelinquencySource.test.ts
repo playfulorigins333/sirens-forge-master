@@ -31,6 +31,10 @@ test("migration is private, invoice-idempotent, and separate from cancellation a
   assert.match(sql, /already_recorded_cycle/);
   assert.match(sql, /stale_failure_ignored/);
   assert.match(sql, /stale_recovery_ignored/);
+  assert.match(sql, /recovery_invoice_id text/);
+  assert.match(sql, /recovery_billing_period_start timestamptz/);
+  assert.match(sql, /recovery_billing_period_end timestamptz/);
+  assert.match(sql, /p_billing_period_start < d\.recovery_billing_period_end/);
   assert.match(sql, /retention_until = retention_started_at \+ interval '60 days'/);
   assert.match(sql, /force row level security/);
   assert.match(sql, /revoke all .* anon, authenticated, service_role/i);
