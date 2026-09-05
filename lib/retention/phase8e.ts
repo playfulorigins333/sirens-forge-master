@@ -17,55 +17,18 @@ export type Phase8eRunResult = {
   twinsPurged: number;
 };
 
-type ClaimRow = {
-  delinquency_id?: unknown;
-  auth_user_id?: unknown;
-  profile_id?: unknown;
-  claim_token?: unknown;
-  claim_state?: unknown;
-  retention_until?: unknown;
-};
-
-function rows(data: unknown): ClaimRow[] {
-  return Array.isArray(data) ? data as ClaimRow[] : [];
-}
-
-function firstRow(data: unknown): Record<string, unknown> | null {
-  return Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) ?? null : data && typeof data === "object" ? data as Record<string, unknown> : null;
-}
-
-function expectedPrivateMediaBlock(error: unknown) {
-  return error instanceof PrivateMediaLifecycleError && ["LEGAL_HOLD", "ACTIVE_VIDEO", "SHARED_STORAGE_OBJECT", "STATE_CONFLICT"].includes(error.code);
-}
-
-function expectedTwinBlock(error: unknown) {
-  return error instanceof TwinLifecycleError && ["LEGAL_HOLD", "ACTIVE_COMPUTE", "ACTIVE_TRAINER", "UPLOAD_WINDOW_ACTIVE", "STATE_CONFLICT", "PURGE_ALREADY_CLAIMED"].includes(error.code);
-}
-
-function beforeOrAt(value: unknown, cutoff: number) {
-  if (typeof value !== "string") return false;
-  const time = new Date(value).getTime();
-  return Number.isFinite(time) && time <= cutoff;
-}
+type ClaimRow = { delinquency_id?: unknown; auth_user_id?: unknown; profile_id?: unknown; claim_token?: unknown; claim_state?: unknown; retention_until?: unknown; };
+function rows(data: unknown): ClaimRow[] { return Array.isArray(data) ? data as ClaimRow[] : []; }
+function firstRow(data: unknown): Record<string, unknown> | null { return Array.isArray(data) ? (data[0] as Record<string, unknown> | undefined) ?? null : data && typeof data === "object" ? data as Record<string, unknown> : null; }
+function expectedPrivateMediaBlock(error: unknown) { return error instanceof PrivateMediaLifecycleError && ["LEGAL_HOLD", "ACTIVE_VIDEO", "SHARED_STORAGE_OBJECT", "STATE_CONFLICT"].includes(error.code); }
+function expectedTwinBlock(error: unknown) { return error instanceof TwinLifecycleError && ["LEGAL_HOLD", "ACTIVE_COMPUTE", "ACTIVE_TRAINER", "UPLOAD_WINDOW_ACTIVE", "STATE_CONFLICT", "PURGE_ALREADY_CLAIMED"].includes(error.code); }
+function beforeOrAt(value: unknown, cutoff: number) { if (typeof value !== "string") return false; const time = new Date(value).getTime(); return Number.isFinite(time) && time <= cutoff; }
 
 export async function runPhase8eSubscriptionDelinquencyEnforcement(): Promise<Phase8eRunResult> {
   const admin = getSupabaseAdmin();
-  const result: Phase8eRunResult = {
-    ok: true,
-    code: "PHASE8E_SUBSCRIPTION_DELINQUENCY_ENFORCEMENT_COMPLETED",
-    accountsSelected: 0,
-    accountsHeld: 0,
-    accountsSuperseded: 0,
-    accountsRecovered: 0,
-    accountsPurged: 0,
-    accountsBlocked: 0,
-    mediaPurged: 0,
-    twinsPurged: 0,
-  };
-
+  const result: Phase8eRunResult = { ok: true, code: "PHASE8E_SUBSCRIPTION_DELINQUENCY_ENFORCEMENT_COMPLETED", accountsSelected: 0, accountsHeld: 0, accountsSuperseded: 0, accountsRecovered: 0, accountsPurged: 0, accountsBlocked: 0, mediaPurged: 0, twinsPurged: 0 };
   const claims = await admin.rpc("phase8e_claim_expired_delinquent_accounts", { p_limit: 10 });
   if (claims.error) return { ...result, ok: false, code: "PHASE8E_ACCOUNT_SELECTION_FAILED" };
-
   for (const claim of rows(claims.data)) {
     const delinquencyId = typeof claim.delinquency_id === "string" ? claim.delinquency_id : null;
     const authUserId = typeof claim.auth_user_id === "string" ? claim.auth_user_id : null;
@@ -74,104 +37,47 @@ export async function runPhase8eSubscriptionDelinquencyEnforcement(): Promise<Ph
     const claimState = typeof claim.claim_state === "string" ? claim.claim_state : null;
     const retentionUntil = typeof claim.retention_until === "string" ? claim.retention_until : null;
     if (!delinquencyId || !authUserId || !profileId) continue;
-
     result.accountsSelected += 1;
-    if (claimState === "held") {
-      result.accountsHeld += 1;
-      continue;
-    }
-    if (claimState === "superseded") {
-      result.accountsSuperseded += 1;
-      continue;
-    }
-    if (claimState !== "claimed" || !claimToken || !retentionUntil) {
-      return { ...result, ok: false, code: "PHASE8E_ACCOUNT_CLAIM_INVALID" };
-    }
-
+    if (claimState === "held") { result.accountsHeld += 1; continue; }
+    if (claimState === "superseded") { result.accountsSuperseded += 1; continue; }
+    if (claimState !== "claimed" || !claimToken || !retentionUntil) return { ...result, ok: false, code: "PHASE8E_ACCOUNT_CLAIM_INVALID" };
     const cutoff = new Date(retentionUntil).getTime();
     if (!Number.isFinite(cutoff)) return { ...result, ok: false, code: "PHASE8E_RETENTION_DEADLINE_INVALID" };
-
-    const validation = await admin.rpc("phase8e_validate_delinquent_account_purge", {
-      p_delinquency_id: delinquencyId,
-      p_auth_user_id: authUserId,
-      p_claim_token: claimToken,
-    });
+    const validation = await admin.rpc("phase8e_validate_delinquent_account_purge", { p_delinquency_id: delinquencyId, p_auth_user_id: authUserId, p_claim_token: claimToken });
     if (validation.error) return { ...result, ok: false, code: "PHASE8E_ACCOUNT_VALIDATION_FAILED" };
     const validationRow = firstRow(validation.data);
-    if (validationRow?.allowed !== true) {
-      if (validationRow?.delinquency_state === "superseded") result.accountsSuperseded += 1;
-      else if (validationRow?.delinquency_state === "recovered") result.accountsRecovered += 1;
-      else result.accountsHeld += 1;
-      continue;
-    }
-
-    const assets = await admin
-      .from("generation_assets")
-      .select("id,lifecycle_state,created_at")
-      .eq("owner_id", authUserId)
-      .lte("created_at", retentionUntil)
-      .neq("lifecycle_state", "purged")
-      .limit(100);
+    if (validationRow?.allowed !== true) { if (validationRow?.delinquency_state === "superseded") result.accountsSuperseded += 1; else if (validationRow?.delinquency_state === "recovered") result.accountsRecovered += 1; else result.accountsHeld += 1; continue; }
+    const assets = await admin.from("generation_assets").select("id,lifecycle_state,created_at").eq("owner_id", authUserId).lte("created_at", retentionUntil).neq("lifecycle_state", "purged").limit(100);
     if (assets.error) return { ...result, ok: false, code: "PHASE8E_MEDIA_LOOKUP_FAILED" };
-
     for (const asset of assets.data ?? []) {
       if (typeof asset.id !== "string" || !beforeOrAt(asset.created_at, cutoff)) continue;
       try {
         if (asset.lifecycle_state === "active") await trashPrivateGenerationAsset(asset.id, authUserId);
-        await purgePrivateGenerationAsset(asset.id, authUserId);
+        await purgePrivateGenerationAsset(asset.id, authUserId, "retention_expired");
         result.mediaPurged += 1;
       } catch (error) {
-        if (expectedPrivateMediaBlock(error)) {
-          result.accountsBlocked += 1;
-          continue;
-        }
+        if (expectedPrivateMediaBlock(error)) { result.accountsBlocked += 1; continue; }
         return { ...result, ok: false, code: "PHASE8E_MEDIA_PURGE_FAILED" };
       }
     }
-
-    const twins = await admin
-      .from("user_loras")
-      .select("id,user_id,lifecycle_state,created_at")
-      .in("user_id", [authUserId, profileId])
-      .lte("created_at", retentionUntil)
-      .neq("lifecycle_state", "purged")
-      .limit(100);
+    const twins = await admin.from("user_loras").select("id,user_id,lifecycle_state,created_at").in("user_id", [authUserId, profileId]).lte("created_at", retentionUntil).neq("lifecycle_state", "purged").limit(100);
     if (twins.error) return { ...result, ok: false, code: "PHASE8E_TWIN_LOOKUP_FAILED" };
-
     for (const twin of twins.data ?? []) {
       if (typeof twin.id !== "string" || typeof twin.user_id !== "string" || !beforeOrAt(twin.created_at, cutoff)) continue;
       try {
         if (twin.lifecycle_state === "active") await trashTwin(twin.id, twin.user_id);
-        await purgeTwin(twin.id, twin.user_id);
+        await purgeTwin(twin.id, twin.user_id, "retention_expired");
         result.twinsPurged += 1;
       } catch (error) {
-        if (expectedTwinBlock(error)) {
-          result.accountsBlocked += 1;
-          continue;
-        }
+        if (expectedTwinBlock(error)) { result.accountsBlocked += 1; continue; }
         return { ...result, ok: false, code: "PHASE8E_TWIN_PURGE_FAILED" };
       }
     }
-
-    const finalValidation = await admin.rpc("phase8e_validate_delinquent_account_purge", {
-      p_delinquency_id: delinquencyId,
-      p_auth_user_id: authUserId,
-      p_claim_token: claimToken,
-    });
+    const finalValidation = await admin.rpc("phase8e_validate_delinquent_account_purge", { p_delinquency_id: delinquencyId, p_auth_user_id: authUserId, p_claim_token: claimToken });
     if (finalValidation.error) return { ...result, ok: false, code: "PHASE8E_ACCOUNT_REVALIDATION_FAILED" };
     const finalValidationRow = firstRow(finalValidation.data);
-    if (finalValidationRow?.allowed !== true) {
-      if (finalValidationRow?.delinquency_state === "superseded") result.accountsSuperseded += 1;
-      else if (finalValidationRow?.delinquency_state === "recovered") result.accountsRecovered += 1;
-      else result.accountsHeld += 1;
-      continue;
-    }
-
-    const finalized = await admin.rpc("phase8e_finalize_delinquent_account_purge", {
-      p_delinquency_id: delinquencyId,
-      p_auth_user_id: authUserId,
-      p_claim_token: claimToken,
-    });
+    if (finalValidationRow?.allowed !== true) { if (finalValidationRow?.delinquency_state === "superseded") result.accountsSuperseded += 1; else if (finalValidationRow?.delinquency_state === "recovered") result.accountsRecovered += 1; else result.accountsHeld += 1; continue; }
+    const finalized = await admin.rpc("phase8e_finalize_delinquent_account_purge", { p_delinquency_id: delinquencyId, p_auth_user_id: authUserId, p_claim_token: claimToken });
     if (finalized.error) return { ...result, ok: false, code: "PHASE8E_ACCOUNT_FINALIZE_FAILED" };
     const finalRow = firstRow(finalized.data);
     if (finalRow?.finalized === true) result.accountsPurged += 1;
@@ -179,6 +85,5 @@ export async function runPhase8eSubscriptionDelinquencyEnforcement(): Promise<Ph
     else if (finalRow?.delinquency_state === "recovered") result.accountsRecovered += 1;
     else result.accountsBlocked += Number(finalRow?.blocked_count ?? 1) || 1;
   }
-
   return result;
 }
