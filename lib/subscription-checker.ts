@@ -18,6 +18,7 @@ export type ActiveSubscriptionResult = {
     id: string;
     status: string;
     tier_name?: string | null;
+    stripe_subscription_id?: string | null;
     current_period_start?: string | null;
     current_period_end?: string | null;
     cancel_at_period_end?: boolean | null;
@@ -70,16 +71,36 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
 
     const { data: subscription, error: subscriptionError } = await supabase
       .from("user_subscriptions")
-      .select("id,status,tier_name,current_period_start,current_period_end,cancel_at_period_end,canceled_at,trial_start,trial_end")
+      .select("id,status,tier_name,stripe_subscription_id,current_period_start,current_period_end,cancel_at_period_end,canceled_at,trial_start,trial_end")
       .eq("user_id", profile.id)
-      .in("status", ["active", "trialing"])
+      .in("status", ["active", "trialing", "canceled"])
       .order("current_period_end", { ascending: false })
       .limit(1)
       .maybeSingle();
     if (subscriptionError) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, error: "SUBSCRIPTION_LOOKUP_FAILED", message: subscriptionError.message ?? "Failed to load subscription.", status: 500 };
 
-    const hasActiveSubscription = !!subscription && (subscription.status === "active" || subscription.status === "trialing");
+    const boundary = subscription?.current_period_end ? new Date(subscription.current_period_end).getTime() : Number.NaN;
+    const canceledButPaidThroughBoundary = subscription?.status === "canceled"
+      && !!subscription.stripe_subscription_id
+      && Number.isFinite(boundary)
+      && boundary > Date.now();
+    const hasActiveSubscription = !!subscription
+      && (subscription.status === "active" || subscription.status === "trialing" || canceledButPaidThroughBoundary);
     if (!hasActiveSubscription) return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription: null, error: "NO_ACTIVE_SUBSCRIPTION", message: "An active subscription is required to access this area.", status: 402 };
+
+    const isLifetime = subscription.tier_name === "og_throne" && !subscription.stripe_subscription_id;
+    if (!isLifetime) {
+      if (!subscription.stripe_subscription_id || !subscription.current_period_end) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "MALFORMED_SUBSCRIPTION", message: "Subscription access could not be verified.", status: 503 };
+      }
+      const paidAccessEndsAt = new Date(subscription.current_period_end).getTime();
+      if (!Number.isFinite(paidAccessEndsAt)) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "MALFORMED_SUBSCRIPTION", message: "Subscription access could not be verified.", status: 503 };
+      }
+      if (paidAccessEndsAt <= Date.now()) {
+        return { ok: false, user: { id: user.id, email: user.email ?? null }, profile: profileResult, subscription, error: "NO_ACTIVE_SUBSCRIPTION", message: "Paid subscription access has ended.", status: 402 };
+      }
+    }
 
     try {
       if (!(await hasCurrentMaterialPolicyAcceptance(user.id, profile.id))) {
@@ -97,6 +118,7 @@ export async function ensureActiveSubscription(): Promise<ActiveSubscriptionResu
         id: subscription.id,
         status: subscription.status,
         tier_name: subscription.tier_name ?? null,
+        stripe_subscription_id: subscription.stripe_subscription_id ?? null,
         current_period_start: subscription.current_period_start ?? null,
         current_period_end: subscription.current_period_end ?? null,
         cancel_at_period_end: subscription.cancel_at_period_end ?? null,

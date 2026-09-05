@@ -2,14 +2,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { ensureCreatorReadAccess } from "@/lib/creator-read-access";
 import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { isPrivateCreatorMediaEnabled, PRIVATE_MEDIA_SIGNED_TTL_SECONDS, sanitizeDownloadFilename, UUID_RE } from "@/lib/private-creator-media/core";
 import { signPrivateGenerationObject } from "@/lib/private-creator-media/r2";
 
 export async function GET(req: NextRequest, context: { params: Promise<{ assetId: string }> }) {
   if (!isPrivateCreatorMediaEnabled()) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404, headers: { "Cache-Control": "no-store" } });
-  const auth = await ensureActiveSubscription();
+  const auth = await ensureCreatorReadAccess();
   if (!auth.ok) return NextResponse.json({ error: auth.error, message: auth.message }, { status: auth.status, headers: { "Cache-Control": "no-store" } });
   const { assetId } = await context.params;
   const mode = req.nextUrl.searchParams.get("mode") ?? "preview";

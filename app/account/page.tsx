@@ -14,6 +14,7 @@ import {
 import { ensureAuthenticatedProfile } from "@/lib/account-access";
 import { supabaseServer } from "@/lib/supabaseServer";
 import { hasCurrentMaterialPolicyAcceptance } from "@/lib/material-policy/service";
+import { getSubscriptionRetentionSummary } from "@/lib/subscription-retention";
 
 export const dynamic = "force-dynamic";
 
@@ -115,6 +116,9 @@ export default async function AccountPage() {
   const displaySubscription = activeSubscription ?? latestSubscription;
   const hasActivePlan = activeSubscription !== null;
   const policyAccepted = await hasCurrentMaterialPolicyAcceptance(auth.user.id, profileId).catch(() => false);
+  const retention = await getSubscriptionRetentionSummary(auth.user.id, profileId).catch(() => null);
+  const retainedReadOnly = retention && new Date(retention.paidAccessEndedAt).getTime() <= Date.now() && new Date(retention.retentionUntil).getTime() > Date.now() && !hasActivePlan;
+  const scheduledCancellation = activeSubscription?.tier_name !== "og_throne" && activeSubscription?.cancel_at_period_end && activeSubscription.current_period_end;
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">
@@ -142,6 +146,9 @@ export default async function AccountPage() {
             Review your Sirens Forge membership, account details, and the plan tied to your creator access.
           </p>
         </div>
+
+        {scheduledCancellation ? <section className="mb-6 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 text-amber-50"><strong>Cancels at period end.</strong> Normal paid access continues through {formatDate(activeSubscription.current_period_end)}.</section> : null}
+        {retainedReadOnly ? <section className="mb-6 rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-5 text-cyan-50"><strong>Creator data is in read-only retention.</strong> Paid access ended {formatDate(retention.paidAccessEndedAt)}; retained access is available through {formatDate(retention.retentionUntil)}. <span className="ml-2 inline-flex gap-3 underline"><Link href="/library">Library</Link><Link href="/account/data-rights">Privacy &amp; Data</Link><Link href="/billing">Billing</Link></span></section> : null}
 
         {/* Top cards */}
         <div className="grid gap-6 lg:grid-cols-3">

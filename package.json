@@ -90,6 +90,8 @@
     "test:sirens-mind-live": "tsx tools/sirens-mind-live-battery.ts",
     "test:phase6f2-creator-reply-subscribers": "node --conditions=react-server --import tsx --test backend/security/tests/phase6f2CreatorReplySubscribers.test.ts",
     "test:phase6f2-creator-reply-postgres": "node backend/security/tests/runPhase6f2CreatorReplyPostgres.mjs"
+    ,"test:phase7-subscription-retention": "tsx --test backend/security/tests/phase7SubscriptionCancellationSource.test.ts"
+    ,"test:phase7-subscription-retention-postgres": "node backend/security/tests/runPhase7SubscriptionCancellationPostgres.mjs"
   },
   "repository": {
     "type": "git",
