@@ -1,0 +1,41 @@
+name: Phase 8E Subscription Delinquency Enforcement
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  phase8e-subscription-delinquency-enforcement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PHASE8E_DELINQUENCY_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Phase 8E source and boundary contracts
+        run: npx tsx --test backend/security/tests/phase8eSubscriptionDelinquencyEnforcementSource.test.ts
+      - name: Phase 8E PostgreSQL integration
+        run: node backend/security/tests/runPhase8eSubscriptionDelinquencyPostgres.mjs
+      - name: API authorization inventory contract
+        run: npx tsx backend/security/tests/apiAuthorizationInventory.test.ts

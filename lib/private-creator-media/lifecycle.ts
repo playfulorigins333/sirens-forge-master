@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import { sirensApiFetch } from "@/lib/sirensApi";
 
 export type PrivateMediaLifecycleState = "active" | "trashed" | "purge_pending" | "purged";
+export type PrivateMediaPurgeReason = "creator_permanent_delete" | "retention_expired";
 export type PrivateMediaLifecycleErrorCode =
   | "NOT_FOUND"
   | "STATE_CONFLICT"
@@ -87,7 +88,11 @@ type PurgeClaimRow = {
   object_key: string | null;
 };
 
-export async function purgePrivateGenerationAsset(assetId: string, ownerId: string) {
+export async function purgePrivateGenerationAsset(
+  assetId: string,
+  ownerId: string,
+  requestedReason: PrivateMediaPurgeReason = "creator_permanent_delete",
+) {
   const admin = getSupabaseAdmin();
   const lookup = await admin
     .from("generation_assets")
@@ -111,8 +116,9 @@ export async function purgePrivateGenerationAsset(assetId: string, ownerId: stri
   if (!claimToken) throw new PrivateMediaLifecycleError("LIFECYCLE_UNAVAILABLE", 503);
 
   const reason = asset.lifecycle_state === "purge_pending"
-    ? asset.purge_reason ?? "creator_permanent_delete"
-    : "creator_permanent_delete";
+    ? asset.purge_reason ?? requestedReason
+    : requestedReason;
+  if (reason !== requestedReason) throw new PrivateMediaLifecycleError("STATE_CONFLICT", 409);
 
   const claim = await admin.rpc("claim_private_generation_asset_purge", {
     p_asset_id: assetId,
