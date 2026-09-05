@@ -1,0 +1,40 @@
+name: Phase 8B Data Minimization PostgreSQL
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  phase8b-data-minimization-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PHASE8_DATA_MINIMIZATION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase8_data_minimization_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Create disposable PostgreSQL database
+        run: psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -v ON_ERROR_STOP=1 -c 'create database phase8_data_minimization_test'
+      - name: Phase 8B source contracts
+        run: npx tsx --test backend/security/tests/phase8DataMinimizationSource.test.ts
+      - name: Phase 8B PostgreSQL 17 behavior
+        run: node backend/security/tests/runPhase8DataMinimizationPostgres.mjs
