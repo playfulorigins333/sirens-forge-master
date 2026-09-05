@@ -89,36 +89,32 @@ $$;
 select public.append_governance_audit_event(
   '10000000-0000-4000-8000-000000000002','creator','phase8_test_event','creator','10000000-0000-4000-8000-000000000002',
   'test',null,'ok',null,null,'20000000-0000-4000-8000-000000000001',null,'{}'::jsonb,'{}'::jsonb,null
-) as first_audit_id \gset
+);
 select public.append_governance_audit_event(
   '10000000-0000-4000-8000-000000000003','creator','phase8_test_event_2','creator','10000000-0000-4000-8000-000000000003',
   'test',null,'ok',null,null,'20000000-0000-4000-8000-000000000002',null,'{}'::jsonb,'{}'::jsonb,null
-) as second_audit_id \gset
+);
 
 do $$
 declare
+  first_id uuid;
   first_hash text;
   second_previous text;
   second_hash text;
 begin
-  select event_hash into first_hash from public.governance_audit_events where id=:'first_audit_id'::uuid;
-  select previous_event_hash,event_hash into second_previous,second_hash from public.governance_audit_events where id=:'second_audit_id'::uuid;
+  select id,event_hash into first_id,first_hash from public.governance_audit_events where correlation_id='20000000-0000-4000-8000-000000000001';
+  select previous_event_hash,event_hash into second_previous,second_hash from public.governance_audit_events where correlation_id='20000000-0000-4000-8000-000000000002';
   if first_hash !~ '^[0-9a-f]{64}$' or second_hash !~ '^[0-9a-f]{64}$' or second_previous is distinct from first_hash then
     raise exception 'governance audit hash chain mismatch';
   end if;
-end
-$$;
-
-do $$
-begin
   begin
-    update public.governance_audit_events set result='tampered' where id=:'first_audit_id'::uuid;
+    update public.governance_audit_events set result='tampered' where id=first_id;
     raise exception 'expected audit update rejection';
   exception when others then
     if sqlerrm <> 'GOVERNANCE_RECORD_IMMUTABLE' then raise; end if;
   end;
   begin
-    delete from public.governance_audit_events where id=:'first_audit_id'::uuid;
+    delete from public.governance_audit_events where id=first_id;
     raise exception 'expected audit delete rejection';
   exception when others then
     if sqlerrm <> 'GOVERNANCE_RECORD_IMMUTABLE' then raise; end if;
@@ -141,17 +137,21 @@ select public.record_governance_action_receipt(
   'ai_likeness_identity_consent','10000000-0000-4000-8000-000000000002','creator','10000000-0000-4000-8000-000000000002',
   'creator','10000000-0000-4000-8000-000000000002','consent','accepted','ai-likeness-v1',null,
   repeat('a',64),'{}'::jsonb,'30000000-0000-4000-8000-000000000001','receipt_key_0001'
-) as creator_receipt_id \gset
+);
 select public.record_governance_action_receipt(
   'ai_likeness_identity_consent','10000000-0000-4000-8000-000000000002','creator','10000000-0000-4000-8000-000000000002',
   'creator','10000000-0000-4000-8000-000000000002','consent','accepted','ai-likeness-v1',null,
   repeat('a',64),'{}'::jsonb,'30000000-0000-4000-8000-000000000001','receipt_key_0001'
-) as creator_receipt_replay_id \gset
+);
 
 do $$
+declare
+  creator_receipt_id uuid;
 begin
-  if :'creator_receipt_id'::uuid is distinct from :'creator_receipt_replay_id'::uuid then
-    raise exception 'receipt idempotent replay returned a different id';
+  select id into creator_receipt_id from public.governance_action_receipts
+   where actor_user_id='10000000-0000-4000-8000-000000000002' and receipt_type='ai_likeness_identity_consent' and idempotency_key='receipt_key_0001';
+  if creator_receipt_id is null or (select count(*) from public.governance_action_receipts where actor_user_id='10000000-0000-4000-8000-000000000002' and receipt_type='ai_likeness_identity_consent' and idempotency_key='receipt_key_0001') <> 1 then
+    raise exception 'receipt idempotent replay duplicated evidence';
   end if;
   begin
     perform public.record_governance_action_receipt(
@@ -183,6 +183,12 @@ begin
   exception when others then
     if sqlerrm <> 'GOVERNANCE_RECEIPT_ADMIN_REQUIRED' then raise; end if;
   end;
+  begin
+    update public.governance_action_receipts set decision='tampered' where id=creator_receipt_id;
+    raise exception 'expected receipt update rejection';
+  exception when others then
+    if sqlerrm <> 'GOVERNANCE_RECORD_IMMUTABLE' then raise; end if;
+  end;
 end
 $$;
 
@@ -190,18 +196,7 @@ select public.record_governance_action_receipt(
   'admin_private_content_access','10000000-0000-4000-8000-000000000001','founder_admin','10000000-0000-4000-8000-000000000003',
   'private_asset','asset-1','view','approved','admin-private-access-v1',null,
   repeat('d',64),'{}'::jsonb,'30000000-0000-4000-8000-000000000004','receipt_key_0004'
-) as admin_receipt_id \gset
-
-do $$
-begin
-  begin
-    update public.governance_action_receipts set decision='tampered' where id=:'creator_receipt_id'::uuid;
-    raise exception 'expected receipt update rejection';
-  exception when others then
-    if sqlerrm <> 'GOVERNANCE_RECORD_IMMUTABLE' then raise; end if;
-  end;
-end
-$$;
+);
 
 -- Legal-hold authority, fresh TOTP, cross-user target identity, active lookup,
 -- release behavior, expiry behavior, and target immutability.
@@ -238,11 +233,14 @@ select public.open_governance_legal_hold(
   'legal-hold-v1',
   '[{"target_type":"private_asset","target_id":"same-object","subject_user_id":"10000000-0000-4000-8000-000000000002","preservation_scope":"binary_and_metadata"},{"target_type":"private_asset","target_id":"same-object","subject_user_id":"10000000-0000-4000-8000-000000000003","preservation_scope":"binary_and_metadata"}]'::jsonb,
   '40000000-0000-4000-8000-000000000003','hold_key_0003'
-) as active_hold_id \gset
+);
 
 do $$
+declare
+  active_hold_id uuid;
 begin
-  if (select count(*) from public.governance_legal_hold_targets where hold_id=:'active_hold_id'::uuid) <> 2 then
+  select id into active_hold_id from public.governance_legal_holds where actor_user_id='10000000-0000-4000-8000-000000000001' and open_idempotency_key='hold_key_0003';
+  if active_hold_id is null or (select count(*) from public.governance_legal_hold_targets where hold_id=active_hold_id) <> 2 then
     raise exception 'cross-user legal-hold target scoping failed';
   end if;
   if not public.governance_target_has_active_legal_hold('private_asset','same-object','10000000-0000-4000-8000-000000000002')
@@ -251,7 +249,7 @@ begin
     raise exception 'active legal-hold subject lookup mismatch';
   end if;
   begin
-    update public.governance_legal_hold_targets set preservation_scope='tampered' where hold_id=:'active_hold_id'::uuid;
+    update public.governance_legal_hold_targets set preservation_scope='tampered' where hold_id=active_hold_id;
     raise exception 'expected legal-hold target update rejection';
   exception when others then
     if sqlerrm <> 'GOVERNANCE_RECORD_IMMUTABLE' then raise; end if;
@@ -260,9 +258,10 @@ end
 $$;
 
 select public.release_governance_legal_hold(
-  :'active_hold_id'::uuid,'10000000-0000-4000-8000-000000000001','release after preservation need ended',
-  statement_timestamp(),'totp','40000000-0000-4000-8000-000000000004','release_key_0001'
-) as released_hold_id \gset
+  (select id from public.governance_legal_holds where actor_user_id='10000000-0000-4000-8000-000000000001' and open_idempotency_key='hold_key_0003'),
+  '10000000-0000-4000-8000-000000000001','release after preservation need ended',statement_timestamp(),'totp',
+  '40000000-0000-4000-8000-000000000004','release_key_0001'
+);
 
 do $$
 begin
@@ -277,9 +276,11 @@ select public.open_governance_legal_hold(
   statement_timestamp()+interval '1 day',statement_timestamp()+interval '2 days',statement_timestamp(),'totp',
   'legal-hold-v1','[{"target_type":"private_asset","target_id":"expiring-object","subject_user_id":"10000000-0000-4000-8000-000000000002","preservation_scope":"metadata_only"}]'::jsonb,
   '40000000-0000-4000-8000-000000000005','hold_key_0004'
-) as expiring_hold_id \gset
+);
 
-update public.governance_legal_holds set status='expired', updated_at=statement_timestamp() where id=:'expiring_hold_id'::uuid;
+update public.governance_legal_holds
+set status='expired', updated_at=statement_timestamp()
+where actor_user_id='10000000-0000-4000-8000-000000000001' and open_idempotency_key='hold_key_0004';
 
 do $$
 begin
