@@ -18,6 +18,25 @@ test("cancellation enforcement keeps the locked sixty-day minimum and central po
   assert.match(migration, /p_limit>50/);
 });
 
+test("newer billing lifecycles supersede old cancellation purge authority", () => {
+  assert.match(migration, /phase8d_canceled_retention_has_successor/);
+  assert.match(migration, /active','trialing','past_due','unpaid/);
+  assert.match(migration, /phase8d_supersede_canceled_retention/);
+  assert.match(migration, /retention\.subscription_cancellation_superseded/);
+  assert.match(migration, /phase8d_validate_canceled_account_purge/);
+  assert.match(runner, /phase8d_validate_canceled_account_purge/g);
+  assert.match(runner, /accountsSuperseded/);
+});
+
+test("destructive work is bounded to the old cancellation retention deadline", () => {
+  assert.match(migration, /p\.created_at<=r\.retention_until/);
+  assert.match(migration, /c\.created_at<=r\.retention_until/);
+  assert.match(migration, /g\.created_at<=\(r\.retention_until at time zone 'UTC'\)/);
+  assert.match(migration, /a\.created_at<=r\.retention_until/);
+  assert.match(migration, /l\.created_at<=\(r\.retention_until at time zone 'UTC'\)/);
+  assert.match(runner, /\.lte\("created_at", retentionUntil\)/);
+});
+
 test("legal holds preserve data but do not extend creator read access", () => {
   assert.match(migration, /subscription_cancellation_retention/);
   assert.match(migration, /governance_target_has_active_legal_hold\('subscription'/);
