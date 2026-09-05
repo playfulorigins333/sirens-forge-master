@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { ensureActiveSubscription } from "@/lib/subscription-checker";
+import { ensureCreatorReadAccess } from "@/lib/creator-read-access";
 import { policyConsentPath } from "@/lib/material-policy/redirect";
 import { supabaseServer } from "@/lib/supabaseServer";
 import LibraryClient, { LibraryItem } from "./LibraryClient";
@@ -142,7 +142,7 @@ function getIdentitySeedPreview(row: UserLoraRow): string | null {
 }
 
 export default async function ActiveLibraryPage() {
-  const auth = await ensureActiveSubscription();
+  const auth = await ensureCreatorReadAccess();
   if (!auth.ok) {
     if (auth.error === "UNAUTHENTICATED") redirect("/login");
     if (auth.error === "POLICY_ACCEPTANCE_REQUIRED") redirect(policyConsentPath("/library"));
@@ -216,5 +216,10 @@ export default async function ActiveLibraryPage() {
     return (Number.isNaN(bt) ? 0 : bt) - (Number.isNaN(at) ? 0 : at);
   });
 
-  return <LibraryClient items={items} />;
+  return <LibraryClient
+    items={items}
+    accessMode={auth.accessMode ?? "active"}
+    paidAccessEndedAt={auth.accessMode === "cancellation_retained" ? auth.paidAccessEndedAt : null}
+    retentionUntil={auth.accessMode === "cancellation_retained" ? auth.retentionUntil : null}
+  />;
 }

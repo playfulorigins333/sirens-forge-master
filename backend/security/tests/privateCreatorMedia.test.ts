@@ -35,7 +35,7 @@ test("migration and route preserve server-only least privilege contract", () => 
   const sql = readFileSync("supabase/migrations/20260824090000_private_creator_generation_media.sql", "utf8");
   const route = readFileSync("app/api/library/assets/[assetId]/signed-url/route.ts", "utf8");
   for (const text of ["force row level security", "from public, anon, authenticated", "to service_role", "security definer", "set search_path = pg_catalog, public, pg_temp", "ordinal between 0 and 3", "^[0-9a-f]{64}$"]) assert.ok(sql.toLowerCase().includes(text.toLowerCase()), text);
-  assert.match(route, /ensureActiveSubscription/); assert.match(route, /\.eq\("owner_id", auth\.user\.id\)/); assert.match(route, /Cache-Control": "no-store"/); assert.doesNotMatch(route, /NEXT_PUBLIC_.*R2|SERVICE_ROLE_KEY/);
+  assert.match(route, /ensureCreatorReadAccess/); assert.match(route, /\.eq\("owner_id", auth\.user\.id\)/); assert.match(route, /Cache-Control": "no-store"/); assert.doesNotMatch(route, /NEXT_PUBLIC_.*R2|SERVICE_ROLE_KEY/);
   const privateR2 = readFileSync("lib/private-creator-media/r2.ts", "utf8");
   assert.match(privateR2, /^import "server-only";/);
   for (const name of ["CREATOR_GENERATION_R2_ACCESS_KEY_ID", "CREATOR_GENERATION_R2_SECRET_ACCESS_KEY", "CREATOR_GENERATION_R2_BUCKET"]) assert.match(privateR2, new RegExp(name));
