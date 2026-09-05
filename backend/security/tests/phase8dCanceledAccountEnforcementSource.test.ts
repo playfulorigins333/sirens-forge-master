@@ -32,9 +32,15 @@ test("destructive work is bounded to the old cancellation retention deadline", (
   assert.match(migration, /p\.created_at<=r\.retention_until/);
   assert.match(migration, /c\.created_at<=r\.retention_until/);
   assert.match(migration, /g\.created_at<=\(r\.retention_until at time zone 'UTC'\)/);
-  assert.match(migration, /a\.created_at<=r\.retention_until/);
-  assert.match(migration, /l\.created_at<=\(r\.retention_until at time zone 'UTC'\)/);
-  assert.match(runner, /\.lte\("created_at", retentionUntil\)/);
+
+  // Physical media/Twin destruction is performed by the runner, which must apply the
+  // retention cutoff to both lookups. The SQL finalizer deliberately counts every
+  // remaining non-purged asset/Twin as a blocker so an old lifecycle cannot be marked
+  // complete while newer or timestamp-ambiguous creator working data still exists.
+  const cutoffLookups = runner.match(/\.lte\("created_at", retentionUntil\)/g) ?? [];
+  assert.equal(cutoffLookups.length, 2);
+  assert.match(migration, /generation_assets a[\s\S]{0,200}a\.lifecycle_state<>'purged'/);
+  assert.match(migration, /user_loras l[\s\S]{0,200}l\.lifecycle_state<>'purged'/);
 });
 
 test("legal holds preserve data but do not extend creator read access", () => {
