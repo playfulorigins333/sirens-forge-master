@@ -15,6 +15,6 @@ psql(["-f", "backend/security/tests/phase7DataRightsPostgresSetup.sql"]);
 psql(["-f", "supabase/migrations/20260905031000_phase7_data_export_account_deletion.sql"]);
 psql(["-f", "supabase/migrations/20260905031100_phase7_export_claim_notification_hardening.sql"]);
 psql(["-f", "supabase/migrations/20260905031200_phase7_export_expiry_hardening.sql"]);
-psql(["-f", "supabase/migrations/20260905045000_phase7_closeout_access_hardening.sql"]);
+psql(["-f", "supabase/migrations/20260905045000_phase7_closeout_account_deletion_billing_guard.sql"]);
 psql(["-f", "backend/security/tests/phase7DataRightsPostgresIntegration.sql"]);
 console.log("Phase 7 data export and voluntary account deletion PostgreSQL integration passed.");
