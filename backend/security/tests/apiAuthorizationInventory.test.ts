@@ -4,7 +4,10 @@ import path from "node:path"
 
 const root = process.cwd()
 const apiRoot = path.join(root, "app/api")
-const inventoryPath = path.join(root, "docs/security/api-authorization-inventory.md")
+const inventoryPaths = [
+  path.join(root, "docs/security/api-authorization-inventory.md"),
+  path.join(root, "docs/security/api-authorization-inventory-phase8c.md"),
+]
 const methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] as const
 const allowedTaxonomy = new Set(["PUBLIC", "AUTHENTICATED", "FRESH_TOTP", "OWNER", "ENTITLED", "ADMIN", "SCHEDULER_SECRET", "WEBHOOK_SIGNATURE", "OAUTH_CALLBACK", "INTERNAL_CONTROLLED"])
 const allowedStatuses = new Set(["PASS", "FIXED-IN-THIS-GATE", "BLOCKED-FROZEN", "NEEDS-SEPARATE-DESIGN"])
@@ -28,7 +31,8 @@ function cells(line: string): string[] {
   return line.slice(1, -1).split(/(?<!\\)\|/).map((cell) => cell.trim().replaceAll("\\|", "|"))
 }
 
-const markdown = await readFile(inventoryPath, "utf8")
+const markdownParts = await Promise.all(inventoryPaths.map((inventoryPath) => readFile(inventoryPath, "utf8")))
+const markdown = markdownParts.join("\n")
 const tableLines = markdown.split("\n").filter((line) => line.startsWith("| `/api/") || line.startsWith("| `/api`"))
 assert.ok(tableLines.length > 0, "inventory must contain route rows")
 const rows = tableLines.map(cells)
@@ -141,5 +145,13 @@ assert.match(identitySeedPost[5], /ensureActiveSubscription\(\).+authenticated.+
 assert.match(identitySeedPost[6], /cannot choose.+user_id.+derived exclusively from.+auth\.user\.id/i, "identity-seed must record authenticated-user-derived ownership")
 assert.match(identitySeedPost[10], /getSupabaseAdmin\(\).+after successful authentication\/entitlement validation.+service-role insert binds.+auth\.user\.id.+never exposed to the browser/i, "identity-seed must record server-only service-role use")
 
-assert.match(markdown, new RegExp(`\\*\\*Inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries`))
+const phase8cRetentionGet = inventoryRow("/api/internal/retention/phase8c/run", "GET")
+const phase8cRetentionClasses = authorizationClasses(phase8cRetentionGet)
+assert.ok(phase8cRetentionClasses.has("SCHEDULER_SECRET"), "Phase 8C retention runner must record scheduler-secret authentication")
+assert.ok(phase8cRetentionClasses.has("INTERNAL_CONTROLLED"), "Phase 8C retention runner must remain internal-only")
+assert.ok(!phase8cRetentionClasses.has("PUBLIC"), "Phase 8C retention runner must not be public")
+assert.match(phase8cRetentionGet[5], /authenticateSchedulerRequest\(\).+CRON_SECRET.+VERCEL_CRON_SECRET/i)
+assert.match(phase8cRetentionGet[10], /Supabase admin.+after scheduler authentication/i)
+
+assert.match(markdown, new RegExp(`\\*\\*Combined inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries|\\*\\*Inventory:\\*\\* ${actualFiles.length} route files / ${expectedEntries.length} route-method entries`))
 console.log(`API authorization inventory contract passed (${actualFiles.length} files, ${expectedEntries.length} route-method entries).`)
