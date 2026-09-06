@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireFreshTotpResponse } from "@/lib/security/mfaRoute"
+import { requireAdminCapability } from "@/lib/security/adminAuthorization"
 import {
   listLegalHolds,
   openLegalHold,
@@ -15,9 +15,8 @@ const headers = { "Cache-Control": "private, no-store, max-age=0", Pragma: "no-c
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers })
 
 export async function GET(request: Request) {
-  const mfa = await requireFreshTotpResponse()
-  if (mfa instanceof NextResponse) return mfa
-  if (!mfa.freshTotpAt) return json({ ok: false, code: "MFA_FRESH_AUTH_REQUIRED" }, 428)
+  const mfa = await requireAdminCapability("governance.legal_hold.manage")
+  if (mfa.ok === false) return json({ ok: false, code: mfa.code, ...(mfa.actionPath ? { actionPath: mfa.actionPath } : {}) }, mfa.status)
 
   const url = new URL(request.url)
   for (const key of url.searchParams.keys()) {
@@ -44,9 +43,8 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const mfa = await requireFreshTotpResponse()
-  if (mfa instanceof NextResponse) return mfa
-  if (!mfa.freshTotpAt) return json({ ok: false, code: "MFA_FRESH_AUTH_REQUIRED" }, 428)
+  const mfa = await requireAdminCapability("governance.legal_hold.manage")
+  if (mfa.ok === false) return json({ ok: false, code: mfa.code, ...(mfa.actionPath ? { actionPath: mfa.actionPath } : {}) }, mfa.status)
 
   const idempotencyKey = request.headers.get("idempotency-key")
   if (!validateIdempotencyKey(idempotencyKey)) return json({ ok: false, code: "LEGAL_HOLD_IDEMPOTENCY_KEY_INVALID" }, 400)

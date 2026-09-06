@@ -61,7 +61,7 @@ test("fresh TOTP helper returns the authoritative AMR timestamp to high-risk rou
 
 test("Founder/Admin legal-hold routes authenticate before creating a service-role client", () => {
   for (const route of adminRoutes) {
-    assert.match(route, /requireFreshTotpResponse\(\)/)
+    assert.match(route, /requireAdminCapability\("governance\.legal_hold\.manage"\)/)
     assert.match(route, /mfa\.freshTotpAt/)
   }
   assert.match(service, /getSupabaseAdmin\(\)\.rpc\("open_governance_legal_hold"/)
