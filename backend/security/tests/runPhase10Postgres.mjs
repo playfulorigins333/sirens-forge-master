@@ -15,6 +15,7 @@ for(const file of[
   "backend/security/tests/phase10PostgresSetup.sql",
   "supabase/migrations/20260905060000_phase8_governance_foundation.sql",
   "supabase/migrations/20260906070000_phase10_admin_support_security.sql",
+  "supabase/migrations/20260906093000_phase10_support_resolution_message.sql",
   "backend/security/tests/phase10PostgresIntegration.sql",
 ]) run(file)
 console.log("Phase 10 PostgreSQL 17 integration passed.")
