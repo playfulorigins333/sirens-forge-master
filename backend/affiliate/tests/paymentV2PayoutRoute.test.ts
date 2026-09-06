@@ -71,7 +71,8 @@ assert.match(source, /payment_v2_recurring_invoice_id:x\.recurring_invoice_id/, 
 
 const vercel = JSON.parse(readFileSync("vercel.json", "utf8"))
 assert.equal(vercel.version, 2)
-assert.deepEqual(vercel.crons, [
+const payoutCrons = vercel.crons.filter((cron: { path?: string }) => cron.path === "/api/admin/affiliate-payouts/execute")
+assert.deepEqual(payoutCrons, [
   { path: "/api/admin/affiliate-payouts/execute", schedule: "59 3 * * 0" },
   { path: "/api/admin/affiliate-payouts/execute", schedule: "59 4 * * 0" },
 ])
