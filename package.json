@@ -98,7 +98,9 @@
     "test:phase7-payment-delinquency-postgres": "node backend/security/tests/runPhase7PaymentDelinquencyPostgres.mjs",
     "test:phase9-notifications": "node --conditions=react-server --import tsx --test backend/notifications/tests/phase9Notifications.test.ts backend/notifications/tests/phase9SourceSecurity.test.ts backend/notifications/tests/phase9SchedulerRoute.test.ts",
     "test:phase9-notifications-postgres": "node backend/notifications/tests/runPhase9Postgres.mjs",
-    "test:phase10-admin-support-security": "tsx --test backend/security/tests/phase10AdminSupportSecurity.test.ts"
+    "test:phase10-admin-support-security": "tsx --test backend/security/tests/phase10AdminSupportSecurity.test.ts",
+    "test:phase11-legal-safety": "tsx --test backend/governance/tests/phase11LegalSafety.test.ts",
+    "test:phase11-legal-safety-postgres": "node backend/governance/tests/runPhase11LegalSafetyPostgres.mjs"
   },
   "repository": {
     "type": "git",

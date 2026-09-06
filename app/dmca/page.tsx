@@ -1,8 +1,10 @@
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
+import SafetyReportForm from "@/components/safety/SafetyReportForm"
 
 export default function DMCAPage() {
   return (
-    <LegalPageLayout title="DMCA Policy" lastUpdated="August 23, 2026">
+    <LegalPageLayout title="DMCA Policy" lastUpdated="September 6, 2026">
+      <SafetyReportForm category="COPYRIGHT_DMCA" title="Submit a copyright or DMCA report" />
       <section>
         <p>
           Sirens Forge respects the intellectual property rights of others and

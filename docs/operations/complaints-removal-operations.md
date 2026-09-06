@@ -1,4 +1,6 @@
 # Complaints and content-removal operations
+> **Phase 11 update (September 6, 2026):** The former restricted-document intake assumption is superseded for new reports by the durable `safety_cases` and append-only `safety_case_activities` system. Public text-only intake and the fresh-TOTP/capability-gated admin queue now implement this runbook’s finite states. Production use still requires separately authorized migration application and verification. This runbook does not authorize enforcement, private-media access, or external disclosure.
+
 
 **Launch runbook — source-only operating contract**
 **Accountable intake:** `admin@sirensforge.vip`

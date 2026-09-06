@@ -8,6 +8,8 @@ export const ADMIN_CAPABILITIES = [
   "support.case.read",
   "support.case.manage",
   "support.private_access.authorize",
+  "safety.case.read",
+  "safety.case.manage",
 ] as const
 export type AdminCapability = typeof ADMIN_CAPABILITIES[number]
 

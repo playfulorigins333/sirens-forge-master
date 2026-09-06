@@ -1,146 +1,20 @@
-'use client';
+import Link from "next/link";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { Shield, AlertTriangle } from 'lucide-react';
-
-export default function AgeGate() {
-  const router = useRouter();
-  const [isEntering, setIsEntering] = useState(false);
-
-  const enter = () => {
-    setIsEntering(true);
-
-    // 🔐 MUST match middleware exactly
-    document.cookie =
-      "sf_age_verified=true; path=/; max-age=31536000; SameSite=Lax";
-
-    // Optional: UI memory only (middleware does NOT read this)
-    localStorage.setItem("sf_age_verified", "true");
-
-    // Small delay to ensure cookie is written
-    setTimeout(() => {
-      router.replace("/");
-    }, 300);
-  };
-
-  const exit = () => {
-    window.location.href = "https://www.google.com";
-  };
-
-  useEffect(() => {
-    // Auto-skip if cookie already exists
-    if (document.cookie.includes("sf_age_verified=true")) {
-      router.replace("/");
-    }
-  }, [router]);
-
-  return (
-    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-4 sm:p-8 text-center relative overflow-hidden">
-
-      {/* Animated background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-red-900/10 via-black to-purple-900/10" />
-
-      <motion.div
-        className="absolute inset-0 bg-gradient-to-tr from-purple-900/5 via-transparent to-pink-900/5"
-        animate={{ opacity: [0.3, 0.5, 0.3] }}
-        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-      />
-
-      <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5 }}
-        className="relative z-10 max-w-2xl w-full"
-      >
-
-        <motion.div
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-          className="mb-8 inline-block"
-        >
-          <div className="w-24 h-24 mx-auto bg-gradient-to-br from-red-600 to-red-800 rounded-full flex items-center justify-center glow-red">
-            <AlertTriangle className="w-12 h-12 text-white" />
-          </div>
-        </motion.div>
-
-        <motion.h1
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="text-5xl sm:text-6xl md:text-7xl font-bold mb-6 text-red-500 tracking-tight"
-        >
-          18+ ONLY
-        </motion.h1>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="mb-8 space-y-4"
-        >
-          <p className="text-lg sm:text-xl text-gray-300 max-w-md mx-auto leading-relaxed">
-            <span className="font-bold text-white">Sirens Forge</span> contains adult AI-generated content.
-          </p>
-          <p className="text-base sm:text-lg text-gray-400 max-w-lg mx-auto">
-            You must be <span className="text-red-400 font-bold">18 years or older</span> to enter.
-          </p>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="flex flex-col sm:flex-row gap-4 justify-center items-center"
-        >
-          {/* ENTER BUTTON */}
-          <motion.button
-            onClick={enter}
-            disabled={isEntering}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="w-full sm:w-auto px-8 sm:px-12 py-4 sm:py-5 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold text-base sm:text-lg rounded-full hover:from-purple-700 hover:to-pink-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-2xl"
-          >
-            {isEntering ? (
-              <span className="flex items-center justify-center gap-2">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                  className="w-5 h-5 border-2 border-white border-t-transparent rounded-full"
-                />
-                ENTERING...
-              </span>
-            ) : (
-              "I AM 18+ — ENTER THE EMPIRE"
-            )}
-          </motion.button>
-
-          {/* EXIT BUTTON */}
-          <motion.button
-            onClick={exit}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="w-full sm:w-auto px-8 sm:px-12 py-4 sm:py-5 bg-white/5 backdrop-blur-sm border-2 border-white/20 text-white font-bold text-base sm:text-lg rounded-full hover:bg-white/10 transition-all"
-          >
-            I AM UNDER 18 — EXIT
-          </motion.button>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.7 }}
-          className="mt-12 text-xs sm:text-sm text-gray-500 max-w-xl mx-auto"
-        >
-          <Shield className="w-4 h-4 inline-block mr-2 text-gray-600" />
-          This site uses cookies to remember your age verification.
-        </motion.div>
-      </motion.div>
-
-      <div className="absolute top-10 left-10 w-32 h-32 bg-purple-600/10 rounded-full blur-3xl" />
-      <div className="absolute bottom-10 right-10 w-40 h-40 bg-pink-600/10 rounded-full blur-3xl" />
+export default async function AgeGate({searchParams}:{searchParams:Promise<{next?:string}>}) {
+  const next=(await searchParams).next || "/";
+  return <main className="min-h-screen bg-black text-white flex items-center justify-center p-6 text-center">
+    <div className="max-w-2xl rounded-2xl border border-red-900 bg-zinc-950 p-8 shadow-2xl">
+      <div className="text-6xl" aria-hidden>⚠</div>
+      <h1 className="mt-4 text-5xl font-bold text-red-500">18+ ONLY</h1>
+      <p className="mt-6 text-xl">Sirens Forge is an adult-only service and may contain adult AI-generated content.</p>
+      <p className="mt-3 text-zinc-400">By continuing, you attest that you are at least 18 years old and may lawfully access adult content where you live.</p>
+      <p className="mt-3 text-sm text-zinc-500">This is a self-attestation, not identity or government-ID age verification. We store an HttpOnly cookie to remember it.</p>
+      <form action="/api/age-attestation" method="post" className="mt-8">
+        <input type="hidden" name="next" value={next}/>
+        <button className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-8 py-4 font-bold" type="submit">I am 18 or older — continue</button>
+      </form>
+      <a className="mt-5 block text-zinc-400 underline" href="https://www.google.com">I am under 18 — exit</a>
+      <p className="mt-8 text-sm text-zinc-400">Safety and legal reporting remains available without attesting: <Link className="underline" href="/underage-policy">underage safety</Link>, <Link className="underline" href="/report-intimate-content">intimate-content removal</Link>, or <Link className="underline" href="/complaints">complaints</Link>.</p>
     </div>
-  );
+  </main>;
 }

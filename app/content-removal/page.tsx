@@ -1,9 +1,11 @@
 import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
+import SafetyReportForm from "@/components/safety/SafetyReportForm"
 
 export default function ContentRemovalPage() {
   return (
-    <LegalPageLayout title="Content Removal Policy" lastUpdated="August 19, 2026">
+    <LegalPageLayout title="Content Removal Policy" lastUpdated="September 6, 2026">
+      <SafetyReportForm category="CONTENT_REMOVAL" title="Submit a text-only removal request" />
       <section>
         <p>
           Sirens Forge provides a process for individuals and rights holders to
