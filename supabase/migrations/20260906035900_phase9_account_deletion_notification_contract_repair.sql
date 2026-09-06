@@ -14,18 +14,23 @@ alter table public.account_deletion_requests
 -- applied Phase 7 request/reactivation functions do not yet write the newer
 -- account_deletion_requests marker columns. Current source already supplies the
 -- values explicitly; these guards only fill a missing marker from authoritative
--- lifecycle timestamps.
+-- lifecycle timestamps for the currently relevant lifecycle state. This avoids
+-- retroactively materializing stale historical request/reactivation notices.
 create or replace function public.phase9_repair_account_deletion_notification_due()
 returns trigger
 language plpgsql
 set search_path = pg_catalog, public
 as $$
 begin
-  if new.requested_notification_due_at is null and new.requested_at is not null then
+  if new.requested_notification_due_at is null
+     and new.requested_at is not null
+     and new.status in ('pending','purge_pending') then
     new.requested_notification_due_at := new.requested_at;
   end if;
 
-  if new.reactivated_notification_due_at is null and new.reactivated_at is not null then
+  if new.reactivated_notification_due_at is null
+     and new.reactivated_at is not null
+     and new.status = 'reactivated' then
     new.reactivated_notification_due_at := new.reactivated_at;
   end if;
 
@@ -37,6 +42,7 @@ drop trigger if exists phase9_repair_account_deletion_notification_due
   on public.account_deletion_requests;
 create trigger phase9_repair_account_deletion_notification_due
 before insert or update of
+  status,
   requested_at,
   reactivated_at,
   requested_notification_due_at,
@@ -45,16 +51,20 @@ on public.account_deletion_requests
 for each row
 execute function public.phase9_repair_account_deletion_notification_due();
 
--- Preserve historical truth without fabricating send/delivery evidence.
+-- Preserve the currently relevant lifecycle handoff without fabricating send or
+-- delivery evidence. Historical completed rows are intentionally left to the
+-- Phase 9 purge-completion bridge below the repair migration.
 update public.account_deletion_requests
 set requested_notification_due_at = requested_at
 where requested_notification_due_at is null
-  and requested_at is not null;
+  and requested_at is not null
+  and status in ('pending','purge_pending');
 
 update public.account_deletion_requests
 set reactivated_notification_due_at = reactivated_at
 where reactivated_notification_due_at is null
-  and reactivated_at is not null;
+  and reactivated_at is not null
+  and status = 'reactivated';
 
 alter function public.phase9_repair_account_deletion_notification_due() owner to postgres;
 revoke all on function public.phase9_repair_account_deletion_notification_due()
