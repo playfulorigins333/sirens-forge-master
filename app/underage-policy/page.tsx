@@ -1,8 +1,11 @@
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
+import SafetyReportForm from "@/components/safety/SafetyReportForm"
 
 export default function UnderagePolicyPage() {
   return (
-    <LegalPageLayout title="Underage Content Policy" lastUpdated="August 19, 2026">
+    <LegalPageLayout title="Underage Content Policy" lastUpdated="September 6, 2026">
+      <section className="rounded border border-red-700 p-4"><h2 className="text-xl font-semibold">Report suspected underage or exploitative content</h2><p>Do not redistribute, download, copy, screenshot, or upload suspected illegal material. Supply only a stable reference and minimum text facts. A report is escalated as P0 internally without making an automatic legal conclusion. This form does not contact law enforcement or NCMEC automatically.</p></section>
+      <SafetyReportForm category="UNDERAGE_EXPLOITATION" title="Submit an urgent text-only safety report" />
       <section>
         <p>
           Sirens Forge maintains a strict zero-tolerance policy for any content

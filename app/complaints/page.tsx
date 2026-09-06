@@ -1,9 +1,11 @@
 import Link from "next/link"
 import LegalPageLayout from "@/components/legal/LegalPageLayout"
+import SafetyReportForm from "@/components/safety/SafetyReportForm"
 
 export default function ComplaintsPage() {
   return (
-    <LegalPageLayout title="Complaints Policy" lastUpdated="April 27, 2026">
+    <LegalPageLayout title="Complaints Policy" lastUpdated="September 6, 2026">
+      <SafetyReportForm category="GENERAL_COMPLAINT" title="Submit a complaint" />
       <section>
         <p>
           Sirens Forge provides a process for users and third parties to submit

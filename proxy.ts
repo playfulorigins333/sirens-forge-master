@@ -34,6 +34,27 @@ const PUBLIC_PATHS = new Set([
 ]);
 
 const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"];
+export const AGE_ATTESTATION_COOKIE = "sf_age_attested";
+const AGE_EXEMPT_PATHS = new Set([
+  "/age", "/terms", "/privacy", "/acceptable-use", "/community-guidelines",
+  "/underage-policy", "/blocked-content", "/content-removal",
+  "/report-intimate-content", "/complaints", "/dmca", "/2257-exemption",
+  "/contact", "/affiliate-terms", "/robots.txt", "/sitemap.xml", "/favicon.ico",
+]);
+const AGE_EXEMPT_API_PATHS = new Set([
+  "/api/age-attestation",
+  "/api/safety/reports",
+  "/api/health",
+  "/api/ping",
+  "/api/status",
+  "/api/webhook",
+  "/api/webhook/payment-v2",
+]);
+const AGE_EXEMPT_API_PREFIXES = ["/api/internal/"];
+const AGE_EXEMPT_CALLBACK_PATHS = new Set([
+  "/api/autopost/connect/fanvue/callback",
+  "/api/autopost/connect/x/callback",
+]);
 const LEGACY_AUTOPOST_ADMIN_ROOT = "/api/admin/autopost";
 export const LEGACY_AUTOPOST_ADMIN_ENABLE_ENV =
   "SIRENS_LEGACY_AUTOPOST_ADMIN_ENABLED" as const;
@@ -74,6 +95,23 @@ export function isPublicPath(pathname: string): boolean {
   );
 }
 
+export function isAgeExemptPath(pathname: string): boolean {
+  return AGE_EXEMPT_PATHS.has(pathname) || pathname.startsWith("/_next") ||
+    AGE_EXEMPT_API_PATHS.has(pathname) || AGE_EXEMPT_API_PREFIXES.some((prefix) => pathname.startsWith(prefix)) ||
+    pathname.startsWith("/auth") || AGE_EXEMPT_CALLBACK_PATHS.has(pathname) ||
+    pathname.startsWith(BOTID_INTERNAL_PREFIX) || pathname.startsWith(VERCEL_RATE_LIMIT_API_PREFIX);
+}
+
+export function safeAgeReturnPath(value: string | null): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  try {
+    const parsed = new URL(value, "https://age.invalid");
+    decodeURI(parsed.pathname);
+    return parsed.origin === "https://age.invalid" && !isAgeExemptPath(parsed.pathname)
+      ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/";
+  } catch { return "/"; }
+}
+
 export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
 
@@ -84,6 +122,12 @@ export async function proxy(req: NextRequest) {
         "Cache-Control": "no-store",
       },
     });
+  }
+
+  if (!isAgeExemptPath(pathname) && req.cookies.get(AGE_ATTESTATION_COOKIE)?.value !== "1") {
+    const ageUrl = new URL("/age", req.url);
+    ageUrl.searchParams.set("next", safeAgeReturnPath(`${pathname}${req.nextUrl.search}`));
+    return NextResponse.redirect(ageUrl);
   }
 
   if (isPublicPath(pathname)) {

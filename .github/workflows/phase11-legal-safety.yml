@@ -1,0 +1,36 @@
+name: Phase 11 legal and safety
+on: [pull_request, workflow_dispatch]
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm}
+      - run: npm ci
+      - run: npm run test:phase11-legal-safety
+      - run: npm run test:public-policy-privacy-truth
+      - run: npm run test:complaints-removal-operations
+      - run: npm run test:material-policy-acceptance-source
+      - run: npm run test:public-paths
+      - run: npm run test:api-authorization-inventory
+      - run: npm run test:phase10-admin-support-security
+      - run: npx tsx backend/creator-publishing-queue/tests/aiTwinConsent.test.ts
+      - run: npx tsc --noEmit
+      - run: npm run build
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: {POSTGRES_PASSWORD: postgres, POSTGRES_DB: phase11_test}
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U postgres -d phase11_test" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      PHASE11_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase11_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 22, cache: npm}
+      - run: npm ci
+      - run: npm run test:phase11-legal-safety-postgres
