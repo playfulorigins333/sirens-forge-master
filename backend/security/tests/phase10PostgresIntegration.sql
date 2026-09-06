@@ -34,10 +34,12 @@ select public.create_own_support_case('technical','second support case');
 reset role;
 update public.support_cases set opened_at='2026-09-06 08:00:00+00',updated_at='2026-09-06 08:00:00+00' where creator_user_id='10000000-0000-4000-8000-000000000003';
 
-create temp table phase10_creator_page1 as
-select * from public.list_own_support_cases(null,null,1);
+-- Create both cursor pages as the authenticated role so the second query can read
+-- the first temporary relation while still exercising the real creator RPC grant.
 set role authenticated;
 select set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000003',false);
+create temp table phase10_creator_page1 as
+select * from public.list_own_support_cases(null,null,1);
 create temp table phase10_creator_page2 as
 select * from public.list_own_support_cases(
  (select opened_at from phase10_creator_page1 limit 1),
