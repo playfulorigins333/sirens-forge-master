@@ -95,7 +95,9 @@
     "test:profile-lifecycle-grants": "tsx --test backend/security/tests/profileLifecycleColumnGrantsSource.test.ts",
     "test:profile-lifecycle-grants-postgres": "node backend/security/tests/runProfileLifecycleColumnGrantsPostgres.mjs",
     "test:phase7-payment-delinquency": "tsx --test backend/security/tests/phase7PaymentDelinquencySource.test.ts",
-    "test:phase7-payment-delinquency-postgres": "node backend/security/tests/runPhase7PaymentDelinquencyPostgres.mjs"
+    "test:phase7-payment-delinquency-postgres": "node backend/security/tests/runPhase7PaymentDelinquencyPostgres.mjs",
+    "test:phase9-notifications": "node --conditions=react-server --import tsx --test backend/notifications/tests/phase9Notifications.test.ts backend/notifications/tests/phase9SourceSecurity.test.ts backend/notifications/tests/phase9SchedulerRoute.test.ts",
+    "test:phase9-notifications-postgres": "node backend/notifications/tests/runPhase9Postgres.mjs"
   },
   "repository": {
     "type": "git",

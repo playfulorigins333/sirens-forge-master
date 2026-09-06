@@ -24,6 +24,10 @@
     {
       "path": "/api/internal/governance/legal-holds/expire",
       "schedule": "7 6 * * *"
+    },
+    {
+      "path": "/api/internal/notifications/phase9/run",
+      "schedule": "23 * * * *"
     }
   ]
 }

@@ -9,6 +9,7 @@ const inventoryPaths = [
   path.join(root, "docs/security/api-authorization-inventory-phase8c.md"),
   path.join(root, "docs/security/api-authorization-inventory-phase8d.md"),
   path.join(root, "docs/security/api-authorization-inventory-phase8f.md"),
+  path.join(root, "docs/security/api-authorization-inventory-phase9.md"),
 ]
 const methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] as const
 const allowedTaxonomy = new Set(["PUBLIC", "AUTHENTICATED", "FRESH_TOTP", "OWNER", "ENTITLED", "ADMIN", "SCHEDULER_SECRET", "WEBHOOK_SIGNATURE", "OAUTH_CALLBACK", "INTERNAL_CONTROLLED"])
