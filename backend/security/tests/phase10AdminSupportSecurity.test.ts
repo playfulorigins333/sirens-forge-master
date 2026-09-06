@@ -4,10 +4,14 @@ import { readFileSync } from "node:fs"
 
 const migrationPath="supabase/migrations/20260906070000_phase10_admin_support_security.sql"
 const migration=readFileSync(migrationPath,"utf8")
+const resolutionHotfix=readFileSync("supabase/migrations/20260906093000_phase10_support_resolution_message.sql","utf8")
 const admin=readFileSync("lib/security/adminAuthorization.ts","utf8")
 const auditRoute=readFileSync("app/api/admin/governance/audit-events/route.ts","utf8")
 const creatorSupportRoute=readFileSync("app/api/account/support/cases/route.ts","utf8")
 const adminSupportRoute=readFileSync("app/api/admin/support/cases/route.ts","utf8")
+const adminSupportCaseRoute=readFileSync("app/api/admin/support/cases/[caseId]/route.ts","utf8")
+const adminSupportUi=readFileSync("app/admin/support/SupportQueueClient.tsx","utf8")
+const creatorSupportUi=readFileSync("app/account/support/SupportClient.tsx","utf8")
 
 test("Phase 10 migration is forward, bootstrap-bound, and preserves deletion authority",()=>{
   assert.match(migration,/reason='sole_production_admin_guard'/)
@@ -63,8 +67,22 @@ test("support lifecycle is bounded, auditable, and reopening clears resolved_at"
   assert.match(creatorSupportRoute,/no-store/)
 })
 
+test("resolved support cases require and expose one creator-facing resolution message",()=>{
+  assert.match(resolutionHotfix,/add column resolution_message text/)
+  assert.match(resolutionHotfix,/SUPPORT_RESOLUTION_MESSAGE_REQUIRED/)
+  assert.match(resolutionHotfix,/when p_status='resolved' then btrim\(p_note\)/)
+  assert.match(resolutionHotfix,/when v_old='resolved' and p_status='in_progress' then null/)
+  assert.match(resolutionHotfix,/c\.resolution_message/)
+  assert.match(adminSupportCaseRoute,/status==="resolved"&&!note/)
+  assert.match(adminSupportCaseRoute,/status!=="resolved"&&x\.note!=null/)
+  assert.match(adminSupportUi,/Message to creator/)
+  assert.match(adminSupportUi,/Tell the creator what was done before resolving the case/)
+  assert.match(creatorSupportUi,/resolution_message/)
+  assert.match(creatorSupportUi,/What we did/)
+})
+
 test("Phase 10 does not create impersonation, password reset, MFA bypass, or private browsing",()=>{
-  const all=migration+admin+auditRoute+creatorSupportRoute+adminSupportRoute
+  const all=migration+resolutionHotfix+admin+auditRoute+creatorSupportRoute+adminSupportRoute+adminSupportCaseRoute
   for(const prohibited of["login as user","resetPasswordForEmail","disable mfa","signedUrl","AUTOPOST_X_ADMIN_USER_IDS"])
     assert.doesNotMatch(all,new RegExp(prohibited,"i"))
 })

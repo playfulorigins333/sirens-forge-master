@@ -34,17 +34,11 @@ select public.create_own_support_case('technical','second support case');
 reset role;
 update public.support_cases set opened_at='2026-09-06 08:00:00+00',updated_at='2026-09-06 08:00:00+00' where creator_user_id='10000000-0000-4000-8000-000000000003';
 
--- Create both cursor pages as the authenticated role so the second query can read
--- the first temporary relation while still exercising the real creator RPC grant.
 set role authenticated;
 select set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000003',false);
-create temp table phase10_creator_page1 as
-select * from public.list_own_support_cases(null,null,1);
+create temp table phase10_creator_page1 as select * from public.list_own_support_cases(null,null,1);
 create temp table phase10_creator_page2 as
-select * from public.list_own_support_cases(
- (select opened_at from phase10_creator_page1 limit 1),
- (select id from phase10_creator_page1 limit 1),1
-);
+select * from public.list_own_support_cases((select opened_at from phase10_creator_page1 limit 1),(select id from phase10_creator_page1 limit 1),1);
 reset role;
 do $$ begin
  if (select count(*) from phase10_creator_page1)<>1 or (select count(*) from phase10_creator_page2)<>1 then raise exception 'creator pagination skipped row'; end if;
@@ -55,23 +49,45 @@ end $$;
 select public.transition_admin_support_case(
  '10000000-0000-4000-8000-000000000002',
  (select id from public.support_cases where creator_user_id='10000000-0000-4000-8000-000000000003' order by id limit 1),
- 'in_progress','working case'
+ 'in_progress',null
 );
 do $$ begin
  if not exists(select 1 from public.governance_audit_events where actor_user_id='10000000-0000-4000-8000-000000000002' and actor_type='admin_operator' and action='support.case.status_changed') then raise exception 'support operator audit evidence missing'; end if;
 end $$;
 
--- Resolution and reopening maintain coherent resolved_at state.
+-- Resolution requires a creator-visible message, exposes it to the creator, and clears it on reopen.
+do $$
+declare v_case uuid := (select id from public.support_cases where status='in_progress' limit 1);
+begin
+  begin
+    perform public.transition_admin_support_case('10000000-0000-4000-8000-000000000002',v_case,'resolved',null);
+    raise exception 'resolution without creator message was accepted';
+  exception when others then
+    if SQLERRM='resolution without creator message was accepted' then raise; end if;
+    if position('SUPPORT_RESOLUTION_MESSAGE_REQUIRED' in SQLERRM)=0 then raise; end if;
+  end;
+end $$;
 select public.transition_admin_support_case(
  '10000000-0000-4000-8000-000000000002',
- (select id from public.support_cases where status='in_progress' limit 1),'resolved','resolved'
+ (select id from public.support_cases where status='in_progress' limit 1),'resolved','Resolved by support and verified working.'
 );
-do $$ begin if not exists(select 1 from public.support_cases where status='resolved' and resolved_at is not null) then raise exception 'resolved_at not set'; end if; end $$;
+do $$ begin
+ if not exists(select 1 from public.support_cases where status='resolved' and resolved_at is not null and resolution_message='Resolved by support and verified working.') then raise exception 'creator resolution message not stored'; end if;
+end $$;
+set role authenticated;
+select set_config('request.jwt.claim.sub','10000000-0000-4000-8000-000000000003',false);
+create temp table phase10_creator_resolution_view as select * from public.list_own_support_cases(null,null,50) where status='resolved';
+reset role;
+do $$ begin
+ if not exists(select 1 from phase10_creator_resolution_view where resolution_message='Resolved by support and verified working.') then raise exception 'creator cannot read resolution message'; end if;
+end $$;
 select public.transition_admin_support_case(
  '10000000-0000-4000-8000-000000000002',
- (select id from public.support_cases where status='resolved' limit 1),'in_progress','reopened'
+ (select id from public.support_cases where status='resolved' limit 1),'in_progress',null
 );
-do $$ begin if exists(select 1 from public.support_cases where status='in_progress' and resolved_at is not null) then raise exception 'resolved_at survived reopen'; end if; end $$;
+do $$ begin
+ if exists(select 1 from public.support_cases where status='in_progress' and (resolved_at is not null or resolution_message is not null)) then raise exception 'resolution state survived reopen'; end if;
+end $$;
 
 -- Governance reads are bounded/minimized and the privileged read audits itself.
 select public.append_governance_audit_event('10000000-0000-4000-8000-000000000001','founder_admin','phase10.test.event','test_target','one','test',null,'success',null,null,gen_random_uuid(),null,'{}'::jsonb,'{}'::jsonb,null);
@@ -81,13 +97,11 @@ do $$ begin
  if exists(select 1 from information_schema.columns where table_name='phase10_audit_page' and column_name in ('facts','reference_hashes','reason')) then raise exception 'audit read exposed private columns'; end if;
 end $$;
 
--- A security operator may read minimized audit evidence and is truthfully logged as admin_operator.
 select * from public.list_governance_audit_events('10000000-0000-4000-8000-000000000004',null,1,null,null,null);
 do $$ begin
  if not exists(select 1 from public.governance_audit_events where actor_user_id='10000000-0000-4000-8000-000000000004' and actor_type='admin_operator' and action='governance.audit.read') then raise exception 'security operator audit read evidence missing'; end if;
 end $$;
 
--- Creator support records and non-founder role assignments must not block final Auth deletion.
 delete from auth.users where id='10000000-0000-4000-8000-000000000003';
 do $$ begin if exists(select 1 from public.support_cases where creator_user_id='10000000-0000-4000-8000-000000000003') then raise exception 'support case survived final auth deletion'; end if; end $$;
 delete from auth.users where id='10000000-0000-4000-8000-000000000002';
@@ -97,7 +111,6 @@ do $$ begin
  if not exists(select 1 from public.governance_audit_events where actor_user_id='10000000-0000-4000-8000-000000000002' and action='support.case.status_changed') then raise exception 'durable audit evidence was erased'; end if;
 end $$;
 
--- Founder remains protected by the pre-existing sole-production-admin guard; Phase 10 does not weaken it.
 do $$ begin
  begin
    delete from auth.users where id='10000000-0000-4000-8000-000000000001';
