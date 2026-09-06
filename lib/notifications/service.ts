@@ -26,6 +26,7 @@ export async function runNotifications(input: { db: Db; transport: NotificationT
     let reason: string | null = null
     let providerHash: string | null = null
     let attemptStarted = false
+    let finalizedByPreparation = false
     try {
       const identity = await input.db.auth.admin.getUserById(row.auth_user_id)
       if (identity.error) {
@@ -38,9 +39,11 @@ export async function runNotifications(input: { db: Db; transport: NotificationT
         outcome = "suppressed"; reason = identity.data.user.email ? "recipient_invalid" : "recipient_missing"
       } else {
         const mail = buildNotification(row.notification_kind, row.context)
-        const started = await input.db.rpc("mark_phase9_notification_attempt_started", { p_id: row.id, p_lease_token: leaseToken })
-        if (started.error || started.data !== true) {
+        const prepared = await input.db.rpc("prepare_phase9_notification_attempt", { p_id: row.id, p_lease_token: leaseToken })
+        if (prepared.error || prepared.data === "unavailable") {
           outcome = "retry"
+        } else if (prepared.data === "suppressed") {
+          outcome = "suppressed"; reason = "source_stale"; finalizedByPreparation = true
         } else {
           attemptStarted = true
           const result = await input.transport.send({ to: identity.data.user.email, mail, idempotencyKey: `phase9/${row.id}` })
@@ -63,9 +66,12 @@ export async function runNotifications(input: { db: Db; transport: NotificationT
     else if (outcome === "retry") out.retried++
     else if (outcome === "failed_uncertain") out.uncertain++
     else out.suppressed++
-    const finalized = await input.db.rpc("finalize_phase9_notification", { p_id: row.id, p_lease_token: leaseToken, p_outcome: outcome, p_reason: reason, p_provider_message_id_hash: providerHash })
-    if (finalized.error || finalized.data !== true) input.log?.({ event: "phase9_notification_finalize_failed", kind: row.notification_kind, outcome, attempt: row.attempts })
-    else input.log?.({ event: "phase9_notification_finalized", kind: row.notification_kind, outcome, attempt: row.attempts })
+    if (finalizedByPreparation) input.log?.({ event: "phase9_notification_finalized", kind: row.notification_kind, outcome, attempt: row.attempts })
+    else {
+      const finalized = await input.db.rpc("finalize_phase9_notification", { p_id: row.id, p_lease_token: leaseToken, p_outcome: outcome, p_reason: reason, p_provider_message_id_hash: providerHash })
+      if (finalized.error || finalized.data !== true) input.log?.({ event: "phase9_notification_finalize_failed", kind: row.notification_kind, outcome, attempt: row.attempts })
+      else input.log?.({ event: "phase9_notification_finalized", kind: row.notification_kind, outcome, attempt: row.attempts })
+    }
   }
   return out
 }

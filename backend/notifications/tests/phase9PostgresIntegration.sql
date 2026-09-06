@@ -1,4 +1,24 @@
 \set ON_ERROR_STOP on
+-- The migration repairs historical completed rows from their actual completion
+-- evidence, and the trigger produces an immutable marker for future transitions.
+do $$ declare completed_at timestamptz; due_at timestamptz; begin
+ select purge_completed_at,completed_notification_due_at into completed_at,due_at from public.account_deletion_requests where id='19000000-0000-4000-8000-000000000001';
+ if due_at is distinct from completed_at then raise exception 'completed-row backfill did not use purge completion evidence'; end if;
+ if public.materialize_phase9_notifications(10)<>1 or public.materialize_phase9_notifications(10)<>0 then raise exception 'backfilled completion did not materialize exactly once'; end if;
+end $$;
+insert into public.account_deletion_requests(id,auth_user_id,status,recovery_deadline)
+values('19000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','pending',now()+interval '1 day');
+update public.account_deletion_requests set status='completed',purge_completed_at='2026-09-06 04:00:00+00' where id='19000000-0000-4000-8000-000000000002';
+do $$ declare first_due timestamptz; begin
+ select completed_notification_due_at into first_due from public.account_deletion_requests where id='19000000-0000-4000-8000-000000000002';
+ if first_due is distinct from '2026-09-06 04:00:00+00'::timestamptz then raise exception 'completion transition marker is not authoritative'; end if;
+ update public.account_deletion_requests set purge_completed_at=purge_completed_at where id='19000000-0000-4000-8000-000000000002';
+ if (select completed_notification_due_at from public.account_deletion_requests where id='19000000-0000-4000-8000-000000000002') is distinct from first_due then raise exception 'completion marker was not idempotent'; end if;
+ if public.materialize_phase9_notifications(10)<>1 or public.materialize_phase9_notifications(10)<>0 then raise exception 'transition completion did not materialize exactly once'; end if;
+end $$;
+truncate public.transactional_notification_deliveries;
+truncate public.account_deletion_requests;
+
 -- All source families materialize, while stale prior lifecycle milestones suppress.
 insert into public.creator_data_exports values('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','completed',now()-interval '1 minute',now()+interval '1 day');
 insert into public.account_deletion_requests values('20000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','reactivated',now()+interval '59 days',null,now()-interval '2 minutes',now()-interval '1 minute',null);
@@ -9,7 +29,7 @@ do $$ declare n integer; rows integer; tok uuid:=gen_random_uuid(); nid uuid; be
  if public.materialize_phase9_notifications(100)<>0 then raise exception 'idempotency failed'; end if;
  select count(*) into rows from public.claim_phase9_notifications(tok,50); if rows<>2 then raise exception 'valid claim/stale suppression failed: %',rows; end if;
  select id into nid from public.transactional_notification_deliveries where state='claimed' limit 1;
- if not public.mark_phase9_notification_attempt_started(nid,tok) then raise exception 'attempt start failed'; end if;
+ if public.prepare_phase9_notification_attempt(nid,tok)<>'ready' then raise exception 'attempt preparation failed'; end if;
  if not public.finalize_phase9_notification(nid,tok,'delivered',null,repeat('a',64)) then raise exception 'finalize failed'; end if;
  if public.finalize_phase9_notification(nid,tok,'delivered',null,repeat('a',64)) then raise exception 'duplicate finalize accepted'; end if;
  if exists(select 1 from public.claim_phase9_notifications(gen_random_uuid(),50) where id=nid) then raise exception 'delivered reclaimed'; end if;
@@ -46,12 +66,32 @@ do $$ declare first_token uuid:=gen_random_uuid(); second_token uuid:=gen_random
  select id into attempted from public.claim_phase9_notifications(first_token,2) order by id limit 1;
  select id into unattempted from public.transactional_notification_deliveries where lease_token=first_token and id<>attempted limit 1;
  if attempted is null or attempted=unattempted then raise exception 'multi-row claim failed'; end if;
- if not public.mark_phase9_notification_attempt_started(attempted,first_token) then raise exception 'attempt marker failed'; end if;
+ if public.prepare_phase9_notification_attempt(attempted,first_token)<>'ready' then raise exception 'attempt marker failed'; end if;
  update public.transactional_notification_deliveries set lease_expires_at=clock_timestamp()-interval '1 second' where lease_token=first_token;
  select count(*) into reclaimed from public.claim_phase9_notifications(second_token,2) where id=unattempted;
  if reclaimed<>1 then raise exception 'never-attempted expired claim was not reclaimed'; end if;
  if not exists(select 1 from public.transactional_notification_deliveries where id=attempted and state='failed_uncertain' and terminal_reason='provider_outcome_uncertain') then raise exception 'started uncertain attempt not terminalized deliberately'; end if;
  if exists(select 1 from public.transactional_notification_deliveries where id=attempted and lease_token=second_token) then raise exception 'uncertain attempt reclaimed'; end if;
+end $$;
+
+-- Final attempt preparation closes claim-to-send lifecycle races for every
+-- mutable lifecycle family.
+truncate public.transactional_notification_deliveries;
+truncate public.creator_data_exports;
+insert into public.account_deletion_requests values('60000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','pending',now()+interval '60 days',null,now()-interval '1 minute',null,null);
+insert into public.subscription_cancellation_retentions values('60000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','retained_read_only',now()-interval '1 minute',now()+interval '60 days',now()-interval '1 minute',now()+interval '30 days',now()+interval '45 days',now()+interval '55 days');
+insert into public.subscription_payment_delinquencies values('60000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','retention_countdown',now()-interval '1 minute',now()+interval '60 days',now()-interval '1 minute',now()+interval '30 days',now()+interval '45 days',now()+interval '55 days');
+select public.materialize_phase9_notifications(10);
+do $$ declare tok uuid:=gen_random_uuid(); r record; begin
+ perform * from public.claim_phase9_notifications(tok,10);
+ update public.account_deletion_requests set status='reactivated' where id='60000000-0000-4000-8000-000000000001';
+ update public.subscription_cancellation_retentions set state='reactivated' where id='60000000-0000-4000-8000-000000000002';
+ update public.subscription_payment_delinquencies set state='recovered' where id='60000000-0000-4000-8000-000000000003';
+ for r in select id from public.transactional_notification_deliveries where lease_token=tok loop
+   if public.prepare_phase9_notification_attempt(r.id,tok)<>'suppressed' then raise exception 'stale final attempt was authorized'; end if;
+ end loop;
+ if (select count(*) from public.transactional_notification_deliveries where state='suppressed' and terminal_reason='source_stale')<>3 then raise exception 'race-stale rows not durably suppressed'; end if;
+ if exists(select 1 from public.transactional_notification_deliveries where provider_attempt_started_at is not null) then raise exception 'stale race reached provider-attempt boundary'; end if;
 end $$;
 
 set role anon; do $$ begin perform public.claim_phase9_notifications(gen_random_uuid(),1); raise exception 'anon claim unexpectedly allowed'; exception when insufficient_privilege then null; end $$; reset role;

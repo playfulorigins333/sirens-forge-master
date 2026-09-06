@@ -47,7 +47,7 @@ const context = { expiresAt: "2026-10-01T00:00:00Z", recoveryDeadline: "2026-11-
 const row = (id = "n1", user = "u1") => ({ id, source_type: "creator_data_export", source_id: `s-${id}`, notification_kind: "export_ready" as const, auth_user_id: user, due_at: "2026-09-01", attempts: 1, context })
 function db(rows: any[], lookup: (id: string) => Promise<any> = async id => ({ data: { user: { id, email: `${id}@example.test` } }, error: null })) {
   const calls: any[] = []
-  return { calls, auth: { admin: { getUserById: lookup } }, rpc: async (name: string, args: any) => { calls.push([name, args]); if (name === "materialize_phase9_notifications") return { data: 1, error: null }; if (name === "claim_phase9_notifications") return { data: rows, error: null }; return { data: true, error: null } } }
+  return { calls, auth: { admin: { getUserById: lookup } }, rpc: async (name: string, args: any) => { calls.push([name, args]); if (name === "materialize_phase9_notifications") return { data: 1, error: null }; if (name === "claim_phase9_notifications") return { data: rows, error: null }; if (name === "prepare_phase9_notification_attempt") return { data: "ready", error: null }; return { data: true, error: null } } }
 }
 
 test("delivery uses authoritative recipient, stable idempotency, and sanitized evidence/logging", async () => {
@@ -80,5 +80,22 @@ test("authoritative missing, invalid, permanent, and uncertain results finalize 
     await runNotifications({ db: database as any, transport })
     const final = database.calls.findLast(call => call[0] === "finalize_phase9_notification")[1]
     assert.equal(final.p_outcome, outcome); assert.equal(final.p_reason, reason)
+  }
+})
+
+test("final attempt suppression never invokes provider transport", async () => {
+  for (const sourceType of ["subscription_cancellation", "payment_delinquency", "account_deletion"]) {
+    const database = db([{ ...row(), source_type: sourceType }])
+    database.rpc = async (name: string, args: any) => {
+      database.calls.push([name, args])
+      if (name === "materialize_phase9_notifications") return { data: 0, error: null }
+      if (name === "claim_phase9_notifications") return { data: [{ ...row(), source_type: sourceType }], error: null }
+      if (name === "prepare_phase9_notification_attempt") return { data: "suppressed", error: null }
+      return { data: true, error: null }
+    }
+    let sends = 0
+    const result = await runNotifications({ db: database as any, transport: { send: async () => { sends++; return { kind: "delivered", providerMessageId: "must-not-send" } } } })
+    assert.equal(sends, 0); assert.equal(result.suppressed, 1)
+    assert.equal(database.calls.some(call => call[0] === "finalize_phase9_notification"), false)
   }
 })

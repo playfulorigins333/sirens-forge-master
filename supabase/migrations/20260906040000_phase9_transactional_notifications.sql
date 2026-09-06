@@ -35,6 +35,25 @@ alter table public.transactional_notification_deliveries force row level securit
 revoke all on public.transactional_notification_deliveries from public, anon, authenticated, service_role;
 -- Deliberately no direct-table grant: service_role uses bounded SECURITY DEFINER RPCs.
 
+-- Phase 7 established the completion marker column but no producer. Bridge the
+-- authoritative completion transition without changing deletion/purge authority.
+create function public.phase9_set_deletion_completed_notification_due()
+returns trigger language plpgsql set search_path=pg_catalog,public as $$
+begin
+ if new.status='completed' and new.purge_completed_at is not null and new.completed_notification_due_at is null then
+   new.completed_notification_due_at:=new.purge_completed_at;
+ end if;
+ return new;
+end $$;
+create trigger phase9_set_deletion_completed_notification_due
+before insert or update of status,purge_completed_at,completed_notification_due_at on public.account_deletion_requests
+for each row execute function public.phase9_set_deletion_completed_notification_due();
+update public.account_deletion_requests
+set completed_notification_due_at=purge_completed_at
+where status='completed' and purge_completed_at is not null and completed_notification_due_at is null;
+alter function public.phase9_set_deletion_completed_notification_due() owner to postgres;
+revoke all on function public.phase9_set_deletion_completed_notification_due() from public,anon,authenticated,service_role;
+
 create function public.materialize_phase9_notifications(p_limit integer default 100)
 returns integer language plpgsql security definer set search_path=pg_catalog,public as $$
 declare v_count integer;
@@ -99,13 +118,28 @@ begin
  from claimed c;
 end $$;
 
-create function public.mark_phase9_notification_attempt_started(p_id uuid,p_lease_token uuid)
-returns boolean language plpgsql security definer set search_path=pg_catalog,public as $$
+create function public.prepare_phase9_notification_attempt(p_id uuid,p_lease_token uuid)
+returns text language plpgsql security definer set search_path=pg_catalog,public as $$
+declare n public.transactional_notification_deliveries%rowtype; v_valid boolean:=false;
 begin
- update public.transactional_notification_deliveries
- set provider_attempt_started_at=clock_timestamp(),updated_at=clock_timestamp()
- where id=p_id and state='claimed' and lease_token=p_lease_token and provider_attempt_started_at is null;
- return found;
+ select * into n from public.transactional_notification_deliveries
+ where id=p_id and state='claimed' and lease_token=p_lease_token for update;
+ if not found or n.provider_attempt_started_at is not null then return 'unavailable'; end if;
+ if n.source_type='creator_data_export' then
+   select exists(select 1 from public.creator_data_exports x where x.id=n.source_id and x.auth_user_id=n.auth_user_id and x.status in ('completed','downloaded') and x.ready_notification_due_at=n.due_at and x.expires_at>clock_timestamp()) into v_valid;
+ elsif n.source_type='account_deletion' then
+   select exists(select 1 from public.account_deletion_requests x where x.id=n.source_id and x.auth_user_id=n.auth_user_id and ((n.notification_kind='deletion_requested' and x.status in ('pending','purge_pending') and x.requested_notification_due_at=n.due_at) or (n.notification_kind='deletion_reactivated' and x.status='reactivated' and x.reactivated_notification_due_at=n.due_at) or (n.notification_kind='deletion_completed' and x.status='completed' and x.completed_notification_due_at=n.due_at))) into v_valid;
+ elsif n.source_type='subscription_cancellation' then
+   select exists(select 1 from public.subscription_cancellation_retentions x where x.id=n.source_id and x.auth_user_id=n.auth_user_id and x.state in ('pending_paid_access_end','retained_read_only','expired') and case n.notification_kind when 'cancellation_day_0' then x.day_0_notification_due_at when 'cancellation_day_30' then x.day_30_notification_due_at when 'cancellation_day_45' then x.day_45_notification_due_at when 'cancellation_day_55' then x.day_55_notification_due_at end=n.due_at) into v_valid;
+ elsif n.source_type='payment_delinquency' then
+   select exists(select 1 from public.subscription_payment_delinquencies x where x.id=n.source_id and x.auth_user_id=n.auth_user_id and x.state in ('retention_countdown','expired') and case n.notification_kind when 'delinquency_day_0' then x.day_0_notification_due_at when 'delinquency_day_30' then x.day_30_notification_due_at when 'delinquency_day_45' then x.day_45_notification_due_at when 'delinquency_day_55' then x.day_55_notification_due_at end=n.due_at) into v_valid;
+ end if;
+ if not v_valid then
+   update public.transactional_notification_deliveries set state='suppressed',terminal_reason='source_stale',lease_token=null,lease_expires_at=null,updated_at=clock_timestamp() where id=n.id;
+   return 'suppressed';
+ end if;
+ update public.transactional_notification_deliveries set provider_attempt_started_at=clock_timestamp(),updated_at=clock_timestamp() where id=n.id;
+ return 'ready';
 end $$;
 
 create function public.finalize_phase9_notification(p_id uuid,p_lease_token uuid,p_outcome text,p_reason text default null,p_provider_message_id_hash text default null)
@@ -127,9 +161,9 @@ end $$;
 
 alter function public.materialize_phase9_notifications(integer) owner to postgres;
 alter function public.claim_phase9_notifications(uuid,integer) owner to postgres;
-alter function public.mark_phase9_notification_attempt_started(uuid,uuid) owner to postgres;
+alter function public.prepare_phase9_notification_attempt(uuid,uuid) owner to postgres;
 alter function public.finalize_phase9_notification(uuid,uuid,text,text,text) owner to postgres;
-revoke all on function public.materialize_phase9_notifications(integer),public.claim_phase9_notifications(uuid,integer),public.mark_phase9_notification_attempt_started(uuid,uuid),public.finalize_phase9_notification(uuid,uuid,text,text,text) from public,anon,authenticated;
-grant execute on function public.materialize_phase9_notifications(integer),public.claim_phase9_notifications(uuid,integer),public.mark_phase9_notification_attempt_started(uuid,uuid),public.finalize_phase9_notification(uuid,uuid,text,text,text) to service_role;
+revoke all on function public.materialize_phase9_notifications(integer),public.claim_phase9_notifications(uuid,integer),public.prepare_phase9_notification_attempt(uuid,uuid),public.finalize_phase9_notification(uuid,uuid,text,text,text) from public,anon,authenticated;
+grant execute on function public.materialize_phase9_notifications(integer),public.claim_phase9_notifications(uuid,integer),public.prepare_phase9_notification_attempt(uuid,uuid),public.finalize_phase9_notification(uuid,uuid,text,text,text) to service_role;
 select pg_notify('pgrst','reload schema');
 commit;
