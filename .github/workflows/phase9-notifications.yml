@@ -27,6 +27,8 @@ jobs:
       - run: npm ci
       - name: Phase 9 behavioral and security contracts
         run: npm run test:phase9-notifications
+      - name: Phase 9 Production drift contract
+        run: npx tsx --test backend/notifications/tests/phase9ProductionDriftSource.test.ts
       - name: Phase 9 PostgreSQL 17 integration
         run: npm run test:phase9-notifications-postgres
       - name: TypeScript
