@@ -44,7 +44,9 @@ create table public.safety_case_activities(
  actor_user_id uuid references auth.users(id) on delete set null,actor_kind text not null check(actor_kind in ('public_reporter','founder_admin','admin_operator','system')),
  activity_type text not null check(activity_type in ('RECEIVED','STATE_TRANSITION','ASSIGNMENT_CHANGED','DETAIL_ADDED')),
  from_state text,to_state text,reason_code text,reason text check(reason is null or (char_length(reason) between 3 and 1000 and reason!~'[[:cntrl:]]')),
- safe_reference text check(safe_reference is null or char_length(safe_reference) between 1 and 500),created_at timestamptz not null default statement_timestamp()
+ safe_reference text check(safe_reference is null or char_length(safe_reference) between 1 and 500),
+ outcome_summary text check(outcome_summary is null or (char_length(outcome_summary) between 3 and 1000 and outcome_summary!~'[[:cntrl:]]')),
+ created_at timestamptz not null default statement_timestamp()
 );
 create index safety_case_activity_case_idx on public.safety_case_activities(case_id,sequence_no);
 
@@ -69,7 +71,12 @@ returns table(id uuid,case_reference text,category text,severity text,current_st
 language plpgsql volatile security definer set search_path=pg_catalog,extensions as $$declare v_kind text;v_count integer;begin
  if not public.admin_actor_has_capability(p_actor_user_id,'safety.case.read') then raise exception 'PHASE11_ADMIN_REQUIRED';end if;
  if p_limit not between 1 and 50 or ((p_before is null)<>(p_before_id is null)) or (p_state is not null and p_state not in ('RECEIVED','TRIAGED','INFORMATION_NEEDED','UNDER_REVIEW','ESCALATED','ACTION_PENDING','ACTIONED','NOTIFIED','APPEAL_OR_COUNTERNOTICE','CLOSED')) then raise exception 'SAFETY_LIST_INVALID';end if;
- return query select c.id,c.case_reference,c.category,c.severity,c.current_state,c.received_at,c.updated_at,left(c.description,240) from public.safety_cases c where (p_state is null or c.current_state=p_state) and (p_before is null or (c.updated_at,c.id)<(p_before,p_before_id)) order by c.updated_at desc,c.id desc limit p_limit;
+ return query select c.id,c.case_reference,c.category,c.severity,c.current_state,c.received_at,c.updated_at,
+ case when c.affected_reference is not null and c.content_url is not null then 'Reference and URL supplied'
+      when c.affected_reference is not null then 'Reference supplied'
+      when c.content_url is not null then 'URL supplied'
+      else 'No location reference supplied' end
+ from public.safety_cases c where (p_state is null or c.current_state=p_state) and (p_before is null or (c.updated_at,c.id)<(p_before,p_before_id)) order by c.updated_at desc,c.id desc limit p_limit;
  get diagnostics v_count=row_count;v_kind:=case when public.admin_actor_has_active_role(p_actor_user_id,'founder_admin') then 'founder_admin' else 'admin_operator' end;
  perform public.append_governance_audit_event(p_actor_user_id,v_kind,'safety.case.queue_read','safety_case_queue','queue','safety',null,'success',null,null,gen_random_uuid(),null,jsonb_build_object('returned_count',v_count,'state_filter',p_state,'limit',p_limit),'{}'::jsonb,null);
 end$$;
@@ -79,12 +86,12 @@ create function public.get_admin_safety_case(p_actor_user_id uuid,p_case_ref tex
  return jsonb_build_object('caseReference',v_case.case_reference,'category',v_case.category,'severity',v_case.severity,'state',v_case.current_state,'receivedAt',v_case.received_at,'updatedAt',v_case.updated_at,'reporterType',v_case.reporter_type,'contactEmail',v_case.contact_email,'affectedReference',v_case.affected_reference,'contentUrl',v_case.content_url,'description',v_case.description,'requestedAction',v_case.requested_action,'declaration',v_case.affected_person_declaration,'outcomeSummary',v_case.outcome_summary);
 end$$;
 create function public.list_admin_safety_case_activities(p_actor_user_id uuid,p_case_ref text,p_before_sequence bigint default null,p_limit integer default 50)
-returns table(sequence_no bigint,actor_kind text,activity_type text,from_state text,to_state text,reason_code text,reason text,safe_reference text,created_at timestamptz)
+returns table(sequence_no bigint,actor_kind text,activity_type text,from_state text,to_state text,reason_code text,reason text,safe_reference text,outcome_summary text,created_at timestamptz)
 language plpgsql volatile security definer set search_path=pg_catalog,extensions as $$declare v_case_id uuid;v_kind text;v_count integer;begin
  if not public.admin_actor_has_capability(p_actor_user_id,'safety.case.read') then raise exception 'PHASE11_ADMIN_REQUIRED';end if;
  if p_limit not between 1 and 100 or (p_before_sequence is not null and p_before_sequence<1) then raise exception 'SAFETY_LIST_INVALID';end if;
  select id into v_case_id from public.safety_cases where case_reference=p_case_ref;if not found then raise exception 'SAFETY_NOT_FOUND';end if;
- return query select a.sequence_no,a.actor_kind,a.activity_type,a.from_state,a.to_state,a.reason_code,a.reason,a.safe_reference,a.created_at
+ return query select a.sequence_no,a.actor_kind,a.activity_type,a.from_state,a.to_state,a.reason_code,a.reason,a.safe_reference,a.outcome_summary,a.created_at
  from public.safety_case_activities a where a.case_id=v_case_id and (p_before_sequence is null or a.sequence_no<p_before_sequence)
  order by a.sequence_no desc limit p_limit;
  get diagnostics v_count=row_count;v_kind:=case when public.admin_actor_has_active_role(p_actor_user_id,'founder_admin') then 'founder_admin' else 'admin_operator' end;
@@ -98,7 +105,7 @@ language plpgsql security definer set search_path=pg_catalog,extensions as $$dec
  if p_to_state='CLOSED' and (p_outcome_summary is null or char_length(btrim(p_outcome_summary)) not between 3 and 1000 or p_outcome_summary~'[[:cntrl:]]') then raise exception 'SAFETY_CLOSURE_OUTCOME_REQUIRED';end if;
  if p_to_state<>'CLOSED' and p_outcome_summary is not null then raise exception 'SAFETY_OUTCOME_ONLY_ON_CLOSURE';end if;
  update public.safety_cases set current_state=p_to_state,reason_code=p_reason_code,outcome_summary=case when p_to_state='CLOSED' then btrim(p_outcome_summary) when v.current_state='CLOSED' then null else outcome_summary end,updated_at=statement_timestamp(),closed_at=case when p_to_state='CLOSED' then statement_timestamp() when v.current_state='CLOSED' then null else closed_at end where id=v.id;
- v_kind:=case when public.admin_actor_has_active_role(p_actor_user_id,'founder_admin') then 'founder_admin' else 'admin_operator' end;insert into public.safety_case_activities(case_id,actor_user_id,actor_kind,activity_type,from_state,to_state,reason_code,reason,safe_reference) values(v.id,p_actor_user_id,v_kind,'STATE_TRANSITION',v.current_state,p_to_state,p_reason_code,btrim(p_reason),case when p_to_state='CLOSED' then btrim(p_outcome_summary) else null end);
+ v_kind:=case when public.admin_actor_has_active_role(p_actor_user_id,'founder_admin') then 'founder_admin' else 'admin_operator' end;insert into public.safety_case_activities(case_id,actor_user_id,actor_kind,activity_type,from_state,to_state,reason_code,reason,outcome_summary) values(v.id,p_actor_user_id,v_kind,'STATE_TRANSITION',v.current_state,p_to_state,p_reason_code,btrim(p_reason),case when p_to_state='CLOSED' then btrim(p_outcome_summary) else null end);
  perform public.append_governance_audit_event(p_actor_user_id,v_kind,'safety.case.state_changed','safety_case',v.case_reference,p_reason_code,null,p_to_state,null,null,gen_random_uuid(),null,jsonb_build_object('from_state',v.current_state,'to_state',p_to_state,'category',v.category,'severity',v.severity),'{}'::jsonb,null);
 end$$;
 

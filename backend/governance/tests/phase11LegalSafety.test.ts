@@ -57,7 +57,14 @@ test("migration integrates finite chronology, closure, capability and RLS contra
   assert.doesNotMatch(migration,/\('founder_admin','safety\.case\.read',statement_timestamp/);
   for(const token of ["SAFETY_CHRONOLOGY_APPEND_ONLY","list_admin_safety_case_activities","SAFETY_CLOSURE_OUTCOME_REQUIRED","force row level security","on delete set null","order by a.sequence_no desc limit p_limit"]) assert.match(migration,new RegExp(token,"i"));
   assert.doesNotMatch(migration,/support_operator','safety|security_operator','safety/);
-  assert.match(ui,/NEXT_STATES/);assert.match(ui,/Required safe closure outcome/);assert.match(ui,/Chronology/);
+  assert.match(migration,/create table public\.safety_case_activities[\s\S]*outcome_summary text check/);
+  assert.match(migration,/insert into public\.safety_case_activities\(case_id,actor_user_id,actor_kind,activity_type,from_state,to_state,reason_code,reason,outcome_summary\)/);
+  assert.doesNotMatch(migration,/insert into public\.safety_case_activities\([^)]*safe_reference[^)]*\)[\s\S]{0,500}p_outcome_summary/);
+  assert.doesNotMatch(migration,/left\(c\.description/);
+  for(const summary of ["Reference and URL supplied","Reference supplied","URL supplied","No location reference supplied"]) assert.match(migration,new RegExp(summary));
+  for(const token of ["NEXT_STATES","QUEUE_PAGE_SIZE","QUEUE_FETCH_SIZE","HISTORY_PAGE_SIZE","HISTORY_FETCH_SIZE","Load older cases","Load older history","before_id","before_sequence","outcome_summary","Newest first"]) assert.match(ui,new RegExp(token));
+  assert.match(ui,/Closure outcome: \{activity\.outcome_summary\}/);
+  assert.doesNotMatch(ui,/Closure outcome: \{activity\.safe_reference\}/);
 });
 
 test("Postgres runner is destructive only against exact disposable database and uses real prerequisites",()=>{

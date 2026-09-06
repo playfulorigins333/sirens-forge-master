@@ -69,7 +69,7 @@ do $$ begin if not exists(select from safety_cases where case_reference=(select 
 select transition_admin_safety_case('10000000-0000-4000-8000-000000000005',(select ref from phase11_refs where kind='underage'),'APPEAL_OR_COUNTERNOTICE','ACCOUNT_APPEAL','Synthetic appeal received.',null);
 do $$ begin
  if exists(select from safety_cases where case_reference=(select ref from phase11_refs where kind='underage') and (closed_at is not null or outcome_summary is not null)) then raise exception 'reopen projection retained stale closure';end if;
- if not exists(select from safety_case_activities where case_id=(select id from safety_cases where case_reference=(select ref from phase11_refs where kind='underage')) and to_state='CLOSED' and safe_reference='Closed after synthetic review; no external action performed.') then raise exception 'historical closure outcome missing';end if;
+ if not exists(select from safety_case_activities where case_id=(select id from safety_cases where case_reference=(select ref from phase11_refs where kind='underage')) and to_state='CLOSED' and outcome_summary='Closed after synthetic review; no external action performed.') then raise exception 'historical closure outcome missing';end if;
  if (select count(*) from safety_case_activities where case_id=(select id from safety_cases where case_reference=(select ref from phase11_refs where kind='underage')))<>6 then raise exception 'chronology count incorrect';end if;
  if exists(select 1 from (select sequence_no,lag(sequence_no) over(order by sequence_no) prior from safety_case_activities where case_id=(select id from safety_cases where case_reference=(select ref from phase11_refs where kind='underage'))) x where prior is not null and sequence_no<=prior) then raise exception 'chronology order unstable';end if;
  if not exists(select from safety_case_activities where actor_kind='founder_admin') or not exists(select from safety_case_activities where actor_kind='admin_operator') then raise exception 'chronology actor kind false';end if;
@@ -82,6 +82,54 @@ do $$ begin begin update safety_case_activities set reason='forged';raise except
 update safety_cases set reporter_user_id='10000000-0000-4000-8000-000000000004',assigned_user_id='10000000-0000-4000-8000-000000000004' where case_reference=(select ref from phase11_refs where kind='ai');
 delete from auth.users where id='10000000-0000-4000-8000-000000000004';
 do $$ begin if not exists(select from safety_cases where case_reference=(select ref from phase11_refs where kind='ai') and reporter_user_id is null and assigned_user_id is null) then raise exception 'referenced Auth deletion unsafe';end if;end $$;
+
+-- Closure outcomes retain their exact 3-1000 character length in a dedicated chronology field.
+set role service_role;
+create temp table phase11_closure_lengths(expected_length integer primary key,case_reference text not null);
+insert into phase11_closure_lengths values
+ (3,create_public_safety_case('GENERAL_COMPLAINT','WITNESS_OTHER',null,null,null,'Synthetic three-character closure outcome case.',null,null,true)),
+ (500,create_public_safety_case('GENERAL_COMPLAINT','WITNESS_OTHER',null,null,null,'Synthetic five-hundred-character closure outcome case.',null,null,true)),
+ (501,create_public_safety_case('GENERAL_COMPLAINT','WITNESS_OTHER',null,null,null,'Synthetic five-hundred-one-character closure outcome case.',null,null,true)),
+ (1000,create_public_safety_case('GENERAL_COMPLAINT','WITNESS_OTHER',null,null,null,'Synthetic one-thousand-character closure outcome case.',null,null,true)),
+ (1001,create_public_safety_case('GENERAL_COMPLAINT','WITNESS_OTHER',null,null,null,'Synthetic rejected closure outcome case.',null,null,true));
+reset role;
+do $$ declare item record;begin
+ for item in select * from phase11_closure_lengths loop
+  perform transition_admin_safety_case('10000000-0000-4000-8000-000000000001',item.case_reference,'TRIAGED','SAFETY','Synthetic triage.',null);
+  perform transition_admin_safety_case('10000000-0000-4000-8000-000000000001',item.case_reference,'UNDER_REVIEW','SAFETY','Synthetic review.',null);
+  perform transition_admin_safety_case('10000000-0000-4000-8000-000000000001',item.case_reference,'NOTIFIED','SAFETY','Synthetic notification.',null);
+  if item.expected_length<=1000 then
+   perform transition_admin_safety_case('10000000-0000-4000-8000-000000000001',item.case_reference,'CLOSED','SAFETY','Synthetic closure.',case item.expected_length when 3 then repeat('a',3) when 500 then repeat('b',500) when 501 then repeat('c',501) else repeat('d',1000) end);
+  else
+   begin
+    perform transition_admin_safety_case('10000000-0000-4000-8000-000000000001',item.case_reference,'CLOSED','SAFETY','Synthetic rejected closure.',repeat('e',1001));
+    raise exception '1001-character closure accepted';
+   exception when others then if SQLERRM='1001-character closure accepted' then raise;end if;end;
+  end if;
+ end loop;
+end $$;
+do $$ begin
+ if exists(select 1 from phase11_closure_lengths l join safety_cases c on c.case_reference=l.case_reference join safety_case_activities a on a.case_id=c.id and a.to_state='CLOSED' where l.expected_length<=1000 and char_length(a.outcome_summary)<>l.expected_length) then raise exception 'closure chronology length changed';end if;
+ if (select count(*) from phase11_closure_lengths l join safety_cases c on c.case_reference=l.case_reference join safety_case_activities a on a.case_id=c.id and a.to_state='CLOSED' where l.expected_length<=1000)<>4 then raise exception 'valid closure length missing';end if;
+ if exists(select 1 from safety_cases c join phase11_closure_lengths l on l.case_reference=c.case_reference where l.expected_length=1001 and c.current_state='CLOSED') then raise exception '1001-character closure persisted';end if;
+end $$;
+select transition_admin_safety_case('10000000-0000-4000-8000-000000000001',(select case_reference from phase11_closure_lengths where expected_length=501),'APPEAL_OR_COUNTERNOTICE','ACCOUNT_APPEAL','Synthetic reopen.',null);
+do $$ begin
+ if exists(select 1 from safety_cases where case_reference=(select case_reference from phase11_closure_lengths where expected_length=501) and (closed_at is not null or outcome_summary is not null)) then raise exception 'reopened closure projection not cleared';end if;
+ if not exists(select 1 from safety_case_activities a join safety_cases c on c.id=a.case_id where c.case_reference=(select case_reference from phase11_closure_lengths where expected_length=501) and a.to_state='CLOSED' and char_length(a.outcome_summary)=501) then raise exception 'reopened historical closure outcome missing';end if;
+end $$;
+
+-- Queue metadata exposes only location-presence labels, never reporter narrative.
+set role service_role;
+select create_public_safety_case('GENERAL_COMPLAINT','WITNESS_OTHER',null,'sentinel-reference','https://example.invalid/sentinel','PHASE11_PRIVATE_QUEUE_SENTINEL_839274 synthetic private narrative.',null,null,true);
+reset role;
+create temp table phase11_private_queue as select * from list_admin_safety_cases('10000000-0000-4000-8000-000000000001',null,null,null,50);
+do $$ declare combined text;begin
+ if exists(select 1 from phase11_private_queue where safe_summary like '%PHASE11_PRIVATE_QUEUE_SENTINEL_839274%') then raise exception 'private narrative leaked to queue';end if;
+ if exists(select 1 from phase11_private_queue where safe_summary not in ('Reference and URL supplied','Reference supplied','URL supplied','No location reference supplied')) then raise exception 'queue returned non-allowlisted summary';end if;
+ select string_agg(coalesce(facts::text,'')||coalesce(reference_hashes::text,'')||coalesce(reason,''),' ') into combined from governance_audit_events;
+ if combined like '%PHASE11_PRIVATE_QUEUE_SENTINEL_839274%' then raise exception 'private queue sentinel leaked to governance';end if;
+end $$;
 
 -- Real governance reads/transitions and minimized, linked hash chain.
 select get_admin_safety_case('10000000-0000-4000-8000-000000000001',(select ref from phase11_refs where kind='ncii'));
