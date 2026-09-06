@@ -34,6 +34,29 @@ const PUBLIC_PATHS = new Set([
 ]);
 
 const PUBLIC_PREFIXES = ["/_next", "/api", "/auth"];
+const LEGACY_AUTOPOST_ADMIN_ROOT = "/api/admin/autopost";
+export const LEGACY_AUTOPOST_ADMIN_ENABLE_ENV =
+  "SIRENS_LEGACY_AUTOPOST_ADMIN_ENABLED" as const;
+
+// Legacy Autopost admin diagnostics/proof routes are not part of the Phase 1
+// launch path. CPQ is the authoritative Fanvue publishing state machine. Keep
+// the entire legacy admin surface fail-closed unless an operator deliberately
+// enables it for a controlled diagnostic window.
+export function legacyAutopostAdminEnabled(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): boolean {
+  return env[LEGACY_AUTOPOST_ADMIN_ENABLE_ENV] === "true";
+}
+
+export function shouldBlockLegacyAutopostAdmin(
+  pathname: string,
+  env: Readonly<Record<string, string | undefined>> = process.env
+): boolean {
+  const inLegacyAdminSurface =
+    pathname === LEGACY_AUTOPOST_ADMIN_ROOT ||
+    pathname.startsWith(`${LEGACY_AUTOPOST_ADMIN_ROOT}/`);
+  return inLegacyAdminSurface && !legacyAutopostAdminEnabled(env);
+}
 
 // Next.js Proxy runs before next.config rewrites, so the auth proxy must not
 // redirect BotID's internal challenge/proxy namespace.
@@ -53,6 +76,15 @@ export function isPublicPath(pathname: string): boolean {
 
 export async function proxy(req: NextRequest) {
   const pathname = req.nextUrl.pathname;
+
+  if (shouldBlockLegacyAutopostAdmin(pathname)) {
+    return new NextResponse(null, {
+      status: 404,
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    });
+  }
 
   if (isPublicPath(pathname)) {
     return NextResponse.next();
