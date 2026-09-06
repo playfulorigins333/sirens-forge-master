@@ -3,7 +3,7 @@ import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function TermsPage() {
   return (
-    <LegalPageLayout title="Terms of Service" lastUpdated="August 22, 2026">
+    <LegalPageLayout title="Terms of Service" lastUpdated="September 5, 2026">
       <section>
         <p>
           Welcome to Sirens Forge. By accessing or using our platform, you agree
@@ -37,12 +37,24 @@ export default function TermsPage() {
       <section>
         <h2 className="text-xl font-semibold">3. Subscriptions and Billing</h2>
         <p>
-          Sirens Forge operates on a subscription-based and paid-access model.
-          By subscribing or purchasing access, you agree to billing through our
-          payment provider. You may cancel recurring subscriptions according to
-          the available billing controls, but no refunds are guaranteed for
-          unused time, digital access, lifetime access, or consumed services
-          unless required by law.
+          Sirens Forge operates on paid-access plans that may include recurring
+          subscriptions and non-recurring or lifetime access. By purchasing
+          access, you agree to billing through our payment provider. Recurring
+          subscriptions may be cancelled through available billing controls and
+          remain subject to the paid-through access period shown for the account.
+          Non-recurring or lifetime access is not treated as a cancellable
+          recurring subscription. Refunds are not guaranteed for unused time,
+          digital access, lifetime access, or consumed services unless required
+          by law.
+        </p>
+        <p>
+          If a recurring payment fails, creator-product access may be frozen
+          during payment recovery. After the second missed payment, a documented
+          retention countdown may begin before deletion of eligible retained
+          creator data. Billing records, fraud-prevention records, immutable
+          audit evidence, legal-hold material, and other records that must or may
+          lawfully be preserved are handled separately from creator-content
+          deletion.
         </p>
       </section>
 
@@ -107,9 +119,10 @@ export default function TermsPage() {
           persona and does not require every persona to resemble the creator.
           Fanvue may permit a fully synthetic fictional AI persona that does not
           resemble the verified human account owner, subject to Fanvue
-          requirements. The OnlyFans launch workflow is likeness-bound: content prepared
-          for that workflow must depict the verified creator and comply with its
-          consent, verification, disclosure, and manual-handoff requirements.
+          requirements. The OnlyFans launch workflow is likeness-bound: content
+          prepared for that workflow must depict the verified creator and comply
+          with its consent, verification, disclosure, and manual-handoff
+          requirements.
         </p>
       </section>
 
@@ -130,13 +143,12 @@ export default function TermsPage() {
           9. Content Removal and Complaints
         </h2>
         <p>
-          Sirens Forge may provide processes for reporting abuse, requesting
+          Sirens Forge provides processes for reporting abuse, requesting
           content removal, submitting complaints, or raising intellectual
           property concerns. We may remove content, restrict access, preserve
-          evidence, suspend accounts, or take other action at our discretion.
-          Submitting a request does not guarantee removal unless required by law
-          or our policies. Reports of nonconsensual or unauthorized intimate
-          content may use the dedicated <Link className="text-cyan-400 hover:underline" href="/report-intimate-content">public reporting route</Link>.
+          evidence, suspend accounts, or take other action under our policies or
+          where required by law. Reports of nonconsensual or unauthorized
+          intimate content may use the dedicated <Link className="text-cyan-400 hover:underline" href="/report-intimate-content">public reporting route</Link>.
         </p>
       </section>
 
@@ -155,17 +167,41 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">11. Termination</h2>
+        <h2 className="text-xl font-semibold">
+          11. Data Export, Account Deletion, and Legal Holds
+        </h2>
         <p>
-          We reserve the right to suspend, restrict, or terminate your access to
-          the service at any time, with or without notice, if we believe you have
-          violated these Terms, our policies, applicable law, payment rules, or
-          the safety of the platform or others.
+          Authenticated creators may use available account controls to request a
+          data export and to request voluntary account deletion. A voluntary
+          deletion request enters a recovery period before eligible creator data
+          is permanently purged. During that period, creator-product access is
+          frozen while data-rights, security, billing-recovery, and reactivation
+          controls remain available.
+        </p>
+        <p>
+          Before requesting deletion, creators may choose to request an export
+          before deletion or to skip that export. Export packages are temporary
+          and may expire. Deletion does not require us to erase records that must
+          or may lawfully be retained for security, fraud prevention, billing,
+          dispute resolution, legal compliance, immutable audit evidence, or an
+          active legal hold. A valid active legal hold blocks destructive
+          deletion of material within its documented scope until the hold is
+          released or expires.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">12. No Warranty</h2>
+        <h2 className="text-xl font-semibold">12. Termination</h2>
+        <p>
+          We reserve the right to suspend, restrict, or terminate your access to
+          the service if we believe you have violated these Terms, our policies,
+          applicable law, payment rules, or the safety of the platform or
+          others, subject to any rights or notices required by applicable law.
+        </p>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold">13. No Warranty</h2>
         <p>
           The service is provided as-is and as-available without warranties of
           any kind, whether express or implied. We do not guarantee that the
@@ -177,7 +213,7 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">13. Limitation of Liability</h2>
+        <h2 className="text-xl font-semibold">14. Limitation of Liability</h2>
         <p>
           To the maximum extent permitted by law, Sirens Forge shall not be
           liable for indirect, incidental, special, consequential, exemplary, or
@@ -189,7 +225,7 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">14. Indemnification</h2>
+        <h2 className="text-xl font-semibold">15. Indemnification</h2>
         <p>
           You agree to defend, indemnify, and hold harmless Sirens Forge, its
           owners, operators, affiliates, contractors, payment processors, and
@@ -202,7 +238,7 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">15. Governing Law</h2>
+        <h2 className="text-xl font-semibold">16. Governing Law</h2>
         <p>
           These Terms are governed by the laws of the State of Florida, without
           regard to conflict-of-law rules. Any disputes arising from these Terms
@@ -212,17 +248,23 @@ export default function TermsPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">16. Changes to These Terms</h2>
+        <h2 className="text-xl font-semibold">
+          17. Policy Versions and Material Changes
+        </h2>
         <p>
-          We may update these Terms or related policies. We will post the updated
-          version and date and provide additional notice or obtain acceptance
-          when required. This provision does not claim that a general automated
-          material-policy re-consent system currently exists.
+          We may update these Terms or related policies. The current material
+          policy bundle identifies the applicable Terms of Service, Privacy
+          Policy, and Acceptable Use Policy by version and source evidence. When
+          Sirens Forge marks a new material bundle as current, creator-product
+          access may require active acceptance of that current bundle before
+          protected creator features resume. Checkout acceptance and
+          authenticated re-consent are recorded as durable policy-acceptance
+          receipts.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">17. Contact</h2>
+        <h2 className="text-xl font-semibold">18. Contact</h2>
         <p>
           For questions regarding these Terms, please contact us at
           admin@sirensforge.vip.

@@ -3,12 +3,12 @@ import LegalPageLayout from "@/components/legal/LegalPageLayout"
 
 export default function PrivacyPage() {
   return (
-    <LegalPageLayout title="Privacy Policy" lastUpdated="August 22, 2026">
+    <LegalPageLayout title="Privacy Policy" lastUpdated="September 5, 2026">
       <section>
         <p>
           This Privacy Policy explains how Sirens Forge collects, uses, stores,
-          shares, protects, and retains information when you access or use the
-          platform.
+          shares, protects, exports, and retains information when you access or
+          use the platform.
         </p>
       </section>
 
@@ -22,6 +22,7 @@ export default function PrivacyPage() {
           <li>LoRA-related materials, identity assets, vault content, and generation history</li>
           <li>Usage data, logs, device data, browser data, IP address, and system activity</li>
           <li>Support requests, complaints, reports, appeals, and other communications</li>
+          <li>Policy-acceptance, consent, deletion, export, security, and governance evidence</li>
         </ul>
       </section>
 
@@ -34,6 +35,7 @@ export default function PrivacyPage() {
           <li>Process payments, subscriptions, refunds, disputes, and billing records</li>
           <li>Generate, store, display, and deliver user-requested outputs</li>
           <li>Provide identity, vault, LoRA, generation, and creator-related features</li>
+          <li>Process creator export, account-deletion, recovery, and reactivation requests</li>
           <li>Detect, investigate, prevent, and enforce against misuse or policy violations</li>
           <li>Respond to support requests, complaints, takedown requests, and legal inquiries</li>
           <li>Comply with legal obligations and protect the rights, safety, and integrity of the platform</li>
@@ -138,40 +140,80 @@ export default function PrivacyPage() {
           We use reasonable technical and organizational measures to protect
           information. However, no internet-based service, cloud provider,
           storage system, AI processing system, or transmission method can be
-          guaranteed to be completely secure. You use the platform at your own
-          risk.
+          guaranteed to be completely secure.
         </p>
       </section>
 
       <section>
         <h2 className="text-xl font-semibold">10. Data Retention</h2>
         <p>
-          We retain information only as needed to provide the service, maintain
-          necessary business and billing records, comply with legal obligations,
-          resolve disputes, prevent fraud, investigate abuse, maintain backups,
-          secure the platform, and support documented enforcement decisions.
-          Retention varies by the type of data and the purpose for which it is
-          held.
+          Sirens Forge uses documented retention rules by data category rather
+          than a single indefinite period. Current platform controls include
+          30-day Recently Deleted windows for private generation media and Twin
+          materials, a 60-day voluntary account-deletion recovery period, a
+          60-day post-cancellation retention period after recurring paid access
+          ends, and a 60-day retention period after the second missed recurring
+          subscription payment. Draft working data uses a 90-day retention rule,
+          while security and governance audit evidence is retained for 12 months.
+          Aggregate or de-identified information may be retained longer where it
+          no longer identifies a creator.
         </p>
-      </section>
-
-      <section>
-        <h2 className="text-xl font-semibold">11. Data Deletion Requests</h2>
         <p>
-          You may contact us to request deletion of your account or certain
-          stored data. We may deny, delay, or limit deletion where retention is
-          required or permitted for billing, security, legal compliance, abuse
-          prevention, dispute resolution, enforcement, backups, fraud prevention,
-          or other documented necessary purposes. Requests use the current manual
-          contact process; this policy does not represent that automated account
-          deletion, reactivation, Recently Deleted, full export, or purge controls
-          are currently available.
+          Retention may be extended or destructive deletion blocked where a
+          valid legal hold, dispute, fraud investigation, security requirement,
+          payment record, legal obligation, backup-restoration constraint, or
+          other documented lawful exception applies. Any retained exception is
+          limited to the purpose requiring preservation.
         </p>
       </section>
 
       <section>
         <h2 className="text-xl font-semibold">
-          12. Connected Social-Platform Accounts
+          11. Data Export and Voluntary Account Deletion
+        </h2>
+        <p>
+          Authenticated creators may request an account data export through the
+          available account controls. Export requests move through a processing
+          lifecycle and completed export packages are made available only for a
+          limited period before expiry. Export integrity evidence may include a
+          cryptographic hash and minimal non-content metadata.
+        </p>
+        <p>
+          Authenticated creators may also request voluntary account deletion.
+          Before deletion is requested, the creator chooses whether to request an
+          export before deletion or to skip that export. The deletion request
+          then enters a 60-day recovery period. Creator-product access is frozen
+          during that period while data-rights, account-security, billing
+          recovery, and reactivation controls remain available. Reactivation
+          during the recovery period cancels the pending deletion. If the
+          recovery period ends without reactivation, eligible creator data moves
+          into the controlled purge process.
+        </p>
+        <p>
+          Deletion does not erase records that must or may lawfully be retained
+          for billing, fraud prevention, security, dispute resolution, legal
+          compliance, immutable audit evidence, or an active legal hold. A valid
+          active legal hold blocks destructive deletion of material within its
+          documented scope until the hold is released or expires.
+        </p>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold">12. Governance and Audit Evidence</h2>
+        <p>
+          Sirens Forge maintains append-only governance evidence for selected
+          high-risk privacy, billing, security, consent, policy-acceptance,
+          deletion, export, and legal-hold actions. These records are designed to
+          store scoped metadata, policy and form versions, timestamps,
+          correlation identifiers, and cryptographic references rather than
+          plaintext secrets, raw access tokens, private binary content, prompts,
+          or captions.
+        </p>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold">
+          13. Connected Social-Platform Accounts
         </h2>
         <p>
           When a creator disconnects a connected social-platform account, OAuth
@@ -192,14 +234,14 @@ export default function PrivacyPage() {
         <p>
           For data obtained through a connected platform API, any retained
           exception applies only to the extent required by applicable law or
-          expressly permitted by that platform’s terms or written approval.
+          expressly permitted by that platform&apos;s terms or written approval.
           Deleted or removed platform content is not retained in audit records.
           Any permitted audit record is limited to minimal non-content metadata.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">13. Content Removal and Complaints</h2>
+        <h2 className="text-xl font-semibold">14. Content Removal and Complaints</h2>
         <p>
           If you believe content on or generated through Sirens Forge violates
           your rights, privacy, consent, likeness, copyright, or our policies,
@@ -212,7 +254,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">14. User Responsibility</h2>
+        <h2 className="text-xl font-semibold">15. User Responsibility</h2>
         <p>
           You are responsible for ensuring that prompts, uploads, references,
           likenesses, identity materials, account activity, and generated content
@@ -223,7 +265,7 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">15. Children and Minors</h2>
+        <h2 className="text-xl font-semibold">16. Children and Minors</h2>
         <p>
           Sirens Forge is strictly for adults aged 18 and older. We do not
           knowingly collect information from anyone under 18. If we become aware
@@ -236,7 +278,7 @@ export default function PrivacyPage() {
 
       <section>
         <h2 className="text-xl font-semibold">
-          16. International Users and Data Transfers
+          17. International Users and Data Transfers
         </h2>
         <p>
           Sirens Forge may process and store information in the United States or
@@ -248,17 +290,22 @@ export default function PrivacyPage() {
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">17. Changes to This Policy</h2>
+        <h2 className="text-xl font-semibold">
+          18. Policy Versions and Material Changes
+        </h2>
         <p>
-          We may update this Privacy Policy. We will post the updated version and
-          date and provide additional notice or obtain acceptance when required.
-          This provision does not claim that a general automated material-policy
-          re-consent system currently exists.
+          We may update this Privacy Policy. The current material policy bundle
+          identifies the applicable Terms of Service, Privacy Policy, and
+          Acceptable Use Policy by version and source evidence. When a new
+          material bundle becomes current, creator-product access may require
+          active acceptance of that bundle before protected creator features
+          resume. Sirens Forge records durable checkout or authenticated
+          re-consent receipts for the accepted current bundle.
         </p>
       </section>
 
       <section>
-        <h2 className="text-xl font-semibold">18. Contact</h2>
+        <h2 className="text-xl font-semibold">19. Contact</h2>
         <p>
           For questions about this Privacy Policy, contact us at
           admin@sirensforge.vip.

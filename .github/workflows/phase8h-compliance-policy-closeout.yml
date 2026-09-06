@@ -1,0 +1,28 @@
+name: Phase 8H Compliance Policy Closeout
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  phase8h-compliance-policy-closeout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Phase 8H closeout source contract
+        run: npx tsx backend/governance/tests/phase8hCompliancePolicyCloseout.test.ts
+      - name: Material policy acceptance source contract
+        run: npm run test:material-policy-acceptance-source
+      - name: Public policy and privacy truth contract
+        run: npm run test:public-policy-privacy-truth
+      - name: Complaints and removal operations contract
+        run: npm run test:complaints-removal-operations
