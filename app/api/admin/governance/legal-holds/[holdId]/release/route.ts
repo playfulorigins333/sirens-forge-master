@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { requireFreshTotpResponse } from "@/lib/security/mfaRoute"
+import { requireAdminCapability } from "@/lib/security/adminAuthorization"
 import { releaseLegalHold, validateIdempotencyKey, validateReleaseLegalHoldInput } from "@/lib/governance/legalHolds"
 
 export const runtime = "nodejs"
@@ -11,9 +11,8 @@ const json = (body: unknown, status = 200) => NextResponse.json(body, { status, 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export async function POST(request: Request, context: { params: Promise<{ holdId: string }> }) {
-  const mfa = await requireFreshTotpResponse()
-  if (mfa instanceof NextResponse) return mfa
-  if (!mfa.freshTotpAt) return json({ ok: false, code: "MFA_FRESH_AUTH_REQUIRED" }, 428)
+  const mfa = await requireAdminCapability("governance.legal_hold.manage")
+  if (mfa.ok === false) return json({ ok: false, code: mfa.code, ...(mfa.actionPath ? { actionPath: mfa.actionPath } : {}) }, mfa.status)
 
   const { holdId } = await context.params
   if (!uuidPattern.test(holdId)) return json({ ok: false, code: "LEGAL_HOLD_ID_INVALID" }, 400)

@@ -3,7 +3,7 @@
 > Canonical, exhaustive route-local authorization inventory for the Next.js frontend repository. Each row is one exported HTTP method. The regression contract parses this table directly; do not add, remove, or rename a route without updating its row.
 
 **Reviewed source baseline:** `42329679dae547fd3205a3c4ad49cfc058f93284`
-**Inventory:** 120 route files / 142 route-method entries
+**Combined inventory:** 132 route files / 156 route-method entries
 **Review result:** all entries PASS; no frozen or design-blocked authorization defects identified.  
 **Cross-repo closure:** the separate Railway/FastAPI repository `playfulorigins333/sirens-forge-api` is covered by merged API PR #4 (`2c84f8620dc626a449740b6e946fef1388605cee`), whose inventory covers 10 business endpoints plus FastAPI framework docs/schema routes and whose regression test enforces the privileged-ingress boundary. Railway Production successfully deployed that exact merge SHA.
 
