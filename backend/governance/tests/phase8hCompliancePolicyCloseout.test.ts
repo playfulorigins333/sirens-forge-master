@@ -6,6 +6,8 @@ const terms = readFileSync("app/terms/page.tsx", "utf8")
 const privacy = readFileSync("app/privacy/page.tsx", "utf8")
 const aup = readFileSync("app/acceptable-use/page.tsx", "utf8")
 const closeout = readFileSync("docs/compliance/phase8h-policy-closeout.md", "utf8")
+const normalizedTerms = terms.replace(/\s+/g, " ")
+const normalizedPrivacy = privacy.replace(/\s+/g, " ")
 
 assert.equal(manifest.termsVersion, "terms-2026-09-05-r1")
 assert.equal(manifest.privacyVersion, "privacy-2026-09-05-r1")
@@ -21,7 +23,7 @@ for (const phrase of [
   "valid active legal hold blocks destructive",
   "current material policy bundle",
   "durable policy-acceptance",
-]) assert(terms.includes(phrase), `Terms closeout missing: ${phrase}`)
+]) assert(normalizedTerms.includes(phrase), `Terms closeout missing: ${phrase}`)
 
 for (const phrase of [
   "30-day Recently Deleted windows",
@@ -32,7 +34,7 @@ for (const phrase of [
   "security and governance audit evidence is retained for 12 months",
   "Governance and Audit Evidence",
   "60-day recovery period",
-]) assert(privacy.includes(phrase), `Privacy closeout missing: ${phrase}`)
+]) assert(normalizedPrivacy.includes(phrase), `Privacy closeout missing: ${phrase}`)
 
 assert.doesNotMatch(privacy, /current manual contact process/)
 assert.doesNotMatch(privacy, /does not represent that automated account deletion/)
