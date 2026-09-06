@@ -1,0 +1,41 @@
+name: Phase 8G Audit Completeness
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  phase8g-audit-completeness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: phase8g_audit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d phase8g_audit_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PHASE8G_AUDIT_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase8g_audit_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Phase 8G source and boundary contracts
+        run: npx tsx --test backend/security/tests/phase8gAuditCompletenessSource.test.ts
+      - name: Phase 8G PostgreSQL integration
+        run: node backend/security/tests/runPhase8gAuditCompletenessPostgres.mjs
+      - name: API authorization inventory contract
+        run: npx tsx backend/security/tests/apiAuthorizationInventory.test.ts
