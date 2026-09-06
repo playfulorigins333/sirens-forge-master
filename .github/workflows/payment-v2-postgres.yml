@@ -8,6 +8,7 @@ on:
       - 'supabase/migrations/20260807003200_affiliate_public_cutover_hardening.sql'
       - 'supabase/migrations/20260807003300_affiliate_summary_payment_v2_read_boundary.sql'
       - 'supabase/migrations/20260822090000_material_policy_acceptance_receipts.sql'
+      - 'supabase/migrations/20260906031000_material_policy_acceptance_manifest_rollforward.sql'
       - 'supabase/manual/**'
       - 'backend/affiliate/tests/**'
       - 'app/api/affiliate/**'

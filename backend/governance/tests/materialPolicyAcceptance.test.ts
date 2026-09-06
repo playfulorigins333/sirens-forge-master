@@ -52,10 +52,29 @@ assert.match(pricing, /if \(!policiesAccepted\) \{[\s\S]*Please accept the Terms
 assert.match(pricing, /const canCheckout = availabilityLoaded && checkoutLoading === null;/)
 assert.doesNotMatch(pricing, /const canCheckout =[^;]*policiesAccepted/)
 assert.match(pricing, /materialPolicyAcceptance:\s*\{ accepted: policiesAccepted,/)
-const migration = readFileSync("supabase/migrations/20260822090000_material_policy_acceptance_receipts.sql", "utf8")
-assert.match(migration, /before update or delete/); assert.match(migration, /enable row level security/)
-assert.match(readFileSync("lib/material-policy/service.ts", "utf8"), /claimed_profile_id/); assert.match(migration, /material_policy_manifest_mismatch/)
-assert.doesNotMatch(migration, /\b(?:drop|truncate)\s+(?:table\s+)?public\.(?:payment_v2|profiles|user_subscriptions)/i)
+
+const baseMigration = readFileSync("supabase/migrations/20260822090000_material_policy_acceptance_receipts.sql", "utf8")
+const rollforward = readFileSync("supabase/migrations/20260906031000_material_policy_acceptance_manifest_rollforward.sql", "utf8")
+assert.match(baseMigration, /before update or delete/)
+assert.match(baseMigration, /enable row level security/)
+assert.match(readFileSync("lib/material-policy/service.ts", "utf8"), /claimed_profile_id/)
+assert.match(baseMigration, /material_policy_manifest_mismatch/)
+assert.doesNotMatch(baseMigration, /\b(?:drop|truncate)\s+(?:table\s+)?public\.(?:payment_v2|profiles|user_subscriptions)/i)
+
+for (const expected of [
+  manifest.materialBundleVersion,
+  manifest.termsVersion,
+  manifest.privacyVersion,
+  manifest.acceptableUseVersion,
+  manifest.acceptanceStatementVersion,
+  manifest.sourceRevision,
+  materialPolicyBundleEvidence(),
+]) assert(rollforward.includes(expected), `rollforward missing current manifest value: ${expected}`)
+assert.match(rollforward, /record_authenticated_material_policy_acceptance/)
+assert.match(rollforward, /record_payment_first_material_policy_acceptance/)
+assert.match(rollforward, /Production application requires separate explicit authorization/)
+assert.doesNotMatch(rollforward, /\b(?:delete|update|truncate)\b[\s\S]*material_policy_acceptance_receipts/i)
+assert.doesNotMatch(rollforward, /\b(?:drop|truncate)\s+(?:table\s+)?public\.(?:payment_v2|profiles|user_subscriptions)/i)
 
 const termsSource = readFileSync("app/terms/page.tsx", "utf8")
 const privacySource = readFileSync("app/privacy/page.tsx", "utf8")
