@@ -4,7 +4,17 @@ import SafetyReportForm from "@/components/safety/SafetyReportForm"
 export default function DMCAPage() {
   return (
     <LegalPageLayout title="DMCA Policy" lastUpdated="September 6, 2026">
-      <SafetyReportForm category="COPYRIGHT_DMCA" title="Submit a copyright or DMCA report" />
+      <section className="rounded border border-amber-700 p-4">
+        <h2 className="text-xl font-semibold">Preliminary copyright concern intake</h2>
+        <p>
+          The structured form below opens a copyright review case. It does not
+          by itself substitute for a complete formal DMCA notice and does not
+          collect every required declaration or signature. Submit a formal DMCA
+          notice containing every element in section 1 to
+          admin@sirensforge.vip.
+        </p>
+      </section>
+      <SafetyReportForm category="COPYRIGHT_DMCA" title="Open a copyright review case" />
       <section>
         <p>
           Sirens Forge respects the intellectual property rights of others and

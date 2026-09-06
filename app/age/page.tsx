@@ -10,6 +10,7 @@ export default async function AgeGate({searchParams}:{searchParams:Promise<{next
       <p className="mt-3 text-zinc-400">By continuing, you attest that you are at least 18 years old and may lawfully access adult content where you live.</p>
       <p className="mt-3 text-sm text-zinc-500">This is a self-attestation, not identity or government-ID age verification. We store an HttpOnly cookie to remember it.</p>
       <form action="/api/age-attestation" method="post" className="mt-8">
+        <input type="hidden" name="attest" value="18plus"/>
         <input type="hidden" name="next" value={next}/>
         <button className="rounded-full bg-gradient-to-r from-purple-600 to-pink-600 px-8 py-4 font-bold" type="submit">I am 18 or older — continue</button>
       </form>

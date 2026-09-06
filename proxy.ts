@@ -41,6 +41,20 @@ const AGE_EXEMPT_PATHS = new Set([
   "/report-intimate-content", "/complaints", "/dmca", "/2257-exemption",
   "/contact", "/affiliate-terms", "/robots.txt", "/sitemap.xml", "/favicon.ico",
 ]);
+const AGE_EXEMPT_API_PATHS = new Set([
+  "/api/age-attestation",
+  "/api/safety/reports",
+  "/api/health",
+  "/api/ping",
+  "/api/status",
+  "/api/webhook",
+  "/api/webhook/payment-v2",
+]);
+const AGE_EXEMPT_API_PREFIXES = ["/api/internal/"];
+const AGE_EXEMPT_CALLBACK_PATHS = new Set([
+  "/api/autopost/connect/fanvue/callback",
+  "/api/autopost/connect/x/callback",
+]);
 const LEGACY_AUTOPOST_ADMIN_ROOT = "/api/admin/autopost";
 export const LEGACY_AUTOPOST_ADMIN_ENABLE_ENV =
   "SIRENS_LEGACY_AUTOPOST_ADMIN_ENABLED" as const;
@@ -83,7 +97,8 @@ export function isPublicPath(pathname: string): boolean {
 
 export function isAgeExemptPath(pathname: string): boolean {
   return AGE_EXEMPT_PATHS.has(pathname) || pathname.startsWith("/_next") ||
-    pathname.startsWith("/api") || pathname.startsWith("/auth") ||
+    AGE_EXEMPT_API_PATHS.has(pathname) || AGE_EXEMPT_API_PREFIXES.some((prefix) => pathname.startsWith(prefix)) ||
+    pathname.startsWith("/auth") || AGE_EXEMPT_CALLBACK_PATHS.has(pathname) ||
     pathname.startsWith(BOTID_INTERNAL_PREFIX) || pathname.startsWith(VERCEL_RATE_LIMIT_API_PREFIX);
 }
 
@@ -91,6 +106,7 @@ export function safeAgeReturnPath(value: string | null): string {
   if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
   try {
     const parsed = new URL(value, "https://age.invalid");
+    decodeURI(parsed.pathname);
     return parsed.origin === "https://age.invalid" && !isAgeExemptPath(parsed.pathname)
       ? `${parsed.pathname}${parsed.search}${parsed.hash}` : "/";
   } catch { return "/"; }
