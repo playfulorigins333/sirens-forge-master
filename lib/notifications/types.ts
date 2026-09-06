@@ -3,4 +3,4 @@ export const notificationKinds = ["export_ready","deletion_requested","deletion_
 export type NotificationKind = typeof notificationKinds[number]
 export type ClaimedNotification = { id:string; source_type:string; source_id:string; notification_kind:NotificationKind; auth_user_id:string; due_at:string; attempts:number; context:Record<string,string|null> }
 export type Mail = { subject:string; text:string; html:string }
-export interface NotificationTransport { send(input:{to:string; mail:Mail; idempotencyKey:string}):Promise<{kind:"delivered";providerMessageId:string}|{kind:"retry";code:string}|{kind:"uncertain";code:string}> }
+export interface NotificationTransport { send(input:{to:string; mail:Mail; idempotencyKey:string}):Promise<{kind:"delivered";providerMessageId:string}|{kind:"retry";code:string}|{kind:"permanent";code:string}|{kind:"uncertain";code:string}> }

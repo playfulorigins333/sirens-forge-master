@@ -4,9 +4,13 @@ Phase 9 consumes (and does not redefine) Phase 7/8 lifecycle truth. It adds tran
 
 ## Architecture and delivery safety
 
-`20260906040000_phase9_transactional_notifications.sql` introduces a FORCE-RLS outbox keyed uniquely by source family, source row, and milestone. A bounded materializer copies currently due markers without representing them as historically sent. A `FOR UPDATE SKIP LOCKED` claim gives each batch a ten-minute lease and increments its bounded attempt count. Source state and ownership are revalidated in the claim transaction; superseded/recovered/stale rows are terminally suppressed. Delivered rows cannot be reclaimed. Retryable failures use deterministic exponential backoff and an eight-attempt ceiling. An expired lease is treated as an uncertain provider outcome and is **not** blindly resent. Resend receives the stable outbox ID as its idempotency key; only a SHA-256 digest of a successful provider message ID is retained.
+`20260906040000_phase9_transactional_notifications.sql` introduces a FORCE-RLS outbox keyed uniquely by source family, source row, and milestone. A bounded materializer excludes existing identities before ordering and limiting, so repeated runs drain a backlog without starving newer work; `ON CONFLICT` remains the concurrency guard. A `FOR UPDATE SKIP LOCKED` claim gives each batch a ten-minute lease and increments its bounded attempt count. Source state and ownership are revalidated in the claim transaction; superseded/recovered/stale rows are terminally suppressed. Delivered rows cannot be reclaimed. Retryable failures use deterministic exponential backoff and an eight-attempt ceiling.
 
-The server resolves the current email from Supabase Auth by the outbox's authoritative `auth_user_id`. No route accepts an email, user ID, or source ID. Invalid/missing recipients fail closed. Templates are centralized, typed, plain-text plus escaped HTML, use durable lifecycle dates, contain no private creator content or internal IDs, and avoid unconditional destruction promises.
+Immediately before transport, a service-role-only RPC durably marks that provider delivery has started. An expired lease without that marker is safely requeued; an expired lease after provider attempt start is deliberately terminalized as uncertain. This prevents unattempted rows later in an interrupted batch from being lost without blindly repeating an uncertain send. Resend receives the stable outbox ID as its idempotency key; only a SHA-256 digest of a successful provider message ID is retained. Explicit SDK `statusCode`/`name` classification retries 408, 425, 429, 5xx, and known transient errors; definite 4xx rejection is safely suppressed as `provider_permanent`; thrown network outcomes remain uncertain.
+
+The server resolves the current email from Supabase Auth by the outbox's authoritative `auth_user_id`. No route accepts an email, user ID, or source ID. Invalid/missing recipients fail closed, while transient Auth-admin errors retry without abandoning the rest of the batch. Templates are centralized, typed, plain-text plus escaped HTML, use durable lifecycle dates, contain no private creator content or internal IDs, avoid unconditional destruction promises, and default links to `https://www.sirensforge.vip` unless `NEXT_PUBLIC_SITE_URL` overrides it.
+
+The outbox intentionally stores the authoritative owner UUID without a foreign key to `auth.users`: durable notification evidence must not block the existing account-deletion authority from removing an Auth row. Delivery still re-resolves that exact UUID through Auth and suppresses if the user no longer exists; it never substitutes another recipient.
 
 ## Scheduler and configuration
 
@@ -26,7 +30,7 @@ Merging or deploying source without the gate sends nothing. Phase 9 development 
 
 ## Security, tests, and containment
 
-The outbox has RLS and FORCE RLS. `PUBLIC`, `anon`, and `authenticated` have no table or function rights. `service_role` has execute only on the three bounded `SECURITY DEFINER` functions; it has no direct table grant. Functions pin `search_path`, validate limits/tokens/outcomes, and are owned by `postgres`.
+The outbox has RLS and FORCE RLS. `PUBLIC`, `anon`, and `authenticated` have no table or function rights. `service_role` has execute only on the four bounded `SECURITY DEFINER` functions; it has no direct table grant. Functions pin `search_path`, validate limits/tokens/outcomes, and are owned by `postgres`.
 
 Coverage includes source/security contracts, all twelve templates, default-off/config behavior, injected-transport success/retry/uncertain/invalid-recipient behavior, sanitized evidence/logs, actual PostgreSQL constraints/materialization/revalidation/claim/finalize/idempotency and role denial, scheduler source boundary, TypeScript, build, and Phase 7/8 regressions. CI uses disposable PostgreSQL 17.
 

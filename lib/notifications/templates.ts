@@ -1,6 +1,6 @@
 import "server-only"
 import type { Mail, NotificationKind } from "./types"
-const base=(path:string)=>`${(process.env.NEXT_PUBLIC_SITE_URL || "https://sirensforge.com").replace(/\/$/,"")}${path}`
+const base=(path:string)=>`${(process.env.NEXT_PUBLIC_SITE_URL || "https://www.sirensforge.vip").replace(/\/$/,"")}${path}`
 const date=(value:string|null|undefined)=>{if(!value) throw new Error("TEMPLATE_DATE_MISSING"); return new Intl.DateTimeFormat("en-US",{dateStyle:"long",timeZone:"UTC"}).format(new Date(value))}
 const render=(subject:string,reason:string,action:string,url:string):Mail=>{const text=`${subject}\n\n${reason}\n\n${action}: ${url}\n\nThis is a transactional account notice from Sirens Forge.`; const esc=(s:string)=>s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!)); return {subject,text,html:`<!doctype html><html><body><h1>${esc(subject)}</h1><p>${esc(reason)}</p><p><a href="${esc(url)}">${esc(action)}</a></p><p>This is a transactional account notice from Sirens Forge.</p></body></html>`}}
 export function buildNotification(kind:NotificationKind,c:Record<string,string|null>):Mail {
