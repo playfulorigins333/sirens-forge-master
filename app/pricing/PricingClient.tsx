@@ -219,6 +219,13 @@ export default function PricingClient() {
   const handleCheckout = async (tierName: CheckoutTier) => {
     try {
       setCheckoutError(null);
+
+      if (!policiesAccepted) {
+        setCheckoutError("Please accept the Terms of Service, Privacy Policy, and Acceptable Use Policy before checkout.");
+        document.getElementById("checkout-policy-acceptance")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+
       setCheckoutLoading(tierName);
 
       if (publicPurchase?.checkoutMode !== "payment_v2") throw new Error("Checkout is unavailable.");
@@ -302,7 +309,7 @@ export default function PricingClient() {
     },
   ];
 
-  const canCheckout = availabilityLoaded && checkoutLoading === null && policiesAccepted;
+  const canCheckout = availabilityLoaded && checkoutLoading === null;
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-black via-slate-950 to-black text-white relative overflow-hidden">
@@ -486,12 +493,15 @@ export default function PricingClient() {
           </div>
         </motion.section>
 
-        <section className="mb-6 rounded-2xl border border-cyan-400/30 bg-cyan-950/20 px-4 py-4 text-sm text-slate-200">
+        <section id="checkout-policy-acceptance" className="mb-6 rounded-2xl border border-cyan-400/30 bg-cyan-950/20 px-4 py-4 text-sm text-slate-200">
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
               checked={policiesAccepted}
-              onChange={(event) => setPoliciesAccepted(event.target.checked)}
+              onChange={(event) => {
+                setPoliciesAccepted(event.target.checked);
+                if (event.target.checked) setCheckoutError(null);
+              }}
               className="mt-1 h-4 w-4 accent-cyan-400"
             />
             <span>
