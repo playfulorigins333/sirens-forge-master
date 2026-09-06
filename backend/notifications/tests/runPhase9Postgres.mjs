@@ -6,7 +6,12 @@ const psql = args => {
   const result = spawnSync("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", ...args], { stdio: "inherit" })
   if (result.status !== 0) process.exit(result.status ?? 1)
 }
-for (const file of ["backend/notifications/tests/phase9PostgresSetup.sql", "supabase/migrations/20260906040000_phase9_transactional_notifications.sql", "backend/notifications/tests/phase9PostgresIntegration.sql"]) psql(["-f", file])
+for (const file of [
+  "backend/notifications/tests/phase9PostgresSetup.sql",
+  "supabase/migrations/20260906035900_phase9_account_deletion_notification_contract_repair.sql",
+  "supabase/migrations/20260906040000_phase9_transactional_notifications.sql",
+  "backend/notifications/tests/phase9PostgresIntegration.sql",
+]) psql(["-f", file])
 
 const concurrentMaterialize = () => new Promise((resolve, reject) => {
   const child = spawn("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", "-c", "select public.materialize_phase9_notifications(1)"], { stdio: "inherit" })

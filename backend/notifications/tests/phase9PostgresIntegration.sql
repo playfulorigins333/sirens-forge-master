@@ -21,7 +21,13 @@ truncate public.account_deletion_requests;
 
 -- All source families materialize, while stale prior lifecycle milestones suppress.
 insert into public.creator_data_exports values('20000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','completed',now()-interval '1 minute',now()+interval '1 day');
-insert into public.account_deletion_requests values('20000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','reactivated',now()+interval '59 days',null,now()-interval '2 minutes',now()-interval '1 minute',null);
+insert into public.account_deletion_requests(
+  id,auth_user_id,status,recovery_deadline,purge_completed_at,
+  requested_notification_due_at,reactivated_notification_due_at,completed_notification_due_at
+) values(
+  '20000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','reactivated',now()+interval '59 days',null,
+  now()-interval '2 minutes',now()-interval '1 minute',null
+);
 insert into public.subscription_cancellation_retentions values('20000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','superseded',now()-interval '60 days',now(),now()-interval '60 days',now()-interval '30 days',now()-interval '15 days',now()-interval '5 days');
 insert into public.subscription_payment_delinquencies values('20000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','recovered',now()-interval '60 days',now(),now()-interval '60 days',now()-interval '30 days',now()-interval '15 days',now()-interval '5 days');
 do $$ declare n integer; rows integer; tok uuid:=gen_random_uuid(); nid uuid; begin
@@ -78,7 +84,13 @@ end $$;
 -- mutable lifecycle family.
 truncate public.transactional_notification_deliveries;
 truncate public.creator_data_exports;
-insert into public.account_deletion_requests values('60000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','pending',now()+interval '60 days',null,now()-interval '1 minute',null,null);
+insert into public.account_deletion_requests(
+  id,auth_user_id,status,recovery_deadline,purge_completed_at,
+  requested_notification_due_at,reactivated_notification_due_at,completed_notification_due_at
+) values(
+  '60000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','pending',now()+interval '60 days',null,
+  now()-interval '1 minute',null,null
+);
 insert into public.subscription_cancellation_retentions values('60000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','retained_read_only',now()-interval '1 minute',now()+interval '60 days',now()-interval '1 minute',now()+interval '30 days',now()+interval '45 days',now()+interval '55 days');
 insert into public.subscription_payment_delinquencies values('60000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','retention_countdown',now()-interval '1 minute',now()+interval '60 days',now()-interval '1 minute',now()+interval '30 days',now()+interval '45 days',now()+interval '55 days');
 select public.materialize_phase9_notifications(10);
