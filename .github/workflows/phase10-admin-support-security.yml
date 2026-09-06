@@ -1,0 +1,45 @@
+name: Phase 10 Admin Support Security
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  phase10-admin-support-security:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: phase10_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d phase10_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PHASE10_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/phase10_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Phase 10 source contracts
+        run: npx tsx --test backend/security/tests/phase10AdminSupportSecurity.test.ts backend/security/tests/creatorMfaFreshAuth.test.ts
+      - name: Phase 10 PostgreSQL integration
+        run: node backend/security/tests/runPhase10Postgres.mjs
+      - name: API authorization inventory contract
+        run: npx tsx backend/security/tests/apiAuthorizationInventory.test.ts
+      - name: Phase 9 regression
+        run: npm run test:phase9-notifications
+      - name: Build
+        run: npm run build

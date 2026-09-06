@@ -3,8 +3,11 @@ import { getSupabaseAdmin } from "@/lib/supabaseAdmin"
 import { requireFreshTotp } from "@/lib/security/mfa"
 
 export const ADMIN_CAPABILITIES = [
-  "governance.audit.read", "governance.legal_hold.manage", "support.case.read",
-  "support.case.manage", "support.private_access.authorize", "security.events.read",
+  "governance.audit.read",
+  "governance.legal_hold.manage",
+  "support.case.read",
+  "support.case.manage",
+  "support.private_access.authorize",
 ] as const
 export type AdminCapability = typeof ADMIN_CAPABILITIES[number]
 
@@ -21,7 +24,8 @@ export async function requireAdminCapability(capability: AdminCapability): Promi
   }
   if (!mfa.freshTotpAt) return { ok: false, status: 428, code: "ADMIN_MFA_REQUIRED", actionPath: "/auth/mfa" }
   const { data, error } = await getSupabaseAdmin().rpc("admin_actor_has_capability", {
-    p_actor_user_id: mfa.userId, p_capability_key: capability,
+    p_actor_user_id: mfa.userId,
+    p_capability_key: capability,
   })
   if (error) return { ok: false, status: 503, code: "ADMIN_AUTHORIZATION_UNAVAILABLE" }
   if (data !== true) return { ok: false, status: 403, code: "ADMIN_FORBIDDEN" }

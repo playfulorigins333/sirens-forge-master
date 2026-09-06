@@ -11,6 +11,6 @@ export async function GET(request: Request) {
   const action=p.get("action"),targetType=p.get("target_type"),actorType=p.get("actor_type")
   if((before!==null&&(!Number.isSafeInteger(before)||before<1))||!Number.isInteger(limit)||limit<1||limit>100||
     (action!==null&&!/^[a-z0-9][a-z0-9_.:-]{2,119}$/.test(action))||(targetType!==null&&!/^[a-z0-9][a-z0-9_]{2,79}$/.test(targetType))||
-    (actorType!==null&&!["creator","founder_admin","system","service"].includes(actorType))) return json({ok:false,code:"AUDIT_PARAMETERS_INVALID"},400)
+    (actorType!==null&&!["creator","founder_admin","admin_operator","system","service"].includes(actorType))) return json({ok:false,code:"AUDIT_PARAMETERS_INVALID"},400)
   const result=await listAuditEvents({actorUserId:auth.userId,before,limit,action,targetType,actorType}); return result.ok?json(result):json({ok:false,code:"AUDIT_READ_UNAVAILABLE"},503)
 }
