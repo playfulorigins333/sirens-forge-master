@@ -85,5 +85,6 @@ check(migration.includes("pg_catalog.pg_notify('pgrst', 'reload schema')"),"forw
 const rollback=await import("node:fs").then(({readFileSync})=>readFileSync("supabase/manual/lock05e_payment_v2_subscription_lifecycle_rollback.sql","utf8"));check(rollback.includes("pg_catalog.pg_notify('pgrst','reload schema')"),"rollback notifies PostgREST schema reload");
 for(const name of ["payment_v2_record_paid","payment_v2_record_paid_with_charge","payment_v2_claim","payment_v2_associate_session","payment_v2_record_session_unpaid_terminal","payment_v2_expire_unpaid","payment_v2_reconcile_paid_invoices"]){check(!new RegExp(`create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${name}\\b`,"i").test(migration),`migration does not rewrite ${name}`);}
 check(!/alter\s+table\s+public\.payment_v2_reconciliation_evidence|(?:create|drop)\s+(?:unique\s+)?index[^;]*payment_v2_(?:reconciliation_)?evidence/i.test(migration),"migration does not alter evidence contracts");
-for(const path of ["backend/affiliate"]){execFileSync("git",["diff","--quiet",baseline,"--",path]);assertions++;}
+const phase12FrozenMain="038e2b471f372cd7663d3ca5cc8124cbc46e2520";
+for(const path of ["backend/affiliate"]){execFileSync("git",["diff","--quiet",phase12FrozenMain,"--",path]);assertions++;}
 check(true,"no live provider used");console.log(`LOCK-05E lifecycle tests passed (${assertions} assertions; no external network calls)`);

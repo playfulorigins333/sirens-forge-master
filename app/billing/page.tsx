@@ -158,7 +158,7 @@ export default async function BillingPage() {
     .maybeSingle()
   const retainedReadOnly = retention && new Date(retention.paidAccessEndedAt).getTime() <= Date.now() && new Date(retention.retentionUntil).getTime() > Date.now() && !hasActivePlan
   const scheduledCancellation = activeSubscription?.tier_name !== "og_throne" && activeSubscription?.cancel_at_period_end && activeSubscription.current_period_end
-  const lifetimeEnded = ["refunded", "revoked"].includes(String(latestSubscription?.status || "").toLowerCase())
+  const lifetimeEnded = !hasActivePlan && ["refunded", "revoked"].includes(String(latestSubscription?.status || "").toLowerCase())
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-black text-white">

@@ -1,6 +1,6 @@
 # Phase 12 billing, Stripe, entitlements, refunds, and disputes closeout
 
-## IMPLEMENTED / SOURCE COMPLETE
+## PHASE 12 PARTIALLY COMPLETE
 Sirens Forge consumes authoritative Stripe refund and dispute snapshots; it never automatically creates a refund. Completed Stripe refund events are consumed. A full OG refund ends lifetime entitlement as refunded, while a full lost OG dispute revokes it. A partial OG refund or dispute loss does not invent partial-access semantics. Open disputes do not revoke access. Early Bird entitlement remains governed exclusively by the existing A3 subscription lifecycle.
 
 Financial adjustments block affiliate payout both during selection and immediately before dispatch. Undispatched full OG commissions are voided. Partial adjustments and money already dispatching or paid create durable fail-closed finance-review evidence; already-paid affiliate funds are **not** clawed back automatically.

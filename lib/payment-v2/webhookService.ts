@@ -116,7 +116,7 @@ async function processA2(event:StripeEvent,provider:PaymentV2Provider,db:Payment
   if(r.id!==refundId||!chargeId||!/^ch_[A-Za-z0-9]+$/.test(chargeId)||(pi!==null&&!/^pi_[A-Za-z0-9]+$/.test(pi))||!Number.isInteger(r.amount)||r.amount<0||!(/^[a-z]{3}$/.test(r.currency))||!refundStatuses.has(r.status||"")||!created||!occurred||!bounded(r.reason)||!bounded(r.failure_reason))return {status:"FAILED_TERMINAL",error:"INVALID_REFUND_SNAPSHOT"};
   const sources=await db.resolveFinancialSource(chargeId);if(sources.length>1)return {status:"FAILED_TERMINAL",error:"SOURCE_AMBIGUOUS"};if(!sources.length)return unresolvedSource(chargeId,pi,provider);
   const result=await db.applyRefund({p_provider_refund_id:r.id,p_source_charge_id:chargeId,p_payment_intent_id:pi,p_amount_cents:r.amount,p_currency:r.currency,p_status:r.status,p_reason:r.reason??null,p_failure_reason:r.failure_reason??null,p_provider_created_at:created,p_provider_event_id:event.id,p_provider_event_created_at:occurred});
-  return lifecycleApplied.has(result)?{status:"PROCESSED",error:null}:{status:"FAILED_TERMINAL",error:"REFUND_RESULT_INVALID"};
+  return lifecycleApplied.has(result)?{status:"PROCESSED",error:null}:["financial_identity_conflict","source_currency_mismatch","source_payment_intent_mismatch"].includes(result)?{status:"FAILED_TERMINAL",error:result.toUpperCase()} :{status:"FAILED_TERMINAL",error:"REFUND_RESULT_INVALID"};
 }
 
 async function processB(event:StripeEvent,provider:PaymentV2Provider,db:PaymentV2Database):Promise<{status:InboxStatus;error:string|null}>{
@@ -126,7 +126,7 @@ async function processB(event:StripeEvent,provider:PaymentV2Provider,db:PaymentV
   if(d.id!==disputeId||!chargeId||!/^ch_[A-Za-z0-9]+$/.test(chargeId)||(pi!==null&&!/^pi_[A-Za-z0-9]+$/.test(pi))||!Number.isInteger(d.amount)||d.amount<0||!(/^[a-z]{3}$/.test(d.currency))||!disputeStatuses.has(d.status)||!created||!occurred||(d.evidence_details?.due_by!=null&&!due)||!bounded(d.reason))return {status:"FAILED_TERMINAL",error:"INVALID_DISPUTE_SNAPSHOT"};
   const sources=await db.resolveFinancialSource(chargeId);if(sources.length>1)return {status:"FAILED_TERMINAL",error:"SOURCE_AMBIGUOUS"};if(!sources.length)return unresolvedSource(chargeId,pi,provider);
   const result=await db.applyDispute({p_provider_dispute_id:d.id,p_source_charge_id:chargeId,p_payment_intent_id:pi,p_amount_cents:d.amount,p_currency:d.currency,p_status:d.status,p_reason:d.reason??null,p_evidence_due_at:due,p_provider_created_at:created,p_provider_event_id:event.id,p_provider_event_created_at:occurred});
-  return lifecycleApplied.has(result)?{status:"PROCESSED",error:null}:{status:"FAILED_TERMINAL",error:"DISPUTE_RESULT_INVALID"};
+  return lifecycleApplied.has(result)?{status:"PROCESSED",error:null}:["financial_identity_conflict","source_currency_mismatch","source_payment_intent_mismatch","dispute_amount_exceeds_gross"].includes(result)?{status:"FAILED_TERMINAL",error:result.toUpperCase()} :{status:"FAILED_TERMINAL",error:"DISPUTE_RESULT_INVALID"};
 }
 
 async function processA3(event: StripeEvent, provider: PaymentV2Provider, db: PaymentV2Database): Promise<{ status: InboxStatus; error: string | null }> {
@@ -402,7 +402,7 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
         const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: current, p_new_status: target, p_error_code: outcome.error, p_count_attempt: true });
         return a3Response(transitioned);
       } catch (cause) {
-        const terminal = cause instanceof Error && /^(subscription_customer_mismatch|subscription_hold_mismatch|subscription_price_mismatch|purchase_ambiguous|unclaimed_relationship_mismatch|claimed_relationship_mismatch|allocation_identity_mismatch|entitlement_cardinality_mismatch|entitlement_identity_mismatch|invalid_subscription_snapshot)$/.test(cause.message);
+        const terminal = cause instanceof Error && /^(subscription_customer_mismatch|subscription_hold_mismatch|subscription_price_mismatch|purchase_ambiguous|unclaimed_relationship_mismatch|claimed_relationship_mismatch|allocation_identity_mismatch|entitlement_cardinality_mismatch|entitlement_identity_mismatch|invalid_subscription_snapshot|source_ambiguous|financial_identity_conflict|source_currency_mismatch|source_payment_intent_mismatch|refund_total_exceeds_gross|dispute_amount_exceeds_gross|recurring_purchase_mismatch)$/.test(cause.message);
         const target = terminal ? "FAILED_TERMINAL" : stickyPending(current, "PENDING_RETRY");
         const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: current, p_new_status: target, p_error_code: terminal ? "DATABASE_IDENTITY_MISMATCH" : "TRANSIENT_PROCESSING_FAILURE", p_count_attempt: true });
         return a3Response(transitioned);
