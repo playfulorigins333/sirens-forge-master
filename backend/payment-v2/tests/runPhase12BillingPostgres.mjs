@@ -1,0 +1,3 @@
+import assert from'node:assert/strict';import{execFileSync}from'node:child_process';
+const raw=process.env.PHASE12_DATABASE_URL;assert.ok(raw,'PHASE12_DATABASE_URL is required');assert.ok(!/[?#]/.test(raw),'query/hash forbidden');const u=new URL(raw);assert.equal(u.protocol,'postgres:');assert.ok(['127.0.0.1','localhost','::1'].includes(u.hostname),'loopback required');assert.equal(u.port,'5432','port 5432 required');assert.equal(u.pathname,'/phase12_test','exact phase12_test required');
+execFileSync('psql',[raw,'-v','ON_ERROR_STOP=1','-f','supabase/migrations/20260906200000_phase12_billing_refunds_disputes.sql'],{stdio:'inherit'});console.log('Phase 12 PostgreSQL migration applied to disposable phase12_test');

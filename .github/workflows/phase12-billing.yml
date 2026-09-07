@@ -1,0 +1,32 @@
+name: Phase 12 billing
+on: [pull_request]
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20, cache: npm}
+      - run: npm ci
+      - run: npm run test:phase12-billing
+      - run: npm run test:pfc-04 && npm run test:payment-v2-contract && npm run test:lock05e && npm run test:lock05f
+      - run: npm run test:pfc-core-03d && npm run test:phase7-subscription-retention && npm run test:phase7-payment-delinquency
+      - run: npm run test:phase10-admin-support-security && npm run test:api-authorization-inventory
+      - run: npm run test:frontend-launch-readiness
+      - run: npx tsc --noEmit
+      - run: npm run build
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: {POSTGRES_PASSWORD: postgres, POSTGRES_DB: phase12_test}
+        ports: ['5432:5432']
+        options: --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env: {PHASE12_DATABASE_URL: 'postgres://postgres:postgres@127.0.0.1:5432/phase12_test'}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20, cache: npm}
+      - run: npm ci
+      - run: npm run test:phase12-billing-postgres

@@ -17,7 +17,10 @@ export type StripeSession = {
   metadata?: Record<string, string> | null;
   line_items?: { data: Array<{ quantity?: number | null; amount_total?: number | null; price?: { id?: string; unit_amount?: number | null; currency?: string | null } | null }> };
 };
-export type StripePaymentIntent = { id: string; status: string; customer: unknown; amount: number; currency: string; latest_charge?: unknown };
+export type StripePaymentIntent = { id: string; status: string; customer: unknown; amount: number; currency: string; latest_charge?: unknown; metadata?:Record<string,string>|null };
+export type StripeRefund = { id:string; charge:unknown; payment_intent?:unknown; amount:number; currency:string; status:string|null; reason?:string|null; failure_reason?:string|null; created:number };
+export type StripeDispute = { id:string; charge:unknown; payment_intent?:unknown; amount:number; currency:string; status:string; reason?:string|null; created:number; evidence_details?:{due_by?:number|null}|null };
+export type StripeCharge = { id:string; payment_intent?:unknown; metadata?:Record<string,string>|null };
 export type StripeSubscription = { id: string; customer: unknown; status: string; current_period_start?: number; current_period_end?: number; cancel_at_period_end?: boolean; canceled_at?: number | null; trial_start?: number | null; trial_end?: number | null; metadata?: Record<string,string> | null; items?: { data: Array<{ quantity?: number | null; current_period_start?: number; current_period_end?: number; price?: { id?: string } | null }> }; latest_invoice?: unknown };
 export type StripeInvoicePayment={id:string;invoice:unknown;status:string;amount_paid:number|null;currency:string;payment:{type:string;payment_intent?:unknown}};
 export type StripeInvoice = { id?: string; customer?: unknown; status?: string | null; amount_due?: number; amount_paid?: number; currency?: string | null; parent?:{type:string;subscription_details?:{subscription:unknown;metadata?:Record<string,string>|null}|null}|null;payments?:unknown };
@@ -31,6 +34,9 @@ export interface PaymentV2Provider {
   constructEvent(rawBody: Uint8Array, signature: string, secret: string): StripeEvent;
   retrieveSession(id: string): Promise<StripeSession>;
   retrievePaymentIntent(id: string): Promise<StripePaymentIntent>;
+  retrieveRefund?(id:string): Promise<StripeRefund>;
+  retrieveDispute?(id:string): Promise<StripeDispute>;
+  retrieveCharge?(id:string): Promise<StripeCharge>;
   retrieveSubscription(id: string): Promise<StripeSubscription>;
   retrieveInvoice?(id:string):Promise<StripeRecurringInvoice>;
   listInvoicePayments?(invoiceId:string):Promise<StripeInvoicePayment[]>;
@@ -46,6 +52,9 @@ export interface PaymentV2Database {
   applyEarlyBirdLifecycle?(args: Record<string, unknown>): Promise<string>;
   recordSubscriptionPaymentFailure?(args: Record<string, unknown>): Promise<string>;
   recoverSubscriptionPaymentDelinquency?(args: Record<string, unknown>): Promise<string>;
+  resolveFinancialSource?(sourceChargeId:string): Promise<Record<string,unknown>[]>;
+  applyRefund?(args:Record<string,unknown>):Promise<string>;
+  applyDispute?(args:Record<string,unknown>):Promise<string>;
 }
 export type WebhookResponse = { status: number; body: Record<string, string> };
 export interface WebhookInput {
@@ -81,6 +90,44 @@ const a3Response = (status: InboxStatus): WebhookResponse => status === "PENDING
 const stickyPending = (current: InboxStatus, proposed: InboxStatus): InboxStatus =>
   current === "PENDING_PURCHASE" && proposed === "PENDING_RETRY" ? "PENDING_PURCHASE" :
   current === "PENDING_RETRY" && proposed === "PENDING_PURCHASE" ? "PENDING_RETRY" : proposed;
+
+const lifecycleApplied = new Set(["applied", "already_applied", "stale_ignored"]);
+const refundStatuses = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const disputeStatuses = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented"]);
+const bounded = (value:unknown, max=200):value is string|null => value == null || (typeof value === "string" && value.length <= max && !/[\u0000-\u001f]/.test(value));
+
+async function unresolvedSource(chargeId:string, paymentIntentId:string|null, provider:PaymentV2Provider):Promise<{status:InboxStatus;error:string|null}> {
+  if (!provider.retrieveCharge) return {status:"PENDING_RETRY",error:"PROVIDER_UNAVAILABLE"};
+  const charge=await provider.retrieveCharge(chargeId);
+  if(charge.id!==chargeId)return {status:"FAILED_TERMINAL",error:"CHARGE_IDENTITY_MISMATCH"};
+  const chargePi=id(charge.payment_intent);
+  if(paymentIntentId && chargePi!==paymentIntentId)return {status:"FAILED_TERMINAL",error:"PAYMENT_INTENT_IDENTITY_MISMATCH"};
+  let discriminator=metadata(charge);
+  if(discriminator.kind==="legacy"&&chargePi){const pi=await provider.retrievePaymentIntent(chargePi);if(pi.id!==chargePi)return {status:"FAILED_TERMINAL",error:"PAYMENT_INTENT_IDENTITY_MISMATCH"};discriminator=metadata(pi);}
+  if(discriminator.kind==="legacy")return {status:"IGNORED_NON_V2",error:null};
+  if(discriminator.kind==="invalid")return {status:"FAILED_TERMINAL",error:"INVALID_V2_METADATA"};
+  return {status:"PENDING_PURCHASE",error:"PURCHASE_PENDING"};
+}
+
+async function processA2(event:StripeEvent,provider:PaymentV2Provider,db:PaymentV2Database):Promise<{status:InboxStatus;error:string|null}>{
+  const refundId=id(event.data.object.id);if(!refundId||!/^re_[A-Za-z0-9]+$/.test(refundId))return {status:"FAILED_TERMINAL",error:"MALFORMED_PROVIDER_IDENTITY"};
+  if(!provider.retrieveRefund||!db.resolveFinancialSource||!db.applyRefund)return {status:"PENDING_RETRY",error:"PROCESSOR_UNAVAILABLE"};
+  const r=await provider.retrieveRefund(refundId),chargeId=id(r.charge),pi=id(r.payment_intent),occurred=timestamp(event.created),created=timestamp(r.created);
+  if(r.id!==refundId||!chargeId||!/^ch_[A-Za-z0-9]+$/.test(chargeId)||(pi!==null&&!/^pi_[A-Za-z0-9]+$/.test(pi))||!Number.isInteger(r.amount)||r.amount<0||!(/^[a-z]{3}$/.test(r.currency))||!refundStatuses.has(r.status||"")||!created||!occurred||!bounded(r.reason)||!bounded(r.failure_reason))return {status:"FAILED_TERMINAL",error:"INVALID_REFUND_SNAPSHOT"};
+  const sources=await db.resolveFinancialSource(chargeId);if(sources.length>1)return {status:"FAILED_TERMINAL",error:"SOURCE_AMBIGUOUS"};if(!sources.length)return unresolvedSource(chargeId,pi,provider);
+  const result=await db.applyRefund({p_provider_refund_id:r.id,p_source_charge_id:chargeId,p_payment_intent_id:pi,p_amount_cents:r.amount,p_currency:r.currency,p_status:r.status,p_reason:r.reason??null,p_failure_reason:r.failure_reason??null,p_provider_created_at:created,p_provider_event_id:event.id,p_provider_event_created_at:occurred});
+  return lifecycleApplied.has(result)?{status:"PROCESSED",error:null}:{status:"FAILED_TERMINAL",error:"REFUND_RESULT_INVALID"};
+}
+
+async function processB(event:StripeEvent,provider:PaymentV2Provider,db:PaymentV2Database):Promise<{status:InboxStatus;error:string|null}>{
+  const disputeId=id(event.data.object.id);if(!disputeId||!/^du_[A-Za-z0-9]+$/.test(disputeId))return {status:"FAILED_TERMINAL",error:"MALFORMED_PROVIDER_IDENTITY"};
+  if(!provider.retrieveDispute||!db.resolveFinancialSource||!db.applyDispute)return {status:"PENDING_RETRY",error:"PROCESSOR_UNAVAILABLE"};
+  const d=await provider.retrieveDispute(disputeId),chargeId=id(d.charge),pi=id(d.payment_intent),occurred=timestamp(event.created),created=timestamp(d.created),due=nullableTimestamp(d.evidence_details?.due_by);
+  if(d.id!==disputeId||!chargeId||!/^ch_[A-Za-z0-9]+$/.test(chargeId)||(pi!==null&&!/^pi_[A-Za-z0-9]+$/.test(pi))||!Number.isInteger(d.amount)||d.amount<0||!(/^[a-z]{3}$/.test(d.currency))||!disputeStatuses.has(d.status)||!created||!occurred||(d.evidence_details?.due_by!=null&&!due)||!bounded(d.reason))return {status:"FAILED_TERMINAL",error:"INVALID_DISPUTE_SNAPSHOT"};
+  const sources=await db.resolveFinancialSource(chargeId);if(sources.length>1)return {status:"FAILED_TERMINAL",error:"SOURCE_AMBIGUOUS"};if(!sources.length)return unresolvedSource(chargeId,pi,provider);
+  const result=await db.applyDispute({p_provider_dispute_id:d.id,p_source_charge_id:chargeId,p_payment_intent_id:pi,p_amount_cents:d.amount,p_currency:d.currency,p_status:d.status,p_reason:d.reason??null,p_evidence_due_at:due,p_provider_created_at:created,p_provider_event_id:event.id,p_provider_event_created_at:occurred});
+  return lifecycleApplied.has(result)?{status:"PROCESSED",error:null}:{status:"FAILED_TERMINAL",error:"DISPUTE_RESULT_INVALID"};
+}
 
 async function processA3(event: StripeEvent, provider: PaymentV2Provider, db: PaymentV2Database): Promise<{ status: InboxStatus; error: string | null }> {
   let subscriptionId: string | null = null;
@@ -345,9 +392,12 @@ export async function paymentFirstWebhook(input: WebhookInput): Promise<WebhookR
       let current = received as InboxStatus;
       if (current === "RECEIVED") current = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: "RECEIVED", p_new_status: "PENDING_PHASE", p_error_code: null, p_count_attempt: false });
       if (["PROCESSED", "IGNORED_NON_V2", "FAILED_TERMINAL"].includes(current)) return responseForInboxStatus(current, true) as WebhookResponse;
-      if (envelope.classification.lifecyclePhase !== "PFC-07E-A3" || event.type === "invoice.paid") return responseForInboxStatus(current) as WebhookResponse;
+      if (event.type === "invoice.paid") return responseForInboxStatus(current) as WebhookResponse;
       try {
-        const outcome = await processA3(event, provider, input.createDatabase());
+        const database=input.createDatabase();
+        const outcome = envelope.classification.lifecyclePhase === "PFC-07E-A2" ? await processA2(event,provider,database)
+          : envelope.classification.lifecyclePhase === "PFC-07E-B" ? await processB(event,provider,database)
+          : await processA3(event, provider, database);
         const target = stickyPending(current, outcome.status);
         const transitioned = await inbox.transitionStatus({ p_provider_event_id: envelope.args.p_provider_event_id, p_expected_status: current, p_new_status: target, p_error_code: outcome.error, p_count_attempt: true });
         return a3Response(transitioned);

@@ -10,6 +10,7 @@ export const ADMIN_CAPABILITIES = [
   "support.private_access.authorize",
   "safety.case.read",
   "safety.case.manage",
+  "billing.financial.read",
 ] as const
 export type AdminCapability = typeof ADMIN_CAPABILITIES[number]
 

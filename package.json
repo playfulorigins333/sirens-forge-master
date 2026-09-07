@@ -100,7 +100,9 @@
     "test:phase9-notifications-postgres": "node backend/notifications/tests/runPhase9Postgres.mjs",
     "test:phase10-admin-support-security": "tsx --test backend/security/tests/phase10AdminSupportSecurity.test.ts",
     "test:phase11-legal-safety": "tsx --test backend/governance/tests/phase11LegalSafety.test.ts",
-    "test:phase11-legal-safety-postgres": "node backend/governance/tests/runPhase11LegalSafetyPostgres.mjs"
+    "test:phase11-legal-safety-postgres": "node backend/governance/tests/runPhase11LegalSafetyPostgres.mjs",
+    "test:phase12-billing": "tsx --test backend/payment-v2/tests/phase12BillingLifecycle.test.ts",
+    "test:phase12-billing-postgres": "node backend/payment-v2/tests/runPhase12BillingPostgres.mjs"
   },
   "repository": {
     "type": "git",
