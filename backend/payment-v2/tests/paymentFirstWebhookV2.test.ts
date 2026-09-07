@@ -66,12 +66,12 @@ for (const enabled of [undefined, "", "TRUE", " true", "false"]) equal((await ha
     event: { id: "evt_refund_created", type: "refund.created", data: { object: { id: "re_exact" } } as any },
     input: { inboxEnabled: "true", async readRawBody() { calls.push("read"); return raw; }, createInboxDatabase: () => ({
       async receiveEvent(args) { calls.push(`receive:${args.p_lifecycle_phase}:${args.p_provider_object_type}:${args.p_raw_payload_sha256}`); return "RECEIVED" as const; },
-      async transitionStatus(args) { calls.push(`transition:${args.p_expected_status}:${args.p_new_status}`); return "PENDING_PHASE" as const; },
+      async transitionStatus(args) { calls.push(`transition:${args.p_expected_status}:${args.p_new_status}`); return args.p_new_status; },
     }) },
   });
   const result = await inbox.run();
-  equal(result, { status: 200, body: { status: "pending", code: "PAYMENT_V2_EVENT_PENDING_PHASE" } }, "recognized lifecycle event is durably pending");
-  equal(calls, ["read", `receive:PFC-07E-A2:refund:${createHash("sha256").update(raw).digest("hex")}`, "transition:RECEIVED:PENDING_PHASE"], "receive happens before lifecycle provider retrieval");
+  equal(result, { status: 503, body: { error: "Payment V2 lifecycle processing must retry", code: "PAYMENT_V2_EVENT_PENDING_RETRY" } }, "implemented lifecycle event retries when its processor dependency is unavailable");
+  equal(calls, ["read", `receive:PFC-07E-A2:refund:${createHash("sha256").update(raw).digest("hex")}`, "transition:RECEIVED:PENDING_PHASE", "transition:PENDING_PHASE:PENDING_RETRY"], "receive happens before lifecycle processing");
   equal(inbox.calls.session.length + inbox.calls.pi.length + inbox.calls.sub.length + inbox.calls.hold.length + inbox.calls.tier.length + inbox.calls.purchase.length, 0, "A1 lifecycle inbox path performs no provider or Payment V2 row lookup");
   equal(calls.filter((call) => call === "read").length, 1, "valid lifecycle inbox path reads raw body exactly once");
   equal(Buffer.from(inbox.calls.construct[0][0] as Uint8Array), raw, "valid lifecycle inbox path verifies exact raw bytes");

@@ -21,6 +21,9 @@ export async function POST(request: Request) {
         constructEvent: (raw, signature, secret) => stripe.webhooks.constructEvent(Buffer.from(raw), signature, secret) as any,
         retrieveSession: (id) => stripe.checkout.sessions.retrieve(id, { expand: ["line_items.data.price"] }) as any,
         retrievePaymentIntent: (id) => stripe.paymentIntents.retrieve(id, { expand: ["latest_charge"] }) as any,
+        retrieveRefund: (id) => stripe.refunds.retrieve(id) as any,
+        retrieveDispute: (id) => stripe.disputes.retrieve(id) as any,
+        retrieveCharge: (id) => stripe.charges.retrieve(id) as any,
         retrieveSubscription: (id) => stripe.subscriptions.retrieve(id, { expand: ["items.data.price", "latest_invoice"] }) as any,
         retrieveInvoice: (id)=>stripe.invoices.retrieve(id) as any,
         async listInvoicePayments(id){return await stripe.invoicePayments.list({invoice:id,status:"paid",limit:100}).autoPagingToArray({limit:1000}) as any;},
@@ -43,6 +46,9 @@ export async function POST(request: Request) {
         async applyEarlyBirdLifecycle(args) { const { data, error } = await db.rpc("payment_v2_apply_early_bird_subscription_lifecycle", args); if (error) throw new Error(error.message); return data; },
         async recordSubscriptionPaymentFailure(args) { const { data, error } = await db.rpc("payment_v2_record_subscription_payment_failure", args); if (error) throw new Error(error.message); return data; },
         async recoverSubscriptionPaymentDelinquency(args) { const { data, error } = await db.rpc("payment_v2_recover_subscription_payment_delinquency", args); if (error) throw new Error(error.message); return data; },
+        async resolveFinancialSource(sourceChargeId) { return rows(db.rpc("payment_v2_resolve_financial_source", { p_source_charge_id: sourceChargeId })) as any; },
+        async applyRefund(args) { const {data,error}=await db.rpc("payment_v2_apply_refund",args);if(error)throw new Error(error.message);return data; },
+        async applyDispute(args) { const {data,error}=await db.rpc("payment_v2_apply_dispute",args);if(error)throw new Error(error.message);return data; },
       };
     },
     createInboxDatabase(): PaymentV2InboxDatabase {

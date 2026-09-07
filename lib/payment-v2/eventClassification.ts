@@ -9,6 +9,7 @@ export type PaymentV2RecognizedLifecycleType =
   | "invoice.payment_failed"
   | "invoice.paid"
   | "charge.dispute.created"
+  | "charge.dispute.updated"
   | "charge.dispute.closed";
 
 export type PaymentV2LifecycleClassification = {
@@ -26,6 +27,7 @@ const lifecycleEvents: Record<PaymentV2RecognizedLifecycleType, Omit<PaymentV2Li
   "invoice.payment_failed": { lifecyclePhase: "PFC-07E-A3", providerObjectType: "invoice" },
   "invoice.paid": { lifecyclePhase: "PFC-07E-A3", providerObjectType: "invoice" },
   "charge.dispute.created": { lifecyclePhase: "PFC-07E-B", providerObjectType: "dispute" },
+  "charge.dispute.updated": { lifecyclePhase: "PFC-07E-B", providerObjectType: "dispute" },
   "charge.dispute.closed": { lifecyclePhase: "PFC-07E-B", providerObjectType: "dispute" },
 };
 
