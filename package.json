@@ -102,7 +102,8 @@
     "test:phase11-legal-safety": "tsx --test backend/governance/tests/phase11LegalSafety.test.ts",
     "test:phase11-legal-safety-postgres": "node backend/governance/tests/runPhase11LegalSafetyPostgres.mjs",
     "test:phase12-billing": "tsx --test backend/payment-v2/tests/phase12BillingLifecycle.test.ts",
-    "test:phase12-billing-postgres": "node backend/payment-v2/tests/runPhase12BillingPostgres.mjs"
+    "test:phase12-billing-postgres": "node backend/payment-v2/tests/runPhase12BillingPostgres.mjs",
+    "test:phase13-publishing": "tsx backend/creator-publishing-queue/tests/phase13PublishingSourceContract.test.ts && tsx backend/creator-publishing-queue/tests/fanvuePublicActivation.test.ts && tsx backend/creator-publishing-queue/tests/autopostLaunchUi.test.ts && tsx backend/security/tests/frontendLaunchReadiness.test.ts"
   },
   "repository": {
     "type": "git",

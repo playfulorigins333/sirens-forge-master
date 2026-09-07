@@ -134,6 +134,13 @@ function isPlatformSelectable(platform: Platform) {
   return platform.public_selectable === true && platform.supports_real_posting === true
 }
 
+function isFanvueScheduledPublishingActive(platform: Platform) {
+  return platform.id === "fanvue" &&
+    platform.launch_status === "available" &&
+    platform.public_selectable === true &&
+    platform.supports_real_posting === true
+}
+
 function platformUnavailableMessage(platform: Platform) {
   if (platform.status_message) return platform.status_message
   if (platform.launch_status === "not_configured") return "Assisted launch workflow only — no direct posting integration is enabled."
@@ -259,7 +266,9 @@ function platformPurpose(platform: Platform) {
   if (platform.id === "x") return "Promote your paid content and direct followers to OnlyFans or Fanvue."
   if (platform.id === "reddit") return "Native Reddit posting and scheduling are not configured. Use caption copy/export and Open Reddit to complete posting manually."
   if (platform.id === "onlyfans") return "Prepare and complete posts through the assisted Creator Publishing Queue."
-  if (platform.id === "fanvue") return "Fanvue connection is ready; scheduled publishing is awaiting final launch activation."
+  if (platform.id === "fanvue") return isFanvueScheduledPublishingActive(platform)
+    ? "Direct scheduled Fanvue publishing is available for eligible connected accounts."
+    : "Fanvue connection is ready; scheduled publishing is awaiting final launch activation."
   return platform.reason ?? platformUnavailableMessage(platform)
 }
 
@@ -267,7 +276,9 @@ function platformStatusBadge(platform: Platform) {
   if (platform.id === "x") return "TRAFFIC CHANNEL"
   if (platform.id === "reddit") return "MANUAL ONLY"
   if (platform.id === "onlyfans") return "ASSISTED PUBLISHING"
-  if (platform.id === "fanvue") return "FINAL ACTIVATION PENDING"
+  if (platform.id === "fanvue") return isFanvueScheduledPublishingActive(platform)
+    ? "SCHEDULED PUBLISHING"
+    : "FINAL ACTIVATION PENDING"
   return String(platform.launch_status ?? "Unavailable").replace("_", " ").toUpperCase()
 }
 
