@@ -1,0 +1,64 @@
+name: Phase 13 publishing
+
+on:
+  pull_request:
+    paths:
+      - 'app/autopost/**'
+      - 'app/creator/publishing-queue/**'
+      - 'lib/autopost/**'
+      - 'lib/creator-publishing-queue/**'
+      - 'backend/creator-publishing-queue/tests/**'
+      - 'backend/security/tests/frontendLaunchReadiness.test.ts'
+      - 'docs/operations/phase13-publishing-closeout.md'
+      - 'package.json'
+      - '.github/workflows/phase13-publishing.yml'
+  workflow_dispatch:
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      CPQ_FANVUE_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/cpq_fanvue_ci
+      PUBLISHING_DISCONNECT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/publishing_disconnect_ci
+      TASK15_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task15_ci
+      TASK17A_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/task17a_ci
+      NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54321
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: dummy-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: dummy-service-role-key
+      CRON_SECRET: dummy-cron-secret
+      OPENAI_API_KEY: dummy-openai-key
+      STRIPE_SECRET_KEY: dummy-stripe-key
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run test:phase13-publishing
+      - run: npm run test:creator-publishing-queue
+      - run: npm run test:creator-publishing-fanvue-launch-postgres
+      - run: npm run test:publishing-provider-disconnect-postgres
+      - run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c 'drop database if exists task15_ci;' -c 'create database task15_ci;' -c 'drop database if exists task17a_ci;' -c 'create database task17a_ci;'
+      - run: npm run test:creator-publishing-task15-postgres
+      - run: npm run test:creator-publishing-task17a-upgrade
+      - run: npm run test:creator-publishing-task17a-postgres
+      - run: npm run test:api-authorization-inventory
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: git diff --check
